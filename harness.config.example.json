@@ -1,0 +1,14 @@
+{
+  "vault": "~/Dev/personal/loreweaver-vault",
+  "student": "sabien",
+  "models": {
+    "tutor":   { "model": "claude-sonnet-5" },
+    "grader":  { "model": "claude-haiku-4-5" },
+    "quiz_gen":{ "model": "claude-sonnet-5" },
+    "card_gen":{ "model": "claude-haiku-4-5" },
+    "compile": { "model": "claude-sonnet-5" }
+  },
+  "loreweaver": { "command": "npx", "args": ["tsx", "~/Dev/personal/loreweaver/src/server.ts"], "embeddings": "ollama" },
+  "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
+  "port": 4820
+}
