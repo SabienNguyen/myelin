@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { panelBus } from '../lib/panelBus.js';
+import { GraphPanel } from './GraphPanel.js';
 import { PagePanel } from './PagePanel.js';
 
 export function SidePanel() {
@@ -17,7 +18,7 @@ export function SidePanel() {
         ))}
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" />
-      <div hidden={tab !== 'graph'} id="graph-root" className="tab-body" />
+      <div hidden={tab !== 'graph'} className="tab-body"><GraphPanel visible={tab === 'graph'} /></div>
       <div hidden={tab !== 'page'} className="tab-body"><PagePanel slug={pageSlug} /></div>
     </aside>
   );
