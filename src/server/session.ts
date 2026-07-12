@@ -4,6 +4,7 @@ import {
 } from 'ai';
 import type { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
+import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput } from './grading.js';
 import type { Loreweaver } from './mcp.js';
@@ -58,7 +59,7 @@ export function createTutorSession(
       mode, state,
       lessons,
       reviewsDue: lessons.filter((l: any) => l.reason === 'review-due').map((l: any) => l.slug),
-      ankiLapses: [], // populated by Task 11's lapse query; empty until then
+      ankiLapses: recentLapses(cfg.vault),
     });
   }
 

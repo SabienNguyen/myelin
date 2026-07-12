@@ -1,8 +1,12 @@
 import { Hono } from 'hono';
+import type { AnkiClient } from './anki/client.js';
+import { backlogDays } from './anki/inbound.js';
 import type { Loreweaver } from './mcp.js';
 import type { HarnessConfig } from './config.js';
 
-export function buildRestRoutes(lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string> = {}) {
+export function buildRestRoutes(
+  lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string> = {}, anki?: AnkiClient,
+) {
   const app = new Hono();
 
   app.get('/api/graph', async (c) => {
@@ -26,6 +30,11 @@ export function buildRestRoutes(lw: Loreweaver, cfg: HarnessConfig, status: Reco
     c.json(await lw.call('read_page', { slug: c.req.param('slug') })));
   app.get('/api/student', async (c) =>
     c.json(await lw.call('get_student_state', { student: cfg.student })));
-  app.get('/api/status', (c) => c.json(status));
+  app.get('/api/status', async (c) => {
+    if (!anki) return c.json(status);
+    const up = await anki.isUp();
+    const backlog = !up && backlogDays(cfg.vault) > cfg.schedule.ankiBacklogNudgeDays;
+    return c.json({ ...status, anki: up ? 'up' : backlog ? 'backlog' : 'down' });
+  });
   return app;
 }
