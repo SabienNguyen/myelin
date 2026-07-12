@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { StagePortal } from '../StagePortal.js';
 
 type Annotation = { span: string; category: string; note: string };
 type Segment = { text: string; category?: string; note?: string };
@@ -28,7 +29,7 @@ function annotateDraft(draft: string, annotations: Annotation[]): Segment[] {
   return segments;
 }
 
-export function WritingDraft({ args, result, addResult }: {
+export function WritingDraftInner({ args, result, addResult }: {
   args: any; result: any; addResult: (r: any) => void;
 }) {
   const [draft, setDraft] = useState(args.priorDraft ?? '');
@@ -62,5 +63,17 @@ export function WritingDraft({ args, result, addResult }: {
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
       <button onClick={() => addResult({ draft })}>Submit</button>
     </div>
+  );
+}
+
+export function WritingDraft(props: { args: any; result: any; addResult: (r: any) => void }) {
+  if (props.result) {
+    return <WritingDraftInner args={props.args} result={props.result} addResult={props.addResult} />;
+  }
+  return (
+    <>
+      <div className="block chip">✍️ Writing exercise sent to stage ▸</div>
+      <StagePortal><WritingDraftInner args={props.args} result={undefined} addResult={props.addResult} /></StagePortal>
+    </>
   );
 }
