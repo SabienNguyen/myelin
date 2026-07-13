@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HarnessConfig } from './config.js';
-import { defaultConverter, splitChapters, type Converter } from './convert.js';
+import {
+  defaultConverter, defaultIncrementalConverter, splitChapters, type Converter, type IncrementalConverter,
+} from './convert.js';
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
 import { sanitizeToolArgs } from './session.js';
@@ -21,6 +23,7 @@ export interface QueueEntry {
   status: QueueStatus;
   error?: string;
   startedAt?: string; // ISO — set on 'converting' placeholders so the UI can show elapsed time
+  progress?: { pagesDone: number; pagesTotal: number | null }; // set on 'converting' placeholders
 }
 
 // Mirrors loreweaver's src/vault/parsePage.ts slugify — duplicated here for the same reason
@@ -109,17 +112,48 @@ export async function ingestBook(
   return { book: bookTitle, chapters: chapters.length };
 }
 
+/** Incremented/decremented around every in-flight startConversion — marker owns the GPU while a
+ * conversion is running, so ensureCompileDrain uses this to avoid contending with it for an
+ * ollama-backed compile model (see canCompileNow). Module-level by design: one process, one GPU. */
+let activeConversions = 0;
+
+/** Wraps a plain (non-incremental) Converter into a single-shot IncrementalConverter — used when
+ * a caller (or a test) injects opts.converter instead of opts.incrementalConverter. Exactly one
+ * onProgress call, final=true, pagesTotal null (matches the "unknown page count" fallback path
+ * of defaultIncrementalConverter). */
+function singleShotIncremental(converter: Converter): IncrementalConverter {
+  return async (file, outDir, onProgress) => {
+    const { markdown } = await converter(file, outDir);
+    await onProgress({ markdown, pagesDone: 0, pagesTotal: null, final: true });
+  };
+}
+
 /**
  * Reload-safe async conversion: immediately writes a 'converting' placeholder to the ledger
  * (so the Library shows the book the moment it's uploaded, and a page reload still sees it),
- * then converts in the background and swaps the placeholder for real 'pending' chapter entries
- * — or 'convert-error' with the message. Returns as soon as the placeholder is queued.
+ * then converts in the background, streaming progress into that placeholder.
+ *
+ * Book mode queues chapters PROGRESSIVELY as the incremental converter's cumulative markdown
+ * confirms them complete (every split section except a still-growing last one, unless the final
+ * update, when all remaining sections are complete) — so the Library fills in while a big scan is
+ * still converting, rather than only at the very end. Paper mode keeps its original single-entry
+ * behavior (no progressive splitting — a paper is one unit of work) but still streams progress
+ * onto the placeholder.
+ *
+ * On completion the placeholder is removed, opts.onComplete fires, and — when cfg.autoCompile is
+ * not explicitly false — ensureCompileDrain is kicked so newly-pending chapters start compiling
+ * without a manual "Compile now" click. On failure the placeholder becomes 'convert-error' with
+ * the message. Returns as soon as the placeholder is queued.
  */
 export function startConversion(
-  cfg: HarnessConfig, filePath: string,
-  opts: { converter?: Converter; mode?: 'book' | 'paper'; title?: string; onComplete?: () => void } = {},
+  lw: Loreweaver, cfg: HarnessConfig, filePath: string,
+  opts: {
+    converter?: Converter; incrementalConverter?: IncrementalConverter;
+    mode?: 'book' | 'paper'; title?: string; model?: LanguageModel; onComplete?: () => void;
+  } = {},
 ): { book: string; converting: true } {
   const book = opts.title || basename(filePath, extname(filePath));
+  const mode = opts.mode ?? 'book';
   const placeholderKey = `__converting__/${Date.now().toString(36)}`;
   const ledger = readQueue(cfg.vault);
   ledger.push({
@@ -128,12 +162,79 @@ export function startConversion(
   });
   writeQueue(cfg.vault, ledger);
 
+  const incremental = opts.incrementalConverter ?? singleShotIncremental(opts.converter ?? defaultConverter);
+
+  const bookTitle = basename(filePath, extname(filePath));
+  const bookSlug = slugify(bookTitle) || 'book';
+  const uploadsDir = join(cfg.vault, 'raw', 'uploads', bookSlug);
+
+  function updatePlaceholderProgress(pagesDone: number, pagesTotal: number | null): void {
+    const current = readQueue(cfg.vault);
+    const ph = current.find((e) => e.chapter === placeholderKey);
+    if (ph) {
+      ph.progress = { pagesDone, pagesTotal };
+      writeQueue(cfg.vault, current);
+    }
+  }
+
+  activeConversions++;
   void (async () => {
     try {
-      await ingestBook(cfg, filePath, opts);
-      const after = readQueue(cfg.vault);
-      writeQueue(cfg.vault, after.filter((e) => e.chapter !== placeholderKey));
+      const outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
+
+      if (mode === 'paper') {
+        let lastMarkdown = '';
+        await incremental(filePath, outDir, (u) => {
+          lastMarkdown = u.markdown;
+          updatePlaceholderProgress(u.pagesDone, u.pagesTotal);
+        });
+        const title = opts.title || lastMarkdown.match(H1_LINE)?.[1]?.trim() || basename(filePath, extname(filePath));
+        const slug = slugify(title) || 'paper';
+        const dir = join(cfg.vault, 'raw', 'uploads', slug);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'paper.md'), `<!-- source: "${title}" -->\n\n${lastMarkdown}\n`);
+
+        const afterPaper = readQueue(cfg.vault).filter((e) => e.chapter !== placeholderKey);
+        afterPaper.push({
+          book: title, chapter: `raw/uploads/${slug}/paper.md`, title, status: 'pending',
+        });
+        writeQueue(cfg.vault, afterPaper);
+      } else {
+        mkdirSync(uploadsDir, { recursive: true });
+        let queuedCount = 0;
+
+        await incremental(filePath, outDir, (u) => {
+          const sections = splitChapters(u.markdown);
+          // A chapter is "complete" once a later heading confirms nothing more will be appended
+          // under it — every section except the last, unless this is the final update (then the
+          // last section is complete too; there's nothing left to grow it).
+          const completeSections = u.final ? sections : sections.slice(0, -1);
+          const newSections = completeSections.slice(queuedCount);
+
+          const current = readQueue(cfg.vault);
+          for (let i = 0; i < newSections.length; i++) {
+            const ch = newSections[i];
+            const n = queuedCount + i + 1;
+            const chapterSlug = slugify(ch.title) || `chapter-${n}`;
+            const filename = `ch-${String(n).padStart(2, '0')}-${chapterSlug}.md`;
+            const header = `<!-- source: "${bookTitle}", chapter ${n}: "${ch.title}" -->\n\n`;
+            writeFileSync(join(uploadsDir, filename), `${header}${ch.body}\n`);
+            current.push({
+              book: bookTitle, chapter: `raw/uploads/${bookSlug}/${filename}`, title: ch.title, status: 'pending',
+            });
+          }
+          queuedCount += newSections.length;
+
+          const ph = current.find((e) => e.chapter === placeholderKey);
+          if (ph) ph.progress = { pagesDone: u.pagesDone, pagesTotal: u.pagesTotal };
+          writeQueue(cfg.vault, current);
+        });
+      }
+
+      const afterAll = readQueue(cfg.vault);
+      writeQueue(cfg.vault, afterAll.filter((e) => e.chapter !== placeholderKey));
       opts.onComplete?.();
+      if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg, { model: opts.model });
     } catch (e: any) {
       const after = readQueue(cfg.vault);
       const ph = after.find((en) => en.chapter === placeholderKey);
@@ -142,6 +243,8 @@ export function startConversion(
         ph.error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
         writeQueue(cfg.vault, after);
       }
+    } finally {
+      activeConversions--;
     }
   })();
 
@@ -265,4 +368,53 @@ export async function compileNext(
   }
 
   return { compiled, failed };
+}
+
+const OLLAMA_PREFIX = 'ollama:';
+const DRAIN_GPU_CONTENTION_BACKOFF_MS = 5_000;
+
+/**
+ * Pure gate for ensureCompileDrain: an ollama-backed compile model shares the GPU with marker —
+ * running both at once is a guaranteed CUDA OOM (see convert.ts's freeOllamaVram comment). Cloud
+ * models (anthropic, etc.) never contend for the local GPU, so they're always cleared to run.
+ */
+export function canCompileNow(compileModelId: string, conversionsActive: number): boolean {
+  return !(compileModelId.startsWith(OLLAMA_PREFIX) && conversionsActive > 0);
+}
+
+let drainRunning = false;
+
+/**
+ * Drains the 'pending' queue by repeatedly calling compileNext(lw, cfg, 1, opts) until nothing is
+ * pending. Module-singleton (drainRunning) — safe to call from multiple places (startConversion
+ * on completion, ingestTools' ingest_paper tool, index.ts at boot) without stacking concurrent
+ * drains. When the compile model is ollama-backed and a conversion is actively running, backs off
+ * DRAIN_GPU_CONTENTION_BACKOFF_MS and rechecks rather than contending with marker for the GPU.
+ * Entries that error stay 'error' — the loop moves on to the next pending entry and never retries
+ * a failed one (manual retry only, e.g. re-running compile from the UI later).
+ */
+export function ensureCompileDrain(lw: Loreweaver, cfg: HarnessConfig, opts: { model?: LanguageModel } = {}): void {
+  if (drainRunning) return;
+  // Defensive: production config always has models.compile (zod-required), but some test
+  // fixtures construct a bare-bones HarnessConfig without it — treat that as "nothing to drain"
+  // rather than throwing out of a fire-and-forget background loop.
+  const compileModelId = cfg.models?.compile?.model;
+  if (!compileModelId) return;
+
+  drainRunning = true;
+  void (async () => {
+    try {
+      while (readQueue(cfg.vault).some((e) => e.status === 'pending')) {
+        if (!canCompileNow(compileModelId, activeConversions)) {
+          await new Promise((r) => { setTimeout(r, DRAIN_GPU_CONTENTION_BACKOFF_MS); });
+          continue;
+        }
+        await compileNext(lw, cfg, 1, opts);
+      }
+    } catch (e) {
+      console.error('[ensureCompileDrain]', e);
+    } finally {
+      drainRunning = false;
+    }
+  })();
 }

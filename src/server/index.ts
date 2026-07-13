@@ -11,7 +11,7 @@ import { buildIngestRoutes } from './ingestRoutes.js';
 import { startScheduler } from './scheduler.js';
 import { AnkiClient } from './anki/client.js';
 import { syncInbound, backlogDays } from './anki/inbound.js';
-import { sweepInterruptedConversions } from './ingest.js';
+import { ensureCompileDrain, sweepInterruptedConversions } from './ingest.js';
 import { sendNotification } from './notify.js';
 
 const cfg = loadConfig();
@@ -19,6 +19,9 @@ const lw = await Loreweaver.connect(cfg);
 const anki = new AnkiClient();
 startScheduler(lw, cfg);
 sweepInterruptedConversions(cfg.vault); // restarts orphan in-flight conversions — mark them honestly
+// Drain any chapters left 'pending' from a previous run (e.g. converted but not yet compiled
+// before a restart) — no button press required.
+if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg);
 
 // ISO 8601 week key (e.g. "2026-W28") — used to nudge about an Anki backlog at most once/week,
 // sharing the same once-per-event ledger file the daily digest scheduler writes to.
@@ -56,7 +59,9 @@ cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => ankiTick(), { n
 ankiTick().catch(console.error); // once at boot
 
 const app = new Hono();
-app.route('/', buildRestRoutes(lw, cfg, { student: cfg.student, tutor: cfg.models.tutor.model }, anki));
+app.route('/', buildRestRoutes(lw, cfg, {
+  student: cfg.student, tutor: cfg.models.tutor.model, autoCompile: cfg.autoCompile,
+}, anki));
 app.route('/', buildChatRoute(lw, cfg));
 app.route('/', buildIngestRoutes(lw, cfg));
 serve({ fetch: app.fetch, port: cfg.port });

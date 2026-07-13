@@ -1,12 +1,40 @@
 import { useEffect, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 
-type Entry = { book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string };
+type Entry = {
+  book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string;
+  progress?: { pagesDone: number; pagesTotal: number | null };
+};
 
 function elapsed(iso?: string): string {
   if (!iso) return '';
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
   return mins >= 1 ? ` · started ${mins}m ago` : '';
+}
+
+/** Converting placeholder row: shows a determinate "N/M pages" progress bar once the incremental
+ * converter has reported a known page count, else falls back to the original elapsed-time text
+ * (unknown page count — EPUB/DOCX, or a PDF pdfPageCount() couldn't read). */
+function ConvertingRow({ entry }: { entry: Entry }) {
+  const { pagesDone, pagesTotal } = entry.progress ?? { pagesDone: 0, pagesTotal: null };
+  const dots = <><span className="dot" /><span className="dot" /><span className="dot" /></>;
+
+  if (pagesTotal) {
+    const pct = Math.max(0, Math.min(100, Math.round((pagesDone / pagesTotal) * 100)));
+    return (
+      <span className="converting-row">
+        {dots}
+        converting · {pagesDone}/{pagesTotal} pages
+        <span className="q-progress-bar"><span className="q-progress-bar-fill" style={{ width: `${pct}%` }} /></span>
+      </span>
+    );
+  }
+  return (
+    <span className="converting-row">
+      {dots}
+      converting{elapsed(entry.startedAt)} — chapters appear here when it finishes
+    </span>
+  );
 }
 
 /** Inline-editable book heading: pencil → input; Enter/blur saves (PATCH), Escape cancels. */
@@ -61,6 +89,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   const [compiling, setCompiling] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [autoCompile, setAutoCompile] = useState(false);
 
   const converting = queue.some((e) => e.status === 'converting');
   useEffect(() => {
@@ -73,6 +102,11 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
     const id = setInterval(load, converting ? 3_000 : POLL_MS);
     return () => { cancelled = true; clearInterval(id); };
   }, [visible, compiling, converting, refresh]);
+
+  useEffect(() => {
+    fetch('/api/status').then((r) => r.json())
+      .then((s) => setAutoCompile(Boolean(s?.autoCompile))).catch(() => {});
+  }, []);
 
   async function compile(n: number) {
     setCompiling(true);
@@ -106,9 +140,11 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
           disabled={compiling || pending === 0}
           onClick={() => compile(3)}
         >
-          {compiling ? 'Compiling… (this takes minutes on local models)' : `Compile next ${Math.min(3, pending) || 0} of ${pending}`}
+          {compiling ? 'Compiling… (this takes minutes on local models)' : `Compile now (${Math.min(3, pending) || 0} of ${pending})`}
         </button>
         {note && <span className="library-note" role="status">{note}</span>}
+        {!note && pending > 0 && autoCompile
+          && <span className="library-note library-autocompile-note" role="status">auto-compiling in the background</span>}
       </div>
       {books.map((book) => (
         <section key={book} className="library-book">
@@ -117,12 +153,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
             {queue.filter((e) => e.book === book).map((e) => (
               <li key={e.chapter} className={`q-${e.status}`} title={e.error ?? ''}>
                 <span className="q-status">{e.status === 'convert-error' ? 'failed' : e.status}</span>
-                {e.status === 'converting'
-                  ? <span className="converting-row">
-                      <span className="dot" /><span className="dot" /><span className="dot" />
-                      converting{elapsed(e.startedAt)} — chapters appear here when it finishes
-                    </span>
-                  : ` ${e.title}`}
+                {e.status === 'converting' ? <ConvertingRow entry={e} /> : ` ${e.title}`}
                 {e.error && <div className="q-error">{e.error}</div>}
               </li>
             ))}

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
-import { compileNext, startConversion } from './ingest.js';
+import { startConversion } from './ingest.js';
 import type { Loreweaver } from './mcp.js';
 
 /** The tutor's own paper-fetching tool — freeform mode only (wired in session.ts alongside
@@ -32,9 +32,11 @@ export function buildIngestTools(
           const downloaded = await download(url);
           // Conversion AND compile both run in the background — neither may stall the chat turn.
           // The Library tab shows the 'converting' placeholder immediately (reload-safe).
-          const result = startConversion(cfg, downloaded.path, {
+          // startConversion itself kicks ensureCompileDrain on completion (when cfg.autoCompile
+          // isn't explicitly false) — a single code path for auto-compiling, shared with the
+          // upload/URL ingest routes.
+          const result = startConversion(lw, cfg, downloaded.path, {
             converter: deps.converter, mode: 'paper', title,
-            onComplete: () => { void compileNext(lw, cfg, 1).catch(console.error); },
           });
           return { queued: result.book, converting: true, compiling: 'starts after conversion' };
         } catch (e: any) {

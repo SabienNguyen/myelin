@@ -1,5 +1,34 @@
 import { describe, it, expect } from 'vitest';
-import { splitChapters } from '../src/server/convert.js';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { pdfPageCount, splitChapters } from '../src/server/convert.js';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = join(here, '..');
+const MARKER_PYTHON = join(REPO_ROOT, '.tools', 'marker-venv', 'bin', 'python');
+
+/** Hand-rolled minimal multi-page PDF — no dependencies, no marker/GPU involvement. Just enough
+ * xref/trailer structure for pypdfium2 (marker's PDF backend) to read /Count off the page tree. */
+function makeTestPdf(path: string, pages: number): void {
+  const objs: string[] = ['<< /Type /Catalog /Pages 2 0 R >>'];
+  const kids = Array.from({ length: pages }, (_, i) => `${3 + i} 0 R`).join(' ');
+  objs.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages} >>`);
+  for (let i = 0; i < pages; i++) objs.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>');
+
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [0];
+  objs.forEach((o, i) => {
+    offsets.push(out.length);
+    out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+  });
+  const xrefOffset = out.length;
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets.slice(1)) out += `${String(off).padStart(10, '0')} 00000 n \n`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  writeFileSync(path, out);
+}
 
 describe('splitChapters', () => {
   it('splits on H1 headings', () => {
@@ -49,5 +78,37 @@ describe('splitChapters', () => {
     expect(chapters).toHaveLength(1);
     expect(chapters[0].title).toBeTruthy();
     expect(chapters[0].body).toBe(md);
+  });
+});
+
+// Skipped when the marker-venv python isn't present on this machine (CI / other environments) —
+// pdfPageCount already degrades to null in that case, which is exercised by the "no such file"
+// case below regardless.
+describe.skipIf(!existsSync(MARKER_PYTHON))('pdfPageCount', () => {
+  it('counts pages via the marker venv python (pypdfium2)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-pdfcount-'));
+    const p = join(dir, 'five-pages.pdf');
+    makeTestPdf(p, 5);
+    await expect(pdfPageCount(p)).resolves.toBe(5);
+  });
+
+  it('counts a different page count correctly', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-pdfcount-'));
+    const p = join(dir, 'one-page.pdf');
+    makeTestPdf(p, 1);
+    await expect(pdfPageCount(p)).resolves.toBe(1);
+  });
+});
+
+describe('pdfPageCount failure modes', () => {
+  it('returns null for a nonexistent file', async () => {
+    await expect(pdfPageCount('/no/such/file.pdf')).resolves.toBeNull();
+  });
+
+  it('returns null for a file that is not a valid PDF', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-pdfcount-'));
+    const p = join(dir, 'not-a-pdf.pdf');
+    writeFileSync(p, 'this is not a pdf');
+    await expect(pdfPageCount(p)).resolves.toBeNull();
   });
 });

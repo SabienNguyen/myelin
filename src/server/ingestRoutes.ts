@@ -32,7 +32,9 @@ export function buildIngestRoutes(
       // URL ingests default to paper mode — arXiv/journal links are single-document sources, not
       // multi-chapter books. Conversion runs in the background; the Library shows a
       // reload-safe 'converting' placeholder immediately.
-      const result = startConversion(cfg, downloaded.path, { converter: deps.converter, mode: body.mode ?? 'paper' });
+      const result = startConversion(lw, cfg, downloaded.path, {
+        converter: deps.converter, mode: body.mode ?? 'paper', model: deps.model,
+      });
       return c.json(result);
     }
 
@@ -42,7 +44,7 @@ export function buildIngestRoutes(
     const tmpDir = mkdtempSync(join(tmpdir(), 'lwh-upload-'));
     const tmpPath = join(tmpDir, file.name);
     writeFileSync(tmpPath, Buffer.from(await file.arrayBuffer()));
-    const result = startConversion(cfg, tmpPath, { converter: deps.converter });
+    const result = startConversion(lw, cfg, tmpPath, { converter: deps.converter, model: deps.model });
     return c.json(result);
   });
 

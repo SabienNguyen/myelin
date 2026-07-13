@@ -522,3 +522,22 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .wiki-link:hover { border-bottom-style: solid; }
 
 .empty { color: var(--text-muted); font-style: italic; }
+
+/* ── Incremental conversion progress (T33) ───────────── */
+.q-progress-bar {
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+.q-progress-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.library-autocompile-note { font-style: italic; }

@@ -25,6 +25,7 @@ describe('loadConfig', () => {
     expect(cfg.vault.startsWith('/')).toBe(true);
     expect(cfg.vault.includes('~')).toBe(false);
     expect(cfg.models.tutor.model).toBe('claude-sonnet-5');
+    expect(cfg.autoCompile).toBe(true); // defaults on when unset
   });
   it('fails loud on missing role', () => {
     const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
@@ -32,5 +33,11 @@ describe('loadConfig', () => {
     const { grader: _drop, ...restModels } = valid.models;
     writeFileSync(p, JSON.stringify({ ...valid, models: restModels }));
     expect(() => loadConfig(p)).toThrow(/grader/);
+  });
+  it('honors an explicit autoCompile: false', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'harness.config.json');
+    writeFileSync(p, JSON.stringify({ ...valid, autoCompile: false }));
+    expect(loadConfig(p).autoCompile).toBe(false);
   });
 });

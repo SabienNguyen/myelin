@@ -25,6 +25,9 @@ const configSchema = z.object({
     ankiBacklogNudgeDays: z.number().int().positive(),
   }),
   port: z.number().int().default(4820),
+  // When true (default), newly-queued chapters/papers compile automatically in the background
+  // (ensureCompileDrain) as soon as conversion finishes — no manual "Compile now" click needed.
+  autoCompile: z.boolean().default(true),
 });
 export type HarnessConfig = z.infer<typeof configSchema>;
 export type ModelRole = keyof HarnessConfig['models'];

@@ -5,7 +5,7 @@ import type { Loreweaver } from './mcp.js';
 import type { HarnessConfig } from './config.js';
 
 export function buildRestRoutes(
-  lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string> = {}, anki?: AnkiClient,
+  lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string | boolean> = {}, anki?: AnkiClient,
 ) {
   const app = new Hono();
 
