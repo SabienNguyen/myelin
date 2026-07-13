@@ -51,7 +51,7 @@ export function MathScratchpad(props: { args: any; result: any; addResult: (r: a
   }
   return (
     <>
-      <div className="block chip" onClick={() => panelBus.setTab('stage')}><Sigma size={15} weight="duotone" /> Math problem waiting on the stage</div>
+      <button type="button" className="block chip" onClick={() => panelBus.setTab('stage')}><Sigma size={15} weight="duotone" /> Math problem waiting on the stage</button>
       <StagePortal><MathScratchpadInner args={props.args} addResult={props.addResult} /></StagePortal>
     </>
   );

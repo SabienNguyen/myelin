@@ -64,7 +64,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
   }
   return (
     <>
-      <div className="block chip" onClick={() => panelBus.setTab('stage')}><ListChecks size={15} weight="duotone" /> Quiz waiting on the stage</div>
+      <button type="button" className="block chip" onClick={() => panelBus.setTab('stage')}><ListChecks size={15} weight="duotone" /> Quiz waiting on the stage</button>
       <StagePortal><QuizInner args={props.args} addResult={props.addResult} /></StagePortal>
     </>
   );

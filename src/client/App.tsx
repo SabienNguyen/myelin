@@ -47,7 +47,7 @@ export function App() {
           <input
             ref={fileInput} type="file" accept=".pdf,.epub,.docx" hidden onChange={handleFile}
           />
-          {ingestStatus && <span className="ingest-status">{ingestStatus}</span>}
+          {ingestStatus && <span className="ingest-status" role="status">{ingestStatus}</span>}
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
             {['learn', 'review', 'quiz', 'freeform'].map((m) => <option key={m}>{m}</option>)}
           </select>

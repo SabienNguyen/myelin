@@ -285,6 +285,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   font-family: inherit;
 }
 .block.chip:hover { background: var(--accent-soft); border-style: solid; }
+.ghost-btn { min-width: 28px; min-height: 28px; display: inline-flex; align-items: center; justify-content: center; }
 .block.chip svg { flex: none; }
 
 .block { position: relative; }

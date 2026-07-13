@@ -93,7 +93,7 @@ export function WritingDraft(props: { args: any; result: any; addResult: (r: any
   }
   return (
     <>
-      <div className="block chip" onClick={() => panelBus.setTab('stage')}><PenNib size={15} weight="duotone" /> Writing exercise waiting on the stage</div>
+      <button type="button" className="block chip" onClick={() => panelBus.setTab('stage')}><PenNib size={15} weight="duotone" /> Writing exercise waiting on the stage</button>
       <StagePortal><WritingDraftInner args={props.args} result={undefined} addResult={props.addResult} /></StagePortal>
     </>
   );

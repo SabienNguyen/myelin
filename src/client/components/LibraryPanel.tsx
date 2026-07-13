@@ -53,7 +53,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
         >
           {compiling ? 'Compiling… (this takes minutes on local models)' : `Compile next ${Math.min(3, pending) || 0} of ${pending}`}
         </button>
-        {note && <span className="library-note">{note}</span>}
+        {note && <span className="library-note" role="status">{note}</span>}
       </div>
       {books.map((book) => (
         <section key={book} className="library-book">
