@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { Loreweaver } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
+import { buildIngestRoutes } from './ingestRoutes.js';
 import { startScheduler } from './scheduler.js';
 import { AnkiClient } from './anki/client.js';
 import { syncInbound, backlogDays } from './anki/inbound.js';
@@ -55,5 +56,6 @@ ankiTick().catch(console.error); // once at boot
 const app = new Hono();
 app.route('/', buildRestRoutes(lw, cfg, { student: cfg.student, tutor: cfg.models.tutor.model }, anki));
 app.route('/', buildChatRoute(lw, cfg));
+app.route('/', buildIngestRoutes(lw, cfg));
 serve({ fetch: app.fetch, port: cfg.port });
 console.log(`loreweaver-harness on :${cfg.port}`);

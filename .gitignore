@@ -1,5 +1,6 @@
 node_modules/
 .superpowers/
+.tools/
 dist/
 .env
 harness.config.json

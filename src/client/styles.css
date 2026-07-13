@@ -108,6 +108,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .statusdot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
 .anki-up .statusdot { background: var(--good); }
 .anki-backlog .statusdot { background: var(--warn); }
+
+.ingest-status { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
 .anki-down .statusdot { background: var(--text-muted); }
 
 /* ── Layout ──────────────────────────────────────────── */
