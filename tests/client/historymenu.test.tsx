@@ -77,4 +77,64 @@ describe('HistoryMenu', () => {
     fireEvent.mouseDown(screen.getByTestId('outside'));
     expect(screen.queryByText('Fractions review')).toBeNull();
   });
+
+  it('exposes aria-haspopup and reflects open state via aria-expanded on the trigger', () => {
+    render(<HistoryMenu activeId="default" onSelect={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: /conversation history/i });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('moves focus to the first menuitem when the panel opens', () => {
+    render(<HistoryMenu activeId="default" onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /conversation history/i }));
+    const items = screen.getAllByRole('menuitem');
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it('moves roving focus through menuitems with ArrowDown/ArrowUp', async () => {
+    render(<HistoryMenu activeId="default" onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /conversation history/i }));
+    await screen.findByText('Fractions review');
+    const items = screen.getAllByRole('menuitem');
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[2]);
+    fireEvent.keyDown(document, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[1]);
+  });
+
+  it('wraps focus from the last menuitem to the first on ArrowDown', async () => {
+    render(<HistoryMenu activeId="default" onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /conversation history/i }));
+    await screen.findByText('Derivatives intro');
+    const items = screen.getAllByRole('menuitem');
+    fireEvent.keyDown(document, { key: 'End' });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(items[0]);
+  });
+
+  it('wraps focus from the first menuitem to the last on ArrowUp', async () => {
+    render(<HistoryMenu activeId="default" onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: /conversation history/i }));
+    await screen.findByText('Derivatives intro');
+    const items = screen.getAllByRole('menuitem');
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(document, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(items[items.length - 1]);
+  });
+
+  it('closes the panel on Escape and returns focus to the trigger button', async () => {
+    render(<HistoryMenu activeId="default" onSelect={vi.fn()} />);
+    const trigger = screen.getByRole('button', { name: /conversation history/i });
+    fireEvent.click(trigger);
+    await screen.findByText('Fractions review');
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText('Fractions review')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
 });
