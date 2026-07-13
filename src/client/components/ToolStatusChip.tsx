@@ -17,9 +17,10 @@ const LABELS: Record<string, string> = {
 export function ToolStatusChip({ toolName, result }: any) {
   const failed = result && typeof result === 'object' && (result as any).isError;
   const label = LABELS[toolName] ?? toolName;
+  // Deliberately typographic, not a pill — reads as quiet marginalia, not UI chrome.
   return (
-    <span className={`tool-chip${failed ? ' failed' : ''}`} title={toolName}>
-      {failed ? '⚠' : '✓'} {label}
+    <span className={`tool-note${failed ? ' failed' : ''}`} title={toolName}>
+      {failed ? '✗ ' : ''}{label}
     </span>
   );
 }

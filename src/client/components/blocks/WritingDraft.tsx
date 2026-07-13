@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { PenNibIcon as PenNib } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 
@@ -73,7 +74,7 @@ export function WritingDraft(props: { args: any; result: any; addResult: (r: any
   }
   return (
     <>
-      <div className="block chip" onClick={() => panelBus.setTab('stage')}>✍️ Writing exercise sent to stage ▸</div>
+      <div className="block chip" onClick={() => panelBus.setTab('stage')}><PenNib size={15} weight="duotone" /> Writing exercise waiting on the stage</div>
       <StagePortal><WritingDraftInner args={props.args} result={undefined} addResult={props.addResult} /></StagePortal>
     </>
   );

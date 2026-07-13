@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { CheckIcon as Check, ListChecksIcon as ListChecks } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 
@@ -42,6 +43,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
     const byId = new Map(perItem.map((p) => [p.id, p.correct]));
     return (
       <div className="block quiz done">
+        <span className="graded-tag"><Check size={12} weight="bold" /> graded</span>
         <h3>{props.args.title}</h3>
         <ul>
           {props.args.items.map((item: any) => {
@@ -62,7 +64,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
   }
   return (
     <>
-      <div className="block chip" onClick={() => panelBus.setTab('stage')}>📝 Quiz sent to stage ▸</div>
+      <div className="block chip" onClick={() => panelBus.setTab('stage')}><ListChecks size={15} weight="duotone" /> Quiz waiting on the stage</div>
       <StagePortal><QuizInner args={props.args} addResult={props.addResult} /></StagePortal>
     </>
   );

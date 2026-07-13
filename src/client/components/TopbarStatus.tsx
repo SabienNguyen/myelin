@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { BrainIcon as Brain, UserCircleIcon as UserCircle } from '@phosphor-icons/react';
 
 type Status = { anki?: 'up' | 'down' | 'backlog'; student?: string; tutor?: string };
 
@@ -20,8 +21,8 @@ export function TopbarStatus() {
   }, []);
   return (
     <div className="topbar-status">
-      {status.student && <span className="badge">👤 {status.student}</span>}
-      {status.tutor && <span className="badge" title="tutor model">🧠 {status.tutor.replace(/^ollama:/, '')}</span>}
+      {status.student && <span className="badge"><UserCircle size={14} weight="duotone" /> {status.student}</span>}
+      {status.tutor && <span className="badge" title="tutor model"><Brain size={14} weight="duotone" /> {status.tutor.replace(/^ollama:/, '')}</span>}
       {status.anki && (
         <span className={`badge anki-${status.anki}`} title={ANKI_LABEL[status.anki]}>
           <span className="statusdot" /> anki

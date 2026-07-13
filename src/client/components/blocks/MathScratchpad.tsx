@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { CheckIcon as Check, SigmaIcon as Sigma } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 
@@ -44,12 +45,13 @@ export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput
 
 export function MathScratchpad(props: { args: any; result: any; addResult: (r: any) => void }) {
   if (props.result) {
-    return <div className="block done">Answer: <Latex tex={props.result.finalLatex} />
+    return <div className="block done"><span className="graded-tag"><Check size={12} weight="bold" /> graded</span>
+      Answer: <Latex tex={props.result.finalLatex} />
       {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}> — {props.result.grading.detail}</em>}</div>;
   }
   return (
     <>
-      <div className="block chip" onClick={() => panelBus.setTab('stage')}>✏️ Math problem sent to stage ▸</div>
+      <div className="block chip" onClick={() => panelBus.setTab('stage')}><Sigma size={15} weight="duotone" /> Math problem waiting on the stage</div>
       <StagePortal><MathScratchpadInner args={props.args} addResult={props.addResult} /></StagePortal>
     </>
   );
