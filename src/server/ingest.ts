@@ -296,13 +296,48 @@ function compileInstructions(): string {
   return cachedPrompt;
 }
 
+/** Local 32k-context models + ollama's silent head-truncation on overflow = the compile
+ * instructions vanish and the model chats instead of tool-calling (observed live: 66-page Murphy
+ * chapters). Chapters over this char budget compile in sequential parts; each part refreshes the
+ * vault slug list so later parts link pages written by earlier ones. ~3.5 chars/token → ~7k
+ * tokens of chapter per part, leaving room for instructions, slugs, and tool-call output. */
+export const CHAPTER_CHUNK_CHARS = 24_000;
+
+export function chunkChapter(markdown: string, budget = CHAPTER_CHUNK_CHARS): string[] {
+  if (markdown.length <= budget) return [markdown];
+  const sections = markdown.split(/^(?=##\s)/m); // keep each H2 heading with its section body
+  const parts: string[] = [];
+  let cur = '';
+  const flush = () => { if (cur.trim()) parts.push(cur); cur = ''; };
+  for (const section of sections) {
+    if (cur && cur.length + section.length > budget) flush();
+    if (section.length > budget) {
+      // one giant section: hard-cut at paragraph boundaries near the budget
+      let rest = cur + section;
+      cur = '';
+      while (rest.length > budget) {
+        let cut = rest.lastIndexOf('\n\n', budget);
+        if (cut < budget * 0.5) cut = budget;
+        parts.push(rest.slice(0, cut));
+        rest = rest.slice(cut);
+      }
+      cur = rest;
+    } else {
+      cur += section;
+    }
+  }
+  flush();
+  return parts;
+}
+
 function buildCompilePrompt(
   bookTitle: string, chapterN: number, chapterTitle: string, chapterMarkdown: string, existingSlugs: string[],
+  partLabel = '',
 ): string {
   return [
     compileInstructions(),
     `Book: "${bookTitle}"`,
-    `Chapter ${chapterN}: "${chapterTitle}"`,
+    `Chapter ${chapterN}: "${chapterTitle}"${partLabel}`,
     `Existing vault slugs (the ONLY valid slugs for prereqs/deepens/links besides ones you write in `
       + `this batch): ${existingSlugs.join(', ') || '(none yet)'}`,
     'Chapter content (markdown):',
@@ -322,35 +357,47 @@ function buildCompilePrompt(
  */
 async function compileOne(
   lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel, ledger: QueueEntry[], entry: QueueEntry,
+  chunkChars = CHAPTER_CHUNK_CHARS,
 ): Promise<'compiled' | 'failed'> {
   try {
     const chapterMarkdown = readFileSync(join(cfg.vault, entry.chapter), 'utf8');
-    const slugs = await lw.listSlugs();
-    const tools = guardTools(await lw.tools(), cfg.student, slugs);
     const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
+    const chunks = chunkChapter(chapterMarkdown, chunkChars);
 
-    const agent = new ToolLoopAgent({
-      model,
-      instructions: 'You are compiling one textbook chapter into Loreweaver vault pages.',
-      tools,
-      stopWhen: isStepCount(16),
-    });
-
-    const result = await agent.generate({
-      prompt: buildCompilePrompt(entry.book, chapterN, entry.title, chapterMarkdown, slugs),
-    });
-
-    // "The agent finished" is not "the work happened" — small models sometimes narrate instead of
-    // calling tools. Gate on THIS entry's own agent steps, not a global before/after vault-slug
-    // diff: with concurrent workers compiling different chapters at once, a global diff would
-    // attribute another worker's newly-written pages to this entry (a false "done"), or blame this
-    // entry for pages another worker is mid-write on (a false "no pages"). Checking this agent's
-    // own result.steps for a write_page tool call is per-entry accurate regardless of what any
-    // other worker is doing concurrently.
-    const wrotePage = result.steps.some((step) => step.toolCalls.some((tc) => tc.toolName === 'write_page'));
-    if (!wrotePage) {
-      throw new Error('model produced no pages (no write_page calls) — try a stronger compile model');
+    let wroteAny = false;
+    const partErrors: string[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      // Refresh slugs per part: part 2's prereq/link candidates include part 1's new pages.
+      const slugs = await lw.listSlugs();
+      const tools = guardTools(await lw.tools(), cfg.student, slugs);
+      const partLabel = chunks.length > 1 ? ` (part ${i + 1} of ${chunks.length})` : '';
+      const agent = new ToolLoopAgent({
+        model,
+        instructions: 'You are compiling one textbook chapter into Loreweaver vault pages.',
+        tools,
+        stopWhen: isStepCount(16),
+      });
+      try {
+        const result = await agent.generate({
+          prompt: buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel),
+        });
+        // "The agent finished" is not "the work happened" — small models sometimes narrate instead
+        // of calling tools. Gate on THIS agent's own steps (per-entry AND per-part accurate under
+        // concurrency; a global vault-slug diff would misattribute other workers' pages).
+        const wrotePage = result.steps.some((step) => step.toolCalls.some((tc) => tc.toolName === 'write_page'));
+        if (wrotePage) wroteAny = true;
+        else partErrors.push(`part ${i + 1}: no write_page calls`);
+      } catch (partErr: any) {
+        partErrors.push(`part ${i + 1}: ${(partErr instanceof Error ? partErr.message : String(partErr)).slice(0, 120)}`);
+      }
     }
+
+    if (!wroteAny) {
+      throw new Error(
+        `model produced no pages (${partErrors.join('; ') || 'no write_page calls'}) — try a stronger compile model`,
+      );
+    }
+    if (partErrors.length) console.error(`[compile] "${entry.title}": partial (${partErrors.join('; ')})`);
 
     entry.status = 'done';
     return 'compiled';
@@ -373,7 +420,8 @@ async function compileOne(
  * compileOne's comment).
  */
 export async function compileNext(
-  lw: Loreweaver, cfg: HarnessConfig, n = 1, opts: { model?: LanguageModel; concurrency?: number } = {},
+  lw: Loreweaver, cfg: HarnessConfig, n = 1,
+  opts: { model?: LanguageModel; concurrency?: number; chunkChars?: number } = {},
 ): Promise<{ compiled: number; failed: number }> {
   const model = opts.model ?? modelFor('compile', cfg);
   const concurrency = Math.max(1, opts.concurrency ?? 1);
@@ -396,7 +444,7 @@ export async function compileNext(
     for (;;) {
       const entry = claimNext();
       if (!entry) return;
-      const outcome = await compileOne(lw, cfg, model, ledger, entry);
+      const outcome = await compileOne(lw, cfg, model, ledger, entry, opts.chunkChars ?? CHAPTER_CHUNK_CHARS);
       if (outcome === 'compiled') compiled++; else failed++;
     }
   }

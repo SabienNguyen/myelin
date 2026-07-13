@@ -314,3 +314,23 @@ describe('compileNext', () => {
     }, 30_000);
   });
 });
+
+describe('chunkChapter (context-budget splitting)', async () => {
+  const { chunkChapter } = await import('../src/server/ingest.js');
+  it('returns whole chapter when under budget', () => {
+    expect(chunkChapter('## A\nshort', 1000)).toEqual(['## A\nshort']);
+  });
+  it('splits on H2 boundaries and preserves every byte', () => {
+    const md = `intro ${'x'.repeat(50)}\n## One\n${'a'.repeat(80)}\n## Two\n${'b'.repeat(80)}\n## Three\n${'c'.repeat(80)}`;
+    const parts = chunkChapter(md, 120);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join('')).toBe(md);
+    expect(parts.slice(1).every((p) => p.startsWith('## '))).toBe(true);
+  });
+  it('hard-cuts a single giant section at paragraph boundaries', () => {
+    const md = `## Giant\n${'p'.repeat(90)}\n\n${'q'.repeat(90)}\n\n${'r'.repeat(90)}`;
+    const parts = chunkChapter(md, 120);
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts.join('')).toBe(md);
+  });
+});
