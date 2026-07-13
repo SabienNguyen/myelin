@@ -2,3 +2,8 @@ node_modules/
 .superpowers/
 dist/
 .env
+harness.config.json
+tests/e2e/.tmp-vault/
+test-results/
+playwright-report/
+blob-report/

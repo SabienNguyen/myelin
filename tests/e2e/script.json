@@ -1,0 +1,33 @@
+{
+  "turns": [
+    {
+      "toolCalls": [
+        {
+          "toolName": "quick_check",
+          "input": {
+            "question": "What does a derivative measure?",
+            "mode": "choice",
+            "choices": ["slope at a point", "area under curve"],
+            "expected": "slope at a point",
+            "pageSlug": "derivatives"
+          }
+        }
+      ],
+      "text": "Let's warm up."
+    },
+    {
+      "toolCalls": [
+        {
+          "toolName": "record_evidence",
+          "input": {
+            "student": "e2e",
+            "slug": "derivatives",
+            "kind": "applied-correctly",
+            "note": "quick check"
+          }
+        }
+      ],
+      "text": "Correct! Recorded — nice."
+    }
+  ]
+}
