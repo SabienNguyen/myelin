@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BookOpenTextIcon as BookOpenText } from '@phosphor-icons/react';
 import { Runtime } from './runtime.js';
 import { Thread } from './components/Thread.js';
@@ -6,13 +6,38 @@ import { SidePanel } from './components/SidePanel.js';
 import { TopbarStatus } from './components/TopbarStatus.js';
 import { HistoryMenu } from './components/HistoryMenu.js';
 import { panelBus } from './lib/panelBus.js';
+import { parseHash, serializeHash } from './lib/urlState.js';
 
 export function App() {
   const [mode, setMode] = useState('learn');
-  const [threadId, setThreadId] = useState('default');
+  const [threadId, setThreadId] = useState(() => parseHash(location.hash).threadId);
   const [ingesting, setIngesting] = useState(false);
   const [ingestStatus, setIngestStatus] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // Deep-linking (T27): the URL hash encodes `#/t/<threadId>[/<tab>|/page/<slug>]`. App owns
+  // only the threadId slice — SidePanel owns tab/page and re-parses the hash to preserve this
+  // piece when it writes its own. Thread switches push a new history entry (unlike SidePanel's
+  // tab flips, which replace) so Back returns to the prior conversation.
+  function selectThread(id: string) {
+    setThreadId(id);
+    const current = parseHash(location.hash);
+    const nextHash = serializeHash({ ...current, threadId: id });
+    if (nextHash !== location.hash) history.pushState(null, '', nextHash);
+  }
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const parsed = parseHash(location.hash);
+      setThreadId((prev) => (parsed.threadId !== prev ? parsed.threadId : prev));
+    };
+    window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('popstate', onHashChange);
+    return () => {
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('popstate', onHashChange);
+    };
+  }, []);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -39,7 +64,7 @@ export function App() {
       <div className="app">
         <header className="topbar">
           <h1><BookOpenText size={20} weight="duotone" /> Loreweaver</h1>
-          <HistoryMenu activeId={threadId} onSelect={setThreadId} />
+          <HistoryMenu activeId={threadId} onSelect={selectThread} />
           <TopbarStatus />
           <button type="button" onClick={() => fileInput.current?.click()} disabled={ingesting}>
             {ingesting ? 'Converting…' : 'Add book'}
