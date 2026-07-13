@@ -58,7 +58,10 @@ describe('ingest routes', () => {
     expect(res.status).toBe(400);
   });
 
-  it('POST /api/ingest/compile drains pending entries and reports a summary', async () => {
+  it('POST /api/ingest/compile marks a no-op model run as error, never silently done', async () => {
+    // The honesty gate: "the agent finished" is not "pages were written". A model that only
+    // narrates (no write_page calls, no new slugs) must surface as a failed chapter — this is
+    // exactly what local coder-tuned models do, observed live in the sandbox.
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-'));
     const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter, model: noToolModel() });
 
@@ -70,9 +73,10 @@ describe('ingest routes', () => {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ n: 1 }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ compiled: 1, failed: 0 });
+    expect(await res.json()).toEqual({ compiled: 0, failed: 1 });
 
     const queue = await (await app.request('/api/ingest/queue')).json();
-    expect(queue[0].status).toBe('done');
+    expect(queue[0].status).toBe('error');
+    expect(queue[0].error).toMatch(/no pages/);
   });
 });

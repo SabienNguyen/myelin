@@ -152,6 +152,14 @@ export async function compileNext(
         prompt: buildCompilePrompt(entry.book, chapterN, entry.title, chapterMarkdown, slugs),
       });
 
+      // "The agent finished" is not "the work happened" — small models sometimes narrate
+      // instead of calling tools. Done means pages actually appeared in the vault.
+      const after = await lw.listSlugs();
+      const newSlugs = after.filter((s) => !slugs.includes(s));
+      if (newSlugs.length === 0) {
+        throw new Error('model produced no pages (no write_page calls) — try a stronger compile model');
+      }
+
       entry.status = 'done';
       compiled++;
     } catch (e: any) {
