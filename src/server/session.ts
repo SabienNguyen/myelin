@@ -28,7 +28,7 @@ function blockTools(): ToolSet {
 
 /** Find block-tool outputs in the tail of the incoming history (since the last user text turn). */
 function pendingBlockOutputs(messages: UIMessage[]) {
-  const out: { tool: BlockToolName; input: any; output: any }[] = [];
+  const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
   const last = messages[messages.length - 1];
   for (const msg of [last]) {
     if (msg?.role !== 'assistant') continue;
@@ -36,7 +36,7 @@ function pendingBlockOutputs(messages: UIMessage[]) {
       const name = String(part.type).replace(/^tool-/, '') as BlockToolName;
       if (part.type?.startsWith('tool-') && BLOCK_TOOL_NAMES.includes(name)
         && part.state === 'output-available' && !part.output?.grading) {
-        out.push({ tool: name, input: part.input, output: part.output });
+        out.push({ tool: name, toolCallId: part.toolCallId, input: part.input, output: part.output });
       }
     }
   }
@@ -66,7 +66,7 @@ export function createTutorSession(
   async function respond(messages: UIMessage[], mode: Mode): Promise<Response> {
     // 1. Grade any fresh block outputs BEFORE the model sees them.
     const pending = pendingBlockOutputs(messages);
-    const grades = [];
+    const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
     for (const p of pending) {
       const grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
       p.output.grading = grading; // model sees student work + machine grade together
@@ -96,7 +96,31 @@ export function createTutorSession(
     const model_messages = [...context, ...(await convertToModelMessages(messages))];
 
     const stream = createUIMessageStream({
+      // Continuation, not a new sibling message: when this response is a resubmit whose incoming
+      // history already ends in an assistant message (the block output that triggered the
+      // resubmit), `createUIMessageStream` inspects `originalMessages` and injects THAT message's
+      // id into the outgoing 'start' chunk. The client (ai@7's AbstractChat.makeRequest) seeds its
+      // streaming state from a snapshot of that same last message and only REPLACES it in place
+      // when the ids match — without this, the ids mismatch (a fresh one vs the snapshot's), the
+      // client falls back to pushing the snapshot-plus-new-content as an extra sibling message, and
+      // the turn-1 content (e.g. "Let's warm up.") ends up rendered twice.
+      originalMessages: messages,
       execute: async ({ writer }) => {
+        // Bug 2 fix: the grading above only mutated the REQUEST's copy of the tool output
+        // (p.output.grading, kept so the model sees student work + machine grade together in the
+        // prompt below) — the browser never sees that mutation on its own. This is where the
+        // `originalMessages` continuation wiring above pays off twice over: because this response
+        // continues (replaces in place) the incoming history's last assistant message, ai@7's
+        // client-side stream processor seeds its working message state from THAT message — meaning
+        // it already contains a part with this toolCallId. So a normal `tool-output-available`
+        // chunk finds and patches it directly, same as any other tool result; no custom data part
+        // or client-side merge code needed. (A `data-grading` data-part sibling was tried first,
+        // merged client-side via onData/setMessages — but it raced the continuation's own
+        // replace-in-place write and got clobbered; this doesn't have that problem because it's
+        // processed as part of the SAME stream/write sequence.)
+        for (const p of pending) {
+          writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
+        }
         const run = async (msgs: ModelMessage[]) => {
           const result = await agent.stream({ messages: msgs });
           writer.merge(toUIMessageStream({ stream: result.stream }));
