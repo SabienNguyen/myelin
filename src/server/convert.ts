@@ -12,12 +12,32 @@ const PANDOC_BIN = join(REPO_ROOT, '.tools', 'pandoc', 'pandoc');
 
 export type Converter = (file: string, outDir: string) => Promise<{ markdown: string }>;
 
-function run(cmd: string, args: string[]): Promise<void> {
+function run(cmd: string, args: string[], env: Record<string, string> = {}): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: 'inherit' });
+    const child = spawn(cmd, args, { stdio: 'inherit', env: { ...process.env, ...env } });
     child.on('error', reject);
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`))));
   });
+}
+
+/** marker and ollama share one consumer GPU — a resident 7B chat model plus marker's ~6.5GB of
+ * layout/OCR models is a guaranteed CUDA OOM (observed live: 880MB short on an 8GB card). Ask
+ * ollama to unload everything before converting; models reload lazily on the next chat turn.
+ * Best-effort: if ollama is down or the API changed, conversion proceeds anyway. */
+async function freeOllamaVram(): Promise<void> {
+  const base = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1').replace(/\/v1\/?$/, '');
+  try {
+    const ps = await (await fetch(`${base}/api/ps`, { signal: AbortSignal.timeout(3000) })).json() as
+      { models?: { name: string }[] };
+    for (const m of ps.models ?? []) {
+      await fetch(`${base}/api/generate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: m.name, keep_alive: 0 }),
+        signal: AbortSignal.timeout(10_000),
+      }).catch(() => {});
+    }
+  } catch { /* ollama absent — nothing to unload */ }
 }
 
 /** marker_single nests its output in <outDir>/<file-stem-without-ext>/<file-stem>.md. */
@@ -28,7 +48,15 @@ async function convertPdf(file: string, outDir: string): Promise<{ markdown: str
       + 'run its setup before converting PDFs.',
     );
   }
-  await run(MARKER_BIN, [file, '--output_format', 'markdown', '--output_dir', outDir]);
+  await freeOllamaVram();
+  const markerArgs = [file, '--output_format', 'markdown', '--output_dir', outDir];
+  try {
+    await run(MARKER_BIN, markerArgs, { PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True' });
+  } catch (e) {
+    // Big scanned books can exceed the card even alone — finish on CPU rather than fail.
+    console.error(`[convert] marker GPU run failed (${e instanceof Error ? e.message : e}); retrying on CPU`);
+    await run(MARKER_BIN, markerArgs, { TORCH_DEVICE: 'cpu' });
+  }
   const stem = basename(file, extname(file));
   const nested = join(outDir, stem);
   const files = await readdir(nested);
