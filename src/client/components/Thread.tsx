@@ -35,7 +35,7 @@ export function Thread() {
         </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
       <ComposerPrimitive.Root className="composer">
-        <ComposerPrimitive.Input placeholder="Ask your tutor…" />
+        <ComposerPrimitive.Input placeholder="Ask your tutor…" autoFocus />
         <ComposerPrimitive.Send>Send</ComposerPrimitive.Send>
       </ComposerPrimitive.Root>
     </ThreadPrimitive.Root>

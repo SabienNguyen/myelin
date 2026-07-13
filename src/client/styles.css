@@ -453,6 +453,47 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border: 2px solid var(--accent); border-bottom-color: transparent;
 }
 
+/* ── Library (compile queue) ─────────────────────────── */
+.library-actions { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.library-actions .primary {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.library-actions .primary:disabled { opacity: 0.5; cursor: default; }
+.library-note { color: var(--text-muted); font-size: 0.85rem; }
+.library-book h3 { font-family: var(--font-serif); font-size: 1rem; margin: 0.9rem 0 0.3rem; }
+.library-book ul { list-style: none; margin: 0; padding: 0; }
+.library-book li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+.q-status {
+  display: inline-block;
+  min-width: 4.6em;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.q-done .q-status { color: var(--good); }
+.q-compiling .q-status { color: var(--accent); }
+.q-error .q-status { color: var(--bad); }
+.q-error .q-error { color: var(--bad); font-size: 0.78rem; margin-top: 2px; }
+
+/* ── Responsive: stack panels under ~900px ───────────── */
+@media (max-width: 900px) {
+  .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(0, 55%) minmax(0, 45%); }
+  .thread { border-right: none; border-bottom: 1px solid var(--border); }
+  .msg.user { margin-left: 8%; }
+  .topbar { flex-wrap: wrap; gap: 0.5rem; }
+  .ingest-status { display: none; }
+}
+
+/* ── Motion is optional ──────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
 .wiki-link {
   color: var(--accent);
   text-decoration: none;
