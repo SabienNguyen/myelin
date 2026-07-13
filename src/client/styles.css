@@ -85,6 +85,23 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 }
 .topbar h1::before { content: "◆ "; color: var(--accent); }
 
+.topbar-status { display: flex; gap: 0.4rem; align-items: center; }
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.15rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.statusdot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
+.anki-up .statusdot { background: var(--good); }
+.anki-backlog .statusdot { background: var(--warn); }
+.anki-down .statusdot { background: var(--text-muted); }
+
 /* ── Layout ──────────────────────────────────────────── */
 .workspace { display: grid; grid-template-columns: 1.4fr 1fr; min-height: 0; }
 
@@ -103,7 +120,22 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 }
 
 /* ── Messages ────────────────────────────────────────── */
-.msg { margin-bottom: 1.1rem; max-width: 100%; }
+.msg { margin-bottom: 1.1rem; max-width: 100%; animation: msg-in 0.18s ease-out; }
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.error-bubble {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent);
+  border-left: 3px solid var(--bad);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bad) 8%, var(--bg-panel));
+  color: var(--bad);
+  font-size: 0.92rem;
+}
 
 .msg.user {
   background: var(--accent-soft);
@@ -293,6 +325,32 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   color: var(--text-muted);
   font-style: italic;
   padding: 0 2rem;
+}
+
+.mark-ok { color: var(--good); font-weight: 700; }
+.mark-bad { color: var(--bad); font-weight: 700; }
+
+.graph-node circle { transition: filter 0.12s; }
+.graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }
+.graph-node text { fill: var(--text); }
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0.6rem 0.2rem 0.2rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  position: sticky;
+  left: 0;
+}
+.graph-legend span { display: inline-flex; align-items: center; gap: 0.35em; }
+.graph-legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.graph-legend .ring {
+  width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  border: 2px solid var(--accent); border-bottom-color: transparent;
 }
 
 .wiki-link {

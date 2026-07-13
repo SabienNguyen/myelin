@@ -1,4 +1,4 @@
-import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive } from '@assistant-ui/react';
+import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive } from '@assistant-ui/react';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 
@@ -19,6 +19,11 @@ export function Thread() {
                 Reasoning: () => null, // thinking models: never show raw reasoning to the learner
                 tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
               }} />
+              <MessagePrimitive.Error>
+                <ErrorPrimitive.Root className="error-bubble">
+                  ⚠ <ErrorPrimitive.Message />
+                </ErrorPrimitive.Root>
+              </MessagePrimitive.Error>
             </MessagePrimitive.Root>
           ),
         }} />

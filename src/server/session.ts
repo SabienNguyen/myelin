@@ -134,6 +134,12 @@ export function createTutorSession(
     return `${ctx}\nVault pages (the ONLY valid slugs — use them verbatim): ${slugs.join(', ')}`;
   }
 
+  function turnError(e: unknown): string {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[turn-error]', msg);
+    return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}`;
+  }
+
   async function respond(messages: UIMessage[], mode: Mode): Promise<Response> {
     const pending = pendingBlockOutputs(messages);
 
@@ -150,6 +156,10 @@ export function createTutorSession(
       // client falls back to pushing the snapshot-plus-new-content as an extra sibling message, and
       // the turn-1 content (e.g. "Let's warm up.") ends up rendered twice.
       originalMessages: messages,
+      // Surface failures to the learner ("degrade loudly") — and to journalctl. NOTE: model
+      // errors surface through the MERGED agent stream, so the same handler must also be passed
+      // to toUIMessageStream below — this outer one only catches execute()-level throws.
+      onError: turnError,
       execute: async ({ writer }) => {
         // 1. Grade fresh block outputs BEFORE the model sees them.
         const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
@@ -199,7 +209,7 @@ export function createTutorSession(
         }
         const run = async (msgs: ModelMessage[]) => {
           const result = await agent.stream({ messages: msgs });
-          writer.merge(toUIMessageStream({ stream: result.stream }));
+          writer.merge(toUIMessageStream({ stream: result.stream, onError: turnError }));
           const steps = await result.steps;
           const called = steps.flatMap((s: any) => s.toolCalls ?? [])
             .some((tc: any) => tc.toolName === 'record_evidence');

@@ -49,7 +49,9 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
             const correct = byId.get(item.id);
             return (
               <li key={item.id}>
-                {item.prompt} — {answer} {correct != null && (correct ? '✓' : '✗')}
+                {item.prompt} — {answer} {correct != null && (
+                  <span className={correct ? 'mark-ok' : 'mark-bad'}>{correct ? '✓' : '✗'}</span>
+                )}
               </li>
             );
           })}

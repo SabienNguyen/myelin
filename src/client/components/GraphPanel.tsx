@@ -60,9 +60,10 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           );
         })}
         {nodes.map((n) => (
-          <g key={n.slug} transform={`translate(${n.x},${n.y})`}
+          <g key={n.slug} className="graph-node" transform={`translate(${n.x},${n.y})`}
             onClick={() => { setSelected(n.slug); panelBus.openPage(n.slug); }}
             style={{ cursor: 'pointer' }}>
+            <title>{`${n.title} — ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft}d until decay` : ''}`}</title>
             <circle r={R} fill={n.color} />
             {n.ringFraction != null && (
               <circle r={R + 4} fill="none" stroke={n.color} strokeWidth={2}
@@ -90,6 +91,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           </g>
         ))}
       </svg>
+      <div className="graph-legend">
+        <span><i className="dot" style={{ background: '#9e9e9e' }} /> unseen</span>
+        <span><i className="dot" style={{ background: '#e0b040' }} /> exposed</span>
+        <span><i className="dot" style={{ background: '#5b8def' }} /> practicing</span>
+        <span><i className="dot" style={{ background: '#4caf7d' }} /> mastered</span>
+        <span><i className="ring" /> time till decay</span>
+        <span>⚠ misconception</span>
+      </div>
     </div>
   );
 }

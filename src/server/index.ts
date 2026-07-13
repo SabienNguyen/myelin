@@ -53,7 +53,7 @@ cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => ankiTick(), { n
 ankiTick().catch(console.error); // once at boot
 
 const app = new Hono();
-app.route('/', buildRestRoutes(lw, cfg, {}, anki));
+app.route('/', buildRestRoutes(lw, cfg, { student: cfg.student, tutor: cfg.models.tutor.model }, anki));
 app.route('/', buildChatRoute(lw, cfg));
 serve({ fetch: app.fetch, port: cfg.port });
 console.log(`loreweaver-harness on :${cfg.port}`);
