@@ -43,26 +43,53 @@ function writeQueue(vault: string, ledger: QueueEntry[]): void {
   writeFileSync(ledgerPath(vault), JSON.stringify(ledger, null, 2));
 }
 
+const H1_LINE = /^#\s+(.+)$/m;
+
 /**
- * Converts a book file to per-chapter markdown under vault/raw/uploads/<book-slug>/ and appends
- * one 'pending' ledger entry per chapter to vault/.harness/compile-queue.json. These are the only
- * two locations this pipeline ever writes — pages/ and students/ are the Loreweaver MCP server's
- * exclusive territory.
+ * Converts a book (or paper) file and appends 'pending' ledger entries to
+ * vault/.harness/compile-queue.json. These are the only two locations this pipeline ever writes —
+ * pages/ and students/ are the Loreweaver MCP server's exclusive territory.
+ *
+ * Book mode (default) splits the converted markdown into per-chapter files under
+ * vault/raw/uploads/<book-slug>/ and appends one ledger entry per chapter.
+ *
+ * Paper mode writes the WHOLE converted markdown as a single vault/raw/uploads/<slug>/paper.md
+ * (no chapter splitting — a paper is one unit of work) and appends exactly one ledger entry,
+ * titled from `opts.title`, else the markdown's first H1 (heading text, '#' stripped), else the
+ * filename.
  */
 export async function ingestBook(
-  cfg: HarnessConfig, filePath: string, opts: { converter?: Converter } = {},
+  cfg: HarnessConfig, filePath: string,
+  opts: { converter?: Converter; mode?: 'book' | 'paper'; title?: string } = {},
 ): Promise<{ book: string; chapters: number }> {
   const converter = opts.converter ?? defaultConverter;
+  const mode = opts.mode ?? 'book';
+  const outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
+  const { markdown } = await converter(filePath, outDir);
+  const ledger = readQueue(cfg.vault);
+
+  if (mode === 'paper') {
+    const title = opts.title || markdown.match(H1_LINE)?.[1]?.trim() || basename(filePath, extname(filePath));
+    const slug = slugify(title) || 'paper';
+    const uploadsDir = join(cfg.vault, 'raw', 'uploads', slug);
+    mkdirSync(uploadsDir, { recursive: true });
+    writeFileSync(join(uploadsDir, 'paper.md'), `<!-- source: "${title}" -->\n\n${markdown}\n`);
+    ledger.push({
+      book: title,
+      chapter: `raw/uploads/${slug}/paper.md`,
+      title,
+      status: 'pending',
+    });
+    writeQueue(cfg.vault, ledger);
+    return { book: title, chapters: 1 };
+  }
+
   const bookTitle = basename(filePath, extname(filePath));
   const bookSlug = slugify(bookTitle) || 'book';
   const uploadsDir = join(cfg.vault, 'raw', 'uploads', bookSlug);
   mkdirSync(uploadsDir, { recursive: true });
 
-  const outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
-  const { markdown } = await converter(filePath, outDir);
   const chapters = splitChapters(markdown);
-
-  const ledger = readQueue(cfg.vault);
   chapters.forEach((ch, i) => {
     const n = i + 1;
     const chapterSlug = slugify(ch.title) || `chapter-${n}`;

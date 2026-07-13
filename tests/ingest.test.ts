@@ -64,6 +64,70 @@ describe('ingestBook', () => {
   });
 });
 
+describe('ingestBook paper mode', () => {
+  const manyHeadingsMd = [
+    '# The Real Paper Title',
+    'Abstract: this paper studies many things.',
+    '## Introduction',
+    'Some intro content.',
+    '# A Misleading Second H1',
+    'This looks like a chapter break but paper mode must not split on it.',
+    '## Results',
+    'Some results content.',
+  ].join('\n');
+
+  it('produces exactly one pending ledger entry titled from the first H1, no chapter splitting', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-paper-'));
+    const cfg = { vault, student: 'kid', models: {} } as unknown as HarnessConfig;
+
+    const result = await ingestBook(cfg, '/uploads/some-upload-name.pdf', {
+      mode: 'paper',
+      converter: async () => ({ markdown: manyHeadingsMd }),
+    });
+
+    expect(result).toEqual({ book: 'The Real Paper Title', chapters: 1 });
+
+    const ledger = readQueue(vault);
+    expect(ledger).toHaveLength(1);
+    expect(ledger[0]).toMatchObject({
+      book: 'The Real Paper Title',
+      title: 'The Real Paper Title',
+      chapter: 'raw/uploads/the-real-paper-title/paper.md',
+      status: 'pending',
+    });
+
+    const written = readFileSync(join(vault, 'raw', 'uploads', 'the-real-paper-title', 'paper.md'), 'utf8');
+    expect(written).toContain('The Real Paper Title');
+    expect(written).toContain('A Misleading Second H1'); // full doc kept intact, not split
+  });
+
+  it('falls back to the filename when the markdown has no H1', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-paper-'));
+    const cfg = { vault, student: 'kid', models: {} } as unknown as HarnessConfig;
+
+    const result = await ingestBook(cfg, '/uploads/Untitled Paper.pdf', {
+      mode: 'paper',
+      converter: async () => ({ markdown: 'No headings here, just body text.' }),
+    });
+
+    expect(result.book).toBe('Untitled Paper');
+    expect(readQueue(vault)[0].title).toBe('Untitled Paper');
+  });
+
+  it('an explicit title opt overrides H1 detection', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-paper-'));
+    const cfg = { vault, student: 'kid', models: {} } as unknown as HarnessConfig;
+
+    const result = await ingestBook(cfg, '/uploads/whatever.pdf', {
+      mode: 'paper', title: 'Explicit Title',
+      converter: async () => ({ markdown: '# Detected H1 Title\nbody' }),
+    });
+
+    expect(result.book).toBe('Explicit Title');
+    expect(readQueue(vault)[0].title).toBe('Explicit Title');
+  });
+});
+
 describe('compileNext', () => {
   let lw: Loreweaver;
   let vault: string;

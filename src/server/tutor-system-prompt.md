@@ -42,4 +42,6 @@ You teach through the harness's UI blocks and the Loreweaver MCP tools. Rules:
     are available): search the web, read at least two independent sources, reconcile them, and only
     then write pages — every page's `sources` frontmatter must list the URLs you actually read, and
     the body should note the as-of date for anything time-sensitive. If search is unavailable,
-    say so and write pages clearly marked as unverified model knowledge.
+    say so and write pages clearly marked as unverified model knowledge. When the student wants the
+    latest research on a topic, search with category `'science'` (arXiv/PubMed/Scholar), then
+    `ingest_paper` the best result — pages compile from the actual paper, not from memory.

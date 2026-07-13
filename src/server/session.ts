@@ -7,6 +7,7 @@ import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blo
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput } from './grading.js';
+import { buildIngestTools } from './ingestTools.js';
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
@@ -178,11 +179,15 @@ export function createTutorSession(
         // Research tools ride with the vault-writing tools: freeform only. A subject gets
         // researched and compiled in freeform; teaching modes stay grounded in the vault.
         const webTools = mode === 'freeform' ? buildWebTools(cfg) : {};
+        // ingest_paper needs cfg (to queue) AND lw (to kick a background compile) — same
+        // freeform-only gate as webTools: a subject gets researched, sourced, and compiled in
+        // freeform; teaching modes stay grounded in the vault.
+        const ingestTools = mode === 'freeform' ? buildIngestTools(lw, cfg) : {};
 
         const agent = new ToolLoopAgent({
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
-          tools: { ...activeMcp, ...webTools, ...blockTools() },
+          tools: { ...activeMcp, ...webTools, ...ingestTools, ...blockTools() },
           stopWhen: isStepCount(24),
         });
 

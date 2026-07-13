@@ -5,17 +5,36 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
+import { downloadToTemp } from './download.js';
 import { compileNext, ingestBook, readQueue } from './ingest.js';
 import type { Loreweaver } from './mcp.js';
 
 export function buildIngestRoutes(
-  lw: Loreweaver, cfg: HarnessConfig, deps: { converter?: Converter; model?: LanguageModel } = {},
+  lw: Loreweaver, cfg: HarnessConfig,
+  deps: { converter?: Converter; model?: LanguageModel; fetchImpl?: typeof fetch } = {},
 ) {
   const app = new Hono();
 
   // PDFs can take minutes to convert (marker) — intentionally no timeout here; the client just
   // awaits the fetch.
   app.post('/api/ingest', async (c) => {
+    const contentType = c.req.header('content-type') ?? '';
+
+    if (contentType.includes('application/json')) {
+      const body = await c.req.json().catch(() => null) as { url?: string; mode?: 'book' | 'paper' } | null;
+      if (!body?.url) return c.json({ error: 'JSON body requires a "url" field' }, 400);
+      let downloaded: Awaited<ReturnType<typeof downloadToTemp>>;
+      try {
+        downloaded = await downloadToTemp(body.url, { fetchImpl: deps.fetchImpl });
+      } catch (e: any) {
+        return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+      }
+      // URL ingests default to paper mode — arXiv/journal links are single-document sources, not
+      // multi-chapter books.
+      const result = await ingestBook(cfg, downloaded.path, { converter: deps.converter, mode: body.mode ?? 'paper' });
+      return c.json(result);
+    }
+
     const body = await c.req.parseBody();
     const file = body.file;
     if (!(file instanceof File)) return c.json({ error: 'multipart field "file" is required' }, 400);
