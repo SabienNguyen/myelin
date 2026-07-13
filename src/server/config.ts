@@ -15,6 +15,9 @@ const configSchema = z.object({
     args: z.array(z.string()),
     embeddings: z.enum(['ollama', 'fake', 'none']).default('ollama'),
   }),
+  // Optional research stack: a local SearXNG instance powering web_search/read_url tools
+  // (freeform mode only). Absent -> the tools simply aren't registered.
+  search: z.object({ searxng: z.string() }).optional(),
   schedule: z.object({
     digestHour: z.number().int().min(0).max(23),
     quietHours: z.tuple([z.number(), z.number()]),

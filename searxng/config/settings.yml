@@ -1,0 +1,9 @@
+# Minimal SearXNG config for the Loreweaver harness research tools.
+use_default_settings: true
+server:
+  secret_key: "loreweaver-local-only-not-secret"
+  limiter: false
+search:
+  formats:
+    - html
+    - json

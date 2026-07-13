@@ -11,6 +11,7 @@ import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { logGuardrail } from './sessionStore.js';
+import { buildWebTools } from './webTools.js';
 
 // Tools the tutor may use per mode; write/link/compile only in freeform (spec §5).
 const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidence',
@@ -174,10 +175,14 @@ export function createTutorSession(
         const activeMcp = Object.fromEntries(Object.entries(mcpTools)
           .filter(([n]) => mode === 'freeform' || TEACH_TOOLS.includes(n)));
 
+        // Research tools ride with the vault-writing tools: freeform only. A subject gets
+        // researched and compiled in freeform; teaching modes stay grounded in the vault.
+        const webTools = mode === 'freeform' ? buildWebTools(cfg) : {};
+
         const agent = new ToolLoopAgent({
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
-          tools: { ...activeMcp, ...blockTools() },
+          tools: { ...activeMcp, ...webTools, ...blockTools() },
           stopWhen: isStepCount(24),
         });
 
