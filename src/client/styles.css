@@ -218,6 +218,30 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .ann-structure, .ann-grammar { background: color-mix(in srgb, var(--bad) 20%, transparent); }
 .skill-grades { margin: 0.4rem 0 0; padding-left: 1.2rem; color: var(--text-muted); }
 
+/* ── Working indicator ───────────────────────────────── */
+.working {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.working em { margin-left: 0.35rem; }
+.working .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: working-pulse 1.2s infinite ease-in-out;
+}
+.working .dot:nth-child(2) { animation-delay: 0.18s; }
+.working .dot:nth-child(3) { animation-delay: 0.36s; }
+@keyframes working-pulse {
+  0%, 70%, 100% { opacity: 0.25; transform: scale(0.85); }
+  35% { opacity: 1; transform: scale(1.15); }
+}
+
 /* ── MCP tool activity: quiet status chips ───────────── */
 .tool-chip {
   display: inline-flex;

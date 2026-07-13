@@ -1,5 +1,24 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeToolArgs } from '../src/server/session.js';
+import { repairSlug, sanitizeToolArgs } from '../src/server/session.js';
+
+const SLUGS = ['derivatives', 'chain-rule', 'gradient-descent', 'loss-functions', 'ser-vs-estar'];
+
+describe('repairSlug', () => {
+  it('keeps exact and unknown-but-distant slugs', () => {
+    expect(repairSlug('derivatives', SLUGS)).toBe('derivatives');
+    expect(repairSlug('quantum-fields', SLUGS)).toBe('quantum-fields'); // no silent wrong match
+  });
+  it('repairs hallucinated variants', () => {
+    expect(repairSlug('derivative', SLUGS)).toBe('derivatives');          // missing plural
+    expect(repairSlug('derivatives-introduction', SLUGS)).toBe('derivatives'); // invented suffix
+    expect(repairSlug('Chain Rule', SLUGS)).toBe('chain-rule');           // title-cased
+  });
+  it('feeds repair through sanitizeToolArgs for slug tools only', () => {
+    expect(sanitizeToolArgs({ slug: 'derivative', kind: 'exposed', note: '' },
+      'record_evidence', 'sabien', SLUGS).slug).toBe('derivatives');
+    expect(sanitizeToolArgs({ query: 'derivative' }, 'search', 'sabien', SLUGS).query).toBe('derivative');
+  });
+});
 
 describe('sanitizeToolArgs (MCP tool guard)', () => {
   it('strips null and undefined optional fields', () => {

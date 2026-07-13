@@ -20,22 +20,66 @@ const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidenc
 // (especially small local ones) invent ids like "student" otherwise.
 const STUDENT_TOOLS = ['record_evidence', 'get_student_state', 'next_lessons', 'find_analogies'];
 
+// Tools whose `slug` argument must name a real vault page.
+const SLUG_TOOLS = ['record_evidence', 'read_page', 'find_analogies'];
+
+function levenshtein(a: string, b: string): number {
+  const m = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) m[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      m[i][j] = Math.min(m[i - 1][j] + 1, m[i][j - 1] + 1, m[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return m[a.length][b.length];
+}
+
+/** Map a (possibly hallucinated) slug onto the closest real vault slug. Models invent slugs
+ * like "derivatives-introduction" or "derivative" for the real page "derivatives"; repairing
+ * conservatively (containment or small edit distance, unique winner) beats letting every
+ * downstream record_evidence/find_analogies call fail. Unmatched slugs pass through untouched
+ * so genuine errors stay visible. */
+export function repairSlug(slug: string, known: string[]): string {
+  if (!slug || known.includes(slug)) return slug;
+  const norm = slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+  if (known.includes(norm)) return norm;
+  const scored = known
+    .map((k) => ({
+      k,
+      score: norm.startsWith(`${k}-`) || k.startsWith(`${norm}-`) || norm === `${k}s` || k === `${norm}s`
+        ? 0 : levenshtein(norm, k),
+    }))
+    .filter(({ k, score }) => score <= Math.min(3, Math.floor(k.length / 3)))
+    .sort((a, b) => a.score - b.score);
+  if (scored.length && (scored.length === 1 || scored[0].score < scored[1].score)) return scored[0].k;
+  return slug;
+}
+
 /** Drop null/undefined args (MCP zod schemas want optional fields ABSENT, not null). */
-export function sanitizeToolArgs(args: any, toolName: string, student: string): any {
+export function sanitizeToolArgs(args: any, toolName: string, student: string, knownSlugs: string[] = []): any {
   if (args == null || typeof args !== 'object' || Array.isArray(args)) return args;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) if (v != null) out[k] = v;
   if (STUDENT_TOOLS.includes(toolName)) out.student = student;
+  if (SLUG_TOOLS.includes(toolName) && typeof out.slug === 'string' && knownSlugs.length)
+    out.slug = repairSlug(out.slug, knownSlugs);
   return out;
 }
 
 /** Wrap MCP tools so every execute() sees sanitized args — the model cannot send a wrong
- * student id or a null optional field no matter what it generates. */
-function guardMcpTools(tools: ToolSet, student: string): ToolSet {
+ * student id, a null optional field, or (where repairable) a hallucinated slug. Failed calls
+ * are logged server-side so journalctl shows WHY a tool chip went ⚠. */
+function guardMcpTools(tools: ToolSet, student: string, knownSlugs: string[]): ToolSet {
   return Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, {
     ...t,
     execute: t.execute
-      ? (args: any, opts: any) => t.execute(sanitizeToolArgs(args, name, student), opts)
+      ? async (args: any, opts: any) => {
+        const clean = sanitizeToolArgs(args, name, student, knownSlugs);
+        const result = await t.execute(clean, opts);
+        if (result && typeof result === 'object' && (result as any).isError) {
+          const text = ((result as any).content ?? []).map((c: any) => c?.text ?? '').join(' ');
+          console.error(`[tool-error] ${name} args=${JSON.stringify(clean)} -> ${text.slice(0, 300)}`);
+        }
+        return result;
+      }
       : t.execute,
   }])) as ToolSet;
 }
@@ -73,52 +117,29 @@ export function createTutorSession(
 ) {
   const model = opts.model ?? modelFor('tutor', cfg);
 
-  async function bootstrap(mode: Mode): Promise<string> {
+  async function bootstrap(mode: Mode, slugs: string[]): Promise<string> {
     const [state, lessonsRes] = await Promise.all([
       lw.call('get_student_state', { student: cfg.student }),
       lw.call('next_lessons', { student: cfg.student }),
     ]);
     const lessons = lessonsRes.lessons ?? [];
-    return buildBootstrapContext({
+    const ctx = buildBootstrapContext({
       mode, state,
       lessons,
       reviewsDue: lessons.filter((l: any) => l.reason === 'review-due').map((l: any) => l.slug),
       ankiLapses: recentLapses(cfg.vault),
     });
+    // Ground the model in the REAL page ids — small models otherwise invent slugs like
+    // "derivatives-introduction" and every downstream slug-taking call fails.
+    return `${ctx}\nVault pages (the ONLY valid slugs — use them verbatim): ${slugs.join(', ')}`;
   }
 
   async function respond(messages: UIMessage[], mode: Mode): Promise<Response> {
-    // 1. Grade any fresh block outputs BEFORE the model sees them.
     const pending = pendingBlockOutputs(messages);
-    const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
-    for (const p of pending) {
-      const grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
-      p.output.grading = grading; // model sees student work + machine grade together
-      grades.push(grading);
-    }
 
-    const mcpTools = guardMcpTools(await lw.tools(), cfg.student);
-    const activeMcp = Object.fromEntries(Object.entries(mcpTools)
-      .filter(([n]) => mode === 'freeform' || TEACH_TOOLS.includes(n)));
-
-    const agent = new ToolLoopAgent({
-      model,
-      instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
-      tools: { ...activeMcp, ...blockTools() },
-      stopWhen: isStepCount(24),
-    });
-
-    const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
-    const context: ModelMessage[] = [];
-    if (isFirstTurn) context.push({ role: 'user', content: await bootstrap(mode) });
-    if (grades.length) context.push({
-      role: 'user',
-      content: `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. ` +
-        `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
-    });
-
-    const model_messages = [...context, ...(await convertToModelMessages(messages))];
-
+    // Everything slow (grading, bootstrap, model turns) runs INSIDE the stream's execute so the
+    // HTTP response starts immediately — the client flips to "running" and can show a working
+    // indicator during grading instead of a dead pause.
     const stream = createUIMessageStream({
       // Continuation, not a new sibling message: when this response is a resubmit whose incoming
       // history already ends in an assistant message (the block output that triggered the
@@ -130,6 +151,37 @@ export function createTutorSession(
       // the turn-1 content (e.g. "Let's warm up.") ends up rendered twice.
       originalMessages: messages,
       execute: async ({ writer }) => {
+        // 1. Grade fresh block outputs BEFORE the model sees them.
+        const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
+        for (const p of pending) {
+          const grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+          p.output.grading = grading; // model sees student work + machine grade together
+          grades.push(grading);
+        }
+
+        const slugs = await lw.listSlugs();
+        const mcpTools = guardMcpTools(await lw.tools(), cfg.student, slugs);
+        const activeMcp = Object.fromEntries(Object.entries(mcpTools)
+          .filter(([n]) => mode === 'freeform' || TEACH_TOOLS.includes(n)));
+
+        const agent = new ToolLoopAgent({
+          model,
+          instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
+          tools: { ...activeMcp, ...blockTools() },
+          stopWhen: isStepCount(24),
+        });
+
+        const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
+        const context: ModelMessage[] = [];
+        if (isFirstTurn) context.push({ role: 'user', content: await bootstrap(mode, slugs) });
+        if (grades.length) context.push({
+          role: 'user',
+          content: `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. ` +
+            `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
+        });
+
+        const model_messages = [...context, ...(await convertToModelMessages(messages))];
+
         // Bug 2 fix: the grading above only mutated the REQUEST's copy of the tool output
         // (p.output.grading, kept so the model sees student work + machine grade together in the
         // prompt below) — the browser never sees that mutation on its own. This is where the

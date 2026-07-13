@@ -22,6 +22,12 @@ export function Thread() {
             </MessagePrimitive.Root>
           ),
         }} />
+        <ThreadPrimitive.If running>
+          <div className="working" role="status">
+            <span className="dot" /><span className="dot" /><span className="dot" />
+            <em>tutor is working…</em>
+          </div>
+        </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
       <ComposerPrimitive.Root className="composer">
         <ComposerPrimitive.Input placeholder="Ask your tutor…" />
