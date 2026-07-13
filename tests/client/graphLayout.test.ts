@@ -30,3 +30,26 @@ describe('layoutGraph', () => {
     expect(j.ringFraction).toBeNull();
   });
 });
+
+describe('layoutGraph with disconnected domains', () => {
+  const disconnected = [
+    { slug: 'algebra-a', title: 'Algebra A', prereqs: [], deepens: [], mastery: null },
+    { slug: 'algebra-b', title: 'Algebra B', prereqs: ['algebra-a'], deepens: [], mastery: null },
+    { slug: 'history-a', title: 'History A', prereqs: [], deepens: [], mastery: null },
+    { slug: 'history-b', title: 'History B', prereqs: ['history-a'], deepens: [], mastery: null },
+  ];
+
+  it('lays out two disconnected components without crashing', () => {
+    expect(() => layoutGraph(disconnected as any, new Date('2026-07-12'))).not.toThrow();
+  });
+
+  it('keeps disconnected components from overlapping (no shared x,y)', () => {
+    const g = layoutGraph(disconnected as any, new Date('2026-07-12'));
+    const seen = new Set<string>();
+    for (const n of g.nodes) {
+      const key = `${n.x},${n.y}`;
+      expect(seen.has(key)).toBe(false);
+      seen.add(key);
+    }
+  });
+});

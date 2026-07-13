@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useThreadRuntime } from '@assistant-ui/react';
+import { getArrow } from 'perfect-arrows';
 import { getGraph } from '../lib/api.js';
 import { layoutGraph, type LaidOutNode, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
@@ -7,6 +8,10 @@ import { panelBus } from '../lib/panelBus.js';
 const R = 16;
 const PAD = 60;
 const POLL_MS = 30_000;
+
+// Tuned low so the layered (mostly-vertical) layout reads as refined arcs
+// rather than the swoopy default perfect-arrows curves.
+const PREREQ_ARROW_OPTS = { bow: 0.15, stretch: 0.3, padStart: R + 2, padEnd: R + 7 };
 
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const [nodes, setNodes] = useState<LaidOutNode[]>([]);
@@ -42,28 +47,31 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   return (
     <div className="graph-panel" style={{ overflow: 'auto', width: '100%', height: '100%' }}>
       <svg viewBox={`${minX} ${minY} ${width} ${height}`} width={width} height={height}>
-        <defs>
-          <marker id="prereq-arrow" markerWidth={8} markerHeight={8} refX={7} refY={4} orient="auto">
-            <path d="M0,0 L8,4 L0,8 Z" fill="#888" />
-          </marker>
-        </defs>
         {edges.map((e) => {
           const src = byId.get(e.src);
           const dst = byId.get(e.dst);
           if (!src || !dst) return null;
-          // Inked S-curve (curveBumpY-style): leave/enter nodes vertically, stop at the rim so
-          // the arrowhead stays visible instead of hiding under the circle.
-          const dir = dst.y > src.y ? 1 : -1;
-          const y1 = src.y + dir * (R + 2);
-          const y2 = dst.y - dir * (R + 7);
-          const my = (y1 + y2) / 2;
-          const d = `M ${src.x} ${y1} C ${src.x} ${my}, ${dst.x} ${my}, ${dst.x} ${y2}`;
+          if (e.type === 'deepens') {
+            // Dashed S-curve (curveBumpY-style): leave/enter nodes vertically, stop at the rim.
+            const dir = dst.y > src.y ? 1 : -1;
+            const y1 = src.y + dir * (R + 2);
+            const y2 = dst.y - dir * (R + 7);
+            const my = (y1 + y2) / 2;
+            const d = `M ${src.x} ${y1} C ${src.x} ${my}, ${dst.x} ${my}, ${dst.x} ${y2}`;
+            return (
+              <path key={`deepens-${e.src}-${e.dst}`} d={d} fill="none"
+                stroke="#888" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.5} />
+            );
+          }
+          // Prereq edges: perfect-arrows tapered arc, padded to stop at each node's rim.
+          const [sx, sy, cx, cy, ex, ey, ae] = getArrow(src.x, src.y, dst.x, dst.y, PREREQ_ARROW_OPTS);
+          const endAngleDeg = ae * (180 / Math.PI);
           return (
-            <path key={`${e.type}-${e.src}-${e.dst}`} d={d} fill="none"
-              stroke="#888" strokeWidth={1.5}
-              strokeDasharray={e.type === 'deepens' ? '4 3' : undefined}
-              opacity={e.type === 'deepens' ? 0.5 : 1}
-              markerEnd={e.type === 'prereq' ? 'url(#prereq-arrow)' : undefined} />
+            <g key={`prereq-${e.src}-${e.dst}`}>
+              <path d={`M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}`} fill="none" stroke="#888" strokeWidth={1.5} />
+              <polygon points="0,-5 10,0 0,5" fill="#888"
+                transform={`translate(${ex},${ey}) rotate(${endAngleDeg})`} />
+            </g>
           );
         })}
         {nodes.map((n) => (
