@@ -36,4 +36,15 @@ describe('model router', () => {
     expect(m.role).toBe('system');
     expect((m as any).providerOptions.anthropic.cacheControl.type).toBe('ephemeral');
   });
+
+  describe('ollama: local model routing', () => {
+    const ollamaCfg = { models: { grader: { model: 'ollama:qwen2.5-coder:14B' } } } as any;
+
+    it('strips the ollama: prefix and returns an openai-compatible model, not anthropic', () => {
+      const m = modelFor('grader', ollamaCfg) as any;
+      expect(m.modelId).toBe('qwen2.5-coder:14B');
+      expect(m.provider).not.toMatch(/anthropic/);
+      expect(m.provider).toBe('ollama.chat');
+    });
+  });
 });

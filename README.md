@@ -29,6 +29,18 @@ exclusively over stdio MCP.
 6. **Optional — real embeddings:** `ollama pull nomic-embed-text` and set
    `loreweaver.embeddings: "ollama"` in your config (the default). Set it to `"fake"` for tests/E2E
    or if you don't want to run Ollama.
+7. **Optional — local models (ollama):** any role's `models.*.model` id can be prefixed with
+   `ollama:` (e.g. `"grader": { "model": "ollama:qwen2.5-coder:14B" }`) to route that role through
+   a local Ollama model instead of Anthropic, via Ollama's OpenAI-compatible endpoint. It defaults
+   to `http://localhost:11434/v1`; override with `OLLAMA_BASE_URL` if Ollama runs elsewhere.
+   **Context length caveat:** Ollama's runtime default context window is 4096 tokens regardless of
+   what the model actually supports, which is too small for this harness's prompts (system prompt +
+   MCP tool results + session context). Raise it on the Ollama service, e.g.
+   `OLLAMA_CONTEXT_LENGTH=32768` (systemd: `systemctl --user edit ollama`, add
+   `Environment=OLLAMA_CONTEXT_LENGTH=32768` under `[Service]`, then restart). Recommended split:
+   keep `tutor` and `compile` on Claude (they need the strongest reasoning/tool-use), and route
+   `grader`, `quiz_gen`, and `card_gen` to a local model — those are higher-volume, lower-stakes
+   calls that a good local coder/instruct model handles fine.
 
 ## Running
 

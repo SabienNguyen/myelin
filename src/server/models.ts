@@ -1,9 +1,16 @@
 import { createRequire } from 'node:module';
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { SystemModelMessage } from 'ai';
 import type { HarnessConfig, ModelRole } from './config.js';
 
 const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? 'unset' });
+
+const OLLAMA_PREFIX = 'ollama:';
+const ollama = createOpenAICompatible({
+  name: 'ollama',
+  baseURL: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1',
+});
 
 export function modelFor(role: ModelRole, cfg: HarnessConfig) {
   if (process.env.LW_MOCK_MODEL) {
@@ -13,7 +20,11 @@ export function modelFor(role: ModelRole, cfg: HarnessConfig) {
     const { createScriptedModel } = require('../../tests/e2e/scripted-model.cjs');
     return createScriptedModel(process.env.LW_MOCK_MODEL);
   }
-  return anthropic(cfg.models[role].model);
+  const modelId = cfg.models[role].model;
+  if (modelId.startsWith(OLLAMA_PREFIX)) {
+    return ollama.chatModel(modelId.slice(OLLAMA_PREFIX.length));
+  }
+  return anthropic(modelId);
 }
 
 export function cachedSystem(text: string): SystemModelMessage {
