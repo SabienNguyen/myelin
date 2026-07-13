@@ -1,7 +1,7 @@
 import { AssistantRuntimeProvider, Tools, useAui } from '@assistant-ui/react';
 import { AssistantChatTransport, useChatRuntime } from '@assistant-ui/react-ai-sdk';
 import type { UIMessage } from 'ai';
-import type { PropsWithChildren } from 'react';
+import { useEffect, useState, type PropsWithChildren } from 'react';
 import { BLOCK_TOOL_NAMES } from '../shared/blocks.js';
 import { toolkit } from './toolkit.js';
 
@@ -38,10 +38,36 @@ export function blockOutputsComplete({ messages }: { messages: UIMessage[] }): b
   return blockParts.length > 0 && blockParts.every((part) => part.state === 'output-available');
 }
 
+const THREAD_ID = 'default';
+
+/** Load the persisted thread once, then mount the chat with it — the server's chatRoute only
+ * persists the REQUEST side; the assistant's turns are saved here via onFinish → PUT. */
 export function Runtime({ mode, children }: PropsWithChildren<{ mode: string }>) {
+  const [initial, setInitial] = useState<UIMessage[] | null>(null);
+  useEffect(() => {
+    fetch(`/api/thread/${THREAD_ID}`).then((r) => r.json())
+      .then((msgs) => setInitial(Array.isArray(msgs) ? msgs : []))
+      .catch(() => setInitial([]));
+  }, []);
+  if (initial === null) return null; // one settled frame while the thread restores
+  return <RuntimeInner mode={mode} initial={initial}>{children}</RuntimeInner>;
+}
+
+function RuntimeInner({ mode, initial, children }: PropsWithChildren<{ mode: string; initial: UIMessage[] }>) {
   const runtime = useChatRuntime({
-    transport: new AssistantChatTransport({ api: '/api/chat', body: { mode, threadId: 'default' } }),
+    transport: new AssistantChatTransport({ api: '/api/chat', body: { mode, threadId: THREAD_ID } }),
+    // Cast: react-ai-sdk types ChatInit against its BUNDLED ai@6; our messages are ai@7.
+    // Identical wire shape, incompatible type identities (the repo-wide rule: never let ai
+    // types flow through react-ai-sdk's surface without a boundary cast).
+    messages: initial.length ? (initial as never[]) : undefined,
     sendAutomaticallyWhen: blockOutputsComplete,
+    onFinish: ({ messages }) => {
+      void fetch(`/api/thread/${THREAD_ID}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(messages),
+      }).catch(() => {});
+    },
   });
   const aui = useAui({ tools: Tools({ toolkit }) });
   return <AssistantRuntimeProvider runtime={runtime} aui={aui}>{children}</AssistantRuntimeProvider>;

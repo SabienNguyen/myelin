@@ -1,7 +1,10 @@
 import { memo } from 'react';
 import { MarkdownTextPrimitive, unstable_memoizeMarkdownComponents as memoize } from '@assistant-ui/react-markdown';
 import remarkGfm from 'remark-gfm';
-import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
+import { panelBus, chatPreprocess } from '../lib/panelBus.js';
 
 export function WikiLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const m = props.href?.match(/^#\/page\/(.+)$/);
@@ -14,6 +17,6 @@ export function WikiLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
 
 const components = memoize({ a: WikiLink });
 export const MarkdownText = memo(() => (
-  <MarkdownTextPrimitive remarkPlugins={[remarkGfm]} components={components}
-    preprocess={wikiPreprocess} defer />
+  <MarkdownTextPrimitive remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}
+    components={components} preprocess={chatPreprocess} defer />
 ));
