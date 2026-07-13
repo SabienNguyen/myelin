@@ -34,14 +34,15 @@ export type ThreadSummary = { id: string; title: string; updatedAt: string; mess
 
 const TITLE_MAX = 60;
 
-/** Best-effort title: the first user message's first text part, trimmed. Falls back to the
- * thread id when there's no user text (e.g. an empty or assistant-only thread). */
+/** Best-effort title: the first SUBSTANTIVE user text (≥ 12 chars) — "hi" openers make
+ * indistinguishable rows in the picker, so prefer the message that says what the conversation
+ * is about. Falls back to the first user text of any length, then the thread id. */
 function titleFor(messages: unknown[], id: string): string {
-  const firstUser = (messages as any[]).find((m) => m && m.role === 'user');
-  const text = firstUser?.parts?.find((p: any) => p?.type === 'text' && typeof p.text === 'string')?.text as
-    | string
-    | undefined;
-  const trimmed = text?.trim();
+  const userTexts = (messages as any[])
+    .filter((m) => m && m.role === 'user')
+    .map((m) => m.parts?.find((p: any) => p?.type === 'text' && typeof p.text === 'string')?.text?.trim())
+    .filter((t): t is string => !!t);
+  const trimmed = userTexts.find((t) => t.length >= 12) ?? userTexts[0];
   if (!trimmed) return id;
   return trimmed.length > TITLE_MAX ? `${trimmed.slice(0, TITLE_MAX)}…` : trimmed;
 }
