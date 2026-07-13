@@ -210,4 +210,107 @@ describe('compileNext', () => {
     expect(entry?.status).toBe('error');
     expect(entry?.error).toMatch(/model unavailable/);
   }, 30_000);
+
+  describe('concurrency', () => {
+    /** A model whose response doesn't depend on call order — it looks at whether a tool result is
+     * already in the prompt to tell "first step" (call write_page) from "second step" (stop), so
+     * it behaves correctly no matter how compileNext's worker pool interleaves calls across
+     * chapters. Tracks how many of its "first step" calls are simultaneously in flight (via an
+     * artificial delay) so tests can assert on actual overlap, not just wall-clock time. */
+    function trackedModel(delayMs: number, inFlight: { current: number; max: number }) {
+      let nextSlug = 0;
+      return new MockLanguageModelV3({
+        doGenerate: async (options) => {
+          const alreadyCalledTool = options.prompt.some((m) => m.role === 'tool');
+          if (!alreadyCalledTool) {
+            inFlight.current++;
+            inFlight.max = Math.max(inFlight.max, inFlight.current);
+            await new Promise((r) => { setTimeout(r, delayMs); });
+            inFlight.current--;
+            const n = nextSlug++;
+            return {
+              content: [{
+                type: 'tool-call',
+                toolCallId: `call-pool-${n}`,
+                toolName: 'write_page',
+                input: JSON.stringify({
+                  slug: `pool-concept-${n}`,
+                  title: `Pool Concept ${n}`,
+                  body: `Body for pool concept ${n}, written by the concurrency pool test.`,
+                  sources: ['Pool Test Book', 'chapter 1'],
+                  difficulty: 2,
+                  status: 'draft',
+                }),
+              }],
+              finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+              usage: {
+                inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
+                outputTokens: { total: 20, text: 0, reasoning: undefined },
+              },
+              warnings: [],
+            };
+          }
+          return {
+            content: [{ type: 'text', text: 'done' }],
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
+            warnings: [],
+          };
+        },
+      });
+    }
+
+    it('runs multiple chapters at once when concurrency > 1 (max in-flight > 1)', async () => {
+      const chapters = Array.from({ length: 6 }, (_, i) => `# Pool Chapter ${i + 1}\nContent ${i + 1}.`).join('\n');
+      await ingestBook(cfg, '/uploads/Pool Test Book A.pdf', { converter: async () => ({ markdown: chapters }) });
+
+      const inFlight = { current: 0, max: 0 };
+      const summary = await compileNext(lw, cfg, 6, { model: trackedModel(30, inFlight), concurrency: 4 });
+
+      expect(summary).toEqual({ compiled: 6, failed: 0 });
+      expect(inFlight.max).toBeGreaterThan(1);
+    }, 30_000);
+
+    it('stays strictly sequential at the default concurrency of 1 (max in-flight === 1)', async () => {
+      const chapters = Array.from({ length: 4 }, (_, i) => `# Pool Chapter B${i + 1}\nContent ${i + 1}.`).join('\n');
+      await ingestBook(cfg, '/uploads/Pool Test Book B.pdf', { converter: async () => ({ markdown: chapters }) });
+
+      const inFlight = { current: 0, max: 0 };
+      const summary = await compileNext(lw, cfg, 4, { model: trackedModel(10, inFlight) }); // no concurrency opt
+
+      expect(summary).toEqual({ compiled: 4, failed: 0 });
+      expect(inFlight.max).toBe(1);
+    }, 30_000);
+
+    it('keeps the per-entry honesty gate intact under concurrency: a no-op model fails every entry, none stolen as false "done"', async () => {
+      const chapters = Array.from({ length: 3 }, (_, i) => `# Pool Chapter C${i + 1}\nContent ${i + 1}.`).join('\n');
+      await ingestBook(cfg, '/uploads/Pool Test Book C.pdf', { converter: async () => ({ markdown: chapters }) });
+
+      const noToolModel = new MockLanguageModelV3({
+        doGenerate: async () => ({
+          content: [{ type: 'text', text: 'narrating instead of writing pages' }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
+          warnings: [],
+        }),
+      });
+
+      const summary = await compileNext(lw, cfg, 3, { model: noToolModel, concurrency: 3 });
+
+      expect(summary).toEqual({ compiled: 0, failed: 3 });
+      const ledger = readQueue(vault);
+      const entries = ledger.filter((e) => e.book === 'Pool Test Book C');
+      expect(entries).toHaveLength(3);
+      for (const e of entries) {
+        expect(e.status).toBe('error');
+        expect(e.error).toMatch(/no pages/);
+      }
+    }, 30_000);
+  });
 });

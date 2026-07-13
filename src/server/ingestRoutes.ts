@@ -61,8 +61,9 @@ export function buildIngestRoutes(
   });
 
   app.post('/api/ingest/compile', async (c) => {
-    const { n } = await c.req.json().catch(() => ({ n: undefined }) as { n?: number });
-    const summary = await compileNext(lw, cfg, n ?? 1, { model: deps.model });
+    const { n, concurrency } = await c.req.json()
+      .catch(() => ({}) as { n?: number; concurrency?: number });
+    const summary = await compileNext(lw, cfg, n ?? 1, { model: deps.model, concurrency: concurrency ?? 1 });
     return c.json(summary);
   });
 

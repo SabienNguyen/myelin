@@ -313,59 +313,95 @@ function buildCompilePrompt(
 }
 
 /**
- * Takes the next `n` 'pending' ledger entries and runs a one-shot compile agent per chapter,
- * passing the chapter markdown inline (never globbing the vault). The ledger is written after
- * every chapter (crash-safe, same pattern as anki-map.json) so a crash mid-batch leaves already
- * -compiled chapters marked 'done' and only the in-flight one re-attempted.
+ * Compiles one 'pending' ledger entry (already claimed — status flipped to 'compiling' by the
+ * caller) through a one-shot compile agent, passing the chapter markdown inline (never globbing
+ * the vault). Mutates `entry` in place and writes the WHOLE ledger array to disk when done — safe
+ * to call from multiple concurrent workers sharing the same in-memory `ledger` array, since each
+ * worker only ever mutates its own claimed entry's fields and writeQueue is a synchronous
+ * writeFileSync (no interleaved partial writes).
+ */
+async function compileOne(
+  lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel, ledger: QueueEntry[], entry: QueueEntry,
+): Promise<'compiled' | 'failed'> {
+  try {
+    const chapterMarkdown = readFileSync(join(cfg.vault, entry.chapter), 'utf8');
+    const slugs = await lw.listSlugs();
+    const tools = guardTools(await lw.tools(), cfg.student, slugs);
+    const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
+
+    const agent = new ToolLoopAgent({
+      model,
+      instructions: 'You are compiling one textbook chapter into Loreweaver vault pages.',
+      tools,
+      stopWhen: isStepCount(16),
+    });
+
+    const result = await agent.generate({
+      prompt: buildCompilePrompt(entry.book, chapterN, entry.title, chapterMarkdown, slugs),
+    });
+
+    // "The agent finished" is not "the work happened" — small models sometimes narrate instead of
+    // calling tools. Gate on THIS entry's own agent steps, not a global before/after vault-slug
+    // diff: with concurrent workers compiling different chapters at once, a global diff would
+    // attribute another worker's newly-written pages to this entry (a false "done"), or blame this
+    // entry for pages another worker is mid-write on (a false "no pages"). Checking this agent's
+    // own result.steps for a write_page tool call is per-entry accurate regardless of what any
+    // other worker is doing concurrently.
+    const wrotePage = result.steps.some((step) => step.toolCalls.some((tc) => tc.toolName === 'write_page'));
+    if (!wrotePage) {
+      throw new Error('model produced no pages (no write_page calls) — try a stronger compile model');
+    }
+
+    entry.status = 'done';
+    return 'compiled';
+  } catch (e: any) {
+    entry.status = 'error';
+    entry.error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+    return 'failed';
+  } finally {
+    writeQueue(cfg.vault, ledger);
+  }
+}
+
+/**
+ * Takes the next `n` 'pending' ledger entries and compiles them, `opts.concurrency` at a time (a
+ * simple worker-pool over the batch — no extra dependency). Each worker repeatedly claims the next
+ * unclaimed entry from `batch` via `claimNext`, whose cursor-bump + status flip + ledger write runs
+ * fully synchronously (no `await` before it returns) so concurrent workers can never claim the same
+ * entry twice, even though they call it through `await`. Ledger writes stay per-entry and
+ * crash-safe (see compileOne); the honesty gate stays per-entry accurate under concurrency (see
+ * compileOne's comment).
  */
 export async function compileNext(
-  lw: Loreweaver, cfg: HarnessConfig, n = 1, opts: { model?: LanguageModel } = {},
+  lw: Loreweaver, cfg: HarnessConfig, n = 1, opts: { model?: LanguageModel; concurrency?: number } = {},
 ): Promise<{ compiled: number; failed: number }> {
   const model = opts.model ?? modelFor('compile', cfg);
+  const concurrency = Math.max(1, opts.concurrency ?? 1);
   const ledger = readQueue(cfg.vault);
   const batch = ledger.filter((e) => e.status === 'pending').slice(0, n);
 
   let compiled = 0;
   let failed = 0;
+  let cursor = 0;
 
-  for (const entry of batch) {
+  function claimNext(): QueueEntry | undefined {
+    if (cursor >= batch.length) return undefined;
+    const entry = batch[cursor++];
     entry.status = 'compiling';
     writeQueue(cfg.vault, ledger);
-
-    try {
-      const chapterMarkdown = readFileSync(join(cfg.vault, entry.chapter), 'utf8');
-      const slugs = await lw.listSlugs();
-      const tools = guardTools(await lw.tools(), cfg.student, slugs);
-      const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
-
-      const agent = new ToolLoopAgent({
-        model,
-        instructions: 'You are compiling one textbook chapter into Loreweaver vault pages.',
-        tools,
-        stopWhen: isStepCount(16),
-      });
-
-      await agent.generate({
-        prompt: buildCompilePrompt(entry.book, chapterN, entry.title, chapterMarkdown, slugs),
-      });
-
-      // "The agent finished" is not "the work happened" — small models sometimes narrate
-      // instead of calling tools. Done means pages actually appeared in the vault.
-      const after = await lw.listSlugs();
-      const newSlugs = after.filter((s) => !slugs.includes(s));
-      if (newSlugs.length === 0) {
-        throw new Error('model produced no pages (no write_page calls) — try a stronger compile model');
-      }
-
-      entry.status = 'done';
-      compiled++;
-    } catch (e: any) {
-      entry.status = 'error';
-      entry.error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-      failed++;
-    }
-    writeQueue(cfg.vault, ledger);
+    return entry;
   }
+
+  async function worker(): Promise<void> {
+    for (;;) {
+      const entry = claimNext();
+      if (!entry) return;
+      const outcome = await compileOne(lw, cfg, model, ledger, entry);
+      if (outcome === 'compiled') compiled++; else failed++;
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, batch.length) }, () => worker()));
 
   return { compiled, failed };
 }
@@ -382,16 +418,33 @@ export function canCompileNow(compileModelId: string, conversionsActive: number)
   return !(compileModelId.startsWith(OLLAMA_PREFIX) && conversionsActive > 0);
 }
 
+/**
+ * Pure gate for how many chapters ensureCompileDrain compiles at once. Same GPU-contention
+ * reasoning as canCompileNow: an ollama-backed compile model shares the one local GPU with marker
+ * (and with itself — running several ollama generations at once against one GPU just serializes
+ * anyway and risks the same OOM canCompileNow already guards against), so it stays strictly
+ * sequential. A cloud compile model has no local GPU to contend for, so several chapters can
+ * compile in parallel — 4 is a modest default (bounded by provider rate limits, not local
+ * resources).
+ */
+export function compileConcurrencyFor(compileModelId: string): number {
+  return compileModelId.startsWith(OLLAMA_PREFIX) ? 1 : 4;
+}
+
 let drainRunning = false;
 
 /**
- * Drains the 'pending' queue by repeatedly calling compileNext(lw, cfg, 1, opts) until nothing is
- * pending. Module-singleton (drainRunning) — safe to call from multiple places (startConversion
- * on completion, ingestTools' ingest_paper tool, index.ts at boot) without stacking concurrent
- * drains. When the compile model is ollama-backed and a conversion is actively running, backs off
- * DRAIN_GPU_CONTENTION_BACKOFF_MS and rechecks rather than contending with marker for the GPU.
- * Entries that error stay 'error' — the loop moves on to the next pending entry and never retries
- * a failed one (manual retry only, e.g. re-running compile from the UI later).
+ * Drains the 'pending' queue by repeatedly calling compileNext(lw, cfg, concurrency, opts) until
+ * nothing is pending, where concurrency comes from compileConcurrencyFor(compileModelId).
+ * Module-singleton (drainRunning) — safe to call from multiple places (startConversion on
+ * completion, ingestTools' ingest_paper tool, index.ts at boot) without stacking concurrent drains.
+ * When the compile model is ollama-backed and a conversion is actively running, backs off
+ * DRAIN_GPU_CONTENTION_BACKOFF_MS and rechecks rather than contending with marker for the GPU — a
+ * non-ollama (cloud) compile model has no such restriction and can drain while a conversion is
+ * still in flight (canCompileNow already allows that; compileDrain.test.ts's "cloud model can
+ * compile during an active conversion" case exercises it end to end). Entries that error stay
+ * 'error' — the loop moves on and never retries a failed one (manual retry only, e.g. re-running
+ * compile from the UI later).
  */
 export function ensureCompileDrain(lw: Loreweaver, cfg: HarnessConfig, opts: { model?: LanguageModel } = {}): void {
   if (drainRunning) return;
@@ -404,12 +457,13 @@ export function ensureCompileDrain(lw: Loreweaver, cfg: HarnessConfig, opts: { m
   drainRunning = true;
   void (async () => {
     try {
+      const concurrency = compileConcurrencyFor(compileModelId);
       while (readQueue(cfg.vault).some((e) => e.status === 'pending')) {
         if (!canCompileNow(compileModelId, activeConversions)) {
           await new Promise((r) => { setTimeout(r, DRAIN_GPU_CONTENTION_BACKOFF_MS); });
           continue;
         }
-        await compileNext(lw, cfg, 1, opts);
+        await compileNext(lw, cfg, concurrency, { ...opts, concurrency });
       }
     } catch (e) {
       console.error('[ensureCompileDrain]', e);

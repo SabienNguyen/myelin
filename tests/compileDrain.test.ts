@@ -4,8 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3 } from 'ai/test';
 import { Loreweaver } from '../src/server/mcp.js';
-import { canCompileNow, ensureCompileDrain, readQueue, startConversion } from '../src/server/ingest.js';
-import type { Converter } from '../src/server/convert.js';
+import {
+  canCompileNow, compileConcurrencyFor, ensureCompileDrain, readQueue, startConversion,
+} from '../src/server/ingest.js';
+import type { Converter, IncrementalConverter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
 const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
@@ -24,6 +26,17 @@ describe('canCompileNow', () => {
   it('blocks an ollama compile model while a conversion is active (GPU contention)', () => {
     expect(canCompileNow('ollama:qwen2.5-coder', 1)).toBe(false);
     expect(canCompileNow('ollama:qwen2.5-coder', 3)).toBe(false);
+  });
+});
+
+describe('compileConcurrencyFor', () => {
+  it('is 1 for an ollama-backed compile model — one local GPU, same contention as canCompileNow', () => {
+    expect(compileConcurrencyFor('ollama:qwen2.5-coder')).toBe(1);
+  });
+
+  it('is 4 for a cloud (non-ollama) compile model — no local GPU to contend for', () => {
+    expect(compileConcurrencyFor('claude-sonnet-5')).toBe(4);
+    expect(compileConcurrencyFor('claude-drain-test')).toBe(4);
   });
 });
 
@@ -109,4 +122,89 @@ describe('ensureCompileDrain — autoCompile end to end', () => {
     // calling it again doesn't throw or double-run.
     expect(() => ensureCompileDrain(lw, cfg)).not.toThrow();
   });
+
+  it('a non-ollama (cloud) compile model drains a progressively-queued chapter WHILE its own conversion is still active', async () => {
+    // A model whose responses don't depend on call order/interleaving — it looks at whether a
+    // tool result is already in the prompt to decide "first step" (call write_page) vs "second
+    // step" (stop). Slugs are unique per call so concurrent/aggregate writes never collide.
+    let nextSlug = 0;
+    const cloudModel = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        const alreadyCalledTool = options.prompt.some((m) => m.role === 'tool');
+        if (!alreadyCalledTool) {
+          const n = nextSlug++;
+          return {
+            content: [{
+              type: 'tool-call',
+              toolCallId: `call-cloud-during-${n}`,
+              toolName: 'write_page',
+              input: JSON.stringify({
+                slug: `cloud-during-conversion-${n}`,
+                title: `Cloud During Conversion Concept ${n}`,
+                body: `Content compiled while its own conversion (${n}) is technically still running.`,
+                sources: ['Cloud During Conversion Book', 'chapter 1'],
+                difficulty: 2,
+                status: 'draft',
+              }),
+            }],
+            finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+            usage: {
+              inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 20, text: 0, reasoning: undefined },
+            },
+            warnings: [],
+          };
+        }
+        return {
+          content: [{ type: 'text', text: 'Compiled 1 concept.' }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage: {
+            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 5, text: 5, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    });
+
+    let releaseGate: () => void;
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+
+    const fakeIncremental: IncrementalConverter = async (_file, _outDir, onProgress) => {
+      // Chapter One is confirmed complete by Chapter Two appearing — progressive queueing puts
+      // it in the ledger as 'pending' even though this conversion is nowhere near finished.
+      await onProgress({
+        markdown: ['# Cloud Drain Chapter One', 'Complete content.', '# Cloud Drain Chapter Two', 'Still growing.'].join('\n'),
+        pagesDone: 10, pagesTotal: 20, final: false,
+      });
+      await gate; // holds activeConversions at 1 for this conversion until the test releases it
+      await onProgress({
+        markdown: ['# Cloud Drain Chapter One', 'Complete content.', '# Cloud Drain Chapter Two', 'Now complete too.'].join('\n'),
+        pagesDone: 20, pagesTotal: 20, final: true,
+      });
+    };
+
+    // Deliberately no opts.model here — startConversion's own on-completion kick is irrelevant to
+    // this test (it fires only after the gate releases, at the very end).
+    startConversion(lw, cfg, '/uploads/Cloud During Conversion Book.pdf', {
+      incrementalConverter: fakeIncremental, mode: 'book',
+    });
+
+    await until(() => readQueue(vault).some((e) => e.title === 'Cloud Drain Chapter One' && e.status === 'pending'));
+    // Still gated — the conversion has not finished, activeConversions is still 1 for it.
+    expect(readQueue(vault).some((e) => e.status === 'converting')).toBe(true);
+
+    ensureCompileDrain(lw, cfg, { model: cloudModel });
+    const done = await until(
+      () => readQueue(vault).find((e) => e.title === 'Cloud Drain Chapter One' && e.status === 'done'),
+    );
+    expect(done).toBeTruthy();
+    // The proof: this happened before the gate was released, i.e. while the conversion that
+    // queued it was still actively running — canCompileNow only allows this for a non-ollama
+    // compile model (cfg.models.compile.model is 'claude-drain-test' throughout this describe).
+    expect(readQueue(vault).some((e) => e.status === 'converting')).toBe(true);
+
+    releaseGate!();
+    await until(() => !readQueue(vault).some((e) => e.status === 'converting'));
+  }, 30_000);
 });

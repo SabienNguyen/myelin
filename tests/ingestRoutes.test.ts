@@ -118,6 +118,21 @@ describe('ingest routes', () => {
     expect(queue[0].status).toBe('error');
     expect(queue[0].error).toMatch(/no pages/);
   });
+
+  it('POST /api/ingest/compile accepts an optional concurrency passthrough (defaults to 1)', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter, model: noToolModel() });
+
+    const form = new FormData();
+    form.append('file', new File(['fake pdf bytes'], 'Concurrency Passthrough.pdf', { type: 'application/pdf' }));
+    await app.request('/api/ingest', { method: 'POST', body: form });
+    await until(() => readQueue(vault)[0]?.status === 'pending');
+
+    // No body at all — must still default cleanly (n=1, concurrency=1), not throw on missing JSON.
+    const noBody = await app.request('/api/ingest/compile', { method: 'POST' });
+    expect(noBody.status).toBe(200);
+    expect(await noBody.json()).toEqual({ compiled: 0, failed: 1 });
+  });
 });
 
 describe('ingest routes — JSON url ingest', () => {

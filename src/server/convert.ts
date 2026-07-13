@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,6 +8,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // src/server -> repo root
 const REPO_ROOT = join(here, '..', '..');
 const MARKER_BIN = join(REPO_ROOT, '.tools', 'marker-venv', 'bin', 'marker_single');
+const MARKER_BATCH_BIN = join(REPO_ROOT, '.tools', 'marker-venv', 'bin', 'marker');
 const MARKER_PYTHON = join(REPO_ROOT, '.tools', 'marker-venv', 'bin', 'python');
 const PANDOC_BIN = join(REPO_ROOT, '.tools', 'pandoc', 'pandoc');
 
@@ -155,13 +156,251 @@ export const defaultConverter: Converter = async (file, outDir) => {
  * minutes rather than only at the very end. */
 const SLICE_PAGES = 32;
 
+type OnIncrementalProgress = (u: {
+  markdown: string; pagesDone: number; pagesTotal: number | null; final: boolean;
+}) => void | Promise<void>;
+
 /**
- * Incremental dispatch: a PDF whose page count is known converts in SLICE_PAGES-page slices,
- * calling onProgress after each with the cumulative markdown assembled so far (marker's
- * --page_range is 0-indexed and inclusive on both ends per `marker_single --help`, e.g.
- * "0-31" for the first 32 pages). Everything else (PDF with unknown page count, EPUB, DOCX)
- * converts single-shot via the existing paths, calling onProgress exactly once with final=true
- * and pagesTotal=null. Tests never invoke this — they inject a fake IncrementalConverter.
+ * The per-slice --page_range loop: one marker_single invocation per SLICE_PAGES-page range,
+ * reloading marker's ~6.5GB of models every time (30-60s × ~total/32 slices on a big book). This
+ * is the original (and only, pre-T34) incremental-conversion strategy — still the tested CPU-
+ * fallback path (via runMarkerSlice's own per-slice GPU->CPU retry) and the fallback target when
+ * the batch binary is unavailable or fails before it commits any progress (see
+ * defaultIncrementalConverter). marker's --page_range is 0-indexed and inclusive on both ends per
+ * `marker_single --help`, e.g. "0-31" for the first 32 pages.
+ */
+async function runPerSliceIncremental(
+  file: string, outDir: string, total: number, onProgress: OnIncrementalProgress,
+): Promise<void> {
+  let cumulative = '';
+  let start = 0;
+  while (start < total) {
+    const end = Math.min(start + SLICE_PAGES - 1, total - 1); // inclusive, 0-indexed
+    const sliceDir = join(outDir, `slice-${start}-${end}`);
+    const sliceMarkdown = await runMarkerSlice(file, sliceDir, ['--page_range', `${start}-${end}`]);
+    cumulative = cumulative ? `${cumulative}\n\n${sliceMarkdown}` : sliceMarkdown;
+    const pagesDone = end + 1;
+    await onProgress({ markdown: cumulative, pagesDone, pagesTotal: total, final: pagesDone >= total });
+    start = end + 1;
+  }
+}
+
+export interface SliceInfo { index: number; start: number; end: number; file: string }
+
+let batchAvailableCache: boolean | null = null;
+
+/**
+ * Whether the batch `marker` binary can actually run here — checked via a `marker --help`
+ * invocation (CPU-only, no model load; a plain `existsSync` isn't enough because a broken venv
+ * still has the launcher script on disk). Cached per-process for the default binary path only, so
+ * production pays this once; tests pass an explicit path to bypass the cache.
+ *
+ * NOTE (deviation, verified live): in THIS repo's marker-venv, `marker --help` fails with
+ * `ModuleNotFoundError: No module named 'psutil'` — the batch CLI's dependency (marker/scripts/
+ * convert.py imports psutil directly) was never installed, and this venv has no `pip`/`pip3`
+ * binary to fix it (it's a `uv`-managed venv — see `.tools/marker-venv/pyvenv.cfg`). marker_single
+ * itself doesn't import psutil and works fine. So on this machine, this always returns false and
+ * every PDF conversion runs the per-slice loop below — that's a pre-existing environment gap, not
+ * a bug in this function; fixing it (installing psutil into the shared venv) was intentionally
+ * left undone here because a real 860-page conversion was using that exact venv's marker_single
+ * process on the GPU while this task was implemented.
+ */
+export async function isMarkerBatchAvailable(binPath: string = MARKER_BATCH_BIN): Promise<boolean> {
+  const useCache = binPath === MARKER_BATCH_BIN;
+  if (useCache && batchAvailableCache != null) return batchAvailableCache;
+  let available: boolean;
+  if (!existsSync(binPath)) {
+    available = false;
+  } else {
+    try {
+      await runCapture(binPath, ['--help']);
+      available = true;
+    } catch {
+      available = false;
+    }
+  }
+  if (useCache) batchAvailableCache = available;
+  return available;
+}
+
+/** Inline python (run via the marker-venv python, one invocation) that splits a source PDF into
+ * `slicePages`-page slice FILES using pypdfium2 — verified against the installed version via
+ * `.tools/marker-venv/bin/python -c "import pypdfium2; help(pypdfium2.PdfDocument.import_pages)"`:
+ * `PdfDocument.new()` makes an empty destination doc, `dst.import_pages(src, pages=[...])` copies
+ * zero-based page indices in, `dst.save(path)` writes it out. Prints a single JSON line
+ * `{ total, slices: [{ index, start, end, file }] }` (start/end are the same half-open
+ * [start, end) convention used elsewhere in this module) so the caller never has to re-derive
+ * slice boundaries from the filesystem. */
+const SPLIT_PDF_SCRIPT = `
+import sys, os, json
+import pypdfium2 as pdfium
+
+src_path, out_dir, slice_pages = sys.argv[1], sys.argv[2], int(sys.argv[3])
+os.makedirs(out_dir, exist_ok=True)
+src = pdfium.PdfDocument(src_path)
+total = len(src)
+slices = []
+start = 0
+idx = 0
+while start < total:
+    end = min(start + slice_pages, total)
+    dst = pdfium.PdfDocument.new()
+    dst.import_pages(src, pages=list(range(start, end)))
+    name = f"slice-{idx:03d}.pdf"
+    dst.save(os.path.join(out_dir, name))
+    slices.append({"index": idx, "start": start, "end": end, "file": name})
+    start = end
+    idx += 1
+print(json.dumps({"total": total, "slices": slices}))
+`;
+
+/** Pre-splits `file` into slice PDFs (see SPLIT_PDF_SCRIPT) under `slicesInDir`. Exported and unit
+ * tested directly against a synthetic multi-page PDF — pypdfium2-only, no marker/GPU involved, so
+ * safe to actually run (same class of operation as pdfPageCount). Throws on any failure (missing
+ * venv python, corrupt PDF); callers treat that as a preflight failure and fall back. */
+export async function splitPdfSlices(
+  file: string, slicesInDir: string, slicePages: number,
+): Promise<{ total: number; slices: SliceInfo[] }> {
+  if (!existsSync(MARKER_PYTHON)) throw new Error(`marker-venv python not found at ${MARKER_PYTHON}`);
+  mkdirSync(slicesInDir, { recursive: true });
+  const scriptPath = join(slicesInDir, '..', 'split-pdf-slices.py');
+  writeFileSync(scriptPath, SPLIT_PDF_SCRIPT);
+  const out = await runCapture(MARKER_PYTHON, [scriptPath, file, slicesInDir, String(slicePages)]);
+  return JSON.parse(out.trim()) as { total: number; slices: SliceInfo[] };
+}
+
+/**
+ * Reads the CONTIGUOUS prefix of slice outputs available in `outDir` (marker's batch mode writes
+ * <outDir>/<slice-stem>/<slice-stem>.md per slice as it finishes — NOT necessarily in input order,
+ * even at --workers 1: marker's own `convert_cli` builds its file list via unsorted `os.listdir()`
+ * over the input folder). Consumes forward from `state.nextIndex`, stopping at the first slice
+ * whose .md isn't there yet, so slices always fold into the cumulative markdown in order and never
+ * twice — `final` is true exactly on the call that consumes the very last slice, however many
+ * batches of polling that takes. Mutates `state` in place. Exported standalone specifically so
+ * this ordering/no-double-consume contract is unit testable without ever spawning marker.
+ */
+export async function consumeContiguousSlices(
+  outDir: string, slices: SliceInfo[], total: number,
+  state: { nextIndex: number; cumulative: string },
+  onProgress: OnIncrementalProgress,
+): Promise<void> {
+  while (state.nextIndex < slices.length) {
+    const slice = slices[state.nextIndex];
+    const stem = basename(slice.file, extname(slice.file));
+    const mdPath = join(outDir, stem, `${stem}.md`);
+    if (!existsSync(mdPath)) return;
+    const sliceMarkdown = await readFile(mdPath, 'utf8');
+    state.cumulative = state.cumulative ? `${state.cumulative}\n\n${sliceMarkdown}` : sliceMarkdown;
+    state.nextIndex++;
+    const pagesDone = Math.min(slice.end, total);
+    const final = state.nextIndex === slices.length;
+    await onProgress({ markdown: state.cumulative, pagesDone, pagesTotal: total, final });
+  }
+}
+
+const BATCH_POLL_MS = 5_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+/**
+ * Runs the batch `marker` binary once over `slicesInDir` -> `slicesOutDir`, polling every
+ * BATCH_POLL_MS while it runs (plus one final catch-up read after it exits) and folding newly-
+ * completed contiguous slices into onProgress via consumeContiguousSlices. --workers stays 1 (one
+ * GPU) and --skip_existing lets a CPU retry after a partial GPU failure skip slices that already
+ * finished. Throws if the process fails to spawn or exits non-zero — the GPU->CPU retry lives one
+ * level up in runBatchIncremental, mirroring runMarkerSlice's own per-slice retry but applied once
+ * to the whole batch.
+ */
+async function runBatchAttempt(
+  slicesInDir: string, slicesOutDir: string, env: Record<string, string>,
+  slices: SliceInfo[], total: number, state: { nextIndex: number; cumulative: string },
+  onProgress: OnIncrementalProgress,
+): Promise<void> {
+  const child = spawn(MARKER_BATCH_BIN, [
+    slicesInDir, '--output_dir', slicesOutDir, '--output_format', 'markdown',
+    '--disable_image_extraction', '--workers', '1', '--skip_existing',
+  ], { stdio: 'inherit', env: { ...process.env, ...env } });
+
+  const exited = new Promise<number | null>((resolve, reject) => {
+    child.on('error', reject);
+    child.on('exit', (code) => resolve(code));
+  });
+  let finished = false;
+  exited.then(() => { finished = true; }, () => { finished = true; });
+
+  while (!finished) {
+    await consumeContiguousSlices(slicesOutDir, slices, total, state, onProgress);
+    if (finished) break;
+    await sleep(BATCH_POLL_MS);
+  }
+  const code = await exited; // rethrows the child's 'error' event (e.g. ENOENT) if spawning failed
+  await consumeContiguousSlices(slicesOutDir, slices, total, state, onProgress); // final catch-up
+  if (code !== 0) throw new Error(`marker batch exited with code ${code}`);
+}
+
+/**
+ * Batch path for a PDF with a known page count: pre-splits it into SLICE_PAGES-page slice FILES
+ * (splitPdfSlices) and runs the batch `marker` binary ONCE over the whole folder — one model load
+ * for the entire book instead of one marker_single invocation (and model load) per slice.
+ *
+ * `state` is passed in (not just returned) so the caller can inspect state.nextIndex after a
+ * thrown error to decide whether it's safe to fall back to the per-slice loop — see
+ * defaultIncrementalConverter's comment for why that matters.
+ */
+async function runBatchIncremental(
+  file: string, outDir: string, total: number, onProgress: OnIncrementalProgress,
+  state: { nextIndex: number; cumulative: string },
+): Promise<void> {
+  const slicesInDir = join(outDir, 'slices-in');
+  const slicesOutDir = join(outDir, 'slices-out');
+  const { slices } = await splitPdfSlices(file, slicesInDir, SLICE_PAGES);
+
+  await freeOllamaVram();
+
+  let gpuErr: unknown;
+  try {
+    await runBatchAttempt(
+      slicesInDir, slicesOutDir, { PYTORCH_CUDA_ALLOC_CONF: 'expandable_segments:True' },
+      slices, total, state, onProgress,
+    );
+  } catch (e) {
+    gpuErr = e;
+  }
+
+  if (gpuErr) {
+    console.error(
+      `[convert] marker batch GPU run failed (${gpuErr instanceof Error ? gpuErr.message : gpuErr}); `
+      + 'retrying the whole batch on CPU',
+    );
+    await runBatchAttempt(slicesInDir, slicesOutDir, { TORCH_DEVICE: 'cpu' }, slices, total, state, onProgress);
+  }
+
+  if (state.nextIndex < slices.length) {
+    throw new Error(
+      `marker batch run finished but only produced ${state.nextIndex}/${slices.length} slice outputs`,
+    );
+  }
+}
+
+/**
+ * Incremental dispatch for a PDF whose page count is known: tries the single-model-load batch path
+ * first (isMarkerBatchAvailable preflight + splitPdfSlices), falling back to the per-slice
+ * --page_range loop when either preflight step fails OR the batch run itself fails *before it has
+ * committed any progress* (state.nextIndex === 0 — no onProgress call has fired yet, so nothing in
+ * the ledger depends on the batch run's partial output). Once even one slice has been folded into
+ * onProgress, a batch failure propagates as a genuine conversion error instead of falling back —
+ * restarting via the per-slice loop at that point would re-derive the same chapters from scratch
+ * and risk duplicating/conflicting with whatever the batch run already queued.
+ *
+ * Everything else (PDF with unknown page count, EPUB, DOCX) converts single-shot via the existing
+ * paths, calling onProgress exactly once with final=true and pagesTotal=null.
+ *
+ * Tests never invoke this directly — they inject a fake IncrementalConverter (same policy as the
+ * pre-T34 code: exercising this for real would mean actually running marker/GPU, which the test
+ * suite deliberately never does). Its extracted pieces (splitPdfSlices, consumeContiguousSlices,
+ * isMarkerBatchAvailable) are unit tested individually instead.
  */
 export const defaultIncrementalConverter: IncrementalConverter = async (file, outDir, onProgress) => {
   const ext = extname(file).toLowerCase();
@@ -169,17 +408,20 @@ export const defaultIncrementalConverter: IncrementalConverter = async (file, ou
   if (ext === '.pdf') {
     const total = await pdfPageCount(file);
     if (total != null) {
-      let cumulative = '';
-      let start = 0;
-      while (start < total) {
-        const end = Math.min(start + SLICE_PAGES - 1, total - 1); // inclusive, 0-indexed
-        const sliceDir = join(outDir, `slice-${start}-${end}`);
-        const sliceMarkdown = await runMarkerSlice(file, sliceDir, ['--page_range', `${start}-${end}`]);
-        cumulative = cumulative ? `${cumulative}\n\n${sliceMarkdown}` : sliceMarkdown;
-        const pagesDone = end + 1;
-        await onProgress({ markdown: cumulative, pagesDone, pagesTotal: total, final: pagesDone >= total });
-        start = end + 1;
+      if (await isMarkerBatchAvailable()) {
+        const state = { nextIndex: 0, cumulative: '' };
+        try {
+          await runBatchIncremental(file, outDir, total, onProgress, state);
+          return;
+        } catch (e) {
+          if (state.nextIndex > 0) throw e; // partial progress already landed — don't restart
+          console.error(
+            `[convert] batch conversion unavailable before any progress landed `
+            + `(${e instanceof Error ? e.message : e}); falling back to the per-slice loop`,
+          );
+        }
       }
+      await runPerSliceIncremental(file, outDir, total, onProgress);
       return;
     }
   }
