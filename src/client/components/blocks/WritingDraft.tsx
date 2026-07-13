@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 
 type Annotation = { span: string; category: string; note: string };
@@ -72,7 +73,7 @@ export function WritingDraft(props: { args: any; result: any; addResult: (r: any
   }
   return (
     <>
-      <div className="block chip">✍️ Writing exercise sent to stage ▸</div>
+      <div className="block chip" onClick={() => panelBus.setTab('stage')}>✍️ Writing exercise sent to stage ▸</div>
       <StagePortal><WritingDraftInner args={props.args} result={undefined} addResult={props.addResult} /></StagePortal>
     </>
   );

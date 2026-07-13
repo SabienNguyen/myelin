@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 
 export function QuizInner({ args, addResult }: {
@@ -59,7 +60,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
   }
   return (
     <>
-      <div className="block chip">📝 Quiz sent to stage ▸</div>
+      <div className="block chip" onClick={() => panelBus.setTab('stage')}>📝 Quiz sent to stage ▸</div>
       <StagePortal><QuizInner args={props.args} addResult={props.addResult} /></StagePortal>
     </>
   );

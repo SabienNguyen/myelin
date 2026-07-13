@@ -16,6 +16,30 @@ import { logGuardrail } from './sessionStore.js';
 const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidence',
   'next_lessons', 'find_analogies', 'list_paths', 'read_path'];
 
+// Tools whose `student` argument must always be the configured student — models
+// (especially small local ones) invent ids like "student" otherwise.
+const STUDENT_TOOLS = ['record_evidence', 'get_student_state', 'next_lessons', 'find_analogies'];
+
+/** Drop null/undefined args (MCP zod schemas want optional fields ABSENT, not null). */
+export function sanitizeToolArgs(args: any, toolName: string, student: string): any {
+  if (args == null || typeof args !== 'object' || Array.isArray(args)) return args;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) if (v != null) out[k] = v;
+  if (STUDENT_TOOLS.includes(toolName)) out.student = student;
+  return out;
+}
+
+/** Wrap MCP tools so every execute() sees sanitized args — the model cannot send a wrong
+ * student id or a null optional field no matter what it generates. */
+function guardMcpTools(tools: ToolSet, student: string): ToolSet {
+  return Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, {
+    ...t,
+    execute: t.execute
+      ? (args: any, opts: any) => t.execute(sanitizeToolArgs(args, name, student), opts)
+      : t.execute,
+  }])) as ToolSet;
+}
+
 function blockTools(): ToolSet {
   // Frontend tools: no execute — the loop pauses; the browser supplies output via addToolOutput.
   // (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats
@@ -73,13 +97,13 @@ export function createTutorSession(
       grades.push(grading);
     }
 
-    const mcpTools = await lw.tools();
+    const mcpTools = guardMcpTools(await lw.tools(), cfg.student);
     const activeMcp = Object.fromEntries(Object.entries(mcpTools)
       .filter(([n]) => mode === 'freeform' || TEACH_TOOLS.includes(n)));
 
     const agent = new ToolLoopAgent({
       model,
-      instructions: buildInstructions(),
+      instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
       tools: { ...activeMcp, ...blockTools() },
       stopWhen: isStepCount(24),
     });

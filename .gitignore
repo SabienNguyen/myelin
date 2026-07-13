@@ -7,3 +7,4 @@ tests/e2e/.tmp-vault/
 test-results/
 playwright-report/
 blob-report/
+.uitour.mjs

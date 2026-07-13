@@ -1,121 +1,282 @@
 :root {
   color-scheme: light dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  line-height: 1.5;
+  line-height: 1.6;
+  font-size: 15px;
+
+  --bg: #faf9f7;
+  --bg-panel: #ffffff;
+  --bg-inset: #f1efec;
+  --text: #2b2a28;
+  --text-muted: #8a8781;
+  --border: #e5e2dc;
+  --accent: #5b5bd6;
+  --accent-soft: #eeeefb;
+  --accent-text: #ffffff;
+  --good: #3d8f5f;
+  --bad: #c25454;
+  --warn: #b7841f;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 3px rgba(30, 25, 15, 0.06), 0 4px 14px rgba(30, 25, 15, 0.04);
 }
 
-* {
-  box-sizing: border-box;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #191919;
+    --bg-panel: #1f1f1f;
+    --bg-inset: #262626;
+    --text: #e8e6e3;
+    --text-muted: #8f8d89;
+    --border: #333330;
+    --accent: #7b7bec;
+    --accent-soft: #2a2a45;
+    --accent-text: #ffffff;
+    --shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  }
 }
 
-html, body, #root {
-  height: 100%;
-  margin: 0;
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--text); }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.85rem;
+  transition: background 0.12s, border-color 0.12s;
+}
+button:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+input, textarea, select {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.45rem 0.7rem;
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
-.app {
-  display: grid;
-  grid-template-rows: auto 1fr;
-  height: 100%;
-}
+.app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
 
+/* ── Top bar ─────────────────────────────────────────── */
 .topbar {
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.5rem 1rem;
-  border-bottom: 1px solid #8884;
+  padding: 0.6rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
 }
-
 .topbar h1 {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
   margin: 0;
   margin-right: auto;
 }
+.topbar h1::before { content: "◆ "; color: var(--accent); }
 
-.workspace {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  min-height: 0;
-}
+/* ── Layout ──────────────────────────────────────────── */
+.workspace { display: grid; grid-template-columns: 1.4fr 1fr; min-height: 0; }
 
 .thread {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid #8884;
+  border-right: 1px solid var(--border);
 }
 
 .thread-viewport {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 1.5rem 1.75rem;
+  scroll-behavior: smooth;
 }
 
-.msg {
-  margin-bottom: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
-}
+/* ── Messages ────────────────────────────────────────── */
+.msg { margin-bottom: 1.1rem; max-width: 100%; }
 
 .msg.user {
-  background: #8882;
-  margin-left: 2rem;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: var(--radius) var(--radius) 4px var(--radius);
+  padding: 0.6rem 0.95rem;
+  margin-left: 18%;
+  width: fit-content;
+  justify-self: end;
+  margin-inline-start: auto;
 }
 
-.msg.assistant {
-  margin-right: 2rem;
+.msg.assistant { margin-right: 8%; padding: 0; }
+.msg.assistant > *:first-child { margin-top: 0; }
+.msg.assistant p { margin: 0.45rem 0; }
+.msg.assistant h1, .msg.assistant h2, .msg.assistant h3 {
+  font-size: 1rem;
+  margin: 0.9rem 0 0.3rem;
 }
+.msg.assistant code {
+  background: var(--bg-inset);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+.msg.assistant pre {
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 1rem;
+  overflow-x: auto;
+}
+.msg.assistant pre code { background: none; padding: 0; }
 
+/* ── Composer ────────────────────────────────────────── */
 .composer {
   display: flex;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-top: 1px solid #8884;
+  gap: 0.6rem;
+  padding: 0.9rem 1.25rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.composer textarea, .composer input { flex: 1; border-radius: 999px; padding: 0.55rem 1.1rem; }
+.composer button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  border-radius: 999px;
+  padding: 0.45rem 1.3rem;
+  font-weight: 600;
+}
+.composer button:hover { filter: brightness(1.08); background: var(--accent); }
+.composer button:disabled { opacity: 0.45; cursor: default; filter: none; }
+
+/* ── Blocks (shared card look) ───────────────────────── */
+.block {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.9rem 1.1rem;
+  margin: 0.7rem 0;
+}
+.block h3 { margin: 0 0 0.6rem; font-size: 1rem; }
+.block > p:first-child { margin-top: 0; }
+
+.block button { margin: 0.15rem 0.35rem 0.15rem 0; }
+.block button.on {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
 }
 
-.composer textarea,
-.composer input {
-  flex: 1;
+/* chips: compact pointer to the stage */
+.block.chip {
+  display: inline-block;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: none;
+  user-select: none;
+}
+.block.chip:hover { filter: brightness(0.97); }
+
+.block.done { border-left: 3px solid var(--good); }
+
+.verdict { font-style: normal; font-weight: 600; }
+.verdict.correct, .verdict.reviewed { color: var(--good); }
+.verdict.partial { color: var(--warn); }
+.verdict.incorrect { color: var(--bad); }
+
+.quiz-item { margin-bottom: 0.8rem; }
+.quiz-item p { margin: 0 0 0.35rem; }
+.quiz > button:last-child, .math-scratchpad button:last-child, .writing-draft button {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  font-weight: 600;
 }
 
-.side-panel {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
+math-field { display: block; width: 100%; margin: 0.5rem 0; border-radius: var(--radius-sm); }
+
+.writing-draft textarea { width: 100%; min-height: 7rem; resize: vertical; margin: 0.4rem 0; }
+
+/* grader annotations */
+mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
+.ann-strong { background: color-mix(in srgb, var(--good) 22%, transparent); }
+.ann-wordy, .ann-vague { background: color-mix(in srgb, var(--warn) 25%, transparent); }
+.ann-structure, .ann-grammar { background: color-mix(in srgb, var(--bad) 20%, transparent); }
+.skill-grades { margin: 0.4rem 0 0; padding-left: 1.2rem; color: var(--text-muted); }
+
+/* ── MCP tool activity: quiet status chips ───────────── */
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  margin: 0.15rem 0.4rem 0.15rem 0;
+  padding: 0.1rem 0.6rem;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-size: 0.78rem;
 }
+.tool-chip.failed { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+
+/* ── Side panel ──────────────────────────────────────── */
+.side-panel { display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
 
 .tabs {
   display: flex;
-  border-bottom: 1px solid #8884;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
 }
-
 .tabs button {
   flex: 1;
-  padding: 0.5rem;
+  padding: 0.5rem 0.75rem;
   background: none;
   border: none;
-  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-muted);
   text-transform: capitalize;
 }
-
+.tabs button:hover { color: var(--text); background: var(--bg-inset); }
 .tabs button.on {
   font-weight: 600;
-  border-bottom: 2px solid currentColor;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
-.tab-body {
-  flex: 1;
-  overflow: auto;
-  padding: 1rem;
+.tab-body { flex: 1; overflow: auto; padding: 1.1rem 1.25rem; }
+
+#stage-root:empty::after {
+  content: "Nothing on stage yet — quizzes, math work, and drafts appear here when your tutor sends them.";
+  display: block;
+  margin-top: 30%;
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 0 2rem;
 }
 
 .wiki-link {
-  text-decoration: underline;
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
   cursor: pointer;
 }
+.wiki-link:hover { border-bottom-style: solid; }
 
-.empty {
-  color: #8888;
-  font-style: italic;
-}
+.empty { color: var(--text-muted); font-style: italic; }

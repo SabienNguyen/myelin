@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
+import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 
 export function Latex({ tex }: { tex: string }) {
@@ -48,7 +49,7 @@ export function MathScratchpad(props: { args: any; result: any; addResult: (r: a
   }
   return (
     <>
-      <div className="block chip">✏️ Math problem sent to stage ▸</div>
+      <div className="block chip" onClick={() => panelBus.setTab('stage')}>✏️ Math problem sent to stage ▸</div>
       <StagePortal><MathScratchpadInner args={props.args} addResult={props.addResult} /></StagePortal>
     </>
   );

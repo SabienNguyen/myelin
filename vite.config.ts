@@ -5,7 +5,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:4820',
+      // HARNESS_API lets a second (sandbox) backend be targeted without editing this file
+      '/api': process.env.HARNESS_API ?? 'http://localhost:4820',
     },
   },
 });

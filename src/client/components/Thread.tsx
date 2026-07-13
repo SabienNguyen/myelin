@@ -1,5 +1,6 @@
 import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive } from '@assistant-ui/react';
 import { MarkdownText } from './MarkdownText.js';
+import { ToolStatusChip } from './ToolStatusChip.js';
 
 export function Thread() {
   return (
@@ -13,7 +14,11 @@ export function Thread() {
           ),
           AssistantMessage: () => (
             <MessagePrimitive.Root className="msg assistant">
-              <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
+              <MessagePrimitive.Parts components={{
+                Text: MarkdownText,
+                Reasoning: () => null, // thinking models: never show raw reasoning to the learner
+                tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
+              }} />
             </MessagePrimitive.Root>
           ),
         }} />
