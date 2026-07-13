@@ -431,6 +431,12 @@ export const defaultIncrementalConverter: IncrementalConverter = async (file, ou
 };
 
 const H1 = /^#\s+(.+)$/gm;
+
+/** marker embeds HTML anchors inside headings (`# <span id="page-30-4"></span>Real Title`) —
+ * strip tags + collapse whitespace so chapter titles are human text. */
+export function cleanHeading(raw: string): string {
+  return raw.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+}
 const H2 = /^##\s+(.+)$/gm;
 
 /**
@@ -444,11 +450,11 @@ export function splitChapters(markdown: string): { title: string; body: string }
   if (matches.length < 2) matches = [...markdown.matchAll(H2)];
   if (matches.length < 2) {
     const first = [...markdown.matchAll(/^#{1,2}\s+(.+)$/gm)][0];
-    return [{ title: first?.[1]?.trim() ?? 'Chapter 1', body: markdown.trim() }];
+    return [{ title: cleanHeading(first?.[1] ?? '') || 'Chapter 1', body: markdown.trim() }];
   }
   return matches.map((m, i) => {
     const start = m.index!;
     const end = i + 1 < matches.length ? matches[i + 1].index! : markdown.length;
-    return { title: m[1].trim(), body: markdown.slice(start, end).trim() };
+    return { title: cleanHeading(m[1]) || `Chapter ${i + 1}`, body: markdown.slice(start, end).trim() };
   });
 }

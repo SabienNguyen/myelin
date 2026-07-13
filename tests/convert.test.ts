@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   consumeContiguousSlices, isMarkerBatchAvailable, pdfPageCount, splitChapters, splitPdfSlices,
-  type SliceInfo,
+  type SliceInfo, cleanHeading,
 } from '../src/server/convert.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -273,5 +273,16 @@ describe('consumeContiguousSlices', () => {
 
     expect(pagesDone).toBe(5);
     expect(final).toBe(true);
+  });
+});
+
+describe('cleanHeading (marker HTML anchors)', () => {
+  it('strips span anchors and collapses whitespace', () => {
+    expect(cleanHeading('<span id="page-30-4"></span><span id="x"></span> Limits  and Continuity'))
+      .toBe('Limits and Continuity');
+  });
+  it('feeds through splitChapters titles', () => {
+    const md = '# <span id="a"></span>One\nbody\n# <span id="b"></span>Two\nbody2';
+    expect(splitChapters(md).map((c) => c.title)).toEqual(['One', 'Two']);
   });
 });

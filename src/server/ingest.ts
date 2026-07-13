@@ -7,7 +7,7 @@ import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { HarnessConfig } from './config.js';
 import {
-  defaultConverter, defaultIncrementalConverter, splitChapters, type Converter, type IncrementalConverter,
+  cleanHeading, defaultConverter, defaultIncrementalConverter, splitChapters, type Converter, type IncrementalConverter,
 } from './convert.js';
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
@@ -73,7 +73,7 @@ export async function ingestBook(
   const ledger = readQueue(cfg.vault);
 
   if (mode === 'paper') {
-    const title = opts.title || markdown.match(H1_LINE)?.[1]?.trim() || basename(filePath, extname(filePath));
+    const title = opts.title || cleanHeading(markdown.match(H1_LINE)?.[1] ?? '') || basename(filePath, extname(filePath));
     const slug = slugify(title) || 'paper';
     const uploadsDir = join(cfg.vault, 'raw', 'uploads', slug);
     mkdirSync(uploadsDir, { recursive: true });
