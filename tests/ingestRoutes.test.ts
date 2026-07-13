@@ -13,6 +13,17 @@ const fakeConverter: Converter = async () => ({
   markdown: '# Only Chapter\nSome fixture content for the route test.',
 });
 
+/** Poll until fn() is truthy — conversion now runs in the background after POST /api/ingest. */
+async function until<T>(fn: () => T, ms = 3000): Promise<T> {
+  const t0 = Date.now();
+  for (;;) {
+    const v = fn();
+    if (v) return v;
+    if (Date.now() - t0 > ms) throw new Error('until(): timeout');
+    await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
 // compileNext only ever calls .listSlugs()/.tools() on the Loreweaver client — a plain stub is
 // enough here; the real MCP round-trip is already covered by tests/ingest.test.ts.
 function fakeLw() {
@@ -46,11 +57,36 @@ describe('ingest routes', () => {
     form.append('file', new File(['fake pdf bytes'], 'My Book.pdf', { type: 'application/pdf' }));
     const res = await app.request('/api/ingest', { method: 'POST', body: form });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ book: 'My Book', chapters: 1 });
+    expect(await res.json()).toEqual({ book: 'My Book', converting: true });
 
+    // Placeholder is visible immediately; background conversion swaps it for pending chapters.
+    await until(() => readQueue(vault)[0]?.status === 'pending');
     const queue = await (await app.request('/api/ingest/queue')).json();
     expect(queue).toHaveLength(1);
-    expect(queue[0]).toMatchObject({ book: 'My Book', status: 'pending' });
+    expect(queue[0]).toMatchObject({ book: 'My Book', status: 'pending', title: 'Only Chapter' });
+  });
+
+  it('PATCH /api/ingest/book renames across queue entries', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter });
+    const form = new FormData();
+    form.append('file', new File(['x'], 'Untitled Scan.pdf', { type: 'application/pdf' }));
+    await app.request('/api/ingest', { method: 'POST', body: form });
+    await until(() => readQueue(vault)[0]?.status === 'pending');
+
+    const res = await app.request('/api/ingest/book', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ book: 'Untitled Scan', name: 'Linear Algebra Done Right' }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ renamed: 1 });
+    expect(readQueue(vault)[0].book).toBe('Linear Algebra Done Right');
+
+    const missing = await app.request('/api/ingest/book', {
+      method: 'PATCH', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ book: 'Nope', name: 'X' }),
+    });
+    expect(missing.status).toBe(404);
   });
 
   it('rejects a request with no file', async () => {
@@ -70,6 +106,7 @@ describe('ingest routes', () => {
     const form = new FormData();
     form.append('file', new File(['fake pdf bytes'], 'Compile Me.pdf', { type: 'application/pdf' }));
     await app.request('/api/ingest', { method: 'POST', body: form });
+    await until(() => readQueue(vault)[0]?.status === 'pending');
 
     const res = await app.request('/api/ingest/compile', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ n: 1 }),
@@ -122,8 +159,10 @@ describe('ingest routes — JSON url ingest', () => {
       body: JSON.stringify({ url: `${base}/paper.pdf` }),
     });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ book: 'Fixture Paper Title', chapters: 1 });
+    const body = await res.json();
+    expect(body.converting).toBe(true);
 
+    await until(() => readQueue(vault)[0]?.status === 'pending');
     const queue = readQueue(vault);
     expect(queue).toHaveLength(1);
     expect(queue[0]).toMatchObject({
@@ -140,6 +179,7 @@ describe('ingest routes — JSON url ingest', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ url: `${base}/paper.pdf` }),
     });
+    await until(() => readQueue(vault)[0]?.status === 'pending');
     expect(readQueue(vault)).toHaveLength(1);
   });
 

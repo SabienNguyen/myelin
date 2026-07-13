@@ -13,13 +13,14 @@ import { sanitizeToolArgs } from './session.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-export type QueueStatus = 'pending' | 'compiling' | 'done' | 'error';
+export type QueueStatus = 'converting' | 'convert-error' | 'pending' | 'compiling' | 'done' | 'error';
 export interface QueueEntry {
   book: string;
   chapter: string; // vault-relative path, e.g. 'raw/uploads/<book-slug>/ch-01-....md'
   title: string;
   status: QueueStatus;
   error?: string;
+  startedAt?: string; // ISO — set on 'converting' placeholders so the UI can show elapsed time
 }
 
 // Mirrors loreweaver's src/vault/parsePage.ts slugify — duplicated here for the same reason
@@ -106,6 +107,72 @@ export async function ingestBook(
   writeQueue(cfg.vault, ledger);
 
   return { book: bookTitle, chapters: chapters.length };
+}
+
+/**
+ * Reload-safe async conversion: immediately writes a 'converting' placeholder to the ledger
+ * (so the Library shows the book the moment it's uploaded, and a page reload still sees it),
+ * then converts in the background and swaps the placeholder for real 'pending' chapter entries
+ * — or 'convert-error' with the message. Returns as soon as the placeholder is queued.
+ */
+export function startConversion(
+  cfg: HarnessConfig, filePath: string,
+  opts: { converter?: Converter; mode?: 'book' | 'paper'; title?: string; onComplete?: () => void } = {},
+): { book: string; converting: true } {
+  const book = opts.title || basename(filePath, extname(filePath));
+  const placeholderKey = `__converting__/${Date.now().toString(36)}`;
+  const ledger = readQueue(cfg.vault);
+  ledger.push({
+    book, chapter: placeholderKey, title: 'Converting…',
+    status: 'converting', startedAt: new Date().toISOString(),
+  });
+  writeQueue(cfg.vault, ledger);
+
+  void (async () => {
+    try {
+      await ingestBook(cfg, filePath, opts);
+      const after = readQueue(cfg.vault);
+      writeQueue(cfg.vault, after.filter((e) => e.chapter !== placeholderKey));
+      opts.onComplete?.();
+    } catch (e: any) {
+      const after = readQueue(cfg.vault);
+      const ph = after.find((en) => en.chapter === placeholderKey);
+      if (ph) {
+        ph.status = 'convert-error';
+        ph.error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+        writeQueue(cfg.vault, after);
+      }
+    }
+  })();
+
+  return { book, converting: true };
+}
+
+/** Boot-time sweep: a server restart orphans in-flight conversions — mark them honestly. */
+export function sweepInterruptedConversions(vault: string): number {
+  const ledger = readQueue(vault);
+  let swept = 0;
+  for (const e of ledger) {
+    if (e.status === 'converting') {
+      e.status = 'convert-error';
+      e.error = 'interrupted by a server restart — re-upload the file';
+      swept++;
+    }
+  }
+  if (swept) writeQueue(vault, ledger);
+  return swept;
+}
+
+/** Rename a book across its queue entries (display name + future compile citations only —
+ * the raw/uploads/<slug>/ folder keeps its original slug; files are inputs, not identity). */
+export function renameBook(vault: string, from: string, to: string): number {
+  const name = to.trim();
+  if (!name) throw new Error('new name must not be empty');
+  const ledger = readQueue(vault);
+  let changed = 0;
+  for (const e of ledger) if (e.book === from) { e.book = name; changed++; }
+  if (changed) writeQueue(vault, ledger);
+  return changed;
 }
 
 /** Wrap MCP tools so every execute() sees sanitized args, mirroring session.ts's guardMcpTools —

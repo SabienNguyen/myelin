@@ -11,12 +11,14 @@ import { buildIngestRoutes } from './ingestRoutes.js';
 import { startScheduler } from './scheduler.js';
 import { AnkiClient } from './anki/client.js';
 import { syncInbound, backlogDays } from './anki/inbound.js';
+import { sweepInterruptedConversions } from './ingest.js';
 import { sendNotification } from './notify.js';
 
 const cfg = loadConfig();
 const lw = await Loreweaver.connect(cfg);
 const anki = new AnkiClient();
 startScheduler(lw, cfg);
+sweepInterruptedConversions(cfg.vault); // restarts orphan in-flight conversions — mark them honestly
 
 // ISO 8601 week key (e.g. "2026-W28") — used to nudge about an Anki backlog at most once/week,
 // sharing the same once-per-event ledger file the daily digest scheduler writes to.

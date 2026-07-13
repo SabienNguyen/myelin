@@ -23,22 +23,35 @@ function fakeLw() {
 
 const fakeConverter: Converter = async () => ({ markdown: '# A Nice Paper\nAbstract text here.' });
 
+/** Poll until fn() is truthy — conversion + compile-kick now run in the background. */
+async function until<T>(fn: () => T, ms = 3000): Promise<T> {
+  const t0 = Date.now();
+  for (;;) {
+    const v = fn();
+    if (v) return v;
+    if (Date.now() - t0 > ms) throw new Error('until(): timeout');
+    await new Promise((r) => setTimeout(r, 15));
+  }
+}
+
 describe('ingest_paper tool', () => {
-  it('downloads, queues a paper entry, and returns { queued, compiling: true } without awaiting compile', async () => {
+  it('returns immediately with a converting placeholder; compile kicks after conversion', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-tool-'));
     const fakeDownload = vi.fn(async (_url: string) => ({ path: '/fake/paper.pdf', contentType: 'application/pdf' }));
     const tools = buildIngestTools(fakeLw(), cfgFor(vault), { download: fakeDownload, converter: fakeConverter });
 
     const out = await (tools.ingest_paper as any).execute({ url: 'https://arxiv.org/pdf/2401.12345' }, {});
-    expect(out).toEqual({ queued: 'A Nice Paper', compiling: true });
+    expect(out).toEqual({ queued: 'paper', converting: true, compiling: 'starts after conversion' });
     expect(fakeDownload).toHaveBeenCalledWith('https://arxiv.org/pdf/2401.12345');
-
-    const queue = readQueue(vault);
-    expect(queue).toHaveLength(1);
-    // compileNext runs synchronously up to its first await (inside the batch loop, before
-    // `await lw.listSlugs()`) — so by the time execute() resolves, the fire-and-forget kick has
-    // already flipped the entry to 'compiling' on disk. This asserts the kick really fired.
-    expect(queue[0]).toMatchObject({ book: 'A Nice Paper', title: 'A Nice Paper', status: 'compiling' });
+    // Placeholder is on disk instantly (reload-safe visibility)…
+    expect(readQueue(vault)[0]).toMatchObject({ status: 'converting' });
+    // …then background conversion replaces it and the onComplete kick flips it to compiling.
+    const entry = await until(() => {
+      const q = readQueue(vault);
+      return q[0]?.book === 'A Nice Paper' && q[0].status !== 'converting' ? q[0] : null;
+    });
+    expect(entry!).toMatchObject({ book: 'A Nice Paper', title: 'A Nice Paper' });
+    expect(['pending', 'compiling', 'error']).toContain(entry!.status); // compile kick raced in
   });
 
   it('uses the optional title hint to name the queued paper, overriding H1 detection', async () => {
@@ -49,8 +62,8 @@ describe('ingest_paper tool', () => {
     const out = await (tools.ingest_paper as any).execute(
       { url: 'https://example.com/paper.pdf', title: 'Custom Title' }, {},
     );
-    expect(out).toEqual({ queued: 'Custom Title', compiling: true });
-    expect(readQueue(vault)[0].title).toBe('Custom Title');
+    expect(out).toEqual({ queued: 'Custom Title', converting: true, compiling: 'starts after conversion' });
+    await until(() => readQueue(vault)[0]?.title === 'Custom Title' && readQueue(vault)[0].status !== 'converting');
   });
 
   it('returns a structured error and never throws when download fails', async () => {
@@ -70,6 +83,13 @@ describe('ingest_paper tool', () => {
     const tools = buildIngestTools(fakeLw(), cfgFor(vault), { download: fakeDownload, converter: brokenConverter });
 
     const out = await (tools.ingest_paper as any).execute({ url: 'https://example.com/paper.pdf' }, {});
-    expect(out).toEqual({ error: expect.stringMatching(/conversion exploded/) });
+    // Conversion failures now surface in the LEDGER (convert-error), not the tool result —
+    // the tool returns before conversion runs.
+    expect(out).toMatchObject({ converting: true });
+    const entry = await until(() => {
+      const q = readQueue(vault);
+      return q[0]?.status === 'convert-error' ? q[0] : null;
+    });
+    expect(entry!.error).toMatch(/conversion exploded/);
   });
 });

@@ -50,7 +50,7 @@ export function App() {
       form.append('file', file);
       const res = await fetch('/api/ingest', { method: 'POST', body: form });
       const data = await res.json();
-      setIngestStatus(res.ok ? `${data.book}: ${data.chapters} chapters queued` : `ingest failed: ${data.error ?? res.statusText}`);
+      setIngestStatus(res.ok ? `${data.book}: converting in the background — see Library` : `ingest failed: ${data.error ?? res.statusText}`);
       if (res.ok) panelBus.setTab('library');
     } catch (err: any) {
       setIngestStatus(`ingest failed: ${err?.message ?? err}`);
