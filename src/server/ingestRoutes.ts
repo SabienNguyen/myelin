@@ -33,7 +33,7 @@ export function buildIngestRoutes(
       // multi-chapter books. Conversion runs in the background; the Library shows a
       // reload-safe 'converting' placeholder immediately.
       const result = startConversion(lw, cfg, downloaded.path, {
-        converter: deps.converter, mode: body.mode ?? 'paper', model: deps.model,
+        converter: deps.converter, mode: body.mode ?? 'paper', model: deps.model, sourceUrl: body.url,
       });
       return c.json(result);
     }

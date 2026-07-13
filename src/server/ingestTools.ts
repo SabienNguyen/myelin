@@ -36,7 +36,7 @@ export function buildIngestTools(
           // isn't explicitly false) — a single code path for auto-compiling, shared with the
           // upload/URL ingest routes.
           const result = startConversion(lw, cfg, downloaded.path, {
-            converter: deps.converter, mode: 'paper', title,
+            converter: deps.converter, mode: 'paper', title, sourceUrl: url,
           });
           return { queued: result.book, converting: true, compiling: 'starts after conversion' };
         } catch (e: any) {

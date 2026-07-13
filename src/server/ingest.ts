@@ -24,6 +24,7 @@ export interface QueueEntry {
   error?: string;
   startedAt?: string; // ISO — set on 'converting' placeholders so the UI can show elapsed time
   progress?: { pagesDone: number; pagesTotal: number | null }; // set on 'converting' placeholders
+  sourceUrl?: string; // papers: the URL the document was fetched from — cited on compiled pages
 }
 
 // Mirrors loreweaver's src/vault/parsePage.ts slugify — duplicated here for the same reason
@@ -64,7 +65,7 @@ const H1_LINE = /^#\s+(.+)$/m;
  */
 export async function ingestBook(
   cfg: HarnessConfig, filePath: string,
-  opts: { converter?: Converter; mode?: 'book' | 'paper'; title?: string } = {},
+  opts: { converter?: Converter; mode?: 'book' | 'paper'; title?: string; sourceUrl?: string } = {},
 ): Promise<{ book: string; chapters: number }> {
   const converter = opts.converter ?? defaultConverter;
   const mode = opts.mode ?? 'book';
@@ -83,6 +84,7 @@ export async function ingestBook(
       chapter: `raw/uploads/${slug}/paper.md`,
       title,
       status: 'pending',
+      ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
     });
     writeQueue(cfg.vault, ledger);
     return { book: title, chapters: 1 };
@@ -149,7 +151,7 @@ export function startConversion(
   lw: Loreweaver, cfg: HarnessConfig, filePath: string,
   opts: {
     converter?: Converter; incrementalConverter?: IncrementalConverter;
-    mode?: 'book' | 'paper'; title?: string; model?: LanguageModel; onComplete?: () => void;
+    mode?: 'book' | 'paper'; title?: string; sourceUrl?: string; model?: LanguageModel; onComplete?: () => void;
   } = {},
 ): { book: string; converting: true } {
   const book = opts.title || basename(filePath, extname(filePath));
@@ -251,7 +253,10 @@ export function startConversion(
   return { book, converting: true };
 }
 
-/** Boot-time sweep: a server restart orphans in-flight conversions — mark them honestly. */
+/** Boot-time sweep: a server restart orphans in-flight work — handle both kinds honestly.
+ * Conversions can't resume (the tmp upload is process-tied) -> convert-error, re-upload.
+ * Compiles CAN resume (chapter file + ledger persist; write_page updates in place) -> back
+ * to pending so the boot drain picks them up. */
 export function sweepInterruptedConversions(vault: string): number {
   const ledger = readQueue(vault);
   let swept = 0;
@@ -259,6 +264,10 @@ export function sweepInterruptedConversions(vault: string): number {
     if (e.status === 'converting') {
       e.status = 'convert-error';
       e.error = 'interrupted by a server restart — re-upload the file';
+      swept++;
+    } else if (e.status === 'compiling') {
+      e.status = 'pending';
+      delete e.error;
       swept++;
     }
   }
@@ -364,12 +373,29 @@ async function compileOne(
     const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
     const chunks = chunkChapter(chapterMarkdown, chunkChars);
 
+    // Citation is a MECHANICAL guarantee, not a prompt hope: every write_page during this
+    // compile gets the canonical source merged into its sources array, whether or not the
+    // model remembered. Papers cite their fetch URL; book chapters cite book + chapter.
+    const citation = entry.sourceUrl
+      ? `${entry.book} (${entry.sourceUrl})`
+      : `${entry.book} — ${entry.title}`;
+    const withCitation = (tools: ToolSet): ToolSet =>
+      Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, name !== 'write_page' ? t : {
+        ...t,
+        execute: t.execute
+          ? (args: any, execOpts: any) => t.execute({
+            ...args,
+            sources: [...new Set([...(Array.isArray(args?.sources) ? args.sources : []), citation])],
+          }, execOpts)
+          : t.execute,
+      }])) as ToolSet;
+
     let wroteAny = false;
     const partErrors: string[] = [];
     for (let i = 0; i < chunks.length; i++) {
       // Refresh slugs per part: part 2's prereq/link candidates include part 1's new pages.
       const slugs = await lw.listSlugs();
-      const tools = guardTools(await lw.tools(), cfg.student, slugs);
+      const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
       const partLabel = chunks.length > 1 ? ` (part ${i + 1} of ${chunks.length})` : '';
       const agent = new ToolLoopAgent({
         model,

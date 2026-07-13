@@ -334,3 +334,85 @@ describe('chunkChapter (context-budget splitting)', async () => {
     expect(parts.join('')).toBe(md);
   });
 });
+
+describe('mechanical citation on write_page', async () => {
+  const { compileNext } = await import('../src/server/ingest.js');
+  const { MockLanguageModelV3 } = await import('ai/test');
+  const { mkdtempSync: mkTmp, mkdirSync: mkDir, writeFileSync: writeF } = await import('node:fs');
+  const { tmpdir: tmpD } = await import('node:os');
+  const { join: j } = await import('node:path');
+  const { z } = await import('zod');
+  const { tool } = await import('ai');
+
+  function writePageModel() {
+    return new MockLanguageModelV3({
+      doGenerate: [
+        {
+          content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'write_page',
+            input: JSON.stringify({ slug: 'attention', title: 'Attention', body: 'x', sources: ['model-added'] }) }],
+          finishReason: { unified: 'tool-calls', raw: 'tool_use' },
+          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined } },
+          warnings: [],
+        },
+        {
+          content: [{ type: 'text', text: 'done' }],
+          finishReason: { unified: 'stop', raw: 'end_turn' },
+          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined } },
+          warnings: [],
+        },
+      ],
+    });
+  }
+
+  it('merges the canonical citation into write_page sources (paper URL form)', async () => {
+    const vault = mkTmp(j(tmpD(), 'lwh-cite-'));
+    mkDir(j(vault, 'raw', 'uploads', 'p'), { recursive: true });
+    writeF(j(vault, 'raw', 'uploads', 'p', 'paper.md'), '# P\nbody');
+    mkDir(j(vault, '.harness'), { recursive: true });
+    writeF(j(vault, '.harness', 'compile-queue.json'), JSON.stringify([{
+      book: 'Attention Is All You Need', chapter: 'raw/uploads/p/paper.md', title: 'Attention Is All You Need',
+      status: 'pending', sourceUrl: 'https://arxiv.org/pdf/1706.03762',
+    }]));
+
+    const seen: any[] = [];
+    const fakeLw = {
+      listSlugs: async () => [],
+      tools: async () => ({
+        write_page: tool({
+          description: 'w', inputSchema: z.object({}).passthrough() as any,
+          execute: async (args: any) => { seen.push(args); return { ok: true }; },
+        }),
+      }),
+    } as any;
+
+    const res = await compileNext(fakeLw, { vault, student: 'kid', models: {} } as any, 1,
+      { model: writePageModel() as any });
+    expect(res).toEqual({ compiled: 1, failed: 0 });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].sources).toContain('model-added');
+    expect(seen[0].sources).toContain('Attention Is All You Need (https://arxiv.org/pdf/1706.03762)');
+  });
+});
+
+describe('sweepInterruptedConversions', async () => {
+  const { sweepInterruptedConversions, readQueue: rq } = await import('../src/server/ingest.js');
+  const { mkdtempSync: mkT, mkdirSync: mkD, writeFileSync: wF } = await import('node:fs');
+  const { tmpdir: tD } = await import('node:os');
+  const { join: jn } = await import('node:path');
+  it('marks converting as convert-error and resumes compiling as pending', () => {
+    const vault = mkT(jn(tD(), 'lwh-sweep-'));
+    mkD(jn(vault, '.harness'), { recursive: true });
+    wF(jn(vault, '.harness', 'compile-queue.json'), JSON.stringify([
+      { book: 'b', chapter: '__converting__/x', title: 'Converting…', status: 'converting' },
+      { book: 'b', chapter: 'raw/uploads/b/ch-01-a.md', title: 'A', status: 'compiling' },
+      { book: 'b', chapter: 'raw/uploads/b/ch-02-b.md', title: 'B', status: 'done' },
+    ]));
+    expect(sweepInterruptedConversions(vault)).toBe(2);
+    const q = rq(vault);
+    expect(q[0].status).toBe('convert-error');
+    expect(q[1].status).toBe('pending');
+    expect(q[2].status).toBe('done');
+  });
+});
