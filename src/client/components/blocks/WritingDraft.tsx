@@ -40,14 +40,33 @@ export function WritingDraftInner({ args, result, addResult }: {
     const grading = result.grading;
     const annotations: Annotation[] = grading?.annotations?.annotations ?? [];
     const segments = annotateDraft(result.draft, annotations);
+    // Tufte-style footnotes: each annotated span gets a superscript number after the mark
+    // (outside it — tests match the mark's exact text), with the grader's notes listed below.
+    let n = 0;
+    const notes: { n: number; category: string; note: string }[] = [];
     return (
       <div className="block writing-draft done">
         <p>{args.prompt}</p>
-        <p>
-          {segments.map((seg, i) => seg.category
-            ? <mark key={i} className={`ann-${seg.category}`} title={seg.note}>{seg.text}</mark>
-            : <span key={i}>{seg.text}</span>)}
+        <p className="draft-text">
+          {segments.map((seg, i) => {
+            if (!seg.category) return <span key={i}>{seg.text}</span>;
+            n += 1;
+            notes.push({ n, category: seg.category, note: seg.note ?? '' });
+            return (
+              <span key={i}>
+                <mark className={`ann-${seg.category}`} title={seg.note}>{seg.text}</mark>
+                <sup className="fn-ref">{n}</sup>
+              </span>
+            );
+          })}
         </p>
+        {notes.length > 0 && (
+          <ol className="footnotes">
+            {notes.map((f) => (
+              <li key={f.n} value={f.n}><span className={`fn-cat ann-${f.category}`}>{f.category}</span> {f.note}</li>
+            ))}
+          </ol>
+        )}
         {grading?.annotations?.skillGrades && (
           <ul className="skill-grades">
             {Object.entries(grading.annotations.skillGrades).map(([skill, grade]) => (

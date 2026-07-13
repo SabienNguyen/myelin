@@ -18,4 +18,17 @@ describe('WritingDraft', () => {
       addResult={vi.fn()} />);
     expect(screen.getByText('strong claim').className).toMatch(/ann-strong/);
   });
+  it('numbers annotations and lists them as footnotes', () => {
+    const { container } = render(<WritingDraftInner args={{ prompt: 'Argue X', round: 1, pageSlug: 'thesis' }}
+      result={{ draft: 'A strong claim here, quite verbose indeed.', grading: { verdict: 'reviewed', detail: '', annotations: {
+        annotations: [
+          { span: 'strong claim', category: 'strong', note: 'good hook' },
+          { span: 'quite verbose', category: 'wordy', note: 'tighten' },
+        ], skillGrades: { claim: 'good' } } } }}
+      addResult={vi.fn()} />);
+    const sups = [...container.querySelectorAll('sup.fn-ref')].map((e) => e.textContent);
+    expect(sups).toEqual(['1', '2']);
+    const notes = [...container.querySelectorAll('.footnotes li')].map((e) => e.textContent);
+    expect(notes).toEqual(['strong good hook', 'wordy tighten']);
+  });
 });

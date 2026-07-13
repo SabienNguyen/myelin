@@ -282,6 +282,27 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .ann-structure, .ann-grammar { background: color-mix(in srgb, var(--bad) 20%, transparent); }
 .skill-grades { margin: 0.4rem 0 0; padding-left: 1.2rem; color: var(--text-muted); }
 
+/* writing footnotes — the grader's notes as numbered marginalia under the draft */
+.draft-text { font-family: var(--font-prose); font-size: 1.02rem; }
+.fn-ref { color: var(--accent); font-weight: 700; margin-left: 1px; }
+.footnotes {
+  margin: 0.6rem 0 0;
+  padding: 0.5rem 0 0 1.4rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.footnotes li { margin-bottom: 0.25rem; }
+.fn-cat {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  padding: 0 4px;
+  border-radius: 3px;
+  margin-right: 0.3em;
+}
+
 /* ── Working indicator ───────────────────────────────── */
 .working {
   display: flex;
