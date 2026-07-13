@@ -3,7 +3,7 @@ import type { UIMessage } from 'ai';
 import type { HarnessConfig } from './config.js';
 import type { Loreweaver } from './mcp.js';
 import { createTutorSession } from './session.js';
-import { loadThread, saveThread } from './sessionStore.js';
+import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { MODES, type Mode } from './prompt.js';
 
 export function buildChatRoute(lw: Loreweaver, cfg: HarnessConfig) {
@@ -17,10 +17,15 @@ export function buildChatRoute(lw: Loreweaver, cfg: HarnessConfig) {
     saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
     return session.respond(body.messages, mode);
   });
+  app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
   app.get('/api/thread/:id', (c) => c.json(loadThread(cfg.vault, c.req.param('id'))));
   app.put('/api/thread/:id', async (c) => {
     saveThread(cfg.vault, c.req.param('id'), await c.req.json());
     return c.json({ ok: true });
+  });
+  app.delete('/api/thread/:id', (c) => {
+    deleteThread(cfg.vault, c.req.param('id'));
+    return c.body(null, 204);
   });
   return app;
 }

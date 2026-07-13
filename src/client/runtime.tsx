@@ -38,31 +38,33 @@ export function blockOutputsComplete({ messages }: { messages: UIMessage[] }): b
   return blockParts.length > 0 && blockParts.every((part) => part.state === 'output-available');
 }
 
-const THREAD_ID = 'default';
-
 /** Load the persisted thread once, then mount the chat with it — the server's chatRoute only
- * persists the REQUEST side; the assistant's turns are saved here via onFinish → PUT. */
-export function Runtime({ mode, children }: PropsWithChildren<{ mode: string }>) {
+ * persists the REQUEST side; the assistant's turns are saved here via onFinish → PUT.
+ * `threadId` defaults to 'default'; App.tsx remounts this component (via `key={threadId}`) on
+ * every conversation switch so `initial` is always re-fetched for the right thread. */
+export function Runtime({ mode, threadId = 'default', children }: PropsWithChildren<{ mode: string; threadId?: string }>) {
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
   useEffect(() => {
-    fetch(`/api/thread/${THREAD_ID}`).then((r) => r.json())
+    fetch(`/api/thread/${threadId}`).then((r) => r.json())
       .then((msgs) => setInitial(Array.isArray(msgs) ? msgs : []))
       .catch(() => setInitial([]));
-  }, []);
+  }, [threadId]);
   if (initial === null) return null; // one settled frame while the thread restores
-  return <RuntimeInner mode={mode} initial={initial}>{children}</RuntimeInner>;
+  return <RuntimeInner mode={mode} threadId={threadId} initial={initial}>{children}</RuntimeInner>;
 }
 
-function RuntimeInner({ mode, initial, children }: PropsWithChildren<{ mode: string; initial: UIMessage[] }>) {
+function RuntimeInner(
+  { mode, threadId, initial, children }: PropsWithChildren<{ mode: string; threadId: string; initial: UIMessage[] }>,
+) {
   const runtime = useChatRuntime({
-    transport: new AssistantChatTransport({ api: '/api/chat', body: { mode, threadId: THREAD_ID } }),
+    transport: new AssistantChatTransport({ api: '/api/chat', body: { mode, threadId } }),
     // Cast: react-ai-sdk types ChatInit against its BUNDLED ai@6; our messages are ai@7.
     // Identical wire shape, incompatible type identities (the repo-wide rule: never let ai
     // types flow through react-ai-sdk's surface without a boundary cast).
     messages: initial.length ? (initial as never[]) : undefined,
     sendAutomaticallyWhen: blockOutputsComplete,
     onFinish: ({ messages }) => {
-      void fetch(`/api/thread/${THREAD_ID}`, {
+      void fetch(`/api/thread/${threadId}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(messages),

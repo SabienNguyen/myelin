@@ -4,9 +4,11 @@ import { Runtime } from './runtime.js';
 import { Thread } from './components/Thread.js';
 import { SidePanel } from './components/SidePanel.js';
 import { TopbarStatus } from './components/TopbarStatus.js';
+import { HistoryMenu } from './components/HistoryMenu.js';
 
 export function App() {
   const [mode, setMode] = useState('learn');
+  const [threadId, setThreadId] = useState('default');
   const [ingesting, setIngesting] = useState(false);
   const [ingestStatus, setIngestStatus] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -31,10 +33,11 @@ export function App() {
   }
 
   return (
-    <Runtime mode={mode}>
+    <Runtime key={threadId} mode={mode} threadId={threadId}>
       <div className="app">
         <header className="topbar">
           <h1><BookOpenText size={20} weight="duotone" /> Loreweaver</h1>
+          <HistoryMenu activeId={threadId} onSelect={setThreadId} />
           <TopbarStatus />
           <button type="button" onClick={() => fileInput.current?.click()} disabled={ingesting}>
             {ingesting ? 'Converting…' : 'Add book'}
