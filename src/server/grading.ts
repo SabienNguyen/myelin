@@ -3,8 +3,15 @@ import { create, all } from 'mathjs';
 import { generateText, Output } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
 import type { EvidenceKind } from '../shared/loreweaver.js';
+import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import { modelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
+
+/** Injectable seam for tests — see claudeSdk.ts. Real callers omit this; it defaults to the
+ * real Agent SDK call. */
+export interface GradingDeps {
+  sdkGenerate?: typeof claudeSdkGenerate;
+}
 
 // predictable: true makes functions like log()/sqrt() return NaN (not a Complex) outside
 // their real domain, so the NaN-equality short-circuit below actually fires — without it,
@@ -43,7 +50,7 @@ export interface Grade {
 const ev = (slug: string, kind: EvidenceKind, note: string) => ({ slug, kind, note });
 
 export async function gradeBlockOutput(
-  tool: BlockToolName, input: any, result: any, cfg: HarnessConfig,
+  tool: BlockToolName, input: any, result: any, cfg: HarnessConfig, deps: GradingDeps = {},
 ): Promise<Grade> {
   if (tool === 'quick_check') {
     if (input.expected != null) {
@@ -54,7 +61,7 @@ export async function gradeBlockOutput(
         evidence: [ev(input.pageSlug, ok ? 'applied-correctly' : 'struggled', `quick_check: ${input.question}`)],
       };
     }
-    return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg);
+    return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps);
   }
 
   if (tool === 'math_scratchpad') {
@@ -75,7 +82,7 @@ export async function gradeBlockOutput(
       const answer = result.answers.find((a: any) => a.id === item.id)?.answer ?? '';
       if (item.type !== 'short' && item.expected != null)
         return { id: item.id, correct: answer.trim().toLowerCase() === item.expected.trim().toLowerCase() };
-      const g = await gradeOpenAnswer(item.prompt, answer, item.pageSlug, cfg);
+      const g = await gradeOpenAnswer(item.prompt, answer, item.pageSlug, cfg, deps);
       return { id: item.id, correct: g.verdict === 'correct' };
     }));
     const right = perItem.filter((p) => p.correct).length;
@@ -94,13 +101,34 @@ export async function gradeBlockOutput(
   }
 
   // writing_draft — grader role, structured output
-  const { output } = await generateText({
-    model: modelFor('grader', cfg),
-    prompt: `Grade this student draft. Prompt: "${input.prompt}"\nDraft:\n${result.draft}\n` +
-      `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`,
-    output: Output.object({ schema: annotationSchema }),
-  });
-  const ann = output as WritingAnnotations;
+  const draftPrompt = `Grade this student draft. Prompt: "${input.prompt}"\nDraft:\n${result.draft}\n`
+    + `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`;
+  const graderModelId = cfg.models.grader.model;
+  let ann: WritingAnnotations;
+  if (isClaudeSdkModel(graderModelId)) {
+    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
+    const { text } = await sdkGenerate({
+      model: stripClaudeSdkPrefix(graderModelId),
+      // The Agent SDK path has no Output.object — ask for JSON-only and parse it ourselves.
+      prompt: `${draftPrompt}\n\nRespond with ONLY valid JSON (no markdown fences, no commentary) `
+        + 'matching this exact shape: {"annotations": [{"span": <string>, "category": '
+        + '<"strong"|"wordy"|"vague"|"structure"|"grammar">, "note": <string>}], "skillGrades": '
+        + '{"claim": <"good"|"weak">, "concision": <"good"|"weak">, "specificity": <"good"|"weak">}}',
+      maxTurns: 1,
+    });
+    try {
+      ann = JSON.parse(text) as WritingAnnotations;
+    } catch (e) {
+      throw new Error(`claude-sdk grader returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
+    }
+  } else {
+    const { output } = await generateText({
+      model: modelFor('grader', cfg),
+      prompt: draftPrompt,
+      output: Output.object({ schema: annotationSchema }),
+    });
+    ann = output as WritingAnnotations;
+  }
   const weak = Object.values(ann.skillGrades).filter((g) => g === 'weak').length;
   return {
     verdict: 'reviewed', detail: `${ann.annotations.length} annotations, ${weak} weak skills`,
@@ -114,11 +142,18 @@ function latexParses(latex: string): boolean {
   try { latexToCompiled(latex); return true; } catch { return false; }
 }
 
-async function gradeOpenAnswer(question: string, answer: string, slug: string, cfg: HarnessConfig): Promise<Grade> {
-  const { text } = await generateText({
-    model: modelFor('grader', cfg),
-    prompt: `Question: ${question}\nStudent answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`,
-  });
+async function gradeOpenAnswer(
+  question: string, answer: string, slug: string, cfg: HarnessConfig, deps: GradingDeps = {},
+): Promise<Grade> {
+  const prompt = `Question: ${question}\nStudent answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
+  const graderModelId = cfg.models.grader.model;
+  let text: string;
+  if (isClaudeSdkModel(graderModelId)) {
+    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
+    ({ text } = await sdkGenerate({ model: stripClaudeSdkPrefix(graderModelId), prompt, maxTurns: 1 }));
+  } else {
+    ({ text } = await generateText({ model: modelFor('grader', cfg), prompt }));
+  }
   const ok = /^CORRECT/i.test(text.trim());
   return {
     verdict: ok ? 'correct' : 'incorrect', detail: text.trim(),

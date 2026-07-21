@@ -1,4 +1,5 @@
 {
+  "_modelRoutes": "models.*.model supports three prefixes, mixable per role: a plain id (e.g. \"claude-sonnet-5\") routes through the Anthropic API and needs ANTHROPIC_API_KEY; \"ollama:<model>\" routes to a local Ollama model; \"claude-sdk:<model>\" routes through the Agent SDK, drawing from your Claude Pro/Max subscription via your local `claude` CLI login (no API key, but you must be logged in on this machine). This key is documentation only — the config loader ignores unrecognized top-level keys. See README 'Model routes' for the full writeup, including what's out of scope for claude-sdk: today.",
   "vault": "~/Dev/personal/loreweaver-vault",
   "student": "sabien",
   "models": {

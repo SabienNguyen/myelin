@@ -313,6 +313,114 @@ describe('compileNext', () => {
       }
     }, 30_000);
   });
+
+  describe('claude-sdk: prefixed compile model', () => {
+    function sdkCfg(): HarnessConfig {
+      return { ...cfg, models: { compile: { model: 'claude-sdk:sonnet' } } } as unknown as HarnessConfig;
+    }
+
+    it('routes to the fake sdkGenerate with mcp config containing the vault env, and passes the '
+      + 'gate when toolCallNames includes write_page', async () => {
+      await ingestBook(sdkCfg(), '/uploads/Claude SDK Book.pdf', {
+        converter: async () => ({ markdown: '# SDK Concept\nContent compiled via the claude-sdk: route.' }),
+      });
+
+      const calls: any[] = [];
+      const sdkGenerate = async (opts: any) => {
+        calls.push(opts);
+        return { text: 'wrote the page', toolCallNames: ['write_page'] };
+      };
+
+      const summary = await compileNext(lw, sdkCfg(), 1, { deps: { sdkGenerate } });
+      expect(summary).toEqual({ compiled: 1, failed: 0 });
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0].model).toBe('sonnet'); // prefix stripped before reaching the SDK
+      expect(calls[0].maxTurns).toBe(24);
+      expect(calls[0].allowedTools).toEqual([
+        'mcp__loreweaver__write_page', 'mcp__loreweaver__link_pages', 'mcp__loreweaver__read_page',
+      ]);
+      expect(calls[0].mcp).toEqual({
+        loreweaver: {
+          command: 'npx',
+          args: ['tsx', join(LW_REPO, 'src/server.ts')],
+          env: expect.objectContaining({
+            LOREWEAVER_VAULT: vault,
+            LOREWEAVER_EMBEDDINGS: 'fake',
+          }),
+        },
+      });
+      expect(calls[0].prompt).toContain('SDK Concept');
+      expect(calls[0].prompt).toContain('REQUIRED');
+
+      const ledger = readQueue(vault);
+      const entry = ledger.find((e) => e.book === 'Claude SDK Book');
+      expect(entry?.status).toBe('done');
+    }, 30_000);
+
+    it('fails the entry when toolCallNames never includes write_page (honesty gate holds)', async () => {
+      await ingestBook(sdkCfg(), '/uploads/Claude SDK Narrating Book.pdf', {
+        converter: async () => ({ markdown: '# Narrated Concept\nNever actually written.' }),
+      });
+
+      const sdkGenerate = async () => ({ text: 'I looked at the chapter.', toolCallNames: [] });
+
+      const summary = await compileNext(lw, sdkCfg(), 1, { deps: { sdkGenerate } });
+      expect(summary).toEqual({ compiled: 0, failed: 1 });
+
+      const ledger = readQueue(vault);
+      const entry = ledger.find((e) => e.book === 'Claude SDK Narrating Book');
+      expect(entry?.status).toBe('error');
+      expect(entry?.error).toMatch(/no pages/);
+    }, 30_000);
+
+    it('leaves an unprefixed compile model on the unmodified ai-sdk path (opts.model still used)', async () => {
+      await ingestBook(cfg, '/uploads/Unprefixed Path Book.pdf', {
+        converter: async () => ({ markdown: '# Unprefixed Concept\nStill uses ToolLoopAgent.' }),
+      });
+      const model = new MockLanguageModelV3({
+        doGenerate: [
+          {
+            content: [{
+              type: 'tool-call',
+              toolCallId: 'call-unprefixed',
+              toolName: 'write_page',
+              input: JSON.stringify({
+                slug: 'unprefixed-concept',
+                title: 'Unprefixed Concept',
+                body: 'Still uses ToolLoopAgent. Part of Unprefixed Path Book.',
+                sources: ['Unprefixed Path Book', 'chapter 1'],
+                difficulty: 2,
+                status: 'draft',
+              }),
+            }],
+            finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+            usage: {
+              inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 20, text: 0, reasoning: undefined },
+            },
+            warnings: [],
+          },
+          {
+            content: [{ type: 'text', text: 'done' }],
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: {
+              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
+              outputTokens: { total: 5, text: 5, reasoning: undefined },
+            },
+            warnings: [],
+          },
+        ],
+      });
+
+      let sdkCalled = false;
+      const summary = await compileNext(lw, cfg, 1, {
+        model, deps: { sdkGenerate: async () => { sdkCalled = true; return { text: '', toolCallNames: [] }; } },
+      });
+      expect(summary).toEqual({ compiled: 1, failed: 0 });
+      expect(sdkCalled).toBe(false);
+    }, 30_000);
+  });
 });
 
 describe('chunkChapter (context-budget splitting)', async () => {

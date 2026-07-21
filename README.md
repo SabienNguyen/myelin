@@ -42,6 +42,32 @@ exclusively over stdio MCP.
    `grader`, `quiz_gen`, and `card_gen` to a local model — those are higher-volume, lower-stakes
    calls that a good local coder/instruct model handles fine.
 
+## Model routes: API key, local (ollama:), subscription (claude-sdk:)
+
+Every `models.*.model` id is routed by matching a prefix — plain id, `ollama:`, or `claude-sdk:` —
+so a config can freely mix routes per role, and moving a role off one route later is just editing
+that string.
+
+1. **Plain id** (e.g. `"claude-sonnet-5"`) — the Anthropic API, billed to `ANTHROPIC_API_KEY`.
+2. **`ollama:<model>`** — a local Ollama model over its OpenAI-compatible endpoint. See setup step
+   7 above.
+3. **`claude-sdk:<model>`** (e.g. `"claude-sdk:sonnet"`) — the [Claude Agent
+   SDK](https://code.claude.com/docs/en/agent-sdk/typescript), drawing from your Claude Pro/Max
+   subscription's credit pool via your machine's local `claude` (Claude Code) login — **no API
+   key involved**. Requires being logged into Claude Code on this machine (`claude` CLI installed
+   and authenticated); the SDK reuses that login rather than reading `ANTHROPIC_API_KEY`. Routed
+   for the one-shot roles only: `grader` (open-answer + writing-draft grading), `card_gen`, and
+   `compile`. The compile route additionally spawns its own loreweaver MCP server process (see
+   `src/server/ingest.ts`'s `compileOne` for why that's an acceptable second writer) and can only
+   enforce the write_page citation as a prompt instruction, not the mechanical guarantee the
+   ai-sdk path gets from wrapping `execute()` — a known gap.
+
+**Out of scope: the interactive `tutor` role.** `claude-sdk:` is not wired up for `tutor` — the
+tutor's chat loop is a live, streaming, human-in-the-loop conversation (the assistant-ui chat
+surface awaiting the student's next message mid-turn), and the Agent SDK's `query()` is a
+run-to-completion async generator with no bridge to that HITL/streaming shape yet. Building that
+bridge is a separate project; `tutor` must stay on a plain id or `ollama:` until then.
+
 ## Running
 
 **Dev** (two processes, hot reload, Vite proxies `/api/*` to the Hono server):

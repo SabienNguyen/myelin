@@ -5,6 +5,7 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
 import {
   cleanHeading, defaultConverter, defaultIncrementalConverter, splitChapters, type Converter, type IncrementalConverter,
@@ -12,6 +13,11 @@ import {
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
 import { sanitizeToolArgs } from './session.js';
+
+/** Injectable seam for tests — see claudeSdk.ts. */
+export interface CompileDeps {
+  sdkGenerate?: typeof claudeSdkGenerate;
+}
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -365,17 +371,18 @@ function buildCompilePrompt(
  * writeFileSync (no interleaved partial writes).
  */
 async function compileOne(
-  lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel, ledger: QueueEntry[], entry: QueueEntry,
-  chunkChars = CHAPTER_CHUNK_CHARS,
+  lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel | undefined, ledger: QueueEntry[], entry: QueueEntry,
+  chunkChars: number,
+  claudeSdk: { useSdk: boolean; modelId: string; deps?: CompileDeps },
 ): Promise<'compiled' | 'failed'> {
   try {
     const chapterMarkdown = readFileSync(join(cfg.vault, entry.chapter), 'utf8');
     const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
     const chunks = chunkChapter(chapterMarkdown, chunkChars);
 
-    // Citation is a MECHANICAL guarantee, not a prompt hope: every write_page during this
-    // compile gets the canonical source merged into its sources array, whether or not the
-    // model remembered. Papers cite their fetch URL; book chapters cite book + chapter.
+    // Citation is a MECHANICAL guarantee on the ai-sdk path, not a prompt hope: every write_page
+    // during this compile gets the canonical source merged into its sources array, whether or not
+    // the model remembered. Papers cite their fetch URL; book chapters cite book + chapter.
     const citation = entry.sourceUrl
       ? `${entry.book} (${entry.sourceUrl})`
       : `${entry.book} — ${entry.title}`;
@@ -395,18 +402,57 @@ async function compileOne(
     for (let i = 0; i < chunks.length; i++) {
       // Refresh slugs per part: part 2's prereq/link candidates include part 1's new pages.
       const slugs = await lw.listSlugs();
-      const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
       const partLabel = chunks.length > 1 ? ` (part ${i + 1} of ${chunks.length})` : '';
+      const prompt = buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel);
+
+      if (claudeSdk.useSdk) {
+        // The Agent SDK path can't wrap tool execute() the way withCitation does above, so the
+        // citation guarantee here is a prompt instruction, not a mechanical one — a known gap
+        // (documented in T40's commit message).
+        const sdkGenerate = claudeSdk.deps?.sdkGenerate ?? claudeSdkGenerate;
+        try {
+          const { toolCallNames } = await sdkGenerate({
+            model: stripClaudeSdkPrefix(claudeSdk.modelId),
+            prompt: `${prompt}\n\nREQUIRED: every write_page call's "sources" array MUST include `
+              + `exactly this string: "${citation}".`,
+            mcp: {
+              loreweaver: {
+                command: cfg.loreweaver.command,
+                args: cfg.loreweaver.args,
+                // Mirrors mcp.ts's Loreweaver.spawn env exactly. NOTE: this spawns a SECOND
+                // loreweaver server process pointed at the same vault — loreweaver's writes are
+                // file-per-page, and the harness's own client (`lw`) only calls listSlugs()
+                // (a filesystem glob) during compile, never lw.tools()/lw.call(), so a second
+                // writer process here is acceptable for now.
+                env: {
+                  ...process.env as Record<string, string>,
+                  LOREWEAVER_VAULT: cfg.vault,
+                  LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
+                },
+              },
+            },
+            allowedTools: ['mcp__loreweaver__write_page', 'mcp__loreweaver__link_pages', 'mcp__loreweaver__read_page'],
+            maxTurns: 24,
+          });
+          // Same honesty gate as the ai-sdk path below, just fed from the SDK's own tool-call log
+          // instead of ToolLoopAgent's step array.
+          if (toolCallNames.includes('write_page')) wroteAny = true;
+          else partErrors.push(`part ${i + 1}: no write_page calls`);
+        } catch (partErr: any) {
+          partErrors.push(`part ${i + 1}: ${(partErr instanceof Error ? partErr.message : String(partErr)).slice(0, 120)}`);
+        }
+        continue;
+      }
+
+      const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
       const agent = new ToolLoopAgent({
-        model,
+        model: model!, // invariant: useSdk is false here, so compileNext always supplied a model
         instructions: 'You are compiling one textbook chapter into Loreweaver vault pages.',
         tools,
         stopWhen: isStepCount(16),
       });
       try {
-        const result = await agent.generate({
-          prompt: buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel),
-        });
+        const result = await agent.generate({ prompt });
         // "The agent finished" is not "the work happened" — small models sometimes narrate instead
         // of calling tools. Gate on THIS agent's own steps (per-entry AND per-part accurate under
         // concurrency; a global vault-slug diff would misattribute other workers' pages).
@@ -447,9 +493,12 @@ async function compileOne(
  */
 export async function compileNext(
   lw: Loreweaver, cfg: HarnessConfig, n = 1,
-  opts: { model?: LanguageModel; concurrency?: number; chunkChars?: number } = {},
+  opts: { model?: LanguageModel; concurrency?: number; chunkChars?: number; deps?: CompileDeps } = {},
 ): Promise<{ compiled: number; failed: number }> {
-  const model = opts.model ?? modelFor('compile', cfg);
+  const compileModelId = cfg.models?.compile?.model;
+  const useSdk = !!compileModelId && isClaudeSdkModel(compileModelId);
+  // useSdk skips modelFor entirely — 'claude-sdk:...' is not a valid ai-sdk model id.
+  const model = useSdk ? undefined : (opts.model ?? modelFor('compile', cfg));
   const concurrency = Math.max(1, opts.concurrency ?? 1);
   const ledger = readQueue(cfg.vault);
   const batch = ledger.filter((e) => e.status === 'pending').slice(0, n);
@@ -470,7 +519,10 @@ export async function compileNext(
     for (;;) {
       const entry = claimNext();
       if (!entry) return;
-      const outcome = await compileOne(lw, cfg, model, ledger, entry, opts.chunkChars ?? CHAPTER_CHUNK_CHARS);
+      const outcome = await compileOne(
+        lw, cfg, model, ledger, entry, opts.chunkChars ?? CHAPTER_CHUNK_CHARS,
+        { useSdk, modelId: compileModelId ?? '', deps: opts.deps },
+      );
       if (outcome === 'compiled') compiled++; else failed++;
     }
   }
@@ -486,7 +538,8 @@ const DRAIN_GPU_CONTENTION_BACKOFF_MS = 5_000;
 /**
  * Pure gate for ensureCompileDrain: an ollama-backed compile model shares the GPU with marker —
  * running both at once is a guaranteed CUDA OOM (see convert.ts's freeOllamaVram comment). Cloud
- * models (anthropic, etc.) never contend for the local GPU, so they're always cleared to run.
+ * models — anthropic ids and claude-sdk: ids alike (the Agent SDK talks to Anthropic's servers,
+ * not a local GPU) — never contend for the local GPU, so they're always cleared to run.
  */
 export function canCompileNow(compileModelId: string, conversionsActive: number): boolean {
   return !(compileModelId.startsWith(OLLAMA_PREFIX) && conversionsActive > 0);
@@ -497,7 +550,7 @@ export function canCompileNow(compileModelId: string, conversionsActive: number)
  * reasoning as canCompileNow: an ollama-backed compile model shares the one local GPU with marker
  * (and with itself — running several ollama generations at once against one GPU just serializes
  * anyway and risks the same OOM canCompileNow already guards against), so it stays strictly
- * sequential. A cloud compile model has no local GPU to contend for, so several chapters can
+ * sequential. A cloud compile model (anthropic or claude-sdk:) has no local GPU to contend for, so several chapters can
  * compile in parallel — 4 is a modest default (bounded by provider rate limits, not local
  * resources).
  */

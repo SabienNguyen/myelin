@@ -3,10 +3,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
+import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from '../claudeSdk.js';
 import type { HarnessConfig } from '../config.js';
 import type { Loreweaver } from '../mcp.js';
 import { modelFor } from '../models.js';
 import type { AnkiClient } from './client.js';
+
+/** Injectable seam for tests — see claudeSdk.ts. */
+export interface OutboundDeps {
+  sdkGenerate?: typeof claudeSdkGenerate;
+}
 
 export type GenerateCards = (
   slug: string,
@@ -57,7 +63,7 @@ function contentHash(front: string, back: string): string {
 }
 
 async function llmGenerateCards(
-  cfg: HarnessConfig, slug: string, page: any, misconceptions: string[],
+  cfg: HarnessConfig, slug: string, page: any, misconceptions: string[], deps: OutboundDeps = {},
 ): Promise<{ front: string; back: string }[]> {
   const parts = [
     `Page: ${page?.meta?.title ?? slug}`,
@@ -65,6 +71,25 @@ async function llmGenerateCards(
     misconceptions.length ? `Known misconceptions: ${misconceptions.join('; ')}` : '',
     CARD_PROMPT,
   ].filter(Boolean);
+  const cardModelId = cfg.models.card_gen.model;
+
+  if (isClaudeSdkModel(cardModelId)) {
+    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
+    // The Agent SDK path has no Output.object — ask for JSON-only and validate with the same
+    // zod schema the ai-sdk path uses for structured output.
+    const prompt = `${parts.join('\n\n')}\n\nRespond with ONLY valid JSON (no markdown fences, no `
+      + 'commentary) matching this exact shape: {"cards": [{"front": <string>, "back": <string>}]} '
+      + '(at most 4 cards).';
+    const { text } = await sdkGenerate({ model: stripClaudeSdkPrefix(cardModelId), prompt, maxTurns: 1 });
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      throw new Error(`claude-sdk card_gen returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
+    }
+    return cardsSchema.parse(parsed).cards;
+  }
+
   const { output } = await generateText({
     model: modelFor('card_gen', cfg),
     prompt: parts.join('\n\n'),
@@ -83,13 +108,13 @@ export async function syncOutbound(
   lw: Loreweaver,
   anki: AnkiClient,
   cfg: HarnessConfig,
-  opts: { generateCards?: GenerateCards } = {},
+  opts: { generateCards?: GenerateCards; deps?: OutboundDeps } = {},
 ): Promise<SyncOutboundResult> {
   const result: SyncOutboundResult = { pushed: 0, updated: 0, skipped: 0 };
   if (!(await anki.isUp())) return result; // Anki closed / connection refused — skip silently
 
   const generateCards: GenerateCards = opts.generateCards
-    ?? ((slug, page, misconceptions) => llmGenerateCards(cfg, slug, page, misconceptions));
+    ?? ((slug, page, misconceptions) => llmGenerateCards(cfg, slug, page, misconceptions, opts.deps));
 
   const state = (await lw.call('get_student_state', { student: cfg.student })) as Record<
     string, { effective: string; misconceptions: string[] }

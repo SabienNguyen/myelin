@@ -146,6 +146,29 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
   }, 30_000);
 });
 
+describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
+  it('routes llmGenerateCards to the injected fake and parses its JSON-only response', async () => {
+    const { cfg, lw } = await makeVaultLoreweaver('kid5', 'integrals', 'Integrals');
+    await bringToPracticing(lw, 'kid5', 'integrals');
+    const anki = new AnkiClient(url);
+
+    const calls: any[] = [];
+    const sdkGenerate = async (opts: any) => {
+      calls.push(opts);
+      return { text: JSON.stringify({ cards: [{ front: 'Q1', back: 'A1' }] }), toolCallNames: [] };
+    };
+    const sdkCfg = { ...cfg, models: { card_gen: { model: 'claude-sdk:sonnet' } } } as HarnessConfig;
+
+    const result = await syncOutbound(lw, anki, sdkCfg, { deps: { sdkGenerate } });
+    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].model).toBe('sonnet');
+    expect(calls[0].prompt).toContain('Integrals');
+
+    await lw.close();
+  }, 30_000);
+});
+
 describe('syncOutbound — Anki offline', () => {
   it('skips silently without touching Loreweaver when Anki is down', async () => {
     // Bind then immediately close a server to get a port nothing is listening on.
