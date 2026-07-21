@@ -34,4 +34,27 @@ export function mathDelims(md: string): string {
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => `$${tex}$`);
 }
 
-export const chatPreprocess = (md: string): string => mathDelims(wikiPreprocess(md));
+/** Local models occasionally degenerate and echo their chat-template control tokens
+ * (`<|im_start|>assistant`, `<|endoftext|>`, ...) as literal text instead of the harness ever
+ * seeing them as structure — server-side stop tokens are the root fix, but already-saved threads
+ * still contain the garbage, and other local models leak differently-shaped markers. This strips
+ * any `<|...|>`-style marker (optionally swallowing an immediately-following ChatML role word,
+ * since that's the shape that actually leaks: `<|im_start|>assistant `) and tidies the whitespace
+ * left behind. Chat-only: PagePanel renders trusted vault content straight through
+ * `wikiPreprocess` and must not run this. */
+export function scrubModelArtifacts(md: string): string {
+  return md
+    // `<|im_start|>` / `<|im_end|>`, optionally followed by a ChatML role word and the
+    // whitespace/newline right after it (e.g. "<|im_start|>assistant\n" or "<|im_end|> user ").
+    .replace(/<\|(?:im_start|im_end)\|>(?:[ \t]*(?:assistant|user|system)\b[ \t]*\n?)?/g, ' ')
+    // any other `<|marker|>` token: `<|endoftext|>`, or an unrecognized `<|foo_bar|>`.
+    .replace(/<\|[a-z_]+\|>/gi, ' ')
+    // collapse the blank runs the removals leave behind.
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+export const chatPreprocess = (md: string): string =>
+  mathDelims(wikiPreprocess(scrubModelArtifacts(md)));

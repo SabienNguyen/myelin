@@ -41,6 +41,10 @@ exclusively over stdio MCP.
    keep `tutor` and `compile` on Claude (they need the strongest reasoning/tool-use), and route
    `grader`, `quiz_gen`, and `card_gen` to a local model — those are higher-volume, lower-stakes
    calls that a good local coder/instruct model handles fine.
+   **Troubleshooting — leaked chat-template tokens:** a degenerate local model can echo its raw
+   ChatML control tokens (`<|im_start|>assistant`, `<|endoftext|>`, ...) as literal chat text; the
+   harness scrubs these at render (`scrubModelArtifacts` in `src/client/lib/panelBus.ts`) and the
+   bundled Ollama models also carry stop params to fix run-on generation at the source.
 
 ## Model routes: API key, local (ollama:), subscription (claude-sdk:)
 
