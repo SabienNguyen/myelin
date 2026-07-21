@@ -45,6 +45,11 @@ function resultMsg(sessionId: string): any {
     uuid: 'u-res', session_id: sessionId,
   };
 }
+// `stream_event` envelope wraps a raw Anthropic API stream event under its OWN uuid — deliberately
+// distinct from the assistant envelope's uuid below, matching the real-world shape that caused Bug A.
+function streamEventMsg(sessionId: string, uuid: string, event: any): any {
+  return { type: 'stream_event', event, parent_tool_use_id: null, uuid, session_id: sessionId };
+}
 
 async function drain(res: Response): Promise<string> { return res.text(); }
 
@@ -176,5 +181,79 @@ describe('resume-failure fallback', () => {
     expect(calls[0].options.resume).toBe('sess-stale');
     expect(calls[1].options.resume).toBeUndefined();
     expect(loadSdkSession(vault, 'thread-stale')).toBe('sess-fresh'); // overwritten
+  }, 30_000);
+});
+
+describe('Bug A: text streamed via partials must not also re-emit via the assistant fallback', () => {
+  it('streams the same text exactly once when stream_events (own uuid) precede the assistant message (different uuid)', async () => {
+    async function* fakeQuery(params: any) {
+      yield initMsg('sess-dedupe');
+      // Partial-stream path: content_block_start/delta/stop under stream-event uuid "u-stream-1".
+      yield streamEventMsg('sess-dedupe', 'u-stream-1', { type: 'message_start' });
+      yield streamEventMsg('sess-dedupe', 'u-stream-1', {
+        type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' },
+      });
+      yield streamEventMsg('sess-dedupe', 'u-stream-1', {
+        type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Hello there.' },
+      });
+      yield streamEventMsg('sess-dedupe', 'u-stream-1', { type: 'content_block_stop', index: 0 });
+      // Fallback path: the SAME text at the SAME index (0), but under a DIFFERENT uuid — the
+      // real-world shape (assistantMsg mints its own `u-asst-*` uuid, unrelated to the stream
+      // events' "u-stream-1"). Pre-fix, the uuid-keyed dedupe check never matches across envelopes,
+      // so this re-emits the already-streamed text a second time.
+      yield assistantMsg('sess-dedupe', [{ type: 'text', text: 'Hello there.' }]);
+      yield resultMsg('sess-dedupe');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    const res = await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any,
+      'learn', 'thread-dedupe',
+    );
+    const chunks = chunksOf(await drain(res));
+
+    const textStarts = chunks.filter((c) => c.type === 'text-start');
+    const deltas = chunks.filter((c) => c.type === 'text-delta' && c.delta === 'Hello there.');
+    expect(textStarts.length).toBe(1); // exactly one text block was opened, not two
+    expect(deltas.length).toBe(1); // the text streamed exactly once, not twice
+  }, 30_000);
+});
+
+describe('Bug B: loreweaver arg sanitization is wired through a live seam, not shadowed canUseTool', () => {
+  it('exposes a PreToolUse hook (not a bypassPermissions-shadowed canUseTool) that force-corrects the student id', async () => {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-hookcheck');
+      yield assistantMsg('sess-hookcheck', [{ type: 'text', text: 'ok' }]);
+      yield resultMsg('sess-hookcheck');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any,
+      'learn', 'thread-hookcheck',
+    ));
+
+    const options = calls[0].options;
+    // The dead combination (bypassPermissions relying on canUseTool-only sanitization) is gone:
+    // permissionMode is unchanged, but canUseTool is no longer the sanitization seam.
+    expect(options.permissionMode).toBe('bypassPermissions');
+    expect(options.canUseTool).toBeUndefined();
+
+    const matchers = options.hooks?.PreToolUse;
+    expect(Array.isArray(matchers) && matchers.length > 0).toBe(true);
+    const hookFn = matchers[0].hooks[0];
+
+    const result = await hookFn(
+      {
+        hook_event_name: 'PreToolUse',
+        session_id: 'sess-hookcheck', transcript_path: '/tmp/x', cwd: '/tmp',
+        tool_name: 'mcp__loreweaver__record_evidence',
+        tool_input: { student: 'WRONG-ID', slug: 'arith', kind: 'applied-correctly', note: 'x' },
+        tool_use_id: 'tu1',
+      },
+      'tu1',
+      { signal: new AbortController().signal },
+    );
+    expect(result.hookSpecificOutput.updatedInput.student).toBe(cfg.student);
   }, 30_000);
 });

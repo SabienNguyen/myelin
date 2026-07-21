@@ -146,17 +146,35 @@ export function createClaudeSdkTutorSession(
         blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools() }),
       },
       // Block/loreweaver tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK
-      // executes them itself, not us) — canUseTool's updatedInput is the only rewrite seam.
-      // UNVERIFIED against the real subscription login: the SDK's own docs say
-      // permissionMode 'bypassPermissions' "bypasses ALL permission checks", which may mean
-      // canUseTool is never invoked in that mode. If so, loreweaver arg sanitization (student-id /
-      // slug repair) silently doesn't apply on this path — allow-only, gap documented in README.
-      canUseTool: async (toolName, input) => {
-        if (toolName.startsWith(LOREWEAVER_PREFIX)) {
-          const bare = toolName.slice(LOREWEAVER_PREFIX.length);
-          return { behavior: 'allow', updatedInput: sanitizeToolArgs(input, bare, cfg.student, slugs) };
-        }
-        return { behavior: 'allow', updatedInput: input };
+      // executes them itself, not us). canUseTool would be the natural rewrite seam, but it is
+      // SDK-CONFIRMED DEAD here, on two independent counts: the SDK's own runtime warning
+      // (CLAUDE_SDK_CAN_USE_TOOL_SHADOWED, seen in the journal on a live subscription-login run)
+      // says permissionMode 'bypassPermissions' auto-approves every tool call before canUseTool is
+      // consulted — AND, separately, that bare `allowedTools` entries (exactly what `allowedTools`
+      // above is: plain tool names, no `Tool(scope)` syntax) shadow canUseTool too. So switching
+      // permissionMode to 'default' alone would NOT have fixed this — allowedTools would still
+      // shadow the callback. The SDK's own warning names the actual fix: a PreToolUse hook, which
+      // is not shadowed by either cause. PreToolUseHookSpecificOutput.updatedInput rewrites tool
+      // input the same way canUseTool's updatedInput would have (see the SDK's sdk.d.ts). Verified
+      // mechanism — see README's "Argument sanitization" section.
+      hooks: {
+        PreToolUse: [{
+          hooks: [async (input) => {
+            if (input.hook_event_name !== 'PreToolUse' || !input.tool_name.startsWith(LOREWEAVER_PREFIX)) {
+              return {};
+            }
+            const bare = input.tool_name.slice(LOREWEAVER_PREFIX.length);
+            const updatedInput = sanitizeToolArgs(input.tool_input, bare, cfg.student, slugs);
+            console.error('[sdk-sanitize]', input.tool_name);
+            return {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'allow',
+                updatedInput,
+              },
+            };
+          }],
+        }],
       },
     };
     if (resumeId) options.resume = resumeId;
@@ -210,7 +228,18 @@ export function createClaudeSdkTutorSession(
           // turn, and a single query() can contain several raw turns (multi-step tool loop).
           let blockKind = new Map<number, 'text' | 'tool_use'>();
           let textIds = new Map<number, string>();
-          const streamedTextIndices = new Set<string>(); // "<uuid>:<index>" already streamed via partials
+          // Indices already streamed via stream_event partials THIS raw API turn. Reset at
+          // stream_event message_start, consulted (and cleared) when the matching `assistant`
+          // envelope for that turn arrives. Deliberately keyed by index ALONE, not uuid: the
+          // stream_event envelopes and the `assistant` envelope for the same raw turn carry
+          // DIFFERENT uuids (confirmed against a persisted thread), so a uuid-qualified key never
+          // matches across the two message types and silently doubled every text block. Stream
+          // order within a single query() is sequential — message_start, then that turn's
+          // content_block_* events, then its `assistant` message, before the next turn's
+          // message_start — so pairing "the current set" with "the next assistant message" is
+          // safe. Fakes that emit no stream_events at all leave this empty, so the fallback below
+          // still emits everything (existing behavior for such fakes is preserved).
+          let streamedThisTurn = new Set<number>();
           let textCounter = 0;
           const pendingLoreweaverCalls = new Set<string>(); // toolCallId awaiting a tool_result
 
@@ -222,13 +251,14 @@ export function createClaudeSdkTutorSession(
               if (event.type === 'message_start') {
                 blockKind = new Map();
                 textIds = new Map();
+                streamedThisTurn = new Set();
               } else if (event.type === 'content_block_start') {
                 const block = event.content_block;
                 if (block?.type === 'text') {
                   const id = `sdk-text-${++textCounter}`;
                   blockKind.set(event.index, 'text');
                   textIds.set(event.index, id);
-                  streamedTextIndices.add(`${message.uuid}:${event.index}`);
+                  streamedThisTurn.add(event.index);
                   writer.write({ type: 'text-start', id });
                 } else if (block?.type === 'tool_use') {
                   blockKind.set(event.index, 'tool_use');
@@ -248,7 +278,7 @@ export function createClaudeSdkTutorSession(
                 if (block.type === 'text') {
                   // Fallback path: only re-emit if partials didn't already stream this exact block
                   // (includePartialMessages off, or a fake that skips stream_events entirely).
-                  if (!streamedTextIndices.has(`${message.uuid}:${i}`)) {
+                  if (!streamedThisTurn.has(i)) {
                     const id = `sdk-text-${++textCounter}`;
                     writer.write({ type: 'text-start', id });
                     if (block.text) writer.write({ type: 'text-delta', id, delta: block.text });
@@ -271,6 +301,9 @@ export function createClaudeSdkTutorSession(
                   }
                 }
               });
+              // This assistant envelope consumes the raw turn its stream_events (if any) described;
+              // clear so a later turn's fallback check isn't polluted by a stale index set.
+              streamedThisTurn = new Set();
             } else if (message.type === 'user') {
               const content = (message.message as any).content;
               if (Array.isArray(content)) {

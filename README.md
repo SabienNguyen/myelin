@@ -93,12 +93,17 @@ How it bridges the Agent SDK's run-to-completion `query()` async generator to a 
   (block tools and loreweaver tools alike) since partial JSON-delta tool input isn't useful to the
   UI, which needs the whole object anyway.
 - **Argument sanitization** (forcing the configured student id, repairing hallucinated slugs —
-  `sanitizeToolArgs`, shared with `session.ts`) runs through `canUseTool`'s `updatedInput`, the
-  only rewrite seam the Agent SDK exposes for tool calls it executes itself. **Unverified against
-  a live subscription login:** the SDK's own docs describe `permissionMode: 'bypassPermissions'`
-  as bypassing *all* permission checks, which may mean `canUseTool` is never invoked in that mode
-  — if so, this sanitization silently doesn't apply on the `claude-sdk:` tutor path. Verify with a
-  live run before relying on it; `allowedTools` scoping still holds regardless.
+  `sanitizeToolArgs`, shared with `session.ts`) runs through a `PreToolUse` hook's `updatedInput`.
+  **Verified against a live subscription login:** `canUseTool` was tried first, but the SDK's own
+  runtime warning (`CLAUDE_SDK_CAN_USE_TOOL_SHADOWED`, seen in the journal on a live run) confirmed
+  it is dead on this path for two independent reasons — `permissionMode: 'bypassPermissions'`
+  auto-approves every tool call before `canUseTool` is consulted, and separately, bare
+  `allowedTools` entries (which is what this route's `allowedTools` list is — plain tool names, no
+  `Tool(scope)` syntax) shadow `canUseTool` too, so switching `permissionMode` to `'default'` alone
+  would not have fixed it. The SDK's own warning names the actual fix: a `PreToolUse` hook is not
+  shadowed by either cause, and `PreToolUseHookSpecificOutput.updatedInput` rewrites tool input the
+  same way `canUseTool`'s `updatedInput` would have. Each sanitized call logs `[sdk-sanitize]
+  <tool>` to stderr so a live run can confirm the seam fires.
 - **Known limitations of this path** (only `web_search`/`read_url` and `ingest_paper` — both
   freeform-only research tools on the ai-sdk path — are not wired up here yet; everything else
   `session.ts`'s freeform mode offers, including `write_page`/`link_pages`/`compile_source`, is
