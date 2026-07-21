@@ -96,6 +96,22 @@ systemctl --user daemon-reload
 systemctl --user enable --now loreweaver-harness
 ```
 
+**Optional: the Gap sidecar (code-exercise blocks).** [The Gap](~/Dev/personal/the-gap) is a
+separate repo providing gauntlet-graded coding ladders on `:4930` (+ its own dev UI on `:4931`,
+unused by the harness until the code_exercise block ports it in a later task). If installed,
+point `harness.config.json`'s `gap.url` at it (default `http://localhost:4930`) — absent, the
+`/api/gap/*` proxy routes and the `gap` status badge simply don't register.
+```bash
+cp systemd/the-gap.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now the-gap
+```
+`pnpm demo` (this unit's `ExecStart`) runs a synchronous gauntlet pre-flight — building and
+grading every rung of the demo ladder — before the API server starts serving; that's by design
+(content re-earns its place every boot), and pushes boot time to several seconds. Watch
+`journalctl --user -u the-gap -f` on first start; `curl localhost:4930/api/ladder` should answer
+once it's up.
+
 ## Tests
 
 ```bash

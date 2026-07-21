@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AnkiClient } from './anki/client.js';
 import { backlogDays } from './anki/inbound.js';
+import { isGapUp } from './gapProxy.js';
 import type { Loreweaver } from './mcp.js';
 import type { HarnessConfig } from './config.js';
 
@@ -31,10 +32,15 @@ export function buildRestRoutes(
   app.get('/api/student', async (c) =>
     c.json(await lw.call('get_student_state', { student: cfg.student })));
   app.get('/api/status', async (c) => {
-    if (!anki) return c.json(status);
-    const up = await anki.isUp();
-    const backlog = !up && backlogDays(cfg.vault) > cfg.schedule.ankiBacklogNudgeDays;
-    return c.json({ ...status, anki: up ? 'up' : backlog ? 'backlog' : 'down' });
+    const extra: Record<string, string> = {};
+    if (anki) {
+      const up = await anki.isUp();
+      const backlog = !up && backlogDays(cfg.vault) > cfg.schedule.ankiBacklogNudgeDays;
+      extra.anki = up ? 'up' : backlog ? 'backlog' : 'down';
+    }
+    if (cfg.gap) extra.gap = (await isGapUp(cfg)) ? 'up' : 'down';
+    if (!anki && !cfg.gap) return c.json(status);
+    return c.json({ ...status, ...extra });
   });
   return app;
 }

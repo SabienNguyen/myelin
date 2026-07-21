@@ -40,4 +40,16 @@ describe('loadConfig', () => {
     writeFileSync(p, JSON.stringify({ ...valid, autoCompile: false }));
     expect(loadConfig(p).autoCompile).toBe(false);
   });
+  it('gap sidecar config is optional; absent by default', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'harness.config.json');
+    writeFileSync(p, JSON.stringify(valid));
+    expect(loadConfig(p).gap).toBeUndefined();
+  });
+  it('accepts a gap.url when present', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'harness.config.json');
+    writeFileSync(p, JSON.stringify({ ...valid, gap: { url: 'http://localhost:4930' } }));
+    expect(loadConfig(p).gap).toEqual({ url: 'http://localhost:4930' });
+  });
 });

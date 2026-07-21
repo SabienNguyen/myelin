@@ -18,6 +18,9 @@ const configSchema = z.object({
   // Optional research stack: a local SearXNG instance powering web_search/read_url tools
   // (freeform mode only). Absent -> the tools simply aren't registered.
   search: z.object({ searxng: z.string() }).optional(),
+  // Optional the-gap sidecar (code_exercise blocks — I2). Absent -> /api/gap/* routes aren't
+  // registered and the status badge is omitted, same "feature off when absent" pattern as search.
+  gap: z.object({ url: z.string() }).optional(),
   schedule: z.object({
     digestHour: z.number().int().min(0).max(23),
     quietHours: z.tuple([z.number(), z.number()]),

@@ -1,0 +1,21 @@
+[Unit]
+Description=The Gap — code-exercise sidecar (ladder API + gauntlet-gated content) for loreweaver-harness
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Dev/personal/the-gap
+# `pnpm demo` runs scripts/demo.mjs: a synchronous gauntlet pre-flight check (builds every rung
+# of the demo ladder and runs the full 5-gate gauntlet — content re-earns its place each boot;
+# this is the CORRECT behavior per docs/plan.md G8, not overhead to work around) before starting
+# the API server (apps/web/server.ts, :4930) and a Vite dev server (apps/web, :4931). Only :4930
+# is consumed by the harness proxy today; :4931 is unused until I2 ports the Gap's own UI, but
+# `pnpm demo` is the one command the gap repo actually exposes and ships both — running the demo
+# unit as-is (rather than hand-rolling a server-only ExecStart) keeps this service a thin wrapper
+# around a command the gap repo already maintains.
+ExecStart=/usr/bin/npm exec --yes pnpm@latest -- demo
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

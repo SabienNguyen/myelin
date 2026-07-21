@@ -8,6 +8,7 @@ import { Loreweaver } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
 import { buildIngestRoutes } from './ingestRoutes.js';
+import { buildGapRoutes } from './gapProxy.js';
 import { startScheduler } from './scheduler.js';
 import { AnkiClient } from './anki/client.js';
 import { syncInbound, backlogDays } from './anki/inbound.js';
@@ -66,5 +67,7 @@ app.route('/', buildRestRoutes(lw, cfg, {
 }, anki));
 app.route('/', buildChatRoute(lw, cfg));
 app.route('/', buildIngestRoutes(lw, cfg));
+// No-op (empty Hono app, 404s) when cfg.gap is absent — see gapProxy.ts's buildGapRoutes doc.
+app.route('/', buildGapRoutes(cfg));
 serve({ fetch: app.fetch, port: cfg.port });
 console.log(`loreweaver-harness on :${cfg.port}`);

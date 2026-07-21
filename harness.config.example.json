@@ -10,6 +10,7 @@
     "compile": { "model": "claude-sonnet-5" }
   },
   "loreweaver": { "command": "npx", "args": ["tsx", "~/Dev/personal/loreweaver/src/server.ts"], "embeddings": "ollama" },
+  "gap": { "url": "http://localhost:4930" },
   "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
   "port": 4820,
   "autoCompile": true
