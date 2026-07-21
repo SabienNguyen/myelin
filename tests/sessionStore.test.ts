@@ -38,6 +38,63 @@ describe('sessionStore threadId validation (single-writer invariant)', () => {
   });
 });
 
+describe('loadThread / saveThread — corrupt-file and duplicate-id hardening', () => {
+  // Regression: a saved thread that (however it happened) contains two messages sharing an `id`
+  // used to reach assistant-ui's MessageRepository unchanged, which throws "A message with the
+  // same id already exists" while restoring and blanks the ENTIRE app at mount.
+
+  it('loadThread dedupes messages with the same id, keeping the LAST occurrence, order preserved', () => {
+    const vault = makeVault();
+    const sessionsDir = join(vault, '.harness', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    const onDisk = [
+      { id: 'u1', v: 'first-copy' },
+      { id: 'a1', v: 'only-a1' },
+      { id: 'u1', v: 'second-copy' }, // duplicate of u1 — the more complete re-persist
+    ];
+    writeFileSync(join(sessionsDir, 'dupes.json'), JSON.stringify(onDisk));
+
+    const loaded = loadThread(vault, 'dupes');
+    expect(loaded).toEqual([
+      { id: 'a1', v: 'only-a1' },
+      { id: 'u1', v: 'second-copy' },
+    ]);
+  });
+
+  it('loadThread returns [] for a file containing invalid JSON, instead of throwing', () => {
+    const vault = makeVault();
+    const sessionsDir = join(vault, '.harness', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(join(sessionsDir, 'broken.json'), '{not valid json');
+
+    expect(loadThread(vault, 'broken')).toEqual([]);
+  });
+
+  it('loadThread returns [] for a file containing a JSON object (non-array)', () => {
+    const vault = makeVault();
+    const sessionsDir = join(vault, '.harness', 'sessions');
+    mkdirSync(sessionsDir, { recursive: true });
+    writeFileSync(join(sessionsDir, 'notarray.json'), JSON.stringify({ oops: 'this is an object' }));
+
+    expect(loadThread(vault, 'notarray')).toEqual([]);
+  });
+
+  it('saveThread dedupes duplicate ids before writing, so the file on disk is already clean', () => {
+    const vault = makeVault();
+    saveThread(vault, 'willdupe', [
+      { id: 'u1', v: 'stale' },
+      { id: 'u1', v: 'fresh' },
+      { id: 'a1', v: 'unique' },
+    ]);
+
+    const onDisk = JSON.parse(readFileSync(join(vault, '.harness', 'sessions', 'willdupe.json'), 'utf8'));
+    expect(onDisk).toEqual([
+      { id: 'u1', v: 'fresh' },
+      { id: 'a1', v: 'unique' },
+    ]);
+  });
+});
+
 describe('listThreads', () => {
   it('returns [] when no sessions dir exists yet', () => {
     const vault = makeVault();

@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync, appendFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { dedupeById } from '../shared/messages.js';
 
 const dir = (vault: string) => join(vault, '.harness', 'sessions');
 
@@ -17,12 +18,24 @@ function assertThreadId(threadId: string) {
 export function saveThread(vault: string, threadId: string, messages: unknown[]) {
   assertThreadId(threadId);
   mkdirSync(dir(vault), { recursive: true });
-  writeFileSync(join(dir(vault), `${threadId}.json`), JSON.stringify(messages));
+  writeFileSync(join(dir(vault), `${threadId}.json`), JSON.stringify(dedupeById(messages)));
 }
+/** Restores a persisted thread. A corrupt file (invalid JSON, or JSON that isn't an array) must
+ * never 500 the GET — it's treated as an empty thread instead. Deduped by id as a durable
+ * backstop: a saved thread with a duplicate id would otherwise blank the entire app at mount
+ * (assistant-ui's MessageRepository throws restoring two messages with the same id). */
 export function loadThread(vault: string, threadId: string): unknown[] {
   assertThreadId(threadId);
   const p = join(dir(vault), `${threadId}.json`);
-  return existsSync(p) ? JSON.parse(readFileSync(p, 'utf8')) : [];
+  if (!existsSync(p)) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(p, 'utf8'));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return dedupeById(parsed);
 }
 export function deleteThread(vault: string, threadId: string) {
   assertThreadId(threadId);

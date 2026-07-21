@@ -3,6 +3,7 @@ import { AssistantChatTransport, useChatRuntime } from '@assistant-ui/react-ai-s
 import type { UIMessage } from 'ai';
 import { useEffect, useState, type PropsWithChildren } from 'react';
 import { BLOCK_TOOL_NAMES } from '../shared/blocks.js';
+import { dedupeById } from '../shared/messages.js';
 import { toolkit } from './toolkit.js';
 
 /**
@@ -46,7 +47,7 @@ export function Runtime({ mode, threadId = 'default', children }: PropsWithChild
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
   useEffect(() => {
     fetch(`/api/thread/${threadId}`).then((r) => r.json())
-      .then((msgs) => setInitial(Array.isArray(msgs) ? msgs : []))
+      .then((msgs) => setInitial(Array.isArray(msgs) ? (dedupeById(msgs) as UIMessage[]) : []))
       .catch(() => setInitial([]));
   }, [threadId]);
   if (initial === null) return null; // one settled frame while the thread restores
