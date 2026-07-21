@@ -21,6 +21,9 @@
   --shadow: 0 1px 2px rgba(38, 30, 15, 0.05);
   --font-serif: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
   --font-prose: 'Newsreader Variable', Georgia, serif;
+  /* P2 (editor polish): bundled locally via @fontsource/jetbrains-mono (main.tsx) — no CDN. Falls
+     back to the existing system mono stack if the webfont hasn't loaded yet. */
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -578,10 +581,13 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   margin: 0.5rem 0;
 }
 .rung-pane { font-size: 0.85rem; }
-.rung-pane .cm-editor { height: auto; }
+.rung-pane .cm-editor { height: auto; font-family: var(--font-mono); }
 .rung-pane--readonly .cm-editor { opacity: 0.6; }
 .rung-pane--gap .cm-editor { border-top: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+/* Read-only panes' line-number gutter (P2) sits on the same dark oneDark chrome as the gap pane —
+   dim it in step with the rest of the pane instead of full-brightness against dimmed code. */
+.rung-pane--readonly .cm-gutters { opacity: 0.85; }
 
 .context-strip { color: var(--text-muted); font-size: 0.85rem; margin: 0.3rem 0; }
 .syntax-error-note { color: var(--bad); font-size: 0.85rem; }
@@ -592,14 +598,43 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .proximity-text { display: flex; justify-content: space-between; font-size: 0.8rem; margin-top: 0.25rem; color: var(--text-muted); }
 .proximity-fraction { font-weight: 600; color: var(--text); }
 
-.test-results-panel { list-style: none; margin: 0.5rem 0 0; padding: 0; font-size: 0.82rem; }
+/* P2: Run/Submit action row — Run stays the app's default (secondary) button look, Submit takes
+   the primary filled-accent treatment (same convention as .composer button). */
+.code-exercise .ide-action-row { display: flex; gap: 0.6rem; margin: 0.6rem 0; }
+.code-exercise .ide-btn { font-size: 0.85rem; padding: 0.4rem 1.1rem; }
+.code-exercise .ide-btn--run:disabled { opacity: 0.5; cursor: default; }
+.code-exercise .ide-btn--submit {
+  background: var(--accent);
+  color: var(--accent-text);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.code-exercise .ide-btn--submit:hover { filter: brightness(1.08); background: var(--accent); }
+
+.code-exercise .ide-submit-confirm {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin: 0 0 0.6rem;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 12%, var(--bg-panel));
+  font-size: 0.85rem;
+}
+.code-exercise .ide-submit-confirm p { margin: 0; color: var(--text); }
+.code-exercise .ide-submit-confirm-actions { display: flex; gap: 0.5rem; flex: none; }
+.code-exercise .ide-submit-confirm-actions .ide-btn { padding: 0.3rem 0.8rem; font-size: 0.82rem; }
+
+.test-results-panel { list-style: none; margin: 0.5rem 0 0; padding: 0; font-size: 0.82rem; font-family: var(--font-mono); }
 .test-result { display: flex; gap: 0.5em; padding: 0.15rem 0; }
 .test-result-status { font-weight: 700; width: 3.2em; flex: none; }
 .test-result--pass .test-result-status { color: var(--good); }
 .test-result--fail .test-result-status { color: var(--bad); }
 .test-results-empty { color: var(--text-muted); font-size: 0.82rem; }
 
-.worked-example-code { background: var(--bg-inset); border-radius: var(--radius-sm); padding: 0.7rem; font-size: 0.82rem; overflow-x: auto; }
+.worked-example-code { background: var(--bg-inset); border-radius: var(--radius-sm); padding: 0.7rem; font-size: 0.82rem; font-family: var(--font-mono); overflow-x: auto; }
 .worked-example-code--prior { opacity: 0.55; }
 .worked-example-check-option--correct { background: var(--good); color: var(--accent-text); border-color: var(--good); }
 .worked-example-check-note { color: var(--text-muted); font-size: 0.82rem; }
@@ -762,6 +797,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border-radius: var(--radius-sm);
   padding: 0.6rem;
   font-size: 0.78rem;
+  font-family: var(--font-mono);
   overflow-x: auto;
 }
 
@@ -778,7 +814,31 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   animation: ide-spin 0.7s linear infinite;
 }
 @keyframes ide-spin { to { transform: rotate(360deg); } }
-.code-exercise .ide-test-console { margin-top: 0.6rem; }
+
+/* Console (P2): test list + per-run timing, boxed like a terminal pane for legibility against the
+   dark CM6 chrome directly above it. */
+.code-exercise .ide-test-console {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.code-exercise .ide-console-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.code-exercise .ide-console-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.code-exercise .ide-run-timing { font-size: 0.78rem; font-family: var(--font-mono); color: var(--text-muted); }
 
 /* RungEditor's fillHeight variant (P1: "the CM6 editor fills the available height") — the gap
    pane grows inside `.ide-editor-column`'s flex column instead of sizing to its content. */

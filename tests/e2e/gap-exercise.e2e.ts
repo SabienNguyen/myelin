@@ -92,10 +92,20 @@ test('code_exercise: real gap sidecar renders the full_body editor, the referenc
   // Sanity: the reference answer really does pass the REAL sidecar's real tests (not a stub).
   expect(runBody.pass, `expected the-gap's own reference answer to pass: ${JSON.stringify(runBody)}`).toBe(true);
 
-  // Passing fires addResult -> the client's sendAutomaticallyWhen predicate auto-resubmits (the
+  // P2 (editor polish): Run and Submit are now separate — a passing auto-run alone no longer
+  // completes the block (see CodeExercise.tsx's `run()`/`doSubmit()` split). Submit is always
+  // clickable, but only completes immediately (no confirm) once React state reflects an
+  // all-passing run — `passingRun` above only proves the NETWORK response landed, not that the
+  // page's own fetch().then/setState chain has consumed it yet, so wait for the console to
+  // actually render zero failing results before clicking (the same state doSubmit() reads).
+  await expect(page.locator('.test-result--fail')).toHaveCount(0);
+  await expect(page.locator('.test-result--pass').first()).toBeVisible();
+
+  // Submitting fires addResult -> the client's sendAutomaticallyWhen predicate auto-resubmits (the
   // same real loop tutor-loop.e2e.ts exercises for quick_check) -> scripted turn 2 calls
-  // record_evidence.
+  // record_evidence — register the /api/chat wait BEFORE the click that triggers it.
   const followUp = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
+  await page.getByRole('button', { name: 'submit', exact: true }).click();
   const followUpRes = await followUp;
   // Consume the full SSE body before touching the vault file: record_evidence's actual write
   // happens server-side once its execute() resolves, which the stream reports via a
@@ -107,7 +117,12 @@ test('code_exercise: real gap sidecar renders the full_body editor, the referenc
   await followUpRes.text();
 
   // (3) Post-pass proof: the graded chip + turn-2 text from the scripted model's follow-up.
-  await expect(page.getByText('Nice — your own code passed the real tests.')).toBeVisible();
+  // Scoped to the actual message thread (not just getByText on the whole page): FocusRail.tsx's
+  // collapsed-panel summary (.focus-rail-lastline) joins the two most recent assistant turns'
+  // text into one string once focus mode drops on Submit (CodeExerciseInner's unmount effect),
+  // so an unscoped getByText for turn 2's text alone resolves ambiguously — it's a substring of
+  // BOTH the real message bubble and that joined summary line.
+  await expect(page.locator('.thread-viewport').getByText('Nice — your own code passed the real tests.')).toBeVisible();
   await expect(page.locator('.code-exercise.done .graded-tag')).toBeVisible();
   await page.screenshot({ path: '/tmp/i3-3.png', fullPage: true });
 

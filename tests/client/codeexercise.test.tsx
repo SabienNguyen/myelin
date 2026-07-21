@@ -108,7 +108,7 @@ describe('CodeExercise — full_body grading (mechanical, via real tests)', () =
   // Real timers: RungEditor's debounce (900ms — ../../../src/client/components/blocks/gap/hooks/
   // useDebouncedRun.ts) fires on a real setTimeout; jsdom + testing-library's findBy/waitFor use
   // real timers/MutationObserver internally too, so faking global timers here just hangs those.
-  it('passing tests with learner-authored code completes with wroteCode:true', async () => {
+  it('a passing auto-run shows results but does NOT complete the block — Run is not Submit (P2)', async () => {
     (globalThis as any).fetch = mockFetch({ pass: true, results: [{ name: 't1', pass: true }, { name: 't2', pass: true }] });
     const addResult = vi.fn();
     render(<CodeExerciseInner
@@ -118,17 +118,52 @@ describe('CodeExercise — full_body grading (mechanical, via real tests)', () =
     const input = await screen.findByLabelText('gap-input');
     fireEvent.change(input, { target: { value: 'return onToken(chunk);' } });
 
-    await new Promise((r) => { setTimeout(r, 1000); });
+    await screen.findByText('2/2 passing');
+    expect(addResult).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it('explicitly clicking Submit after a passing run completes with wroteCode:true', async () => {
+    (globalThis as any).fetch = mockFetch({ pass: true, results: [{ name: 't1', pass: true }, { name: 't2', pass: true }] });
+    const addResult = vi.fn();
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={addResult} Editor={TextEditor}
+    />);
+    const input = await screen.findByLabelText('gap-input');
+    fireEvent.change(input, { target: { value: 'return onToken(chunk);' } });
+
+    await screen.findByText('2/2 passing');
+    fireEvent.click(screen.getByRole('button', { name: /^submit$/i }));
 
     expect(addResult).toHaveBeenCalledExactlyOnceWith({
       completed: true, rungReached: 'full_body', testsPassed: 2, testsTotal: 2, wroteCode: true,
     });
   }, 10_000);
 
+  it('Submit with no run yet (or failing tests) opens an inline confirm instead of completing silently', async () => {
+    (globalThis as any).fetch = mockFetch({ pass: false, results: [{ name: 't1', pass: false }] });
+    const addResult = vi.fn();
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={addResult} Editor={TextEditor}
+    />);
+    await screen.findByLabelText('gap-input');
+
+    fireEvent.click(screen.getByRole('button', { name: /^submit$/i }));
+    expect(addResult).not.toHaveBeenCalled();
+    const confirm = await screen.findByRole('alertdialog', { name: /confirm submit/i });
+    expect(confirm).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /submit anyway/i }));
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({
+      completed: true, rungReached: 'full_body', testsPassed: 0, testsTotal: 0, wroteCode: false,
+    });
+  });
+
   it('passing tests with an empty gap (guided/watched only) completes with wroteCode:false', async () => {
     // An empty gap never even POSTs (InlineCompletion/full_body both skip a blank submission —
     // ported behavior) — simulate the guided case as a "stop here" on an untouched full_body
-    // screen instead, since full_body auto-completion only fires on a genuine pass.
+    // screen instead, since Submit only matters once there's something to submit.
     (globalThis as any).fetch = mockFetch();
     const addResult = vi.fn();
     render(<CodeExerciseInner

@@ -16,6 +16,13 @@
 // only fires that event (mount-with-no-result -> on, unmount -> off, via a cleanup effect so a
 // page reload or a "stop here"/pass-driven unmount both correctly clear it — see panelBus.ts's
 // `focusMode` event doc). CodeExerciseInner never touches the DOM outside the Stage itself.
+//
+// P2 (editor polish): full_body's Run and Submit are now explicit, separate actions. Run (button,
+// or Ctrl/Cmd+Enter inside the editor — RungEditor.tsx) just executes tests and shows
+// results/console; it NEVER calls finish() no matter how green the run is. Submit is the one and
+// only path that completes the block for full_body — always clickable, but if the latest run
+// isn't all-passing (or there's been no run yet) it opens an inline confirm first rather than
+// completing silently. The learner controls when the block actually commits.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CodeIcon as Code, CheckIcon as Check } from '@phosphor-icons/react';
@@ -34,6 +41,7 @@ import { DocsPanel } from './gap/DocsPanel.js';
 import { FocusLayout, type BriefTab } from './gap/FocusLayout.js';
 import { useDebouncedRun } from './gap/hooks/useDebouncedRun.js';
 import { useDetectorState } from './gap/hooks/useDetectorState.js';
+import { gapDraftKey, clearDraft } from './gap/draftStorage.js';
 import type { Rung, TemplateKind, TestResult } from './gap/types.js';
 
 const STEP_LABELS: Record<TemplateKind, string> = {
@@ -47,7 +55,9 @@ const STEP_LABELS: Record<TemplateKind, string> = {
 const TASK_BRIEF: Record<TemplateKind, string> = {
   worked_example: 'watch the pattern get built move by move — read-only, nothing graded here.',
   inline_completion: 'fill in the single gap below. tests run automatically as you type.',
-  full_body: 'write the whole function body. tests run automatically as you type — no run button needed.',
+  // P2 (editor polish): Run and Submit are now separate — see the buttons below the editor.
+  full_body: 'write the whole function body. tests run automatically as you type, or press run '
+    + '(ctrl/cmd+enter) any time — nothing is graded until you press submit.',
 };
 
 export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
@@ -69,6 +79,10 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   const [syntaxError, setSyntaxError] = useState<string | undefined>(undefined);
   const [planText, setPlanText] = useState('');
   const completedRef = useRef(false);
+  // P2 (editor polish): Run and Submit are now distinct actions (see the full_body render branch
+  // below) — `run()` only ever populates these two, never `finish()`.
+  const [lastRunMs, setLastRunMs] = useState<number | undefined>(undefined);
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
 
   // Two independent detector instances: full_body gets the full plan/predict/docs set (unchanged
   // from I2); inline_completion gets docs only (its own scoping rationale — see
@@ -125,11 +139,18 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     finish(false, template, results.filter((r) => r.pass).length, results.length, false);
   }
 
+  // P2 (editor polish): Run executes the tests and shows results/console — it never completes the
+  // block or records evidence, no matter how green (that's Submit's job, below). This fires both
+  // from useDebouncedRun (auto-run-as-you-type, unchanged from before) and from an explicit
+  // trigger (the Run button, Ctrl/Cmd+Enter inside the editor).
   const run = useCallback(async (currentCode: string) => {
     if (!currentRung || currentRung.template !== 'full_body') return;
     setRunning(true);
+    setConfirmSubmit(false); // a fresh run supersedes any pending "submit anyway?" confirm.
+    const startedAt = performance.now();
     try {
       const response = await postRun(currentRung.id, currentCode);
+      setLastRunMs(Math.round(performance.now() - startedAt));
       setHasRun(true);
       setResults(response.results);
       setSyntaxError(response.syntaxError);
@@ -139,17 +160,37 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
         failingSet: response.results.filter((r) => !r.pass).map((r) => r.name),
         syntaxError: response.syntaxError !== undefined,
       });
-      if (response.pass) {
-        const wroteCode = currentCode.trim() !== '';
-        const testsPassed = response.results.filter((r) => r.pass).length;
-        finish(true, 'full_body', testsPassed, response.results.length, wroteCode);
-      }
     } finally {
       setRunning(false);
     }
-  }, [currentRung, detector, finish]);
+  }, [currentRung, detector]);
 
   useDebouncedRun(code, run);
+
+  const fullBodyDraftKey = currentRung ? gapDraftKey(currentRung.artifactId, currentRung.template) : undefined;
+
+  // Submit is the explicit, learner-controlled completion gesture — Run never fires `finish()`.
+  // wroteCode is (re)computed here off the CURRENT gap contents rather than whatever code the
+  // last run happened to execute: the definition itself — "did the learner type anything into the
+  // gap" — is unchanged from before (I2), only the moment it's evaluated moved from "the instant a
+  // run happened to pass" to "the instant the learner submits", which is the direct, necessary
+  // consequence of decoupling running tests from completing the block.
+  const doSubmit = useCallback(() => {
+    setConfirmSubmit(false);
+    const testsPassed = results.filter((r) => r.pass).length;
+    const wroteCode = code.trim() !== '';
+    finish(true, 'full_body', testsPassed, results.length, wroteCode);
+    if (fullBodyDraftKey) clearDraft(fullBodyDraftKey);
+  }, [results, code, finish, fullBodyDraftKey]);
+
+  // Reasonable enabling rule (spec): Submit is always clickable. If the latest run has failing
+  // tests — or there's been no run at all yet — clicking it opens an inline confirm instead of
+  // completing immediately; a second click ("submit anyway") commits.
+  const allPassing = hasRun && results.length > 0 && results.every((r) => r.pass);
+  function onSubmitClick(): void {
+    if (allPassing) { doSubmit(); return; }
+    setConfirmSubmit(true);
+  }
 
   const onFullBodyGapChange = useCallback((nextCode: string) => {
     setCode(nextCode);
@@ -247,10 +288,46 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
               visiblePre={currentRung.visible_pre}
               visiblePost={currentRung.visible_post}
               onGapChange={onFullBodyGapChange}
+              draftKey={fullBodyDraftKey}
+              onRunRequest={() => run(code)}
               fillHeight
             />
             {syntaxError !== undefined && <SyntaxErrorNote message={syntaxError} />}
+
+            <div className="ide-action-row">
+              <button
+                type="button"
+                className="ide-btn ide-btn--run"
+                onClick={() => run(code)}
+                disabled={running}
+              >
+                {running ? 'running…' : 'run'}
+              </button>
+              <button type="button" className="ide-btn ide-btn--submit" onClick={onSubmitClick}>
+                submit
+              </button>
+            </div>
+            {confirmSubmit && (
+              <div className="ide-submit-confirm" role="alertdialog" aria-label="confirm submit">
+                <p>tests aren&apos;t passing — submit anyway?</p>
+                <div className="ide-submit-confirm-actions">
+                  <button type="button" className="ide-btn ide-btn--submit" onClick={doSubmit}>
+                    submit anyway
+                  </button>
+                  <button type="button" onClick={() => setConfirmSubmit(false)}>
+                    keep editing
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="ide-test-console">
+              <div className="ide-console-header">
+                <h4 className="ide-console-title">tests</h4>
+                {lastRunMs !== undefined && (
+                  <span className="ide-run-timing">ran in {lastRunMs}ms</span>
+                )}
+              </div>
               <TestResultsPanel results={results} />
             </div>
           </div>
