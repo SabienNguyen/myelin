@@ -12,31 +12,37 @@
 // are full_body concerns. The gap here is a few lines, already context-lined and hint-carrying by
 // design — an idle-on-empty-gap plan offer would compete with the hint that already exists for
 // this exact case, and a 3-run predict-then-run panel doesn't fit a single-branch gap. Only the
-// syntax-error streak — a signal orthogonal to the gap's size — still applies, so this screen runs
-// its own detector instance and renders just the docs offer when it fires.
+// syntax-error streak — a signal orthogonal to the gap's size — still applies.
+//
+// P1 (docs/superpowers/plans/2026-07-20-gap-integration.md IDE focus mode): the detector instance
+// and the docs offer's rendering both moved to the caller (CodeExercise.tsx) — the offer now
+// docks as a brief-panel tab (FocusLayout.tsx) alongside full_body's plan/predict/docs tabs
+// instead of floating as its own aside card here, so the parent needs the live `offers` state to
+// build that tab list. The context_line strip also moved to the caller's brief panel (the rung's
+// "context/contract line" — see FocusLayout's `contextLine` prop) to avoid rendering it twice.
 
 import { useCallback, useState } from 'react';
 import type { Rung } from './types.js';
 import { RungEditor } from './RungEditor.js';
 import { SyntaxErrorNote } from './SyntaxErrorNote.js';
-import { OfferCard } from './OfferPanel.js';
-import { DocsPanel } from './DocsPanel.js';
 import { useDebouncedRun } from './hooks/useDebouncedRun.js';
-import { useDetectorState } from './hooks/useDetectorState.js';
+import type { UseDetectorState } from './hooks/useDetectorState.js';
 import { postRun } from './api.js';
 
 export interface InlineCompletionProps {
   rung: Rung;
   /** Called when the learner dismisses the right-answer success state ("continue" affordance). */
   onContinue: () => void;
+  /** Owned by the caller (one instance per active inline_completion rung) so its `offers` can
+   *  also drive the brief panel's Docs tab — see this file's top comment. */
+  detector: UseDetectorState;
 }
 
-export function InlineCompletion({ rung, onContinue }: InlineCompletionProps) {
+export function InlineCompletion({ rung, onContinue, detector }: InlineCompletionProps) {
   const [code, setCode] = useState('');
   const [hasRun, setHasRun] = useState(false);
   const [pass, setPass] = useState(false);
   const [syntaxError, setSyntaxError] = useState<string | undefined>(undefined);
-  const detector = useDetectorState();
 
   const run = useCallback(
     async (currentCode: string) => {
@@ -65,8 +71,6 @@ export function InlineCompletion({ rung, onContinue }: InlineCompletionProps) {
 
   return (
     <div className="inline-completion">
-      {rung.prose.context_line !== undefined && <p className="context-strip">{rung.prose.context_line}</p>}
-
       <RungEditor visiblePre={rung.visible_pre} visiblePost={rung.visible_post} onGapChange={setCode} />
 
       {syntaxError !== undefined && <SyntaxErrorNote message={syntaxError} />}
@@ -83,14 +87,6 @@ export function InlineCompletion({ rung, onContinue }: InlineCompletionProps) {
           <button type="button" onClick={onContinue}>
             continue
           </button>
-        </div>
-      )}
-
-      {detector.offers.docs && (
-        <div className="offer-panel">
-          <OfferCard onDismiss={() => detector.dismissOffer('docs')}>
-            <DocsPanel artifactId={rung.artifactId} />
-          </OfferCard>
         </div>
       )}
     </div>

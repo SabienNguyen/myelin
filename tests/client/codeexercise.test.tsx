@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { CodeExerciseInner } from '../../src/client/components/blocks/CodeExercise.js';
+import { CodeExercise, CodeExerciseInner } from '../../src/client/components/blocks/CodeExercise.js';
+import { panelBus } from '../../src/client/lib/panelBus.js';
 
 afterEach(() => cleanup());
 
@@ -96,7 +97,10 @@ describe('CodeExercise — ladder sequence enforcement', () => {
       addResult={vi.fn()} Editor={TextEditor}
     />);
     await screen.findByLabelText('gap-input');
-    expect(screen.queryByText(/worked example/i)).toBeNull();
+    // No ladder nav (that's the "no skipping ahead" invariant this test guards) — a Task-tab
+    // sibling-worked-example link legitimately mentions "worked example" text elsewhere (P1), so
+    // this checks the ladder progress nav specifically rather than any occurrence of the phrase.
+    expect(screen.queryByRole('navigation', { name: /ladder progress/i })).toBeNull();
   });
 });
 
@@ -137,4 +141,76 @@ describe('CodeExercise — full_body grading (mechanical, via real tests)', () =
       completed: false, rungReached: 'full_body', testsPassed: 0, testsTotal: 0, wroteCode: false,
     });
   });
+});
+
+describe('CodeExercise — IDE focus mode (P1, docs/superpowers/plans/2026-07-20-gap-integration.md)', () => {
+  beforeEach(() => { (globalThis as any).fetch = mockFetch(); });
+
+  it('mounting with no result emits focusMode:true; unmounting emits focusMode:false', async () => {
+    const seen: boolean[] = [];
+    const un = panelBus.subscribe((e) => { if (e.type === 'focusMode') seen.push(e.on); });
+    const { unmount } = render(
+      <CodeExerciseInner args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }} addResult={vi.fn()} Editor={TextEditor} />,
+    );
+    await screen.findByLabelText('gap-input');
+    expect(seen).toEqual([true]);
+    unmount();
+    expect(seen).toEqual([true, false]);
+    un();
+  });
+
+  it('the CodeExercise wrapper only mounts the focus-triggering inner while unanswered — a result clears focus mode', async () => {
+    // StagePortal (CodeExercise's Inner is only ever mounted via it) portals into a real
+    // #stage-root element — provide the same target SidePanel.tsx renders in the real app.
+    const stageRoot = document.createElement('div');
+    stageRoot.id = 'stage-root';
+    document.body.appendChild(stageRoot);
+
+    const seen: boolean[] = [];
+    const un = panelBus.subscribe((e) => { if (e.type === 'focusMode') seen.push(e.on); });
+    const { rerender } = render(
+      <CodeExercise args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }} result={undefined} addResult={vi.fn()} />,
+    );
+    await screen.findByText(/code exercise waiting on the stage/i);
+    expect(seen).toEqual([true]);
+
+    rerender(
+      <CodeExercise
+        args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+        result={{ completed: true, rungReached: 'full_body', testsPassed: 2, testsTotal: 2, wroteCode: true }}
+        addResult={vi.fn()}
+      />,
+    );
+    expect(seen).toEqual([true, false]);
+    un();
+    stageRoot.remove();
+  });
+});
+
+describe('CodeExercise — ambient offers dock as brief-panel tabs (P1)', () => {
+  it('a fired detector adds a lit tab to the brief panel; dismissing it removes the tab', async () => {
+    // Two consecutive syntax-error runs trip the docs detector (DOCS_STREAK = 2, detectors.ts).
+    (globalThis as any).fetch = mockFetch({ pass: false, results: [], syntaxError: 'unexpected token' });
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={vi.fn()} Editor={TextEditor}
+    />);
+    const input = await screen.findByLabelText('gap-input');
+
+    expect(screen.queryByRole('tab', { name: /docs/i })).toBeNull();
+
+    fireEvent.change(input, { target: { value: 'a' } });
+    await new Promise((r) => { setTimeout(r, 1000); });
+    fireEvent.change(input, { target: { value: 'ab' } });
+    await new Promise((r) => { setTimeout(r, 1000); });
+
+    const docsTab = await screen.findByRole('tab', { name: /docs/i });
+    expect(docsTab.querySelector('.ide-tab-badge')).not.toBeNull();
+
+    fireEvent.click(docsTab);
+    expect(await screen.findByText(/you look like you might be here/i)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
+    expect(screen.queryByRole('tab', { name: /docs/i })).toBeNull();
+  }, 10_000);
 });

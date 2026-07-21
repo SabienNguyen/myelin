@@ -41,9 +41,16 @@ export interface RungEditorProps {
   visiblePost: string;
   initialGap?: string;
   onGapChange: (code: string) => void;
+  /** P1 (docs/superpowers/plans/2026-07-20-gap-integration.md IDE focus mode): the gap pane
+   *  grows to fill the available column height instead of sizing to its content — see
+   *  `.rung-editor-frame--fill` in styles.css. Off by default so InlineCompletion's inline,
+   *  content-sized use is unaffected. */
+  fillHeight?: boolean;
 }
 
-export function RungEditor({ visiblePre, visiblePost, initialGap = '', onGapChange }: RungEditorProps) {
+export function RungEditor({
+  visiblePre, visiblePost, initialGap = '', onGapChange, fillHeight = false,
+}: RungEditorProps) {
   const preRef = useRef<HTMLDivElement>(null);
   const postRef = useRef<HTMLDivElement>(null);
   const gapRef = useRef<HTMLDivElement>(null);
@@ -76,7 +83,7 @@ export function RungEditor({ visiblePre, visiblePost, initialGap = '', onGapChan
   }, []);
 
   return (
-    <div className="rung-editor-frame">
+    <div className={fillHeight ? 'rung-editor-frame rung-editor-frame--fill' : 'rung-editor-frame'}>
       <div ref={preRef} className="rung-pane rung-pane--readonly rung-pane--pre" aria-label="code before the gap" />
       {/* data-testid is a tiny test-only affordance (I3, docs/superpowers/plans/2026-07-20-
           gap-integration.md): tests/e2e/gap-exercise.e2e.ts locates this pane to dispatch a real

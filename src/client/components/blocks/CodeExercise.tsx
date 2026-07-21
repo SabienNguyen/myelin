@@ -7,6 +7,15 @@
 // ({completed, rungReached, testsPassed, testsTotal, wroteCode}) either when the sequence
 // completes naturally, or when the learner abandons early via the explicit "stop here" affordance
 // (completed:false, rungReached set to whatever step they were on).
+//
+// P1 (docs/superpowers/plans/2026-07-20-gap-integration.md): IDE focus mode. All three rungs now
+// render inside FocusLayout.tsx's shared left-brief/right-content shell instead of each having
+// their own ad hoc layout, and the ambient offers (plan/predict/docs) dock as brief-panel tabs
+// (see FocusLayout's top comment) instead of a floating aside. Focus mode ITSELF — collapsing the
+// chat column to a rail, widening the Stage — is owned by App.tsx via a panelBus event; this file
+// only fires that event (mount-with-no-result -> on, unmount -> off, via a cleanup effect so a
+// page reload or a "stop here"/pass-driven unmount both correctly clear it — see panelBus.ts's
+// `focusMode` event doc). CodeExerciseInner never touches the DOM outside the Stage itself.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CodeIcon as Code, CheckIcon as Check } from '@phosphor-icons/react';
@@ -19,7 +28,10 @@ import { InlineCompletion } from './gap/InlineCompletion.js';
 import { ProximityHeader } from './gap/ProximityHeader.js';
 import { TestResultsPanel } from './gap/TestResultsPanel.js';
 import { SyntaxErrorNote } from './gap/SyntaxErrorNote.js';
-import { OfferPanel } from './gap/OfferPanel.js';
+import { PlanPanel } from './gap/PlanPanel.js';
+import { PredictRunPanel } from './gap/PredictRunPanel.js';
+import { DocsPanel } from './gap/DocsPanel.js';
+import { FocusLayout, type BriefTab } from './gap/FocusLayout.js';
 import { useDebouncedRun } from './gap/hooks/useDebouncedRun.js';
 import { useDetectorState } from './gap/hooks/useDetectorState.js';
 import type { Rung, TemplateKind, TestResult } from './gap/types.js';
@@ -28,6 +40,14 @@ const STEP_LABELS: Record<TemplateKind, string> = {
   worked_example: 'worked example',
   inline_completion: 'inline completion',
   full_body: 'full body',
+};
+
+// Task-tab brief copy, tone-clean (no praise/emoji — spec invariant): what this screen is for,
+// not encouragement about it.
+const TASK_BRIEF: Record<TemplateKind, string> = {
+  worked_example: 'watch the pattern get built move by move — read-only, nothing graded here.',
+  inline_completion: 'fill in the single gap below. tests run automatically as you type.',
+  full_body: 'write the whole function body. tests run automatically as you type — no run button needed.',
 };
 
 export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
@@ -44,12 +64,28 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   // full_body-only run state — worked_example and inline_completion manage their own internally.
   const [code, setCode] = useState('');
   const [hasRun, setHasRun] = useState(false);
+  const [running, setRunning] = useState(false);
   const [results, setResults] = useState<TestResult[]>([]);
   const [syntaxError, setSyntaxError] = useState<string | undefined>(undefined);
   const [planText, setPlanText] = useState('');
   const completedRef = useRef(false);
 
+  // Two independent detector instances: full_body gets the full plan/predict/docs set (unchanged
+  // from I2); inline_completion gets docs only (its own scoping rationale — see
+  // InlineCompletion.tsx's top comment). worked_example has no offers at all. Both instances exist
+  // for the component's whole lifetime rather than per-step (MVP: one ladder, one pass through) —
+  // a stray idle tick while the other screen is active is harmless.
   const detector = useDetectorState();
+  const inlineDetector = useDetectorState();
+
+  // P1: focus mode. Fires exactly once on mount (this component only ever mounts when there's no
+  // result yet — see CodeExercise() below) and clears via cleanup, which covers BOTH natural exits
+  // (a result arrives -> the parent stops rendering this component -> unmount) and abnormal ones
+  // (thread switch, reload).
+  useEffect(() => {
+    panelBus.setFocusMode(true);
+    return () => panelBus.setFocusMode(false);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,6 +101,9 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
 
   const template = sequence[stepIndex];
   const currentRung = rungs?.find((r) => r.template === template) ?? null;
+  // I2's ladder response carries a sibling worked-example artifact even in single-rung full_body
+  // mode (getLadder() always returns the whole rung set) — used for the Task tab's sibling link.
+  const siblingRung = rungs?.find((r) => r.template === 'worked_example') ?? null;
 
   const finish = useCallback((
     completed: boolean, rungReached: TemplateKind, testsPassed: number, testsTotal: number, wroteCode: boolean,
@@ -88,20 +127,25 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
 
   const run = useCallback(async (currentCode: string) => {
     if (!currentRung || currentRung.template !== 'full_body') return;
-    const response = await postRun(currentRung.id, currentCode);
-    setHasRun(true);
-    setResults(response.results);
-    setSyntaxError(response.syntaxError);
-    detector.dispatch({
-      type: 'run-result',
-      at: Date.now(),
-      failingSet: response.results.filter((r) => !r.pass).map((r) => r.name),
-      syntaxError: response.syntaxError !== undefined,
-    });
-    if (response.pass) {
-      const wroteCode = currentCode.trim() !== '';
-      const testsPassed = response.results.filter((r) => r.pass).length;
-      finish(true, 'full_body', testsPassed, response.results.length, wroteCode);
+    setRunning(true);
+    try {
+      const response = await postRun(currentRung.id, currentCode);
+      setHasRun(true);
+      setResults(response.results);
+      setSyntaxError(response.syntaxError);
+      detector.dispatch({
+        type: 'run-result',
+        at: Date.now(),
+        failingSet: response.results.filter((r) => !r.pass).map((r) => r.name),
+        syntaxError: response.syntaxError !== undefined,
+      });
+      if (response.pass) {
+        const wroteCode = currentCode.trim() !== '';
+        const testsPassed = response.results.filter((r) => r.pass).length;
+        finish(true, 'full_body', testsPassed, response.results.length, wroteCode);
+      }
+    } finally {
+      setRunning(false);
     }
   }, [currentRung, detector, finish]);
 
@@ -124,55 +168,94 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     return <p className="code-exercise-error">no {template} rung available for pattern &quot;{args.pattern}&quot;.</p>;
   }
 
+  const ladder = sequence.length > 1
+    ? { steps: sequence.map((t, i) => `${i + 1}. ${STEP_LABELS[t]}`), stepIndex }
+    : undefined;
+
+  const taskTab: BriefTab = {
+    key: 'task',
+    label: 'Task',
+    active: false,
+    content: (
+      <div className="ide-task-brief">
+        <p>{TASK_BRIEF[template]}</p>
+        {template === 'full_body' && siblingRung && (
+          <details className="ide-sibling-link">
+            <summary>see the worked example ({siblingRung.artifactId})</summary>
+            <pre>{(siblingRung.prose.moves ?? []).map((m) => m.code).join('')}</pre>
+          </details>
+        )}
+      </div>
+    ),
+  };
+
+  const offerTabs: BriefTab[] = [];
+  if (template === 'full_body') {
+    if (detector.offers.plan) {
+      offerTabs.push({
+        key: 'plan', label: 'Plan', active: true,
+        content: <PlanPanel artifactId={currentRung.artifactId} value={planText} onChange={setPlanText} />,
+        onDismiss: () => detector.dismissOffer('plan'),
+      });
+    }
+    if (detector.offers.predictRun) {
+      offerTabs.push({
+        key: 'predict', label: 'Predict', active: true,
+        content: <PredictRunPanel artifactId={currentRung.artifactId} rungId={currentRung.id} code={code} />,
+        onDismiss: () => detector.dismissOffer('predictRun'),
+      });
+    }
+    if (detector.offers.docs) {
+      offerTabs.push({
+        key: 'docs', label: 'Docs', active: true,
+        content: <DocsPanel artifactId={currentRung.artifactId} />,
+        onDismiss: () => detector.dismissOffer('docs'),
+      });
+    }
+  } else if (template === 'inline_completion' && inlineDetector.offers.docs) {
+    offerTabs.push({
+      key: 'docs', label: 'Docs', active: true,
+      content: <DocsPanel artifactId={currentRung.artifactId} />,
+      onDismiss: () => inlineDetector.dismissOffer('docs'),
+    });
+  }
+
   return (
     <div className="block code-exercise">
-      {sequence.length > 1 && (
-        <nav className="ladder-steps" aria-label="ladder progress">
-          {sequence.map((t, i) => (
-            <span
-              key={t}
-              className={i === stepIndex ? 'ladder-step ladder-step--current' : 'ladder-step'}
-              aria-current={i === stepIndex ? 'step' : undefined}
-            >
-              {i + 1}. {STEP_LABELS[t]}
-            </span>
-          ))}
-        </nav>
-      )}
+      <FocusLayout
+        key={currentRung.id}
+        patternTitle={args.pattern}
+        contextLine={currentRung.prose.context_line}
+        ladder={ladder}
+        tabs={[taskTab, ...offerTabs]}
+      >
+        {template === 'worked_example' && (
+          <WorkedExample rung={currentRung} onContinue={advanceOrFinish} />
+        )}
 
-      {template === 'worked_example' && (
-        <WorkedExample key={currentRung.id} rung={currentRung} onContinue={advanceOrFinish} />
-      )}
+        {template === 'inline_completion' && (
+          <InlineCompletion rung={currentRung} onContinue={advanceOrFinish} detector={inlineDetector} />
+        )}
 
-      {template === 'inline_completion' && (
-        <InlineCompletion key={currentRung.id} rung={currentRung} onContinue={advanceOrFinish} />
-      )}
-
-      {template === 'full_body' && (
-        <div className="code-exercise-columns">
-          <div className="code-exercise-main">
-            <ProximityHeader results={results} hasRun={hasRun} />
+        {template === 'full_body' && (
+          <div className="ide-editor-column">
+            <div className="ide-header-strip">
+              <ProximityHeader results={results} hasRun={hasRun} />
+              {running && <span className="ide-spinner" role="status" aria-label="running tests" />}
+            </div>
             <Editor
               visiblePre={currentRung.visible_pre}
               visiblePost={currentRung.visible_post}
               onGapChange={onFullBodyGapChange}
+              fillHeight
             />
             {syntaxError !== undefined && <SyntaxErrorNote message={syntaxError} />}
-            <TestResultsPanel results={results} />
+            <div className="ide-test-console">
+              <TestResultsPanel results={results} />
+            </div>
           </div>
-          <OfferPanel
-            offers={detector.offers}
-            artifactId={currentRung.artifactId}
-            rungId={currentRung.id}
-            code={code}
-            planText={planText}
-            onPlanTextChange={setPlanText}
-            onDismissPlan={() => detector.dismissOffer('plan')}
-            onDismissPredictRun={() => detector.dismissOffer('predictRun')}
-            onDismissDocs={() => detector.dismissOffer('docs')}
-          />
-        </div>
-      )}
+        )}
+      </FocusLayout>
 
       <div className="code-exercise-controls">
         <button type="button" className="code-exercise-stop" onClick={stopHere}>

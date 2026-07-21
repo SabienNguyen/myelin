@@ -5,6 +5,7 @@ import { Thread } from './components/Thread.js';
 import { SidePanel } from './components/SidePanel.js';
 import { TopbarStatus } from './components/TopbarStatus.js';
 import { HistoryMenu } from './components/HistoryMenu.js';
+import { FocusRail } from './components/FocusRail.js';
 import { panelBus } from './lib/panelBus.js';
 import { parseHash, serializeHash } from './lib/urlState.js';
 
@@ -14,6 +15,18 @@ export function App() {
   const [ingesting, setIngesting] = useState(false);
   const [ingestStatus, setIngestStatus] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // P1 (docs/superpowers/plans/2026-07-20-gap-integration.md): IDE focus mode. A code_exercise
+  // block (CodeExercise.tsx) emits panelBus `focusMode` on mount-with-no-result / unmount; App
+  // owns the resulting `.app.focus-mode` class (documented choice — least invasive against the
+  // existing SidePanel/App structure: a CSS grid change, not a new layout component tree). `peek`
+  // is local UI state (not part of the bus event) letting the learner glance at chat without
+  // exiting focus mode; it always resets when focus mode itself turns off, so the next exercise
+  // starts collapsed again.
+  const [focusMode, setFocusMode] = useState(false);
+  const [peek, setPeek] = useState(false);
+  useEffect(() => panelBus.subscribe((e) => { if (e.type === 'focusMode') setFocusMode(e.on); }), []);
+  useEffect(() => { if (!focusMode) setPeek(false); }, [focusMode]);
 
   // Deep-linking (T27): the URL hash encodes `#/t/<threadId>[/<tab>|/page/<slug>]`. App owns
   // only the threadId slice — SidePanel owns tab/page and re-parses the hash to preserve this
@@ -59,9 +72,11 @@ export function App() {
     }
   }
 
+  const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
+
   return (
     <Runtime key={threadId} mode={mode} threadId={threadId}>
-      <div className="app">
+      <div className={appClass}>
         <header className="topbar">
           <h1><BookOpenText size={20} weight="duotone" /> Loreweaver</h1>
           <HistoryMenu activeId={threadId} onSelect={selectThread} />
@@ -78,7 +93,10 @@ export function App() {
           </select>
         </header>
         <main className="workspace">
-          <Thread />
+          <div className="thread-column">
+            <FocusRail peek={peek} onTogglePeek={() => setPeek((p) => !p)} />
+            <Thread />
+          </div>
           <SidePanel />
         </main>
       </div>
