@@ -100,6 +100,23 @@ export async function gradeBlockOutput(
     };
   }
 
+  if (tool === 'code_exercise') {
+    // Mechanical (docs/superpowers/plans/2026-07-20-gap-integration.md I2 contract): NEVER calls a
+    // model — completed && wroteCode -> 'applied-correctly' (passed real tests with own code);
+    // completed && !wroteCode -> 'exposed' (watched/completed guided rungs only, no own code
+    // graded); !completed -> 'struggled' (abandoned via the "stop here" affordance).
+    const kind: EvidenceKind = !result.completed ? 'struggled'
+      : result.wroteCode ? 'applied-correctly' : 'exposed';
+    const note = result.completed
+      ? (result.wroteCode ? 'passed real tests with own code' : `completed ${result.rungReached} (guided)`)
+      : `stopped at ${result.rungReached}`;
+    return {
+      verdict: result.completed ? 'correct' : 'incorrect',
+      detail: `${result.testsPassed}/${result.testsTotal} tests`,
+      evidence: [ev(input.pageSlug, kind, note)],
+    };
+  }
+
   // writing_draft — grader role, structured output
   const draftPrompt = `Grade this student draft. Prompt: "${input.prompt}"\nDraft:\n${result.draft}\n`
     + `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`;

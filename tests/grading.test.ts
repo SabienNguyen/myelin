@@ -36,6 +36,32 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(bad.verdict).toBe('incorrect');
     expect(bad.evidence[0].kind).toBe('struggled');
   });
+
+  // code_exercise (docs/superpowers/plans/2026-07-20-gap-integration.md I2 contract): mechanical,
+  // never calls the grader model — `cfg = {} as any` above enforces that (a stray model call would
+  // throw reading cfg.models.grader).
+  it('completed + wroteCode -> applied-correctly', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
+      { completed: true, rungReached: 'full_body', testsPassed: 8, testsTotal: 8, wroteCode: true }, cfg);
+    expect(g.verdict).toBe('correct');
+    expect(g.detail).toBe('8/8 tests');
+    expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'applied-correctly' });
+  });
+  it('completed + !wroteCode (guided rungs only) -> exposed', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
+      { completed: true, rungReached: 'inline_completion', testsPassed: 0, testsTotal: 0, wroteCode: false }, cfg);
+    expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'exposed' });
+  });
+  it('!completed (abandoned via "stop here") -> struggled', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
+      { completed: false, rungReached: 'full_body', testsPassed: 3, testsTotal: 8, wroteCode: false }, cfg);
+    expect(g.verdict).toBe('incorrect');
+    expect(g.detail).toBe('3/8 tests');
+    expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'struggled' });
+  });
 });
 
 describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {

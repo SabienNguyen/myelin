@@ -50,11 +50,29 @@ const writingDraft = {
   result: z.object({ draft: z.string() }),
 };
 
+// The Gap inside the Stage (docs/superpowers/plans/2026-07-20-gap-integration.md, Pinned
+// Contracts — schema copied VERBATIM from that plan).
+const codeExercise = {
+  input: z.object({
+    pattern: z.string(),          // e.g. 'stream-consumer' (the ladder id, MVP: one ladder)
+    rung: z.enum(['worked_example', 'inline_completion', 'full_body', 'ladder']),
+    pageSlug: z.string(),         // vault page that receives evidence
+  }),
+  result: z.object({
+    completed: z.boolean(),
+    rungReached: z.string(),      // last rung completed
+    testsPassed: z.number(),
+    testsTotal: z.number(),
+    wroteCode: z.boolean(),       // true only if learner-authored code passed full_body
+  }),
+};
+
 export const BLOCK_TOOLS = {
   quick_check: quickCheck,
   quiz,
   math_scratchpad: mathScratchpad,
   writing_draft: writingDraft,
+  code_exercise: codeExercise,
 } as const;
 export type BlockToolName = keyof typeof BLOCK_TOOLS;
 export const BLOCK_TOOL_NAMES = Object.keys(BLOCK_TOOLS) as BlockToolName[];

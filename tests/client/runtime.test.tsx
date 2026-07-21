@@ -82,4 +82,17 @@ describe('blockOutputsComplete (Bug 1 — sendAutomaticallyWhen predicate)', () 
     ] as any;
     expect(blockOutputsComplete({ messages })).toBe(false);
   });
+
+  it('resubmits for a completed code_exercise block part too (no code change needed — it iterates BLOCK_TOOL_NAMES)', () => {
+    const codeExercisePart = {
+      type: 'tool-code_exercise', toolCallId: 'tc3', state: 'output-available',
+      input: { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
+      output: { completed: true, rungReached: 'full_body', testsPassed: 8, testsTotal: 8, wroteCode: true },
+    };
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+      { id: 'a1', role: 'assistant', parts: [codeExercisePart] },
+    ] as any;
+    expect(blockOutputsComplete({ messages })).toBe(true);
+  });
 });

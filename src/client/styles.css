@@ -541,3 +541,85 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   transition: width 0.4s ease;
 }
 .library-autocompile-note { font-style: italic; }
+
+/* ── code_exercise (the Gap inside the Stage, I2) ─────────────────────────────────────
+   Ported dark-editor look stays scoped INSIDE .block.code-exercise; the card chrome
+   itself (background/border/shadow) stays the harness's own paper/ink `.block` look. */
+.code-exercise .ladder-steps {
+  display: flex;
+  gap: 0.9rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.code-exercise .ladder-step--current { color: var(--accent); font-weight: 700; }
+
+.code-exercise .code-exercise-columns { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 0.9rem; align-items: start; }
+@media (max-width: 900px) { .code-exercise .code-exercise-columns { grid-template-columns: 1fr; } }
+
+.code-exercise .code-exercise-controls { margin-top: 0.7rem; text-align: right; }
+.code-exercise .code-exercise-stop {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.code-exercise .code-exercise-stop:hover { color: var(--bad); border-color: var(--bad); }
+
+.code-exercise .code-exercise-error, .code-exercise .code-exercise-loading { color: var(--text-muted); }
+
+/* Rung editor: three stacked CM6 panes, dark theme (matches the gap's own oneDark chrome) */
+.rung-editor-frame {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin: 0.5rem 0;
+}
+.rung-pane { font-size: 0.85rem; }
+.rung-pane .cm-editor { height: auto; }
+.rung-pane--readonly .cm-editor { opacity: 0.6; }
+.rung-pane--gap .cm-editor { border-top: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+
+.context-strip { color: var(--text-muted); font-size: 0.85rem; margin: 0.3rem 0; }
+.syntax-error-note { color: var(--bad); font-size: 0.85rem; }
+
+.proximity-header { margin: 0.4rem 0; }
+.proximity-bar-track { width: 100%; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.proximity-bar-fill { height: 100%; background: var(--accent); transition: width 0.3s ease; }
+.proximity-text { display: flex; justify-content: space-between; font-size: 0.8rem; margin-top: 0.25rem; color: var(--text-muted); }
+.proximity-fraction { font-weight: 600; color: var(--text); }
+
+.test-results-panel { list-style: none; margin: 0.5rem 0 0; padding: 0; font-size: 0.82rem; }
+.test-result { display: flex; gap: 0.5em; padding: 0.15rem 0; }
+.test-result-status { font-weight: 700; width: 3.2em; flex: none; }
+.test-result--pass .test-result-status { color: var(--good); }
+.test-result--fail .test-result-status { color: var(--bad); }
+.test-results-empty { color: var(--text-muted); font-size: 0.82rem; }
+
+.worked-example-code { background: var(--bg-inset); border-radius: var(--radius-sm); padding: 0.7rem; font-size: 0.82rem; overflow-x: auto; }
+.worked-example-code--prior { opacity: 0.55; }
+.worked-example-check-option--correct { background: var(--good); color: var(--accent-text); border-color: var(--good); }
+.worked-example-check-note { color: var(--text-muted); font-size: 0.82rem; }
+.worked-example-controls { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
+.worked-example-progress { color: var(--text-muted); font-size: 0.78rem; }
+
+.inline-completion-hint { color: var(--warn); font-size: 0.85rem; }
+.inline-completion-success-line { color: var(--good); }
+
+/* ambient offers — dismissible side cards, never modal (docs/superpowers/plans/2026-07-20) */
+.offer-card { border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 0.6rem 0.7rem; margin-bottom: 0.6rem; font-size: 0.82rem; }
+.offer-card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 0.4rem; margin-bottom: 0.4rem; }
+.offer-card-label { color: var(--text-muted); font-style: italic; }
+.offer-card-dismiss { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 0.2rem; }
+.plan-panel-textarea { width: 100%; min-height: 4rem; resize: vertical; }
+.plan-panel-concepts { list-style: none; margin: 0.4rem 0 0; padding: 0; font-size: 0.78rem; color: var(--text-muted); }
+.plan-concept--lit { color: var(--good); font-weight: 600; }
+.predict-run-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin: 0.4rem 0; }
+.predict-run-table td, .predict-run-table th { padding: 0.2rem 0.3rem; text-align: left; }
+.doc-card { margin-bottom: 0.6rem; }
+.doc-card-title { font-size: 0.88rem; margin: 0 0 0.2rem; }
+.doc-card-snippet { font-size: 0.8rem; color: var(--text-muted); margin: 0 0 0.2rem; }
+.doc-card-url { font-size: 0.75rem; }
