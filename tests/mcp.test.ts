@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Loreweaver, isTransportError } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
 const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
@@ -38,7 +38,49 @@ describe('Loreweaver client', () => {
   it('throws a readable error on isError results', async () => {
     await expect(lw.call('read_page', { slug: 'nope' })).rejects.toThrow();
   });
-}, 30_000);
+
+  // T41: a long auto-compile drain killed the spawned child; call() already respawned once on
+  // a transport-shaped error, but tools() proxied the dead client directly and every subsequent
+  // chapter errored with "Attempted to send a request from a closed client". These simulate the
+  // dead child by closing the real client out from under the instance, then exercise each surface
+  // that must recover via a single respawn-and-retry.
+  it('recovers call() after the transport dies', async () => {
+    await (lw as any).client.close();
+    const page = await lw.call('read_page', { slug: 'derivatives' });
+    expect(page.page.meta.title).toBe('Derivatives');
+  });
+
+  it('recovers tools() after the transport dies', async () => {
+    await (lw as any).client.close();
+    const tools = await lw.tools();
+    expect(Object.keys(tools)).toContain('record_evidence');
+    const raw: any = await (tools.read_page as any).execute({ slug: 'derivatives' }, {} as any);
+    const parsed = JSON.parse(raw.content[0].text);
+    expect(parsed.page.meta.title).toBe('Derivatives');
+  });
+
+  it("recovers a previously-fetched tool's execute after the transport dies underneath it", async () => {
+    const tools = await lw.tools(); // fetched while the client is alive
+    await (lw as any).client.close(); // kill the client the fetched tool's closure was bound to
+    const raw: any = await (tools.read_page as any).execute({ slug: 'derivatives' }, {} as any);
+    const parsed = JSON.parse(raw.content[0].text);
+    expect(parsed.page.meta.title).toBe('Derivatives');
+  });
+}, 60_000);
+
+describe('isTransportError', () => {
+  it('matches the literal message observed in production', () => {
+    expect(isTransportError(new Error('Attempted to send a request from a closed client'))).toBe(true);
+  });
+  it('matches EPIPE, transport, and disconnected too', () => {
+    expect(isTransportError(new Error('write EPIPE'))).toBe(true);
+    expect(isTransportError(new Error('transport error'))).toBe(true);
+    expect(isTransportError(new Error('disconnected from server'))).toBe(true);
+  });
+  it('does not match unrelated errors', () => {
+    expect(isTransportError(new Error('page not found: nope'))).toBe(false);
+  });
+});
 
 it('GET /api/graph returns nodes with mastery', async () => {
   const { buildRestRoutes } = await import('../src/server/restRoutes.js');
