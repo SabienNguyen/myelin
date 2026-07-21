@@ -82,7 +82,7 @@ describe('syncInbound', () => {
     const anki = new AnkiClient(url);
 
     // Phase 1: a single ease-4 (Easy) review for derivatives (card 55 -> note 2001).
-    reviews.push([1783900000000, 55, -1, 4, 10, 5, 2500, 4000, 1]);
+    reviews.push([Date.now() - 3_600_000, 55, -1, 4, 10, 5, 2500, 4000, 1]); // 1h ago — stays inside recentLapses windows forever
     const first = await syncInbound(lw, anki, cfg);
     expect(first.recorded).toBe(1);
 
@@ -92,7 +92,7 @@ describe('syncInbound', () => {
     expect(after.detail.evidence.at(-1).kind).toBe('exposed');
 
     // Phase 2: an ease-1 (Again) review for chain-rule (card 66 -> note 3001), later timestamp.
-    reviews.push([1783900500000, 66, -1, 1, 10, 5, 2500, 4000, 1]);
+    reviews.push([Date.now() - 3_000_000, 66, -1, 1, 10, 5, 2500, 4000, 1]); // 50min ago
     const second = await syncInbound(lw, anki, cfg);
     expect(second.recorded).toBe(1);
 
