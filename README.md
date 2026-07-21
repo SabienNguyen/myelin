@@ -60,17 +60,50 @@ that string.
    subscription's credit pool via your machine's local `claude` (Claude Code) login — **no API
    key involved**. Requires being logged into Claude Code on this machine (`claude` CLI installed
    and authenticated); the SDK reuses that login rather than reading `ANTHROPIC_API_KEY`. Routed
-   for the one-shot roles only: `grader` (open-answer + writing-draft grading), `card_gen`, and
-   `compile`. The compile route additionally spawns its own loreweaver MCP server process (see
-   `src/server/ingest.ts`'s `compileOne` for why that's an acceptable second writer) and can only
+   for the one-shot roles — `grader` (open-answer + writing-draft grading), `card_gen`, and
+   `compile` (which additionally spawns its own loreweaver MCP server process — see
+   `src/server/ingest.ts`'s `compileOne` for why that's an acceptable second writer — and can only
    enforce the write_page citation as a prompt instruction, not the mechanical guarantee the
-   ai-sdk path gets from wrapping `execute()` — a known gap.
+   ai-sdk path gets from wrapping `execute()`, a known gap) — **and now also `tutor`** (T43, below).
 
-**Out of scope: the interactive `tutor` role.** `claude-sdk:` is not wired up for `tutor` — the
-tutor's chat loop is a live, streaming, human-in-the-loop conversation (the assistant-ui chat
-surface awaiting the student's next message mid-turn), and the Agent SDK's `query()` is a
-run-to-completion async generator with no bridge to that HITL/streaming shape yet. Building that
-bridge is a separate project; `tutor` must stay on a plain id or `ollama:` until then.
+### `tutor` on the Agent SDK
+
+Setting `models.tutor.model` to a `claude-sdk:` id routes the interactive chat tutor through
+`src/server/claudeSdkTutor.ts` (`createClaudeSdkTutorSession`) instead of the AI-SDK
+`ToolLoopAgent` path in `src/server/session.ts` — picked at server construction time in
+`chatRoute.ts` by inspecting `cfg.models.tutor.model`. It streams the same UIMessage chunk shapes
+the existing chat client understands (block tools pause the turn, grading round-trips, the
+evidence guardrail nudge, thread continuation), so no client changes are needed to use it.
+
+How it bridges the Agent SDK's run-to-completion `query()` async generator to a HITL chat turn:
+- **Blocks pause the turn via an MCP sentinel, not a real pause primitive.** `quick_check` /
+  `quiz` / `math_scratchpad` / `writing_draft` / `code_exercise` are registered as an in-process
+  MCP server (`createSdkMcpServer`, one `tool()` per `BLOCK_TOOLS` entry) whose handler returns a
+  sentinel telling the model to end its turn immediately; the system prompt reinforces this. The
+  student's answer arrives as the next chat message, exactly like the ai-sdk path's frontend
+  tools.
+- **Session continuity uses SDK session resume**, not full-transcript replay: `vault/.harness/sdk-sessions.json`
+  maps `threadId -> sdkSessionId`. Turn 1 starts a fresh `query()` and captures the session id off
+  the `system`/`init` message; later turns pass only the new turn's content via `options.resume`.
+  If resume fails (a stale/pruned session id), the harness falls back to a fresh session seeded
+  with a rebuilt bootstrap context, overwrites the stored id, and logs the failure loudly to
+  stderr (`console.error`) — it does not fail the turn silently.
+- **Streaming** uses `options.includePartialMessages: true` for live text (`stream_event` /
+  `content_block_delta` text deltas), and the complete `assistant` message for tool-call input
+  (block tools and loreweaver tools alike) since partial JSON-delta tool input isn't useful to the
+  UI, which needs the whole object anyway.
+- **Argument sanitization** (forcing the configured student id, repairing hallucinated slugs —
+  `sanitizeToolArgs`, shared with `session.ts`) runs through `canUseTool`'s `updatedInput`, the
+  only rewrite seam the Agent SDK exposes for tool calls it executes itself. **Unverified against
+  a live subscription login:** the SDK's own docs describe `permissionMode: 'bypassPermissions'`
+  as bypassing *all* permission checks, which may mean `canUseTool` is never invoked in that mode
+  — if so, this sanitization silently doesn't apply on the `claude-sdk:` tutor path. Verify with a
+  live run before relying on it; `allowedTools` scoping still holds regardless.
+- **Known limitations of this path** (only `web_search`/`read_url` and `ingest_paper` — both
+  freeform-only research tools on the ai-sdk path — are not wired up here yet; everything else
+  `session.ts`'s freeform mode offers, including `write_page`/`link_pages`/`compile_source`, is
+  available). Requires the same local `claude` (Claude Code) login as the other `claude-sdk:`
+  routes above.
 
 ## Running
 
