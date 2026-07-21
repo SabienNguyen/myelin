@@ -50,9 +50,11 @@ async function ankiTick(): Promise<void> {
   const key = `anki|backlog|${isoWeekKey(new Date())}`;
   const ledger = loadNotifyLedger();
   if (ledger[key]) return;
-  sendNotification('Loreweaver', 'Anki reviews are piling up — open Anki to catch up.');
-  ledger[key] = true;
-  saveNotifyLedger(ledger);
+  // Ledger only on delivery — a headless boot's failed notify-send must retry next tick.
+  if (await sendNotification('Loreweaver', 'Anki reviews are piling up — open Anki to catch up.')) {
+    ledger[key] = true;
+    saveNotifyLedger(ledger);
+  }
 }
 
 cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => ankiTick(), { noOverlap: true });

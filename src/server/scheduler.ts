@@ -50,9 +50,13 @@ export function startScheduler(lw: Loreweaver, cfg: HarnessConfig) {
     }
     const { items, newLedger } = computeDigest(details, loadLedger(cfg.vault), new Date());
     if (items.length) {
-      sendNotification('Loreweaver', items.map((i) => i.message).join('\n'));
-      mkdirSync(join(cfg.vault, '.harness'), { recursive: true });
-      writeFileSync(ledgerPath(cfg.vault), JSON.stringify(newLedger));
+      // Only mark the ledger when the notification actually reached the desktop — a headless
+      // send (boot-before-login) fails and must retry on a later tick, not vanish.
+      const delivered = await sendNotification('Loreweaver', items.map((i) => i.message).join('\n'));
+      if (delivered) {
+        mkdirSync(join(cfg.vault, '.harness'), { recursive: true });
+        writeFileSync(ledgerPath(cfg.vault), JSON.stringify(newLedger));
+      }
     }
   }, { noOverlap: true });
 }
