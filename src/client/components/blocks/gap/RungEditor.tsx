@@ -78,7 +78,14 @@ export function RungEditor({ visiblePre, visiblePost, initialGap = '', onGapChan
   return (
     <div className="rung-editor-frame">
       <div ref={preRef} className="rung-pane rung-pane--readonly rung-pane--pre" aria-label="code before the gap" />
-      <div ref={gapRef} className="rung-pane rung-pane--gap" aria-label="your code" />
+      {/* data-testid is a tiny test-only affordance (I3, docs/superpowers/plans/2026-07-20-
+          gap-integration.md): tests/e2e/gap-exercise.e2e.ts locates this pane to dispatch a real
+          synthetic ClipboardEvent('paste') at it (the standard way to feed exact multi-line text
+          into a CM6 contentEditable without keystroke-level fragility, e.g. its closeBrackets
+          extension double-inserting a `}` typed right after an auto-inserted one) — CM6's own
+          paste handler applies it as one transaction, so this is still the real editor/real CM6
+          path, not a stand-in like CodeExerciseInner's `Editor` prop swap used in jsdom tests. */}
+      <div ref={gapRef} className="rung-pane rung-pane--gap" aria-label="your code" data-testid="gap-editor" />
       <div ref={postRef} className="rung-pane rung-pane--readonly rung-pane--post" aria-label="code after the gap" />
     </div>
   );

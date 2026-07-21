@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
+import { PracticePanel } from './PracticePanel.js';
 
 type Entry = {
   book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string;
@@ -125,7 +126,12 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   }
 
   if (queue.length === 0) {
-    return <p className="empty">No books yet — use “Add book” in the top bar, or ask the tutor (freeform) to pull in a paper.</p>;
+    return (
+      <div className="library-panel">
+        <p className="empty">No books yet — use “Add book” in the top bar, or ask the tutor (freeform) to pull in a paper.</p>
+        <PracticePanel visible={visible} />
+      </div>
+    );
   }
 
   const pending = queue.filter((e) => e.status === 'pending').length;
@@ -160,6 +166,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
           </ul>
         </section>
       ))}
+      <PracticePanel visible={visible} />
     </div>
   );
 }

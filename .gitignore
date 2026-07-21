@@ -2,9 +2,11 @@ node_modules/
 .superpowers/
 .tools/
 dist/
+dist-gap/
 .env
 harness.config.json
 tests/e2e/.tmp-vault/
+tests/e2e/.tmp-vault-gap/
 test-results/
 playwright-report/
 blob-report/

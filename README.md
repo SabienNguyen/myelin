@@ -112,6 +112,16 @@ grading every rung of the demo ladder — before the API server starts serving; 
 `journalctl --user -u the-gap -f` on first start; `curl localhost:4930/api/ladder` should answer
 once it's up.
 
+**One place to learn:** the tutor UI on `:4173` is the product surface — code exercises render as
+blocks in its Stage, pattern pages live in its vault/graph, and evidence lands in the same student
+model as every other subject. The gap sidecar (`:4930`, plus its dev UI on `:4931`) is
+infrastructure: don't open it to learn; it only serves ladders and runs tests for the harness.
+With the sidecar configured, the harness also seeds a stub vault page per ladder pattern at boot
+(`src/server/seedPatternPages.ts`) and the Library tab grows a "Practice" section listing each
+pattern with an owned/rented/new badge derived from the student model (effective practicing or
+better → owned; exposed → rented; no record → new); clicking a row simply asks the tutor to run a
+code exercise — the tutor stays the orchestrator.
+
 ## Tests
 
 ```bash

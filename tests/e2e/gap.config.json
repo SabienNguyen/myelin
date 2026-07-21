@@ -1,0 +1,15 @@
+{
+  "vault": "~/Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-gap",
+  "student": "e2e",
+  "models": {
+    "tutor":    { "model": "scripted" },
+    "grader":   { "model": "scripted" },
+    "quiz_gen": { "model": "scripted" },
+    "card_gen": { "model": "scripted" },
+    "compile":  { "model": "scripted" }
+  },
+  "loreweaver": { "command": "npx", "args": ["tsx", "~/Dev/personal/loreweaver/src/server.ts"], "embeddings": "fake" },
+  "gap": { "url": "http://localhost:4930" },
+  "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
+  "port": 4821
+}

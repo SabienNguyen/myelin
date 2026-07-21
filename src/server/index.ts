@@ -9,6 +9,7 @@ import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
 import { buildIngestRoutes } from './ingestRoutes.js';
 import { buildGapRoutes } from './gapProxy.js';
+import { seedPatternPages } from './seedPatternPages.js';
 import { startScheduler } from './scheduler.js';
 import { AnkiClient } from './anki/client.js';
 import { syncInbound, backlogDays } from './anki/inbound.js';
@@ -17,6 +18,10 @@ import { sendNotification } from './notify.js';
 
 const cfg = loadConfig();
 const lw = await Loreweaver.connect(cfg);
+// I3: seed the-gap's ladder patterns as vault pages (idempotent, mechanical content — see
+// seedPatternPages.ts for the single-writer rationale). Gated on cfg.gap: no ladders, nothing to
+// seed.
+if (cfg.gap) await seedPatternPages(lw, cfg);
 const anki = new AnkiClient();
 startScheduler(lw, cfg);
 sweepInterruptedConversions(cfg.vault); // restarts orphan in-flight conversions — mark them honestly
