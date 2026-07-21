@@ -25,7 +25,14 @@ export function App() {
   // starts collapsed again.
   const [focusMode, setFocusMode] = useState(false);
   const [peek, setPeek] = useState(false);
-  useEffect(() => panelBus.subscribe((e) => { if (e.type === 'focusMode') setFocusMode(e.on); }), []);
+  // Idempotent on purpose (post-review hardening): a functional updater that bails to the SAME
+  // state reference when the value hasn't changed, rather than trusting React's primitive-value
+  // bailout alone — defense-in-depth against a StagePortal/CodeExercise subtree that legitimately
+  // remounts (e.g. a fast reload or thread switch racing an unmount) re-emitting the value it
+  // already holds.
+  useEffect(() => panelBus.subscribe((e) => {
+    if (e.type === 'focusMode') setFocusMode((prev) => (prev === e.on ? prev : e.on));
+  }), []);
   useEffect(() => { if (!focusMode) setPeek(false); }, [focusMode]);
 
   // Deep-linking (T27): the URL hash encodes `#/t/<threadId>[/<tab>|/page/<slug>]`. App owns

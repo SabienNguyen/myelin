@@ -2,31 +2,50 @@ import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive } 
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 
+// P1 FIX (docs/superpowers/plans/2026-07-20-gap-integration.md — post-review): these two must be
+// stable module-scope function references, NOT inline arrow functions inside Thread()'s render
+// body. `ThreadPrimitive.Messages` uses `components.UserMessage`/`components.AssistantMessage` as
+// React component TYPES for the per-role message subtree — a fresh function identity every time
+// Thread() renders reads to React as "a different component type at this position", which
+// unmounts and remounts the ENTIRE message subtree (including whatever's portaled into the Stage
+// from inside it) on every single Thread re-render. That was already true before P1 but harmless
+// (nothing downstream reacted to the churn). P1's CodeExerciseInner mount effect
+// (panelBus.setFocusMode(true)/cleanup(false), CodeExercise.tsx) turned it into a feedback loop:
+// App re-render -> Thread re-renders -> new inline component identity -> AssistantMessage subtree
+// remounts -> CodeExerciseInner's unmount(false)-then-mount(true) cycle flips App's focusMode
+// state -> App re-renders again -> repeat, until React's nested-update-count guard throws
+// "Maximum update depth exceeded" and tears the tree down (the browser symptom: chip visible,
+// #stage-root empty, .focus-mode gone). Fix is this hoist alone — StagePortal's target
+// (#stage-root, SidePanel.tsx) is a permanently-mounted DOM node and was never actually churning.
+function UserMessage() {
+  return (
+    <MessagePrimitive.Root className="msg user">
+      <MessagePrimitive.Parts />
+    </MessagePrimitive.Root>
+  );
+}
+function AssistantMessage() {
+  return (
+    <MessagePrimitive.Root className="msg assistant">
+      <MessagePrimitive.Parts components={{
+        Text: MarkdownText,
+        Reasoning: () => null, // thinking models: never show raw reasoning to the learner
+        tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
+      }} />
+      <MessagePrimitive.Error>
+        <ErrorPrimitive.Root className="error-bubble">
+          ⚠ <ErrorPrimitive.Message />
+        </ErrorPrimitive.Root>
+      </MessagePrimitive.Error>
+    </MessagePrimitive.Root>
+  );
+}
+
 export function Thread() {
   return (
     <ThreadPrimitive.Root className="thread">
       <ThreadPrimitive.Viewport className="thread-viewport">
-        <ThreadPrimitive.Messages components={{
-          UserMessage: () => (
-            <MessagePrimitive.Root className="msg user">
-              <MessagePrimitive.Parts />
-            </MessagePrimitive.Root>
-          ),
-          AssistantMessage: () => (
-            <MessagePrimitive.Root className="msg assistant">
-              <MessagePrimitive.Parts components={{
-                Text: MarkdownText,
-                Reasoning: () => null, // thinking models: never show raw reasoning to the learner
-                tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
-              }} />
-              <MessagePrimitive.Error>
-                <ErrorPrimitive.Root className="error-bubble">
-                  ⚠ <ErrorPrimitive.Message />
-                </ErrorPrimitive.Root>
-              </MessagePrimitive.Error>
-            </MessagePrimitive.Root>
-          ),
-        }} />
+        <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
         <ThreadPrimitive.If running>
           <div className="working" role="status">
             <span className="dot" /><span className="dot" /><span className="dot" />
