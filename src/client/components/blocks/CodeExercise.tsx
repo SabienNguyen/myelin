@@ -23,6 +23,14 @@
 // only path that completes the block for full_body — always clickable, but if the latest run
 // isn't all-passing (or there's been no run yet) it opens an inline confirm first rather than
 // completing silently. The learner controls when the block actually commits.
+//
+// RungEditor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md, "whole-file IDE"): full_body
+// (and inline_completion — see InlineCompletion.tsx) now load and grade the rung's WHOLE file,
+// not a spliced-in gap fragment. `code` here is that whole doc; `initialScaffold` (resolveScaffold
+// of the current rung) is the PRISTINE starting doc it's diffed against for wroteCode — an exact
+// string compare, not a trim/empty check, since the doc is never actually empty anymore (it always
+// starts pre-loaded with the scaffold's visible_pre/marker/visible_post). Run posts
+// `{ mode: 'file', code }` to the sidecar accordingly.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CodeIcon as Code, CheckIcon as Check } from '@phosphor-icons/react';
@@ -43,6 +51,7 @@ import { FocusLayout, type BriefTab, type MinedProvenance } from './gap/FocusLay
 import { useDebouncedRun } from './gap/hooks/useDebouncedRun.js';
 import { useDetectorState } from './gap/hooks/useDetectorState.js';
 import { gapDraftKey, clearDraft } from './gap/draftStorage.js';
+import { resolveScaffold } from './gap/scaffold.js';
 import type { MinedEntry, Rung, TemplateKind, TestResult } from './gap/types.js';
 
 const STEP_LABELS: Record<TemplateKind, string> = {
@@ -55,7 +64,10 @@ const STEP_LABELS: Record<TemplateKind, string> = {
 // not encouragement about it.
 const TASK_BRIEF: Record<TemplateKind, string> = {
   worked_example: 'watch the pattern get built move by move — read-only, nothing graded here.',
-  inline_completion: 'fill in the single gap below. tests run automatically as you type.',
+  // RungEditor v2: no more single fenced-off gap — a comment in the file marks the task, the rest
+  // of the file is editable too (docs/superpowers/plans/2026-07-21-coding-stage.md).
+  inline_completion: 'a comment below marks what to fill in — the rest of the file is editable '
+    + 'too. tests run automatically as you type.',
   // P2 (editor polish): Run and Submit are now separate — see the buttons below the editor.
   full_body: 'write the whole function body. tests run automatically as you type, or press run '
     + '(ctrl/cmd+enter) any time — nothing is graded until you press submit.',
@@ -193,7 +205,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     setConfirmSubmit(false); // a fresh run supersedes any pending "submit anyway?" confirm.
     const startedAt = performance.now();
     try {
-      const response = await postRun(currentRung.id, currentCode);
+      const response = await postRun(currentRung.id, currentCode, { mode: 'file' });
       setLastRunMs(Math.round(performance.now() - startedAt));
       setHasRun(true);
       setResults(response.results);
@@ -212,20 +224,26 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   useDebouncedRun(code, run);
 
   const fullBodyDraftKey = currentRung ? gapDraftKey(currentRung.artifactId, currentRung.template) : undefined;
+  // RungEditor v2: the PRISTINE starting doc (never draft-adjusted) — the one wroteCode diffs
+  // against below. '' when currentRung isn't resolved yet is never actually read (doSubmit only
+  // ever fires from the full_body render branch, which doesn't render until currentRung exists)
+  // but keeps this a plain string rather than a conditional type for every caller downstream.
+  const initialScaffold = currentRung ? resolveScaffold(currentRung) : '';
 
   // Submit is the explicit, learner-controlled completion gesture — Run never fires `finish()`.
-  // wroteCode is (re)computed here off the CURRENT gap contents rather than whatever code the
-  // last run happened to execute: the definition itself — "did the learner type anything into the
-  // gap" — is unchanged from before (I2), only the moment it's evaluated moved from "the instant a
-  // run happened to pass" to "the instant the learner submits", which is the direct, necessary
-  // consequence of decoupling running tests from completing the block.
+  // wroteCode is (re)computed here off the CURRENT whole-doc contents rather than whatever code
+  // the last run happened to execute — the moment it's evaluated is "the instant the learner
+  // submits", not "the instant a run happened to pass" (P2, unchanged rationale). The definition
+  // itself changed with RungEditor v2 though: an exact string compare against `initialScaffold`
+  // (the ORIGINAL scaffold, not the draft) rather than a trim/empty check — the doc is never
+  // actually empty anymore, it always starts pre-loaded with the scaffold's own text.
   const doSubmit = useCallback(() => {
     setConfirmSubmit(false);
     const testsPassed = results.filter((r) => r.pass).length;
-    const wroteCode = code.trim() !== '';
+    const wroteCode = code !== initialScaffold;
     finish(true, 'full_body', testsPassed, results.length, wroteCode);
     if (fullBodyDraftKey) clearDraft(fullBodyDraftKey);
-  }, [results, code, finish, fullBodyDraftKey]);
+  }, [results, code, finish, fullBodyDraftKey, initialScaffold]);
 
   // Reasonable enabling rule (spec): Submit is always clickable. If the latest run has failing
   // tests — or there's been no run at all yet — clicking it opens an inline confirm instead of
@@ -236,12 +254,17 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     setConfirmSubmit(true);
   }
 
-  const onFullBodyGapChange = useCallback((nextCode: string) => {
+  // RungEditor v2: fires once at mount (RungEditor reports its resolved starting doc — draft-
+  // restored or scaffold — immediately, not just on the learner's first real edit — see that
+  // file's top comment) and on every subsequent edit alike. gapEmpty now means "still exactly the
+  // starting scaffold" rather than a literal empty-string check, for the same reason wroteCode's
+  // definition changed above.
+  const onFullBodyDocChange = useCallback((nextCode: string) => {
     setCode(nextCode);
     const now = Date.now();
     detector.dispatch({ type: 'keystroke', at: now });
-    detector.dispatch({ type: 'gap-empty-check', at: now, gapEmpty: nextCode.trim() === '' });
-  }, [detector]);
+    detector.dispatch({ type: 'gap-empty-check', at: now, gapEmpty: nextCode === initialScaffold });
+  }, [detector, initialScaffold]);
 
   if (loadError) {
     return <p className="code-exercise-error">could not load the exercise: {loadError}</p>;
@@ -348,14 +371,12 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
               {running && <span className="ide-spinner" role="status" aria-label="running tests" />}
             </div>
             <Editor
-              visiblePre={currentRung.visible_pre}
-              visiblePost={currentRung.visible_post}
-              onGapChange={onFullBodyGapChange}
+              scaffold={initialScaffold}
+              onDocChange={onFullBodyDocChange}
               draftKey={fullBodyDraftKey}
               onRunRequest={() => run(code)}
               fillHeight
             />
-            {syntaxError !== undefined && <SyntaxErrorNote message={syntaxError} />}
 
             <div className="ide-action-row">
               <button
@@ -384,6 +405,11 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
               </div>
             )}
 
+            {/* Whole-file IDE (item 4, docs/superpowers/plans/2026-07-21-coding-stage.md): a
+                syntax error means the file doesn't parse — there IS no test-results question to
+                answer yet, so it replaces the results list here rather than sitting as a separate
+                note elsewhere, distinct from "no results yet" (which means something else: nothing
+                run at all). */}
             <div className="ide-test-console">
               <div className="ide-console-header">
                 <h4 className="ide-console-title">tests</h4>
@@ -391,7 +417,9 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
                   <span className="ide-run-timing">ran in {lastRunMs}ms</span>
                 )}
               </div>
-              <TestResultsPanel results={results} />
+              {syntaxError !== undefined
+                ? <SyntaxErrorNote message={syntaxError} />
+                : <TestResultsPanel results={results} />}
             </div>
           </div>
         )}

@@ -15,8 +15,14 @@ const GAP_REPO = join(homedir(), 'Dev/personal/the-gap');
  * the-gap's packages/masker/src/cli.ts doc: `pnpm --filter masker mask <artifactId> <template>
  * '<selectorJSON>'` prints the Rung as JSON to stdout, exit 0 — `--silent` suppresses pnpm's own
  * command echo, which would otherwise precede the JSON on stdout and break JSON.parse.
+ *
+ * RungEditor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md, "whole-file IDE"): the editor
+ * now loads and grades the rung's WHOLE file, not a gap fragment, so this returns the complete
+ * correct file — visible_pre + reference_answer + visible_post, the same splice the old gap-mode
+ * grading always did server-side, just assembled test-side now since there's no separate gap
+ * region left in the UI to paste just the answer into.
  */
-async function fetchReferenceAnswer(): Promise<string> {
+async function fetchCompleteReferenceFile(): Promise<string> {
   const { stdout } = await execFileAsync(
     'npm',
     [
@@ -29,7 +35,10 @@ async function fetchReferenceAnswer(): Promise<string> {
   if (typeof rung.reference_answer !== 'string' || !rung.reference_answer.trim()) {
     throw new Error(`masker returned no reference_answer: ${stdout.slice(0, 200)}`);
   }
-  return rung.reference_answer as string;
+  if (typeof rung.visible_pre !== 'string' || typeof rung.visible_post !== 'string') {
+    throw new Error(`masker returned no visible_pre/visible_post: ${stdout.slice(0, 200)}`);
+  }
+  return `${rung.visible_pre}${rung.reference_answer}${rung.visible_post}`;
 }
 
 // This file's dedicated backend+frontend pair (playwright.config.ts) serves on :4174/:4821 —
@@ -49,7 +58,7 @@ test('code_exercise: real gap sidecar renders the full_body editor, the referenc
   );
   test.setTimeout(90_000);
 
-  const referenceAnswer = await fetchReferenceAnswer();
+  const completeFile = await fetchCompleteReferenceFile();
 
   const firstChat = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.goto('/');
@@ -63,29 +72,39 @@ test('code_exercise: real gap sidecar renders the full_body editor, the referenc
   await expect(chip).toBeVisible();
   await page.screenshot({ path: '/tmp/i3-1.png', fullPage: true });
 
-  // (2) Stage proof: full_body is a single rung (not 'ladder'), so the real CM6 editor — fed by
-  // the REAL sidecar's rung data through the harness proxy — mounts directly, no ladder nav.
+  // (2) Stage proof: full_body is a single rung (not 'ladder'), so the real CM6 whole-file editor
+  // (RungEditor v2, docs/superpowers/plans/2026-07-21-coding-stage.md) — fed by the REAL sidecar's
+  // rung data (its `scaffold` field) through the harness proxy — mounts directly, no ladder nav.
   const gapEditor = page.getByTestId('gap-editor').locator('.cm-content');
   await expect(gapEditor).toBeVisible();
   await page.screenshot({ path: '/tmp/i3-2.png', fullPage: true });
 
-  // Real editor, exact content: dispatch a synthetic ClipboardEvent('paste') at the CM6 content
-  // node — CM6's own paste handler applies it as one transaction (see RungEditor.tsx's
-  // data-testid doc comment for why paste, not page.keyboard.type, drives this: closeBrackets'
-  // type-over heuristic isn't reliable for exact multi-line reproduction of code containing
-  // strings/brackets). Matched on request body (not just the URL) because an empty-code auto-run
-  // can also fire from useDebouncedRun on mount, before this paste.
+  // Real editor, exact content: select the whole doc then dispatch a synthetic ClipboardEvent
+  // ('paste') at the CM6 content node — CM6's own paste handler applies it as one transaction
+  // (see RungEditor.tsx's data-testid doc comment for why paste, not page.keyboard.type, drives
+  // this: closeBrackets' type-over heuristic isn't reliable for exact multi-line reproduction of
+  // code containing strings/brackets). The whole-file editor starts pre-loaded with the rung's
+  // scaffold (not empty, unlike the old gap-only pane) — selecting everything first is what makes
+  // this a REPLACE rather than an insert into the middle of the scaffold. Matched on the exact
+  // request body (not just a non-empty heuristic) because RungEditor's own mount-time sync can
+  // also fire an auto-run against the untouched scaffold before this paste ever lands.
   const passingRun = page.waitForResponse(async (res) => {
     if (!res.url().endsWith('/api/gap/run')) return false;
     const body = res.request().postDataJSON();
-    return typeof body?.code === 'string' && body.code.trim().length > 0;
+    return body?.mode === 'file' && body?.code === completeFile;
   });
   await gapEditor.click();
   await gapEditor.evaluate((el, text) => {
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
     const dt = new DataTransfer();
     dt.setData('text/plain', text as string);
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
-  }, referenceAnswer);
+  }, completeFile);
 
   const runRes = await passingRun;
   const runBody = await runRes.json();

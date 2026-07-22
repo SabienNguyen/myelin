@@ -8,6 +8,11 @@
 // fired/did-not-fire verdict for items the trace harness can directly observe (item.observable);
 // the null-body-guard row (an internal branch, not a callback) shows "not directly observed"
 // instead.
+//
+// RungEditor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md): `code` (lifted from
+// CodeExercise.tsx's own `code` state) is now the learner's WHOLE current file, not a gap
+// fragment — `mode: 'file'` on the trace request below is required so the sidecar grades/traces
+// it as such instead of trying to splice it into visible_pre/visible_post.
 
 import { useState } from 'react';
 import { PREDICT_ITEMS_BY_ARTIFACT } from './handWrittenProse.js';
@@ -16,7 +21,7 @@ import { postRun } from './api.js';
 export interface PredictRunPanelProps {
   artifactId: string;
   rungId: string;
-  /** The learner's current gap code — traced as-is, same splice /api/gap/run always does. */
+  /** The learner's current whole-file doc — see this file's top comment. */
   code: string;
 }
 
@@ -33,7 +38,7 @@ export function PredictRunPanel({ artifactId, rungId, code }: PredictRunPanelPro
 
   async function runWithTracing(): Promise<void> {
     setActual('running');
-    const response = await postRun(rungId, code, true);
+    const response = await postRun(rungId, code, { mode: 'file', trace: true });
     setActual({ fired: response.trace?.fired ?? [] });
   }
 

@@ -7,8 +7,10 @@
 import type { TestResult } from './types.js';
 
 export function TestResultsPanel({ results }: { results: TestResult[] }) {
+  // RungEditor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md): "the gap" no longer names
+  // a distinct region of the editor — the whole file is editable.
   if (results.length === 0) {
-    return <p className="test-results-empty">no results yet — start typing in the gap</p>;
+    return <p className="test-results-empty">no results yet — start typing</p>;
   }
 
   return (

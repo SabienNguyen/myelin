@@ -28,11 +28,28 @@ export async function getLadder(): Promise<LadderPayload> {
   return response.json();
 }
 
-export async function postRun(rungId: string, code: string, trace?: boolean): Promise<RunResponse> {
+export interface PostRunOptions {
+  /** Whole-file IDE (docs/superpowers/plans/2026-07-21-coding-stage.md): `code` is the rung's
+   *  COMPLETE file rather than just a spliced-in gap fragment — graded against the artifact's
+   *  real suite, same shape response either way (plus an optional `syntaxError` on parse
+   *  failure). Every caller that now sources `code` from RungEditor's whole-doc onDocChange
+   *  (CodeExercise.tsx, InlineCompletion.tsx, PredictRunPanel.tsx) must set this — omitting it
+   *  would have the sidecar try to splice a whole file into visible_pre/visible_post as if it
+   *  were a bare gap fragment. */
+  mode?: 'file';
+  trace?: boolean;
+}
+
+export async function postRun(rungId: string, code: string, options?: PostRunOptions): Promise<RunResponse> {
   const response = await fetch('/api/gap/run', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(trace ? { rungId, code, trace: true } : { rungId, code }),
+    body: JSON.stringify({
+      rungId,
+      code,
+      ...(options?.mode ? { mode: options.mode } : {}),
+      ...(options?.trace ? { trace: true } : {}),
+    }),
   });
   if (!response.ok) throw new Error(`POST /api/gap/run failed: ${response.status}`);
   return response.json();

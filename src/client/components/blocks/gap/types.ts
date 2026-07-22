@@ -27,6 +27,13 @@ export interface Rung {
   // be visible in a type-level diff, but the harness client never reads it.
   reference_answer: string;
   prose: RungProse;
+  // RungEditor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md, whole-file IDE): the
+  // complete answer-stripped file — visible_pre + an indented "YOUR TURN" task-marker comment +
+  // visible_post — server-computed for every served rung, built-in and mined alike. Optional so a
+  // stale sidecar response predating this field still type-checks; see ./scaffold.ts's
+  // resolveScaffold for the client-side fallback every caller uses instead of reading this
+  // directly.
+  scaffold?: string;
 }
 
 export interface Ladder {

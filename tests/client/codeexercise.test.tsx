@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useEffect, useRef } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { CodeExercise, CodeExerciseInner } from '../../src/client/components/blocks/CodeExercise.js';
@@ -83,10 +84,24 @@ function mockFetch(
 
 // Injectable seam for the full_body gap editor — see CodeExercise.tsx's `Editor` prop doc: jsdom
 // mounts real CM6 fine, but simulating actual keystrokes into a contentEditable CM6 view isn't
-// worth the fragility.
-const TextEditor = ({ onGapChange }: any) => (
-  <textarea aria-label="gap-input" onChange={(e) => onGapChange(e.target.value)} />
-);
+// worth the fragility. RungEditor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md): mirrors
+// the real component's contract (RungEditor.tsx's top comment) by reporting its resolved starting
+// doc (here, just `scaffold` — this stub never restores a draft) to the caller immediately on
+// mount, not only on the learner's first real edit, so wroteCode's exact-compare-against-the-
+// original-scaffold logic (CodeExercise.tsx) sees an accurate starting value in these tests too.
+// Empty deps ([]), reading `onDocChange` through a ref rather than listing it directly — same
+// reason RungEditor.tsx's own mount effect does this (its top comment): `onDocChange` here is
+// CodeExercise.tsx's onFullBodyDocChange, whose deps include `detector` from useDetectorState.ts,
+// which is verbatim-ported and returns a brand-new object every render (never memoized) — an
+// effect keyed on `onDocChange`'s identity would re-fire every time it's called (since calling it
+// triggers a state update, which produces a NEW onDocChange next render), looping forever.
+const TextEditor = ({ scaffold, onDocChange }: any) => {
+  const onDocChangeRef = useRef(onDocChange);
+  onDocChangeRef.current = onDocChange;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { onDocChangeRef.current(scaffold); }, []);
+  return <textarea aria-label="gap-input" defaultValue={scaffold} onChange={(e) => onDocChange(e.target.value)} />;
+};
 
 describe('CodeExercise — ladder sequence enforcement', () => {
   beforeEach(() => { (globalThis as any).fetch = mockFetch(); });
@@ -215,6 +230,27 @@ describe('CodeExercise — full_body grading (mechanical, via real tests)', () =
 
     await screen.findByText('2/2 passing');
     expect(addResult).not.toHaveBeenCalled();
+  }, 10_000);
+
+  it('Run posts { mode: "file", code: <whole doc> } — RungEditor v2, item 4', async () => {
+    const fetchMock = mockFetch({ pass: true, results: [{ name: 't1', pass: true }] });
+    (globalThis as any).fetch = fetchMock;
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={vi.fn()} Editor={TextEditor}
+    />);
+    const input = await screen.findByLabelText('gap-input');
+    fireEvent.change(input, { target: { value: 'return onToken(chunk);' } });
+    await screen.findByText('1/1 passing');
+
+    const runCall = fetchMock.mock.calls.find((c: any[]) => {
+      if (c[0] !== '/api/gap/run') return false;
+      const body = JSON.parse(c[1].body);
+      return body.code === 'return onToken(chunk);';
+    });
+    expect(runCall).toBeTruthy();
+    const body = JSON.parse(runCall![1].body);
+    expect(body).toMatchObject({ rungId: fullBodyRung.id, code: 'return onToken(chunk);', mode: 'file' });
   }, 10_000);
 
   it('explicitly clicking Submit after a passing run completes with wroteCode:true', async () => {

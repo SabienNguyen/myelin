@@ -628,7 +628,9 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 
 .code-exercise .code-exercise-error, .code-exercise .code-exercise-loading { color: var(--text-muted); }
 
-/* Rung editor: three stacked CM6 panes, dark theme (matches the gap's own oneDark chrome) */
+/* Rung editor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md, "whole-file IDE"): ONE CM6
+   view over the rung's whole file, dark theme (matches the gap's own oneDark chrome) — the old
+   three-stacked read-only/gap/read-only pane frame is gone (see RungEditor.tsx's top comment). */
 .rung-editor-frame {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -637,12 +639,13 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 .rung-pane { font-size: 0.85rem; }
 .rung-pane .cm-editor { height: auto; font-family: var(--font-mono); }
-.rung-pane--readonly .cm-editor { opacity: 0.6; }
-.rung-pane--gap .cm-editor { border-top: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
-/* Read-only panes' line-number gutter (P2) sits on the same dark oneDark chrome as the gap pane —
-   dim it in step with the rest of the pane instead of full-brightness against dimmed code. */
-.rung-pane--readonly .cm-gutters { opacity: 0.85; }
+
+/* The AI's "YOUR TURN" marker comment (RungEditor.tsx's markerHighlightField, located via
+   ./scaffold.ts's findMarkerLineRange): a subtle background tint on its own contiguous lines —
+   reuses the same accent token the old gap pane's border used to frame the editable region, now a
+   low-alpha wash instead since there's no separate "editable region" left to frame. Disappears the
+   instant the learner edits or deletes the marker; never blocked, never restored. */
+.cm-your-turn-marker { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 
 .context-strip { color: var(--text-muted); font-size: 0.85rem; margin: 0.3rem 0; }
 .syntax-error-note { color: var(--bad); font-size: 0.85rem; }
@@ -942,11 +945,11 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 .code-exercise .ide-run-timing { font-size: 0.78rem; font-family: var(--font-mono); color: var(--text-muted); }
 
-/* RungEditor's fillHeight variant (P1: "the CM6 editor fills the available height") — the gap
+/* RungEditor's fillHeight variant (P1: "the CM6 editor fills the available height") — the editor
    pane grows inside `.ide-editor-column`'s flex column instead of sizing to its content. */
 .rung-editor-frame--fill { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.rung-editor-frame--fill .rung-pane--gap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-.rung-editor-frame--fill .rung-pane--gap .cm-editor { height: 100%; }
+.rung-editor-frame--fill .rung-pane--editable { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.rung-editor-frame--fill .rung-pane--editable .cm-editor { height: 100%; }
 
 /* Track A (docs/superpowers/plans/2026-07-21-coding-stage.md "A. In-IDE tutor help"): the Help
    tab's transcript + composer — same brief-panel visual language as the other tabs (ide-brief-*
