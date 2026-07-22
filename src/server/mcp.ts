@@ -4,6 +4,7 @@ import { glob } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { ToolSet } from 'ai';
 import type { HarnessConfig } from './config.js';
+import { invalidateGraphCache } from './graphCache.js';
 
 type MCPClient = Awaited<ReturnType<typeof createMCPClient>>;
 
@@ -68,11 +69,27 @@ export class Loreweaver {
     ])) as ToolSet;
   }
 
+  // Graph-cache invalidation seam: every write_page call the harness itself makes reaches the
+  // vault through exactly one of the two methods below (call() or execTool()) — both live on
+  // this wrapper and both already know the tool name, so this is the single, least-invasive
+  // place to hook invalidateGraphCache() rather than sprinkling it across every write_page call
+  // site (ingestRepo.ts/seedPatternPages.ts call lw.call('write_page', ...) directly; the
+  // tutor-session and compile agent loops in session.ts/ingest.ts instead hand out the ToolSet
+  // from tools(), whose execute() is execTool() below — the model triggers write_page through
+  // THAT path, not call()). Only invalidate on success: a rejected/erroring write never touched
+  // the vault. External vault edits (e.g. a user editing Obsidian directly) aren't covered here
+  // and fall through to the cache's own TTL — see graphCache.ts.
+  private static invalidateIfWrite(name: string): void {
+    if (name === 'write_page') invalidateGraphCache();
+  }
+
   private execTool(name: string, args: any, opts: any): Promise<any> {
     return this.withRespawn(async (client) => {
       const tool = (await client.tools())[name];
       if (!tool?.execute) throw new Error(`loreweaver tool "${name}" not found on client`);
-      return tool.execute(args, opts);
+      const result = await tool.execute(args, opts);
+      Loreweaver.invalidateIfWrite(name);
+      return result;
     });
   }
 
@@ -81,7 +98,9 @@ export class Loreweaver {
       const res = await client.callTool({ name, arguments: args });
       const text = (res.content as { type: string; text: string }[])[0]?.text ?? '';
       if (res.isError) throw new Error(`loreweaver ${name}: ${text}`);
-      return JSON.parse(text);
+      const parsed = JSON.parse(text);
+      Loreweaver.invalidateIfWrite(name);
+      return parsed;
     });
   }
 
