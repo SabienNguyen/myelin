@@ -523,4 +523,23 @@ describe('sweepInterruptedConversions', async () => {
     expect(q[1].status).toBe('pending');
     expect(q[2].status).toBe('done');
   });
+
+  // B2c: a repo ingest's whole lifetime (clone/docs/mine/seed) lives behind ONE 'converting'
+  // placeholder (mode: 'repo') — a server restart mid-ingest must sweep it the same way a book
+  // conversion sweeps, just with a message that points at re-running the ingest, not re-uploading
+  // a file (there's no upload to re-do).
+  it('sweeps an interrupted repo-ingest placeholder to convert-error with a repo-specific message', () => {
+    const vault = mkT(jn(tD(), 'lwh-sweep-repo-'));
+    mkD(jn(vault, '.harness'), { recursive: true });
+    wF(jn(vault, '.harness', 'compile-queue.json'), JSON.stringify([
+      {
+        book: 'my-repo', chapter: '__ingesting_repo__/x', title: 'Ingesting repo…', mode: 'repo',
+        status: 'converting', phase: 'mining…',
+      },
+    ]));
+    expect(sweepInterruptedConversions(vault)).toBe(1);
+    const q = rq(vault);
+    expect(q[0].status).toBe('convert-error');
+    expect(q[0].error).toMatch(/re-run the repo ingest/);
+  });
 });

@@ -31,11 +31,22 @@ export interface QueueEntry {
   startedAt?: string; // ISO — set on 'converting' placeholders so the UI can show elapsed time
   progress?: { pagesDone: number; pagesTotal: number | null }; // set on 'converting' placeholders
   sourceUrl?: string; // papers: the URL the document was fetched from — cited on compiled pages
+  // B2c (ingestRepo.ts): marks the single placeholder entry a repo ingest owns for its whole
+  // lifetime (cloning -> docs pass -> mining pass -> sidecar refresh -> seeding). Per-chapter
+  // entries queued by the docs pass are plain book chapters (no `mode`) — they compile through the
+  // existing, unmodified pipeline exactly like a book's.
+  mode?: 'repo';
+  // Human-readable phase text for a `mode: 'repo'` placeholder ('cloning', 'docs: N queued',
+  // 'mining…', 'mined P/C passed', the final 'pages: N queued, exercises: P' summary) — the repo
+  // analogue of `progress` above, which is shaped for page-count conversion progress and doesn't
+  // fit a multi-phase repo ingest.
+  phase?: string;
 }
 
 // Mirrors loreweaver's src/vault/parsePage.ts slugify — duplicated here for the same reason
 // DECAY/MasteryLevel are duplicated in src/shared/loreweaver.ts (documented divergence risk).
-function slugify(s: string): string {
+// Exported for ingestRepo.ts, which needs the identical slug algorithm for repo/doc-file naming.
+export function slugify(s: string): string {
   return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
@@ -49,7 +60,10 @@ export function readQueue(vault: string): QueueEntry[] {
   return existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as QueueEntry[]) : [];
 }
 
-function writeQueue(vault: string, ledger: QueueEntry[]): void {
+// Exported for ingestRepo.ts, which owns a single long-lived placeholder entry across several
+// async phases (clone/docs/mine/seed) and needs the same read-modify-write primitive startConversion
+// uses for its own placeholder above.
+export function writeQueue(vault: string, ledger: QueueEntry[]): void {
   mkdirSync(join(vault, '.harness'), { recursive: true });
   writeFileSync(ledgerPath(vault), JSON.stringify(ledger, null, 2));
 }
@@ -269,7 +283,9 @@ export function sweepInterruptedConversions(vault: string): number {
   for (const e of ledger) {
     if (e.status === 'converting') {
       e.status = 'convert-error';
-      e.error = 'interrupted by a server restart — re-upload the file';
+      e.error = e.mode === 'repo'
+        ? 'interrupted by a server restart — re-run the repo ingest'
+        : 'interrupted by a server restart — re-upload the file';
       swept++;
     } else if (e.status === 'compiling') {
       e.status = 'pending';

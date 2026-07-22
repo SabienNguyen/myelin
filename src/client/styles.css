@@ -545,6 +545,28 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 .library-autocompile-note { font-style: italic; }
 
+/* ── B2c: "Add repo" + repo-ingest queue rows ────────── */
+.add-repo-form { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.add-repo-form input { min-width: 260px; flex: 1; }
+.repo-ingest-row { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--text-muted); }
+.repo-ingest-row .dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  animation: working-pulse 1.2s infinite ease-in-out;
+}
+.repo-ingest-row .dot:nth-child(3) { animation-delay: 0.18s; }
+.repo-ingest-row .dot:nth-child(4) { animation-delay: 0.36s; }
+.repo-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.05rem 0.35rem;
+  border-radius: 3px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
 /* ── code_exercise (the Gap inside the Stage, I2) ─────────────────────────────────────
    Ported dark-editor look stays scoped INSIDE .block.code-exercise; the card chrome
    itself (background/border/shadow) stays the harness's own paper/ink `.block` look. */
@@ -693,6 +715,18 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .practice-tag--owned { color: var(--good); border-color: var(--good); }
 .practice-tag--rented { color: var(--accent); border-color: var(--accent); }
 .practice-tag--new { color: var(--text-muted); }
+
+/* B2c: mined patterns ("From your repos" group) — family badge takes the same pill shape as the
+ * ownership tags above but a neutral accent (family is provenance, not a mastery signal). */
+.practice-group-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0.8rem 0 0.3rem;
+}
+.practice-tag--mined { color: var(--text-muted); border-color: var(--border); font-style: italic; text-transform: none; letter-spacing: 0; }
 
 /* ── P1: IDE focus mode (docs/superpowers/plans/2026-07-20-gap-integration.md) ──────────────
    A code_exercise block toggles `.app.focus-mode` via panelBus (App.tsx subscribes; see that

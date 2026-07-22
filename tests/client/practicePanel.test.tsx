@@ -10,7 +10,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
 
 const { PracticePanel } = await import('../../src/client/components/PracticePanel.js');
 
-function mockFetch(effective?: string) {
+function mockFetch(effective?: string, mined: any[] = []) {
   return vi.fn(async (url: string) => {
     if (url === '/api/gap/ladder') {
       return {
@@ -18,6 +18,7 @@ function mockFetch(effective?: string) {
         json: async () => ({
           ladder: { pattern: 'stream-consumer', targetArtifactId: 'stream-consumer', siblingArtifactId: 'paginated-fetcher', rungs: [] },
           rungs: [],
+          mined,
         }),
       } as any;
     }
@@ -74,5 +75,46 @@ describe('PracticePanel', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<PracticePanel visible={false} />);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// B2c: mined ladder entries (payload.mined) — listed under a "From your repos" group, clicking
+// routes through the tutor exactly like a built-in row.
+describe('PracticePanel — mined patterns (B2c)', () => {
+  const minedEntry = {
+    rung: { id: 'mined-pick--full_body--abc', artifactId: 'packages-core-src-pick', template: 'full_body' },
+    meta: { title: 'Pick', family: 'mined:the-gap', source: { repo: '/repo', commit: 'deadbeef', path: 'src/pick.ts' } },
+  };
+
+  it('lists a "From your repos" group with the family badge, and appends the pageSlug on click', async () => {
+    vi.stubGlobal('fetch', mockFetch(undefined, [minedEntry]));
+    render(<PracticePanel />);
+
+    await screen.findByText('From your repos');
+    const row = await screen.findByRole('button', { name: /pick/i });
+    expect(screen.getByText('mined:the-gap')).not.toBeNull();
+
+    fireEvent.click(row);
+    expect(append).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('pageSlug "packages-core-src-pick"'),
+    );
+  });
+
+  it('renders the mined group even when the built-in ladder has no pattern', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/gap/ladder') {
+        return { ok: true, json: async () => ({ ladder: {}, rungs: [], mined: [minedEntry] }) } as any;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    render(<PracticePanel />);
+    await screen.findByText('From your repos');
+  });
+
+  it('shows no "From your repos" group when mined is empty', async () => {
+    vi.stubGlobal('fetch', mockFetch(undefined, []));
+    const { container } = render(<PracticePanel />);
+    await waitFor(() => expect(container.querySelector('.practice-panel')).not.toBeNull());
+    expect(screen.queryByText('From your repos')).toBeNull();
   });
 });

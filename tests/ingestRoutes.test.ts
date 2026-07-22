@@ -221,3 +221,53 @@ describe('ingest routes — JSON url ingest', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('POST /api/ingest/repo (B2c)', () => {
+  it('rejects a missing "source" field with 400', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-repo-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault));
+    const res = await app.request('/api/ingest/repo', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/"source"/);
+  });
+
+  it('rejects a source that derives an unsafe name with 400 (path-traversal guard)', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-repo-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault));
+    const res = await app.request('/api/ingest/repo', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'https://github.com/foo/bar.baz.git' }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/could not derive a safe name/);
+  });
+
+  it('rejects a nonexistent local path with 400', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-repo-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault));
+    const res = await app.request('/api/ingest/repo', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: '/definitely/does/not/exist-xyz' }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/does not exist/);
+  });
+
+  it('a valid local path is accepted and queues a repo placeholder (injected fakes, no real subprocess)', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-repo-'));
+    const repoDir = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-repo-src-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), {
+      ingestRepoDeps: { miner: async () => ({ candidates: 0, passed: [], rejected: [] }) },
+    });
+    const res = await app.request('/api/ingest/repo', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ source: repoDir }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ingesting).toBe(true);
+    await until(() => readQueue(vault).some((e) => e.mode === 'repo' && e.book === body.name));
+  });
+});

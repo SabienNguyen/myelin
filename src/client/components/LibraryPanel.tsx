@@ -5,6 +5,8 @@ import { PracticePanel } from './PracticePanel.js';
 type Entry = {
   book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string;
   progress?: { pagesDone: number; pagesTotal: number | null };
+  mode?: string; // 'repo' for a B2c repo-ingest placeholder — plain book chapters leave this unset
+  phase?: string; // repo-ingest placeholder's human-readable phase text (cloning/docs/mining/done)
 };
 
 function elapsed(iso?: string): string {
@@ -34,6 +36,21 @@ function ConvertingRow({ entry }: { entry: Entry }) {
     <span className="converting-row">
       {dots}
       converting{elapsed(entry.startedAt)} — chapters appear here when it finishes
+    </span>
+  );
+}
+
+/** B2c repo-ingest placeholder row: distinct badge + the current phase text ('cloning',
+ * 'docs: N queued', 'mining…', 'mined P/C passed', or the final 'pages: N queued, exercises: P'
+ * summary once done) in place of ConvertingRow's page-count progress bar, which doesn't apply to
+ * a multi-phase repo ingest. */
+function RepoIngestRow({ entry }: { entry: Entry }) {
+  const busy = entry.status === 'converting';
+  return (
+    <span className="repo-ingest-row">
+      <span className="repo-badge">repo</span>
+      {busy && <><span className="dot" /><span className="dot" /><span className="dot" /></>}
+      {entry.phase ?? entry.title}
     </span>
   );
 }
@@ -83,6 +100,58 @@ function BookTitle({ book, onRenamed }: { book: string; onRenamed: () => void })
   );
 }
 
+/** B2c: "Add repo" affordance (paired with the topbar's "Add book" — git URL or absolute local
+ * path, ingested via POST /api/ingest/repo). Kept self-contained in LibraryPanel rather than
+ * threaded through App.tsx's own upload state, since the repo queue row it produces already lives
+ * here. */
+function AddRepoForm({ onQueued }: { onQueued: () => void }) {
+  const [value, setValue] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const source = value.trim();
+    if (!source || submitting) return;
+    setSubmitting(true);
+    setNote(null);
+    try {
+      const res = await fetch('/api/ingest/repo', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setValue('');
+        setNote(`${data.name}: ingesting in the background`);
+        onQueued();
+      } else {
+        setNote(`Add repo failed: ${data.error ?? res.statusText}`);
+      }
+    } catch (err: any) {
+      setNote(`Add repo failed: ${err?.message ?? err}`);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form className="add-repo-form" onSubmit={submit}>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="git URL or local path"
+        aria-label="Repo URL or path"
+        disabled={submitting}
+      />
+      <button type="submit" disabled={submitting || !value.trim()}>
+        {submitting ? 'Adding…' : 'Add repo'}
+      </button>
+      {note && <span className="library-note" role="status">{note}</span>}
+    </form>
+  );
+}
+
 const POLL_MS = 10_000;
 
 export function LibraryPanel({ visible = true }: { visible?: boolean }) {
@@ -128,6 +197,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   if (queue.length === 0) {
     return (
       <div className="library-panel">
+        <AddRepoForm onQueued={() => setRefresh((r) => r + 1)} />
         <p className="empty">No books yet — use “Add book” in the top bar, or ask the tutor (freeform) to pull in a paper.</p>
         <PracticePanel visible={visible} />
       </div>
@@ -139,6 +209,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
 
   return (
     <div className="library-panel">
+      <AddRepoForm onQueued={() => setRefresh((r) => r + 1)} />
       <div className="library-actions">
         <button
           type="button"
@@ -157,9 +228,11 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
           <BookTitle book={book} onRenamed={() => setRefresh((r) => r + 1)} />
           <ul>
             {queue.filter((e) => e.book === book).map((e) => (
-              <li key={e.chapter} className={`q-${e.status}`} title={e.error ?? ''}>
+              <li key={e.chapter} className={`q-${e.status}${e.mode === 'repo' ? ' q-repo' : ''}`} title={e.error ?? ''}>
                 <span className="q-status">{e.status === 'convert-error' ? 'failed' : e.status}</span>
-                {e.status === 'converting' ? <ConvertingRow entry={e} /> : ` ${e.title}`}
+                {e.mode === 'repo' ? <RepoIngestRow entry={e} />
+                  : e.status === 'converting' ? <ConvertingRow entry={e} />
+                    : ` ${e.title}`}
                 {e.error && <div className="q-error">{e.error}</div>}
               </li>
             ))}

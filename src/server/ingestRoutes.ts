@@ -7,11 +7,14 @@ import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
 import { compileNext, readQueue, renameBook, startConversion } from './ingest.js';
+import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
 import type { Loreweaver } from './mcp.js';
 
 export function buildIngestRoutes(
   lw: Loreweaver, cfg: HarnessConfig,
-  deps: { converter?: Converter; model?: LanguageModel; fetchImpl?: typeof fetch } = {},
+  deps: {
+    converter?: Converter; model?: LanguageModel; fetchImpl?: typeof fetch; ingestRepoDeps?: IngestRepoDeps;
+  } = {},
 ) {
   const app = new Hono();
 
@@ -49,6 +52,23 @@ export function buildIngestRoutes(
   });
 
   app.get('/api/ingest/queue', (c) => c.json(readQueue(cfg.vault)));
+
+  // B2c: "Add repo" ingestion — git URL or absolute local path. Name derivation/validation
+  // (ingestRepo.ts's deriveRepoName + local-path existence check) happens synchronously before
+  // any ledger write, so a bad name or a nonexistent local path 400s immediately rather than
+  // queuing a placeholder that would just fail a moment later.
+  app.post('/api/ingest/repo', async (c) => {
+    const body = await c.req.json().catch(() => null) as { source?: string } | null;
+    if (!body?.source?.trim()) {
+      return c.json({ error: 'JSON body requires a "source" field (git URL or absolute local path)' }, 400);
+    }
+    try {
+      const result = ingestRepo(lw, cfg, body.source, deps.ingestRepoDeps);
+      return c.json(result);
+    } catch (e: any) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+  });
 
   app.patch('/api/ingest/book', async (c) => {
     const body = await c.req.json().catch(() => null) as { book?: string; name?: string } | null;

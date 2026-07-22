@@ -15,6 +15,16 @@ interface Row {
   ownership: Ownership;
 }
 
+// B2c: GET /api/gap/ladder's `mined` array (gapProxy.ts's GapMinedEntry) — one row per
+// gauntlet-passed artifact mined from a repo. `slug` doubles as the code_exercise pageSlug: it's
+// `rung.artifactId`, which is EXACTLY the seeded vault page's slug by construction (both are the
+// mined artifact directory's own basename — see ingestRepo.ts's seedMinedArtifactPage).
+interface MinedRow {
+  slug: string;
+  title: string;
+  family: string;
+}
+
 const OWNERSHIP_LABEL: Record<Ownership, string> = {
   owned: 'owned', rented: 'rented', new: 'new',
 };
@@ -30,8 +40,20 @@ function ownershipFor(effective: string | undefined): Ownership {
   return 'new';
 }
 
+function minedRowsFrom(payload: any): MinedRow[] {
+  const raw = Array.isArray(payload?.mined) ? payload.mined : [];
+  return raw
+    .map((entry: any): MinedRow => ({
+      slug: typeof entry?.rung?.artifactId === 'string' ? entry.rung.artifactId : '',
+      title: typeof entry?.meta?.title === 'string' ? entry.meta.title : (entry?.rung?.artifactId ?? 'mined pattern'),
+      family: typeof entry?.meta?.family === 'string' ? entry.meta.family : 'mined',
+    }))
+    .filter((row: MinedRow) => row.slug);
+}
+
 export function PracticePanel({ visible = true }: { visible?: boolean }) {
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [mined, setMined] = useState<MinedRow[]>([]);
   const threadRuntime = useThreadRuntime();
 
   useEffect(() => {
@@ -41,20 +63,23 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
       // GET /api/gap/ladder 404s when cfg.gap is absent (see gapProxy.ts) — treat that the same
       // as "no ladders", not an error worth surfacing in the Library tab.
       const ladderRes = await fetch('/api/gap/ladder').catch(() => null);
-      if (!ladderRes?.ok) { if (!cancelled) setRows([]); return; }
-      const { ladder } = await ladderRes.json();
-      const pattern: string | undefined = ladder?.pattern;
-      if (!pattern) { if (!cancelled) setRows([]); return; }
+      if (!ladderRes?.ok) { if (!cancelled) { setRows([]); setMined([]); } return; }
+      const payload = await ladderRes.json();
+      const minedRows = minedRowsFrom(payload);
+      const pattern: string | undefined = payload?.ladder?.pattern;
+      if (!pattern) { if (!cancelled) { setRows([]); setMined(minedRows); } return; }
 
       const studentRes = await fetch('/api/student').catch(() => null);
       const student = studentRes?.ok ? await studentRes.json() : {};
       if (cancelled) return;
       setRows([{ pattern, ownership: ownershipFor(student?.[pattern]?.effective) }]);
+      setMined(minedRows);
     })();
     return () => { cancelled = true; };
   }, [visible]);
 
-  if (!rows || rows.length === 0) return null;
+  if (rows === null) return null;
+  if (rows.length === 0 && mined.length === 0) return null;
 
   return (
     <section className="practice-panel">
@@ -76,6 +101,28 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
           </li>
         ))}
       </ul>
+      {mined.length > 0 && (
+        <>
+          <h4 className="practice-group-label">From your repos</h4>
+          <ul>
+            {mined.map((row) => (
+              <li key={row.slug}>
+                <button
+                  type="button"
+                  className="practice-row practice-row--mined"
+                  onClick={() => threadRuntime.append(
+                    `Practice the "${row.title}" pattern (mined artifact, pageSlug "${row.slug}") with a code exercise.`,
+                  )}
+                >
+                  <Code size={14} weight="duotone" />
+                  <span className="practice-pattern">{row.title}</span>
+                  <span className="practice-tag practice-tag--mined">{row.family}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </section>
   );
 }

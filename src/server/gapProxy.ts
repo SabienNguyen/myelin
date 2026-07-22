@@ -20,9 +20,24 @@ export interface GapRung {
   reference_answer: string;
   prose?: { context_line?: string; hint?: string; success_line?: string };
 }
+// B2c: mined artifacts (packages/miner output, e.g. the harness vault's own repo-mining pass)
+// served IN ADDITION to `rungs` above — see the-gap repo's apps/web/src/server/ladder.ts
+// (LadderPayload.mined). Optional (not every /api/ladder response predates this field, and
+// callers that only care about the built-in ladder never need to touch it) rather than required,
+// so existing code/tests constructing a GapLadderPayload literal don't need updating.
+export interface GapMinedArtifactMeta {
+  title: string;
+  family: string; // e.g. "mined:<repo>"
+  source: { repo: string; commit: string; path: string };
+}
+export interface GapMinedEntry {
+  rung: GapRung;
+  meta: GapMinedArtifactMeta;
+}
 export interface GapLadderPayload {
   ladder: { pattern: string; targetArtifactId: string; siblingArtifactId: string; rungs: string[] };
   rungs: GapRung[];
+  mined?: GapMinedEntry[];
 }
 
 /** Fetches the-gap sidecar's GET /api/ladder — the ONE endpoint the sidecar ever returns rung
@@ -91,25 +106,34 @@ async function proxy(c: any, url: string, method: 'GET' | 'POST', body?: unknown
 // the cache never leaks across unrelated config instances — no manual reset hook needed.
 const statusCache = new WeakMap<object, { at: number; up: boolean }>();
 
-/** Powers the `gap` badge on GET /api/status: a 2s-timeout ping of the sidecar's GET /api/ladder,
- * cached 30s so the status endpoint stays cheap under repeated polling. Returns false (not a
- * thrown error) when cfg.gap is absent or the sidecar is unreachable — status checks never
- * throw. */
+/** One 2s-timeout ping of the sidecar's GET /api/ladder — NOT cached (see isGapUp below for the
+ * cached wrapper the `gap` status badge uses). Exported for ingestRepo.ts's post-restart poll
+ * (B2c step 5), which needs a FRESH reading on every ~2s tick — isGapUp's 30s cache would happily
+ * keep reporting "down" for up to 30s after the restarted sidecar is actually back up, which would
+ * make a 30s poll loop built on it nearly useless. Returns false (never throws) when cfg.gap is
+ * absent or the sidecar is unreachable, same contract as isGapUp. */
+export async function pingGapOnce(cfg: HarnessConfig): Promise<boolean> {
+  if (!cfg.gap) return false;
+  try {
+    const res = await fetch(`${cfg.gap.url.replace(/\/$/, '')}/api/ladder`, {
+      signal: AbortSignal.timeout(STATUS_PING_TIMEOUT_MS),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Powers the `gap` badge on GET /api/status: pingGapOnce, cached 30s so the status endpoint
+ * stays cheap under repeated polling. Returns false (not a thrown error) when cfg.gap is absent
+ * or the sidecar is unreachable — status checks never throw. */
 export async function isGapUp(cfg: HarnessConfig): Promise<boolean> {
   if (!cfg.gap) return false;
   const now = Date.now();
   const cached = statusCache.get(cfg);
   if (cached && now - cached.at < STATUS_CACHE_MS) return cached.up;
 
-  let up: boolean;
-  try {
-    const res = await fetch(`${cfg.gap.url.replace(/\/$/, '')}/api/ladder`, {
-      signal: AbortSignal.timeout(STATUS_PING_TIMEOUT_MS),
-    });
-    up = res.ok;
-  } catch {
-    up = false;
-  }
+  const up = await pingGapOnce(cfg);
   statusCache.set(cfg, { at: now, up });
   return up;
 }
