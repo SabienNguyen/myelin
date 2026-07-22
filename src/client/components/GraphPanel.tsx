@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useThreadRuntime } from '@assistant-ui/react';
 import { getArrow } from 'perfect-arrows';
 import { getGraph } from '../lib/api.js';
 import { layoutGraph, type LaidOutNode, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
+import { parseHash } from '../lib/urlState.js';
 
 const R = 16;
 const PAD = 60;
@@ -13,10 +14,112 @@ const POLL_MS = 30_000;
 // rather than the swoopy default perfect-arrows curves.
 const PREREQ_ARROW_OPTS = { bow: 0.15, stretch: 0.3, padStart: R + 2, padEnd: R + 7 };
 
+// ── Contextual scope ─────────────────────────────────────────────────────
+// /api/graph always returns the WHOLE vault (a vault of hundreds of pages is cheap to fetch and
+// keep in memory), but rendering all of it by default drowns out the one topic a student actually
+// has open. contextualSubgraph derives a small neighborhood client-side from that already-fetched
+// graph instead of asking the server to filter it.
+export const CONTEXT_HOPS = 2;
+export const CONTEXT_CAP = 40;
+
+export interface Subgraph {
+  nodes: LaidOutNode[];
+  edges: LaidOutEdge[];
+  /** BFS origin actually used — null only when there's truly no usable seed (nothing open this
+   * session, no decay data to infer one from either), in which case `nodes`/`edges` above are
+   * simply the full graph, unfiltered, and the caller should show the "open a page" hint. */
+  seedSlug: string | null;
+  /** True when seedSlug wasn't the caller's requested seed but was inferred from decay data. */
+  seedInferred: boolean;
+  hops: number;
+  /** True when the 2-hop neighborhood exceeded `cap` and some hop-2 nodes were dropped to fit —
+   * hop-1 neighbors are never dropped, see the trim step below. */
+  truncated: boolean;
+}
+
+/**
+ * Undirected BFS neighborhood of `requestedSeed` within CONTEXT_HOPS hops, capped at ~`cap`
+ * nodes. Pure and synchronous — the caller already holds the full laid-out graph in memory.
+ *
+ * Cap strategy ("1-hop completeness, then closest-by-degree"): hop-1 neighbors are ALWAYS
+ * included in full, even past the cap — a student's immediate prereqs/dependents/deepens links
+ * should never be silently dropped. Hop-2 nodes fill any remaining room, highest-degree-in-the-
+ * full-graph first: among nodes tied on distance, degree is a cheap proxy for "how central/likely
+ * relevant", since raw BFS discovery order (a Map's insertion order) carries no real signal.
+ *
+ * `requestedSeed` missing (null, or a slug no longer present in `nodes`) falls back to inferring a
+ * seed from decay data — the LaidOutNode with the most `daysLeft` (least elapsed time since
+ * `last_reinforced`, i.e. the freshest "recently touched" node the already-fetched graph exposes)
+ * — and, if nothing has decay data either, all the way to the whole graph with `seedSlug: null`.
+ */
+export function contextualSubgraph(
+  nodes: LaidOutNode[], edges: LaidOutEdge[], requestedSeed: string | null, cap: number = CONTEXT_CAP,
+): Subgraph {
+  const bySlug = new Map(nodes.map((n) => [n.slug, n]));
+  let seedSlug = requestedSeed != null && bySlug.has(requestedSeed) ? requestedSeed : null;
+  let seedInferred = false;
+  if (seedSlug == null) {
+    const withDecay = nodes.filter((n) => n.daysLeft != null);
+    if (withDecay.length > 0) {
+      seedSlug = withDecay.reduce((freshest, n) => (n.daysLeft! > freshest.daysLeft! ? n : freshest)).slug;
+      seedInferred = true;
+    }
+  }
+  if (seedSlug == null) {
+    return { nodes, edges, seedSlug: null, seedInferred: false, hops: 0, truncated: false };
+  }
+
+  const adjacency = new Map<string, Set<string>>();
+  const link = (a: string, b: string) => {
+    if (!adjacency.has(a)) adjacency.set(a, new Set());
+    adjacency.get(a)!.add(b);
+  };
+  for (const e of edges) { link(e.src, e.dst); link(e.dst, e.src); }
+
+  const distance = new Map<string, number>([[seedSlug, 0]]);
+  let frontier = [seedSlug];
+  for (let hop = 1; hop <= CONTEXT_HOPS && frontier.length > 0; hop++) {
+    const next: string[] = [];
+    for (const cur of frontier) {
+      for (const nb of adjacency.get(cur) ?? []) {
+        if (!distance.has(nb)) { distance.set(nb, hop); next.push(nb); }
+      }
+    }
+    frontier = next;
+  }
+
+  const hop1 = [...distance].filter(([, d]) => d === 1).map(([s]) => s);
+  const hop2 = [...distance].filter(([, d]) => d === 2).map(([s]) => s);
+
+  const included = new Set<string>([seedSlug, ...hop1]);
+  const room = cap - included.size;
+  let truncated: boolean;
+  if (room > 0) {
+    const degree = (slug: string) => adjacency.get(slug)?.size ?? 0;
+    const ranked = [...hop2].sort((a, b) => degree(b) - degree(a) || a.localeCompare(b));
+    for (const slug of ranked.slice(0, room)) included.add(slug);
+    truncated = ranked.length > room;
+  } else {
+    truncated = hop2.length > 0;
+  }
+
+  return {
+    nodes: nodes.filter((n) => included.has(n.slug)),
+    edges: edges.filter((e) => included.has(e.src) && included.has(e.dst)),
+    seedSlug, seedInferred, hops: CONTEXT_HOPS, truncated,
+  };
+}
+
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const [nodes, setNodes] = useState<LaidOutNode[]>([]);
   const [edges, setEdges] = useState<LaidOutEdge[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [mode, setMode] = useState<'contextual' | 'full'>('contextual');
+  // The "currently open page" context signal. Seeded once from the URL (covers a deep link
+  // straight into a page, landed on before this component ever sees a panelBus event — GraphPanel
+  // is mounted for the whole app lifetime, just CSS-hidden while another tab is active, per
+  // SidePanel.tsx), then kept live below by panelBus + hash listeners.
+  const [contextSeed, setContextSeed] = useState<string | null>(() => parseHash(location.hash).pageSlug);
   const threadRuntime = useThreadRuntime();
 
   useEffect(() => {
@@ -34,9 +137,43 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     return () => { cancelled = true; clearInterval(id); };
   }, [visible]);
 
-  const byId = new Map(nodes.map((n) => [n.slug, n]));
-  const xs = nodes.map((n) => n.x);
-  const ys = nodes.map((n) => n.y);
+  // Tracks the scope seed regardless of which tab is visible (this effect has no `visible` gate)
+  // so that switching to Graph after opening a page elsewhere shows an already-correct context,
+  // instead of a stale one that only updates the next time an openPage event fires while visible.
+  // Two sources, because the app has two ways a page's slug changes (see SidePanel.tsx): most
+  // opens go through panelBus (wiki-link clicks, graph node clicks, `teachMe`), but direct/back-
+  // forward hash navigation bypasses panelBus entirely — the hash listener catches that case. A
+  // hash change is only applied when it actually names a page, so switching tabs in the URL (which
+  // drops the page segment — see urlState.ts's serializeHash) never clears a known context.
+  useEffect(() => {
+    const unsub = panelBus.subscribe((e) => {
+      if (e.type === 'openPage' || e.type === 'teachMe') setContextSeed(e.slug);
+    });
+    const onHashChange = () => {
+      const parsed = parseHash(location.hash);
+      if (parsed.tab === 'page' && parsed.pageSlug) setContextSeed(parsed.pageSlug);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    window.addEventListener('popstate', onHashChange);
+    return () => {
+      unsub();
+      window.removeEventListener('hashchange', onHashChange);
+      window.removeEventListener('popstate', onHashChange);
+    };
+  }, []);
+
+  const sub = useMemo(
+    () => (mode === 'contextual' ? contextualSubgraph(nodes, edges, contextSeed) : null),
+    [mode, nodes, edges, contextSeed],
+  );
+  const displayNodes = sub ? sub.nodes : nodes;
+  const displayEdges = sub ? sub.edges : edges;
+  const seedTitle = sub?.seedSlug != null
+    ? (nodes.find((n) => n.slug === sub.seedSlug)?.title ?? sub.seedSlug) : null;
+
+  const byId = new Map(displayNodes.map((n) => [n.slug, n]));
+  const xs = displayNodes.map((n) => n.x);
+  const ys = displayNodes.map((n) => n.y);
   const minX = (xs.length ? Math.min(...xs) : 0) - PAD;
   const minY = (ys.length ? Math.min(...ys) : 0) - PAD;
   const maxX = (xs.length ? Math.max(...xs) : 200) + PAD;
@@ -46,8 +183,31 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
   return (
     <div className="graph-panel" style={{ overflow: 'auto', width: '100%', height: '100%' }}>
+      <div className="graph-controls">
+        <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope">
+          <button type="button" role="tab" aria-selected={mode === 'contextual'}
+            className={mode === 'contextual' ? 'on' : ''} onClick={() => setMode('contextual')}>
+            This topic
+          </button>
+          <button type="button" role="tab" aria-selected={mode === 'full'}
+            className={mode === 'full' ? 'on' : ''} onClick={() => setMode('full')}>
+            Whole vault
+          </button>
+        </div>
+        {mode === 'contextual' && (
+          seedTitle != null ? (
+            <p className="graph-subtitle">
+              around {seedTitle} · {sub!.hops} hops
+              {sub!.nodes.length === 1 && ' · no linked pages yet'}
+              {sub!.truncated && ' · showing closest matches'}
+            </p>
+          ) : (
+            <p className="graph-subtitle hint">open a page to focus the graph</p>
+          )
+        )}
+      </div>
       <svg viewBox={`${minX} ${minY} ${width} ${height}`} width={width} height={height}>
-        {edges.map((e) => {
+        {displayEdges.map((e) => {
           const src = byId.get(e.src);
           const dst = byId.get(e.dst);
           if (!src || !dst) return null;
@@ -74,7 +234,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
             </g>
           );
         })}
-        {nodes.map((n) => (
+        {displayNodes.map((n) => (
           <g key={n.slug} className="graph-node" transform={`translate(${n.x},${n.y})`}
             onClick={() => { setSelected(n.slug); panelBus.openPage(n.slug); }}
             style={{ cursor: 'pointer' }}>

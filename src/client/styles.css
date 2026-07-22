@@ -439,6 +439,39 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .mark-ok { color: var(--good); font-weight: 700; }
 .mark-bad { color: var(--bad); font-weight: 700; }
 
+.graph-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-panel);
+  padding: 0.1rem 0 0.5rem;
+}
+.graph-mode-toggle {
+  display: inline-flex;
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.graph-mode-toggle button {
+  padding: 0.25rem 0.7rem;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+.graph-mode-toggle button + button { border-left: 1px solid var(--border); }
+.graph-mode-toggle button:hover { color: var(--text); background: var(--bg-inset); }
+.graph-mode-toggle button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+.graph-subtitle { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
+.graph-subtitle.hint { font-style: italic; }
+
 .graph-node circle { transition: filter 0.12s; }
 .graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }
 .graph-node text { fill: var(--text); }
