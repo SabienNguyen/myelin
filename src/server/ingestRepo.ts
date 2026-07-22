@@ -28,8 +28,9 @@ import {
 import { pingGapOnce } from './gapProxy.js';
 import type { HarnessConfig } from './config.js';
 import { splitChapters } from './convert.js';
-import { ensureCompileDrain, readQueue, slugify, writeQueue } from './ingest.js';
+import { ensureCompileDrain, slugify } from './ingest.js';
 import type { Loreweaver } from './mcp.js';
+import { readQueue, updateQueue, writeQueue, type QueueEntry } from './queueStore.js';
 
 // ── name/source derivation ──────────────────────────────────────────────────────────────────
 
@@ -353,6 +354,15 @@ export interface IngestRepoDeps {
  * count permitting) sidecar restart+poll -> pattern-page seeding in the background, updating the
  * placeholder's `phase` text as each stage completes. Returns as soon as the placeholder is
  * queued, exactly like startConversion.
+ *
+ * Ledger-write note: the INITIAL placeholder push just below is a direct readQueue+writeQueue
+ * pair, not routed through updateQueue's async mutex — same reason as startConversion's own
+ * initial push (see ingest.ts): this function returns synchronously and its only caller
+ * (ingestRoutes.ts's POST /api/ingest/repo) relies on the placeholder being durably on disk the
+ * instant it returns. Safe because nothing async happens between this read and this write. Every
+ * OTHER ledger write below (setPhase, finish, the docs-pass loop) runs in the background
+ * continuation, arbitrarily far past an await, and goes through updateQueue — see queueStore.ts's
+ * module doc comment for the incident that requires this.
  */
 export function ingestRepo(
   lw: Loreweaver, cfg: HarnessConfig, source: string, deps: IngestRepoDeps = {},
@@ -389,20 +399,21 @@ export function ingestRepo(
   });
   writeQueue(cfg.vault, ledger);
 
-  function setPhase(phase: string): void {
-    const current = readQueue(cfg.vault);
-    const ph = current.find((e) => e.chapter === placeholderKey);
-    if (ph) { ph.phase = phase; writeQueue(cfg.vault, current); }
+  async function setPhase(phase: string): Promise<void> {
+    await updateQueue(cfg.vault, (entries) => {
+      const ph = entries.find((e) => e.chapter === placeholderKey);
+      if (ph) ph.phase = phase;
+    });
   }
-  function finish(status: 'done' | 'error', phase: string, error?: string): void {
-    const current = readQueue(cfg.vault);
-    const ph = current.find((e) => e.chapter === placeholderKey);
-    if (ph) {
-      ph.status = status;
-      ph.phase = phase;
-      if (error) ph.error = error;
-      writeQueue(cfg.vault, current);
-    }
+  async function finish(status: 'done' | 'error', phase: string, error?: string): Promise<void> {
+    await updateQueue(cfg.vault, (entries) => {
+      const ph = entries.find((e) => e.chapter === placeholderKey);
+      if (ph) {
+        ph.status = status;
+        ph.phase = phase;
+        if (error) ph.error = error;
+      }
+    });
   }
 
   void (async () => {
@@ -426,29 +437,32 @@ export function ingestRepo(
         const raw = readFileSync(join(repoPath, relPath), 'utf8');
         const chapters = splitChapters(raw);
         const fileSlug = slugify(relPath.replace(/\.md$/i, '')) || 'doc';
-        const current = readQueue(cfg.vault);
-        chapters.forEach((ch, i) => {
+        const newEntries: QueueEntry[] = chapters.map((ch, i) => {
           const n = i + 1;
           const chapterSlug = slugify(ch.title) || `chapter-${n}`;
           const filename = `${fileSlug}--ch-${String(n).padStart(2, '0')}-${chapterSlug}.md`;
           const header = `<!-- source: "${name}", file "${relPath}", chapter ${n}: "${ch.title}" -->\n\n`;
           writeFileSync(join(uploadsDir, filename), `${header}${ch.body}\n`);
-          current.push({
+          return {
             book: name,
             chapter: `raw/uploads/${repoSlug}/${filename}`,
             title: ch.title,
-            status: 'pending',
+            status: 'pending' as const,
             sourceUrl: `${trimmedSource} — ${relPath}`,
-          });
+          };
         });
-        writeQueue(cfg.vault, current);
+        // Targeted push via updateQueue (re-reads fresh, inside the mutex) rather than the
+        // read-once-hold-across-the-loop pattern that ate tonight's rows elsewhere — see
+        // queueStore.ts's module doc comment. This is exactly the write that lost 15 rows in
+        // production: a repo ingest's placeholder + these per-doc-file chapter pushes.
+        await updateQueue(cfg.vault, (entries) => { entries.push(...newEntries); });
         queuedChapters += chapters.length;
       }
-      setPhase(docFiles.length > 0 ? `docs: ${queuedChapters} queued` : 'docs: 0 queued (no markdown files found)');
+      await setPhase(docFiles.length > 0 ? `docs: ${queuedChapters} queued` : 'docs: 0 queued (no markdown files found)');
       if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg);
 
       // ── mining pass (contract point 4): flat --out, JSON report, phase updates ──────────
-      setPhase('mining…');
+      await setPhase('mining…');
       const mineOutDir = join(cfg.vault, '.harness', 'mined');
       mkdirSync(mineOutDir, { recursive: true });
       let report: MineReport;
@@ -456,10 +470,10 @@ export function ingestRepo(
         report = await (deps.miner ?? defaultRunMiner)(repoPath, mineOutDir);
       } catch (e: any) {
         const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-        finish('error', `mining failed: ${msg}`, msg);
+        await finish('error', `mining failed: ${msg}`, msg);
         return;
       }
-      setPhase(`mined ${report.passed.length}/${report.candidates} passed`);
+      await setPhase(`mined ${report.passed.length}/${report.candidates} passed`);
 
       // ── pattern-page seeding (contract point 6) ─────────────────────────────────────────
       const existingSlugs = new Set(await lw.listSlugs());
@@ -486,9 +500,9 @@ export function ingestRepo(
         }
       }
 
-      finish('done', `pages: ${queuedChapters} queued, exercises: ${seeded}${warning}`);
+      await finish('done', `pages: ${queuedChapters} queued, exercises: ${seeded}${warning}`);
     } catch (e: any) {
-      finish('error', 'repo ingest failed', (e instanceof Error ? e.message : String(e)).slice(0, 500));
+      await finish('error', 'repo ingest failed', (e instanceof Error ? e.message : String(e)).slice(0, 500));
     }
   })();
 

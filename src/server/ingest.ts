@@ -1,6 +1,6 @@
 import { ToolLoopAgent, isStepCount, type LanguageModel, type ToolSet } from 'ai';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  mkdirSync, mkdtempSync, readFileSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
@@ -12,6 +12,9 @@ import {
 } from './convert.js';
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
+import {
+  readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
+} from './queueStore.js';
 import { sanitizeToolArgs } from './session.js';
 
 /** Injectable seam for tests — see claudeSdk.ts. */
@@ -21,51 +24,20 @@ export interface CompileDeps {
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-export type QueueStatus = 'converting' | 'convert-error' | 'pending' | 'compiling' | 'done' | 'error';
-export interface QueueEntry {
-  book: string;
-  chapter: string; // vault-relative path, e.g. 'raw/uploads/<book-slug>/ch-01-....md'
-  title: string;
-  status: QueueStatus;
-  error?: string;
-  startedAt?: string; // ISO — set on 'converting' placeholders so the UI can show elapsed time
-  progress?: { pagesDone: number; pagesTotal: number | null }; // set on 'converting' placeholders
-  sourceUrl?: string; // papers: the URL the document was fetched from — cited on compiled pages
-  // B2c (ingestRepo.ts): marks the single placeholder entry a repo ingest owns for its whole
-  // lifetime (cloning -> docs pass -> mining pass -> sidecar refresh -> seeding). Per-chapter
-  // entries queued by the docs pass are plain book chapters (no `mode`) — they compile through the
-  // existing, unmodified pipeline exactly like a book's.
-  mode?: 'repo';
-  // Human-readable phase text for a `mode: 'repo'` placeholder ('cloning', 'docs: N queued',
-  // 'mining…', 'mined P/C passed', the final 'pages: N queued, exercises: P' summary) — the repo
-  // analogue of `progress` above, which is shaped for page-count conversion progress and doesn't
-  // fit a multi-phase repo ingest.
-  phase?: string;
-}
+// The ledger's storage primitives (readQueue/writeQueue/updateQueue) and its entry shape now live
+// in queueStore.ts — re-exported here so every existing import of `readQueue`/`writeQueue`/
+// `QueueEntry`/`QueueStatus` from './ingest.js' keeps working unchanged. See queueStore.ts's module
+// doc comment for the full incident writeup this split is in service of: production code must
+// mutate the ledger only via updateQueue, never via a hand-rolled readQueue-then-writeQueue pair.
+export {
+  readQueue, writeQueue, type QueueEntry, type QueueStatus,
+} from './queueStore.js';
 
 // Mirrors loreweaver's src/vault/parsePage.ts slugify — duplicated here for the same reason
 // DECAY/MasteryLevel are duplicated in src/shared/loreweaver.ts (documented divergence risk).
 // Exported for ingestRepo.ts, which needs the identical slug algorithm for repo/doc-file naming.
 export function slugify(s: string): string {
   return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
-
-function ledgerPath(vault: string): string {
-  return join(vault, '.harness', 'compile-queue.json');
-}
-
-/** The full compile queue ledger — used by the ingest REST routes and by tests. */
-export function readQueue(vault: string): QueueEntry[] {
-  const p = ledgerPath(vault);
-  return existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as QueueEntry[]) : [];
-}
-
-// Exported for ingestRepo.ts, which owns a single long-lived placeholder entry across several
-// async phases (clone/docs/mine/seed) and needs the same read-modify-write primitive startConversion
-// uses for its own placeholder above.
-export function writeQueue(vault: string, ledger: QueueEntry[]): void {
-  mkdirSync(join(vault, '.harness'), { recursive: true });
-  writeFileSync(ledgerPath(vault), JSON.stringify(ledger, null, 2));
 }
 
 const H1_LINE = /^#\s+(.+)$/m;
@@ -91,7 +63,6 @@ export async function ingestBook(
   const mode = opts.mode ?? 'book';
   const outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
   const { markdown } = await converter(filePath, outDir);
-  const ledger = readQueue(cfg.vault);
 
   if (mode === 'paper') {
     const title = opts.title || cleanHeading(markdown.match(H1_LINE)?.[1] ?? '') || basename(filePath, extname(filePath));
@@ -99,14 +70,15 @@ export async function ingestBook(
     const uploadsDir = join(cfg.vault, 'raw', 'uploads', slug);
     mkdirSync(uploadsDir, { recursive: true });
     writeFileSync(join(uploadsDir, 'paper.md'), `<!-- source: "${title}" -->\n\n${markdown}\n`);
-    ledger.push({
-      book: title,
-      chapter: `raw/uploads/${slug}/paper.md`,
-      title,
-      status: 'pending',
-      ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
+    await updateQueue(cfg.vault, (entries) => {
+      entries.push({
+        book: title,
+        chapter: `raw/uploads/${slug}/paper.md`,
+        title,
+        status: 'pending',
+        ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
+      });
     });
-    writeQueue(cfg.vault, ledger);
     return { book: title, chapters: 1 };
   }
 
@@ -116,20 +88,20 @@ export async function ingestBook(
   mkdirSync(uploadsDir, { recursive: true });
 
   const chapters = splitChapters(markdown);
-  chapters.forEach((ch, i) => {
+  const newEntries: QueueEntry[] = chapters.map((ch, i) => {
     const n = i + 1;
     const chapterSlug = slugify(ch.title) || `chapter-${n}`;
     const filename = `ch-${String(n).padStart(2, '0')}-${chapterSlug}.md`;
     const header = `<!-- source: "${bookTitle}", chapter ${n}: "${ch.title}" -->\n\n`;
     writeFileSync(join(uploadsDir, filename), `${header}${ch.body}\n`);
-    ledger.push({
+    return {
       book: bookTitle,
       chapter: `raw/uploads/${bookSlug}/${filename}`,
       title: ch.title,
-      status: 'pending',
-    });
+      status: 'pending' as const,
+    };
   });
-  writeQueue(cfg.vault, ledger);
+  await updateQueue(cfg.vault, (entries) => { entries.push(...newEntries); });
 
   return { book: bookTitle, chapters: chapters.length };
 }
@@ -166,6 +138,15 @@ function singleShotIncremental(converter: Converter): IncrementalConverter {
  * not explicitly false — ensureCompileDrain is kicked so newly-pending chapters start compiling
  * without a manual "Compile now" click. On failure the placeholder becomes 'convert-error' with
  * the message. Returns as soon as the placeholder is queued.
+ *
+ * Ledger-write note: the INITIAL placeholder push just below is a direct readQueue+writeQueue pair,
+ * not routed through updateQueue's async mutex — deliberately, because this function's contract is
+ * "returns as soon as the placeholder is queued": callers (the upload/URL ingest routes,
+ * ingest_paper) read the ledger synchronously right after this call returns and expect the
+ * placeholder to already be durable on disk, not landing on a later microtask. That's safe because
+ * nothing async happens between this read and this write (see queueStore.ts's module doc for why
+ * that's the only condition that matters). Every OTHER write below — all in the background
+ * continuation, arbitrarily far past an await — goes through updateQueue.
  */
 export function startConversion(
   lw: Loreweaver, cfg: HarnessConfig, filePath: string,
@@ -190,13 +171,11 @@ export function startConversion(
   const bookSlug = slugify(bookTitle) || 'book';
   const uploadsDir = join(cfg.vault, 'raw', 'uploads', bookSlug);
 
-  function updatePlaceholderProgress(pagesDone: number, pagesTotal: number | null): void {
-    const current = readQueue(cfg.vault);
-    const ph = current.find((e) => e.chapter === placeholderKey);
-    if (ph) {
-      ph.progress = { pagesDone, pagesTotal };
-      writeQueue(cfg.vault, current);
-    }
+  async function updatePlaceholderProgress(pagesDone: number, pagesTotal: number | null): Promise<void> {
+    await updateQueue(cfg.vault, (entries) => {
+      const ph = entries.find((e) => e.chapter === placeholderKey);
+      if (ph) ph.progress = { pagesDone, pagesTotal };
+    });
   }
 
   activeConversions++;
@@ -206,9 +185,9 @@ export function startConversion(
 
       if (mode === 'paper') {
         let lastMarkdown = '';
-        await incremental(filePath, outDir, (u) => {
+        await incremental(filePath, outDir, async (u) => {
           lastMarkdown = u.markdown;
-          updatePlaceholderProgress(u.pagesDone, u.pagesTotal);
+          await updatePlaceholderProgress(u.pagesDone, u.pagesTotal);
         });
         const title = opts.title || lastMarkdown.match(H1_LINE)?.[1]?.trim() || basename(filePath, extname(filePath));
         const slug = slugify(title) || 'paper';
@@ -216,16 +195,18 @@ export function startConversion(
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, 'paper.md'), `<!-- source: "${title}" -->\n\n${lastMarkdown}\n`);
 
-        const afterPaper = readQueue(cfg.vault).filter((e) => e.chapter !== placeholderKey);
-        afterPaper.push({
-          book: title, chapter: `raw/uploads/${slug}/paper.md`, title, status: 'pending',
+        await updateQueue(cfg.vault, (entries) => {
+          const kept = entries.filter((e) => e.chapter !== placeholderKey);
+          kept.push({
+            book: title, chapter: `raw/uploads/${slug}/paper.md`, title, status: 'pending',
+          });
+          return kept;
         });
-        writeQueue(cfg.vault, afterPaper);
       } else {
         mkdirSync(uploadsDir, { recursive: true });
         let queuedCount = 0;
 
-        await incremental(filePath, outDir, (u) => {
+        await incremental(filePath, outDir, async (u) => {
           const sections = splitChapters(u.markdown);
           // A chapter is "complete" once a later heading confirms nothing more will be appended
           // under it — every section except the last, unless this is the final update (then the
@@ -233,38 +214,37 @@ export function startConversion(
           const completeSections = u.final ? sections : sections.slice(0, -1);
           const newSections = completeSections.slice(queuedCount);
 
-          const current = readQueue(cfg.vault);
-          for (let i = 0; i < newSections.length; i++) {
-            const ch = newSections[i];
+          const newEntries: QueueEntry[] = newSections.map((ch, i) => {
             const n = queuedCount + i + 1;
             const chapterSlug = slugify(ch.title) || `chapter-${n}`;
             const filename = `ch-${String(n).padStart(2, '0')}-${chapterSlug}.md`;
             const header = `<!-- source: "${bookTitle}", chapter ${n}: "${ch.title}" -->\n\n`;
             writeFileSync(join(uploadsDir, filename), `${header}${ch.body}\n`);
-            current.push({
-              book: bookTitle, chapter: `raw/uploads/${bookSlug}/${filename}`, title: ch.title, status: 'pending',
-            });
-          }
+            return {
+              book: bookTitle, chapter: `raw/uploads/${bookSlug}/${filename}`, title: ch.title, status: 'pending' as const,
+            };
+          });
           queuedCount += newSections.length;
 
-          const ph = current.find((e) => e.chapter === placeholderKey);
-          if (ph) ph.progress = { pagesDone: u.pagesDone, pagesTotal: u.pagesTotal };
-          writeQueue(cfg.vault, current);
+          await updateQueue(cfg.vault, (entries) => {
+            entries.push(...newEntries);
+            const ph = entries.find((e) => e.chapter === placeholderKey);
+            if (ph) ph.progress = { pagesDone: u.pagesDone, pagesTotal: u.pagesTotal };
+          });
         });
       }
 
-      const afterAll = readQueue(cfg.vault);
-      writeQueue(cfg.vault, afterAll.filter((e) => e.chapter !== placeholderKey));
+      await updateQueue(cfg.vault, (entries) => entries.filter((e) => e.chapter !== placeholderKey));
       opts.onComplete?.();
       if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg, { model: opts.model });
     } catch (e: any) {
-      const after = readQueue(cfg.vault);
-      const ph = after.find((en) => en.chapter === placeholderKey);
-      if (ph) {
-        ph.status = 'convert-error';
-        ph.error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-        writeQueue(cfg.vault, after);
-      }
+      await updateQueue(cfg.vault, (entries) => {
+        const ph = entries.find((en) => en.chapter === placeholderKey);
+        if (ph) {
+          ph.status = 'convert-error';
+          ph.error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+        }
+      });
     } finally {
       activeConversions--;
     }
@@ -276,7 +256,13 @@ export function startConversion(
 /** Boot-time sweep: a server restart orphans in-flight work — handle both kinds honestly.
  * Conversions can't resume (the tmp upload is process-tied) -> convert-error, re-upload.
  * Compiles CAN resume (chapter file + ledger persist; write_page updates in place) -> back
- * to pending so the boot drain picks them up. */
+ * to pending so the boot drain picks them up.
+ *
+ * Stays a direct readQueue+writeQueue pair (not updateQueue) rather than the async mutex: it's
+ * called synchronously at boot (src/server/index.ts, not awaited) and its own tests call it
+ * synchronously too, so its signature has to stay `(vault) => number`. That's fine — this function
+ * never holds anything across an await (read, synchronous loop, write, done), so it can't reproduce
+ * the lost-update bug updateQueue exists to close; see queueStore.ts's module doc comment. */
 export function sweepInterruptedConversions(vault: string): number {
   const ledger = readQueue(vault);
   let swept = 0;
@@ -298,7 +284,12 @@ export function sweepInterruptedConversions(vault: string): number {
 }
 
 /** Rename a book across its queue entries (display name + future compile citations only —
- * the raw/uploads/<slug>/ folder keeps its original slug; files are inputs, not identity). */
+ * the raw/uploads/<slug>/ folder keeps its original slug; files are inputs, not identity).
+ *
+ * Stays a direct readQueue+writeQueue pair for the same reason sweepInterruptedConversions does:
+ * its only call site (ingestRoutes.ts's PATCH /api/ingest/book) uses the return value synchronously
+ * (`renameBook(...) === 0` decides the 404 branch), so the signature has to stay `(...) => number`,
+ * not `Promise<number>`. Safe for the same reason — no await between its read and its write. */
 export function renameBook(vault: string, from: string, to: string): number {
   const name = to.trim();
   if (!name) throw new Error('new name must not be empty');
@@ -379,18 +370,26 @@ function buildCompilePrompt(
 }
 
 /**
- * Compiles one 'pending' ledger entry (already claimed — status flipped to 'compiling' by the
- * caller) through a one-shot compile agent, passing the chapter markdown inline (never globbing
- * the vault). Mutates `entry` in place and writes the WHOLE ledger array to disk when done — safe
- * to call from multiple concurrent workers sharing the same in-memory `ledger` array, since each
- * worker only ever mutates its own claimed entry's fields and writeQueue is a synchronous
- * writeFileSync (no interleaved partial writes).
+ * Compiles one 'pending' (now 'compiling', flipped by the caller's claimNext) ledger entry through
+ * a one-shot compile agent, passing the chapter markdown inline (never globbing the vault).
+ *
+ * Ledger-write note: `entry`'s book/chapter/title/sourceUrl fields are read-only snapshots taken at
+ * claim time — this function never mutates them and never holds/writes the whole ledger array.
+ * Instead, its `finally` block patches ONLY this entry's status/error, by looking it up fresh by
+ * `entry.chapter` identity via updateQueue — a targeted, re-read-inside-the-mutex write, not a
+ * stale whole-array one. THIS is the fix for the lost-update bug: the old version wrote back a
+ * `ledger` array that compileNext had read once, BEFORE this function's (potentially long, LLM-
+ * call-laden) awaits above — any row another flow appended to the file during that window was
+ * invisible to that stale array and got clobbered the instant this finally block fired. See
+ * queueStore.ts's module doc comment for the full incident writeup.
  */
 async function compileOne(
-  lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel | undefined, ledger: QueueEntry[], entry: QueueEntry,
+  lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel | undefined, entry: QueueEntry,
   chunkChars: number,
   claudeSdk: { useSdk: boolean; modelId: string; deps?: CompileDeps },
 ): Promise<'compiled' | 'failed'> {
+  let status: QueueStatus = 'done';
+  let error: string | undefined;
   try {
     const chapterMarkdown = readFileSync(join(cfg.vault, entry.chapter), 'utf8');
     const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
@@ -487,25 +486,35 @@ async function compileOne(
     }
     if (partErrors.length) console.error(`[compile] "${entry.title}": partial (${partErrors.join('; ')})`);
 
-    entry.status = 'done';
+    status = 'done';
     return 'compiled';
   } catch (e: any) {
-    entry.status = 'error';
-    entry.error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+    status = 'error';
+    error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
     return 'failed';
   } finally {
-    writeQueue(cfg.vault, ledger);
+    await updateQueue(cfg.vault, (entries) => {
+      const live = entries.find((e) => e.chapter === entry.chapter);
+      if (live) {
+        live.status = status;
+        if (error !== undefined) live.error = error;
+      }
+    });
   }
 }
 
 /**
  * Takes the next `n` 'pending' ledger entries and compiles them, `opts.concurrency` at a time (a
- * simple worker-pool over the batch — no extra dependency). Each worker repeatedly claims the next
- * unclaimed entry from `batch` via `claimNext`, whose cursor-bump + status flip + ledger write runs
- * fully synchronously (no `await` before it returns) so concurrent workers can never claim the same
- * entry twice, even though they call it through `await`. Ledger writes stay per-entry and
- * crash-safe (see compileOne); the honesty gate stays per-entry accurate under concurrency (see
- * compileOne's comment).
+ * simple worker-pool over the batch — no extra dependency). `batch` is a one-time snapshot that
+ * only decides WHICH n entries (by `chapter` identity) this call targets — it is never written
+ * back. Each worker repeatedly claims the next unclaimed identity from `batch` via `claimNext`,
+ * whose cursor bump (`batch[cursor++]`) runs fully synchronously before any await, so concurrent
+ * workers can never claim the same entry twice; the actual status flip re-reads the ledger fresh
+ * and patches only that one entry via updateQueue, so it can never clobber a row some other flow
+ * (ingestRepo's docs pass, a concurrent startConversion) appended to the file while this batch's
+ * compiles — each potentially a long LLM call — are in flight. compileOne's own finally block does
+ * the same targeted-patch dance for the final status. See queueStore.ts's module doc comment for
+ * the incident this replaces.
  */
 export async function compileNext(
   lw: Loreweaver, cfg: HarnessConfig, n = 1,
@@ -516,27 +525,30 @@ export async function compileNext(
   // useSdk skips modelFor entirely — 'claude-sdk:...' is not a valid ai-sdk model id.
   const model = useSdk ? undefined : (opts.model ?? modelFor('compile', cfg));
   const concurrency = Math.max(1, opts.concurrency ?? 1);
-  const ledger = readQueue(cfg.vault);
-  const batch = ledger.filter((e) => e.status === 'pending').slice(0, n);
+  const snapshot = readQueue(cfg.vault);
+  const batch = snapshot.filter((e) => e.status === 'pending').slice(0, n);
 
   let compiled = 0;
   let failed = 0;
   let cursor = 0;
 
-  function claimNext(): QueueEntry | undefined {
+  async function claimNext(): Promise<QueueEntry | undefined> {
     if (cursor >= batch.length) return undefined;
-    const entry = batch[cursor++];
-    entry.status = 'compiling';
-    writeQueue(cfg.vault, ledger);
-    return entry;
+    const target = batch[cursor++]; // synchronous bump — no two workers ever get the same target
+    let claimed: QueueEntry = target;
+    await updateQueue(cfg.vault, (entries) => {
+      const live = entries.find((e) => e.chapter === target.chapter);
+      if (live) { live.status = 'compiling'; claimed = live; }
+    });
+    return claimed;
   }
 
   async function worker(): Promise<void> {
     for (;;) {
-      const entry = claimNext();
+      const entry = await claimNext();
       if (!entry) return;
       const outcome = await compileOne(
-        lw, cfg, model, ledger, entry, opts.chunkChars ?? CHAPTER_CHUNK_CHARS,
+        lw, cfg, model, entry, opts.chunkChars ?? CHAPTER_CHUNK_CHARS,
         { useSdk, modelId: compileModelId ?? '', deps: opts.deps },
       );
       if (outcome === 'compiled') compiled++; else failed++;
