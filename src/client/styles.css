@@ -471,6 +471,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 
 .graph-subtitle { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
 .graph-subtitle.hint { font-style: italic; }
+.graph-subtitle.graph-loading { padding: 2.5rem 0; text-align: center; }
 
 .graph-node circle { transition: filter 0.12s; }
 .graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }

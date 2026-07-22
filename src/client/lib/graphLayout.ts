@@ -33,6 +33,23 @@ export interface LaidOutEdge {
 
 type Pos = { x: number; y: number };
 
+/**
+ * Everything about a node that's derivable in O(n) straight from the raw /api/graph payload —
+ * color, decay ring, edges — none of which needs the comparatively expensive (O(n log n)+)
+ * sugiyama/dagre position pass below. Splitting this out lets callers (GraphPanel) compute cheap
+ * membership info (contextualSubgraph only needs `slug` + `daysLeft`, plus the edge list) for the
+ * WHOLE vault, then run the expensive position pass only over the small subset that survives.
+ *
+ * `prereqs` is kept around (rather than expecting callers to reconstruct it from `LaidOutEdge[]`)
+ * so `positionsSugiyama`/`positionsDagre` below can run completely unmodified on any subset of
+ * these nodes: passing a filtered node list naturally restricts layout edges to prereqs whose
+ * *other* endpoint also survived the filter (see the `bySlug.get(p)` guards below) — exactly what
+ * a subgraph-only layout pass needs, with no extra bookkeeping.
+ */
+export interface GraphNodeMeta extends Omit<LaidOutNode, 'x' | 'y'> {
+  prereqs: string[];
+}
+
 // d3-dag's sugiyama places roots (sources of layout edges) in the lowest layer
 // (smallest y) and their descendants in progressively larger y. We lay edges
 // out prereq -> dependent (the foundation is the source), then invert y so the
@@ -40,7 +57,7 @@ type Pos = { x: number; y: number };
 // they support, goals float toward the top. This mirrors what the previous
 // dagre rankdir:'BT' pass did, just achieved via an explicit flip instead of
 // dagre's rank-direction flag.
-function positionsSugiyama(nodes: any[]): Map<string, Pos> | null {
+function positionsSugiyama(nodes: GraphNodeMeta[]): Map<string, Pos> | null {
   try {
     const g = dagGraph<string, undefined>();
     const bySlug = new Map<string, MutGraphNode<string, undefined>>();
@@ -72,7 +89,7 @@ function positionsSugiyama(nodes: any[]): Map<string, Pos> | null {
 
 // Fallback layout kept from the pre-T29 implementation. Used only when the
 // sugiyama pass can't run (cycles, or an unexpected d3-dag failure).
-function positionsDagre(nodes: any[]): Map<string, Pos> {
+function positionsDagre(nodes: GraphNodeMeta[]): Map<string, Pos> {
   const g = new dagre.graphlib.Graph();
   g.setGraph({ rankdir: 'BT', nodesep: GAP_X, ranksep: GAP_Y });
   g.setDefaultEdgeLabel(() => ({}));
@@ -87,33 +104,53 @@ function positionsDagre(nodes: any[]): Map<string, Pos> {
   return pos;
 }
 
-export function layoutGraph(nodes: any[], now: Date): { nodes: LaidOutNode[]; edges: LaidOutEdge[] } {
+/**
+ * Cheap (no layout algorithm) pass over the raw /api/graph payload: derives the prereq/deepens
+ * edge list and per-node decay metadata (color, ring, daysLeft). Safe to run over the whole vault
+ * on every poll — the expensive part of the old `layoutGraph` is entirely in `positionNodes` below.
+ */
+export function graphMeta(nodes: any[], now: Date): { nodes: GraphNodeMeta[]; edges: LaidOutEdge[] } {
   const slugs = new Set(nodes.map((n) => n.slug));
-  const edges: { src: string; dst: string; type: 'prereq' | 'deepens' }[] = [];
+  const edges: LaidOutEdge[] = [];
   for (const n of nodes) {
     for (const p of n.prereqs) if (slugs.has(p)) edges.push({ src: n.slug, dst: p, type: 'prereq' });
     for (const d of n.deepens) if (slugs.has(d)) edges.push({ src: n.slug, dst: d, type: 'deepens' });
   }
 
-  const positions = positionsSugiyama(nodes) ?? positionsDagre(nodes);
+  const metaNodes: GraphNodeMeta[] = nodes.map((n) => {
+    const effective: MasteryLevel = n.mastery?.effective ?? 'unseen';
+    const window = WINDOW[effective];
+    let daysLeft: number | null = null, ringFraction: number | null = null;
+    if (window && n.mastery?.last_reinforced) {
+      const elapsed = Math.floor((now.getTime() - new Date(n.mastery.last_reinforced).getTime()) / 86_400_000);
+      daysLeft = Math.max(0, window - elapsed);
+      ringFraction = daysLeft / window;
+    }
+    return {
+      slug: n.slug, title: n.title, prereqs: n.prereqs ?? [],
+      color: COLORS[effective], effective, daysLeft, ringFraction,
+      misconceptions: n.mastery?.misconceptions ?? [],
+    };
+  });
 
-  return {
-    nodes: nodes.map((n) => {
-      const pos = positions.get(n.slug) ?? { x: 0, y: 0 };
-      const effective: MasteryLevel = n.mastery?.effective ?? 'unseen';
-      const window = WINDOW[effective];
-      let daysLeft: number | null = null, ringFraction: number | null = null;
-      if (window && n.mastery?.last_reinforced) {
-        const elapsed = Math.floor((now.getTime() - new Date(n.mastery.last_reinforced).getTime()) / 86_400_000);
-        daysLeft = Math.max(0, window - elapsed);
-        ringFraction = daysLeft / window;
-      }
-      return {
-        slug: n.slug, title: n.title, x: pos.x, y: pos.y,
-        color: COLORS[effective], effective, daysLeft, ringFraction,
-        misconceptions: n.mastery?.misconceptions ?? [],
-      };
-    }),
-    edges: edges.map((e) => ({ ...e })),
-  };
+  return { nodes: metaNodes, edges };
+}
+
+/**
+ * Runs the (comparatively expensive) sugiyama/dagre position pass over exactly the nodes given —
+ * callers control the cost by controlling how many nodes they pass in (e.g. a contextual subgraph
+ * vs. the whole vault).
+ */
+export function positionNodes(nodes: GraphNodeMeta[]): LaidOutNode[] {
+  const positions = positionsSugiyama(nodes) ?? positionsDagre(nodes);
+  return nodes.map((n) => {
+    const pos = positions.get(n.slug) ?? { x: 0, y: 0 };
+    const { prereqs: _prereqs, ...rest } = n;
+    return { ...rest, x: pos.x, y: pos.y };
+  });
+}
+
+export function layoutGraph(nodes: any[], now: Date): { nodes: LaidOutNode[]; edges: LaidOutEdge[] } {
+  const { nodes: meta, edges } = graphMeta(nodes, now);
+  return { nodes: positionNodes(meta), edges };
 }

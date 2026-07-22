@@ -2,13 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { useThreadRuntime } from '@assistant-ui/react';
 import { getArrow } from 'perfect-arrows';
 import { getGraph } from '../lib/api.js';
-import { layoutGraph, type LaidOutNode, type LaidOutEdge } from '../lib/graphLayout.js';
+import {
+  graphMeta, positionNodes, type GraphNodeMeta, type LaidOutNode, type LaidOutEdge,
+} from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
 import { parseHash } from '../lib/urlState.js';
 
 const R = 16;
 const PAD = 60;
-const POLL_MS = 30_000;
+export const POLL_MS = 30_000;
 
 // Tuned low so the layered (mostly-vertical) layout reads as refined arcs
 // rather than the swoopy default perfect-arrows curves.
@@ -22,8 +24,18 @@ const PREREQ_ARROW_OPTS = { bow: 0.15, stretch: 0.3, padStart: R + 2, padEnd: R 
 export const CONTEXT_HOPS = 2;
 export const CONTEXT_CAP = 40;
 
-export interface Subgraph {
-  nodes: LaidOutNode[];
+// Membership (this BFS) only ever reads `slug` (for graph structure, via `edges`) and `daysLeft`
+// (for the decay-inference fallback below) — never position/color/etc. Keeping contextualSubgraph
+// generic over this minimal shape means it can run BEFORE the (expensive) layout pass, directly on
+// GraphNodeMeta (un-laid) nodes, while staying source-compatible with the already-laid-out
+// LaidOutNode[] fixtures the existing tests below construct.
+export interface ContextualNode {
+  slug: string;
+  daysLeft: number | null;
+}
+
+export interface Subgraph<N extends ContextualNode = LaidOutNode> {
+  nodes: N[];
   edges: LaidOutEdge[];
   /** BFS origin actually used — null only when there's truly no usable seed (nothing open this
    * session, no decay data to infer one from either), in which case `nodes`/`edges` above are
@@ -52,9 +64,9 @@ export interface Subgraph {
  * `last_reinforced`, i.e. the freshest "recently touched" node the already-fetched graph exposes)
  * — and, if nothing has decay data either, all the way to the whole graph with `seedSlug: null`.
  */
-export function contextualSubgraph(
-  nodes: LaidOutNode[], edges: LaidOutEdge[], requestedSeed: string | null, cap: number = CONTEXT_CAP,
-): Subgraph {
+export function contextualSubgraph<N extends ContextualNode>(
+  nodes: N[], edges: LaidOutEdge[], requestedSeed: string | null, cap: number = CONTEXT_CAP,
+): Subgraph<N> {
   const bySlug = new Map(nodes.map((n) => [n.slug, n]));
   let seedSlug = requestedSeed != null && bySlug.has(requestedSeed) ? requestedSeed : null;
   let seedInferred = false;
@@ -111,8 +123,15 @@ export function contextualSubgraph(
 }
 
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
-  const [nodes, setNodes] = useState<LaidOutNode[]>([]);
-  const [edges, setEdges] = useState<LaidOutEdge[]>([]);
+  // Raw-ish per-node metadata (color, decay, edges) — cheap to (re)compute for the whole vault on
+  // every poll; does NOT include x/y. Position is computed separately, below, only for whichever
+  // subset actually gets displayed (see `displayNodes`).
+  const [meta, setMeta] = useState<{ nodes: GraphNodeMeta[]; edges: LaidOutEdge[] }>({ nodes: [], edges: [] });
+  // True until the FIRST fetch+layout has resolved. Gates the "laying out the graph…" placeholder
+  // so a student switching to the Graph tab sees that instead of a misleading "open a page to
+  // focus" hint or a blank canvas. A plain `let firstLoad` flag inside the load effect (rather than
+  // resetting this state elsewhere) means subsequent poll refreshes never flip it back to true.
+  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<'contextual' | 'full'>('contextual');
   // The "currently open page" context signal. Seeded once from the URL (covers a deep link
@@ -125,12 +144,12 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
+    let firstLoad = true;
     const load = async () => {
       const data = await getGraph();
       if (cancelled) return;
-      const laid = layoutGraph(data.nodes ?? [], new Date());
-      setNodes(laid.nodes);
-      setEdges(laid.edges);
+      setMeta(graphMeta(data.nodes ?? [], new Date()));
+      if (firstLoad) { firstLoad = false; setLoading(false); }
     };
     load();
     const id = setInterval(load, POLL_MS);
@@ -162,14 +181,40 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     };
   }, []);
 
-  const sub = useMemo(
-    () => (mode === 'contextual' ? contextualSubgraph(nodes, edges, contextSeed) : null),
-    [mode, nodes, edges, contextSeed],
+  // Membership pass: cheap (a BFS over `meta.edges`, no layout algorithm) even run over the whole
+  // vault, so it's fine to compute unconditionally regardless of `mode`. `contextualSub` recomputes
+  // only on a genuine reseed or fresh poll data — NOT on a mode toggle — so flipping back to "This
+  // topic" after visiting "Whole vault" doesn't redo the BFS. `fullSub` is a passthrough of every
+  // node/edge (memoized separately for the same reason).
+  const contextualSub = useMemo(
+    () => contextualSubgraph(meta.nodes, meta.edges, contextSeed),
+    [meta, contextSeed],
   );
-  const displayNodes = sub ? sub.nodes : nodes;
-  const displayEdges = sub ? sub.edges : edges;
-  const seedTitle = sub?.seedSlug != null
-    ? (nodes.find((n) => n.slug === sub.seedSlug)?.title ?? sub.seedSlug) : null;
+  const fullSub: Subgraph<GraphNodeMeta> = useMemo(
+    () => ({ nodes: meta.nodes, edges: meta.edges, seedSlug: null, seedInferred: false, hops: 0, truncated: false }),
+    [meta],
+  );
+  const sub = mode === 'contextual' ? contextualSub : fullSub;
+
+  // Position pass: the (comparatively expensive) sugiyama/dagre layout, run ONLY over `sub.nodes`
+  // — i.e. the already-filtered membership above, not the whole vault. In contextual mode with a
+  // live seed this is bounded by CONTEXT_CAP; laying out the full node set only happens for the
+  // seedless fallback (see contextualSubgraph's doc comment) or "Whole vault" mode, both of which
+  // genuinely need every node positioned.
+  //
+  // This IS still a synchronous call inline in render, so switching to "Whole vault" on a large
+  // vault can still cost a visible beat with the last-painted (contextual) view frozen on screen
+  // until the new layout commits — we don't reuse the "laying out the graph…" placeholder around
+  // it. Doing so would mean yielding to the browser (e.g. a setTimeout(0) deferral) between setting
+  // a loading flag and running the layout, purely to guarantee an intermediate paint; that's a
+  // second loading-state pathway (with its own once-per-toggle semantics) layered on top of the
+  // first-load one above, for a rare, user-initiated, already one-off action — not worth the added
+  // complexity here. The strict win over the old behavior stands regardless: that same freeze used
+  // to happen on every load/poll, in every mode; now it's scoped to the explicit "Whole vault" ask.
+  const displayNodes = useMemo(() => positionNodes(sub.nodes), [sub]);
+  const displayEdges = sub.edges;
+  const seedTitle = mode === 'contextual' && sub.seedSlug != null
+    ? (meta.nodes.find((n) => n.slug === sub.seedSlug)?.title ?? sub.seedSlug) : null;
 
   const byId = new Map(displayNodes.map((n) => [n.slug, n]));
   const xs = displayNodes.map((n) => n.x);
@@ -194,18 +239,24 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
             Whole vault
           </button>
         </div>
-        {mode === 'contextual' && (
+        {/* Never show the "open a page" hint (nor an empty-looking canvas below) while the first
+            load+layout is still in flight — both would misleadingly read as "there's nothing
+            here" rather than "still working on it". */}
+        {!loading && mode === 'contextual' && (
           seedTitle != null ? (
             <p className="graph-subtitle">
-              around {seedTitle} · {sub!.hops} hops
-              {sub!.nodes.length === 1 && ' · no linked pages yet'}
-              {sub!.truncated && ' · showing closest matches'}
+              around {seedTitle} · {sub.hops} hops
+              {sub.nodes.length === 1 && ' · no linked pages yet'}
+              {sub.truncated && ' · showing closest matches'}
             </p>
           ) : (
             <p className="graph-subtitle hint">open a page to focus the graph</p>
           )
         )}
       </div>
+      {loading ? (
+        <p className="graph-subtitle hint graph-loading">laying out the graph…</p>
+      ) : (
       <svg viewBox={`${minX} ${minY} ${width} ${height}`} width={width} height={height}>
         {displayEdges.map((e) => {
           const src = byId.get(e.src);
@@ -266,6 +317,8 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           </g>
         ))}
       </svg>
+      )}
+      {!loading && (
       <div className="graph-legend">
         <span><i className="dot" style={{ background: '#9e9e9e' }} /> unseen</span>
         <span><i className="dot" style={{ background: '#e0b040' }} /> exposed</span>
@@ -274,6 +327,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         <span><i className="ring" /> time till decay</span>
         <span>⚠ misconception</span>
       </div>
+      )}
     </div>
   );
 }

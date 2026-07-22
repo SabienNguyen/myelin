@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import type { LaidOutNode, LaidOutEdge } from '../../src/client/lib/graphLayout.js';
 import { panelBus } from '../../src/client/lib/panelBus.js';
@@ -11,8 +11,18 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
   return { ...actual, useThreadRuntime: () => ({ append: vi.fn() }) };
 });
 
-const { GraphPanel, contextualSubgraph, CONTEXT_HOPS, CONTEXT_CAP } =
+// Wraps the real `positionNodes` (the expensive sugiyama/dagre pass) in a spy, so contextual-mode
+// perf tests below can assert what it was actually called with — real layout behavior is
+// preserved (the wrapped function still runs), only call tracking is added.
+vi.mock('../../src/client/lib/graphLayout.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/client/lib/graphLayout.js')>();
+  return { ...actual, positionNodes: vi.fn(actual.positionNodes) };
+});
+
+const { GraphPanel, contextualSubgraph, CONTEXT_HOPS, CONTEXT_CAP, POLL_MS } =
   await import('../../src/client/components/GraphPanel.js');
+const { positionNodes } = await import('../../src/client/lib/graphLayout.js');
+const positionNodesSpy = positionNodes as unknown as Mock;
 
 function node(slug: string, overrides: Partial<LaidOutNode> = {}): LaidOutNode {
   return {
@@ -214,5 +224,90 @@ describe('GraphPanel — contextual mode (component)', () => {
     expect(screen.getByText('Topic B')).not.toBeNull();
     expect(screen.getByText('Topic D')).not.toBeNull();
     expect(screen.queryByText('Topic Isolated')).toBeNull();
+  });
+});
+
+describe('GraphPanel — loading state', () => {
+  const graphNodes = [
+    { slug: 'a', title: 'Topic A', prereqs: [], deepens: [], mastery: null },
+  ];
+
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); location.hash = ''; vi.useRealTimers(); });
+
+  it('shows a "laying out the graph…" placeholder — not the hint, not an empty canvas — until the first load+layout resolves, then hides it', async () => {
+    let resolveFetch!: (v: unknown) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveFetch = resolve; })));
+
+    const { container } = render(<GraphPanel visible />);
+    expect(screen.getByText(/laying out the graph/i)).not.toBeNull();
+    expect(screen.queryByText(/open a page to focus the graph/i)).toBeNull();
+    expect(container.querySelector('svg')).toBeNull();
+
+    await act(async () => {
+      resolveFetch({ ok: true, json: async () => ({ nodes: graphNodes }) });
+    });
+
+    expect(screen.queryByText(/laying out the graph/i)).toBeNull();
+    expect(container.querySelector('svg')).not.toBeNull();
+    await screen.findByText(/open a page to focus the graph/i);
+  });
+
+  it('does not re-show the loading placeholder on subsequent poll refreshes', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ nodes: graphNodes }) })));
+
+    render(<GraphPanel visible />);
+    // Flush the first load's promise chain (fetch -> .json() -> setMeta/setLoading).
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.queryByText(/laying out the graph/i)).toBeNull();
+    expect(screen.getByText(/open a page to focus the graph/i)).not.toBeNull();
+
+    // Fast-forward past a full poll interval — the interval's own `load()` call resolves via the
+    // same fetch stub, but must not flip `loading` back to true.
+    await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
+    expect(screen.queryByText(/laying out the graph/i)).toBeNull();
+    expect(screen.getByText(/open a page to focus the graph/i)).not.toBeNull();
+  });
+});
+
+describe('GraphPanel — contextual-first perf (layout scoped to subgraph)', () => {
+  // A seed with 50 one-hop neighbors (comfortably over CONTEXT_CAP, so hop-1 completeness alone
+  // forces the subgraph past the cap) plus 100 entirely disconnected filler nodes, so the vault
+  // (151 nodes) is unambiguously larger than both the cap and the resulting subgraph.
+  const HOP1_COUNT = 50;
+  const FILLER_COUNT = 100;
+  const bigGraphNodes = [
+    { slug: 'seed', title: 'Seed Topic', prereqs: [], deepens: [], mastery: null },
+    ...Array.from({ length: HOP1_COUNT }, (_, i) => ({
+      slug: `child${i}`, title: `Child ${i}`, prereqs: ['seed'], deepens: [], mastery: null,
+    })),
+    ...Array.from({ length: FILLER_COUNT }, (_, i) => ({
+      slug: `isolated${i}`, title: `Isolated ${i}`, prereqs: [], deepens: [], mastery: null,
+    })),
+  ];
+
+  beforeEach(() => {
+    positionNodesSpy.mockClear();
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/graph') return { ok: true, json: async () => ({ nodes: bigGraphNodes }) } as any;
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    location.hash = '#/t/default/page/seed';
+  });
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); location.hash = ''; });
+
+  it('lays out only the contextual subgraph, never the whole (151-node) vault', async () => {
+    const { container } = render(<GraphPanel visible />);
+    await screen.findByText(/around Seed Topic/i);
+
+    // Rendered scope: seed + its 50 hop-1 children, none of the 100 disconnected filler nodes.
+    expect(container.querySelectorAll('.graph-node')).toHaveLength(HOP1_COUNT + 1);
+    expect(screen.queryByText('Isolated 0')).toBeNull();
+
+    // `positionNodes` (the expensive sugiyama/dagre pass) must only ever have been asked to
+    // position the subgraph — never all 151 nodes of the full vault.
+    const calledSizes = positionNodesSpy.mock.calls.map((args: unknown[]) => (args[0] as unknown[]).length);
+    expect(calledSizes).toContain(HOP1_COUNT + 1);
+    expect(calledSizes).not.toContain(bigGraphNodes.length);
   });
 });
