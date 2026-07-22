@@ -38,6 +38,7 @@ import { SyntaxErrorNote } from './gap/SyntaxErrorNote.js';
 import { PlanPanel } from './gap/PlanPanel.js';
 import { PredictRunPanel } from './gap/PredictRunPanel.js';
 import { DocsPanel } from './gap/DocsPanel.js';
+import { HelpPanel, type HelpExchange } from './gap/HelpPanel.js';
 import { FocusLayout, type BriefTab } from './gap/FocusLayout.js';
 import { useDebouncedRun } from './gap/hooks/useDebouncedRun.js';
 import { useDetectorState } from './gap/hooks/useDetectorState.js';
@@ -78,6 +79,10 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   const [results, setResults] = useState<TestResult[]>([]);
   const [syntaxError, setSyntaxError] = useState<string | undefined>(undefined);
   const [planText, setPlanText] = useState('');
+  // Track A (docs/superpowers/plans/2026-07-21-coding-stage.md): the Help tab's transcript for
+  // THIS exercise (spans the whole ladder walk, not just the current rung — mirrors planText's
+  // caller-owned lifting reasoning above) — session-local, never persisted to the lesson thread.
+  const [helpExchanges, setHelpExchanges] = useState<HelpExchange[]>([]);
   const completedRef = useRef(false);
   // P2 (editor polish): Run and Submit are now distinct actions (see the full_body render branch
   // below) — `run()` only ever populates these two, never `finish()`.
@@ -230,6 +235,24 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     ),
   };
 
+  // Track A: always present, alongside the offer tabs (not gated by a detector) — draft/failures
+  // are threaded straight from this component's own state (spec: "no new global state").
+  const helpTab: BriefTab = {
+    key: 'help',
+    label: 'Help',
+    active: false,
+    content: (
+      <HelpPanel
+        pattern={args.pattern}
+        rung={template}
+        draft={code}
+        failures={results.filter((r) => !r.pass).map((r) => r.name)}
+        exchanges={helpExchanges}
+        onExchangeAdded={(exchange) => setHelpExchanges((prev) => [...prev, exchange])}
+      />
+    ),
+  };
+
   const offerTabs: BriefTab[] = [];
   if (template === 'full_body') {
     if (detector.offers.plan) {
@@ -268,7 +291,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
         patternTitle={args.pattern}
         contextLine={currentRung.prose.context_line}
         ladder={ladder}
-        tabs={[taskTab, ...offerTabs]}
+        tabs={[taskTab, helpTab, ...offerTabs]}
       >
         {template === 'worked_example' && (
           <WorkedExample rung={currentRung} onContinue={advanceOrFinish} />

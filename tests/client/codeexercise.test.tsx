@@ -33,7 +33,10 @@ const fullBodyRung = {
   prose: {},
 };
 
-function mockFetch(runResponse: any = { pass: true, results: [{ name: 't1', pass: true }] }) {
+function mockFetch(
+  runResponse: any = { pass: true, results: [{ name: 't1', pass: true }] },
+  helpResponse: any = { hint: 'name what handles a null body before touching a reader.' },
+) {
   return vi.fn(async (url: string, init?: any) => {
     if (url === '/api/gap/ladder') {
       return {
@@ -47,6 +50,10 @@ function mockFetch(runResponse: any = { pass: true, results: [{ name: 't1', pass
     if (url === '/api/gap/run') {
       void init;
       return { ok: true, json: async () => runResponse } as any;
+    }
+    if (url === '/api/gap/help') {
+      void init;
+      return { ok: true, json: async () => helpResponse } as any;
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
@@ -248,4 +255,103 @@ describe('CodeExercise — ambient offers dock as brief-panel tabs (P1)', () => 
     fireEvent.click(screen.getByRole('button', { name: /dismiss/i }));
     expect(screen.queryByRole('tab', { name: /docs/i })).toBeNull();
   }, 10_000);
+});
+
+describe('CodeExercise — Help tab (Track A, docs/superpowers/plans/2026-07-21-coding-stage.md)', () => {
+  beforeEach(() => { (globalThis as any).fetch = mockFetch(); });
+
+  it('always present (not gated by a detector) and posts to /api/gap/help with pattern/rung/draft/failures', async () => {
+    const fetchMock = mockFetch(
+      { pass: false, results: [{ name: 'handles a null body', pass: false }] },
+      { hint: 'name what handles a null body before touching a reader.' },
+    );
+    (globalThis as any).fetch = fetchMock;
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={vi.fn()} Editor={TextEditor}
+    />);
+    const input = await screen.findByLabelText('gap-input');
+    fireEvent.change(input, { target: { value: 'return chunk;' } });
+    await screen.findByText(/0\/1 passing/i);
+
+    fireEvent.click(screen.getByRole('tab', { name: /help/i }));
+    const composer = screen.getByPlaceholderText('ask about this exercise…');
+    fireEvent.change(composer, { target: { value: 'why does the null body test fail?' } });
+    fireEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+
+    const hint = await screen.findByText(/name what handles a null body/i);
+    expect(hint).toBeTruthy();
+    expect(screen.getByText('why does the null body test fail?')).toBeTruthy();
+
+    const helpCall = fetchMock.mock.calls.find((c: any[]) => c[0] === '/api/gap/help');
+    expect(helpCall).toBeTruthy();
+    const body = JSON.parse(helpCall![1].body);
+    expect(body).toMatchObject({
+      pattern: 'stream-consumer',
+      rung: 'full_body',
+      question: 'why does the null body test fail?',
+      draft: 'return chunk;',
+      failures: ['handles a null body'],
+    });
+  }, 10_000);
+
+  it('the transcript accumulates across exchanges and survives switching tabs away and back', async () => {
+    let call = 0;
+    (globalThis as any).fetch = vi.fn(async (url: string, init?: any) => {
+      if (url === '/api/gap/ladder') {
+        return {
+          ok: true,
+          json: async () => ({
+            ladder: { pattern: 'stream-consumer', targetArtifactId: 'stream-consumer', siblingArtifactId: 'route-handler', rungs: [] },
+            rungs: [workedExampleRung, inlineCompletionRung, fullBodyRung],
+          }),
+        } as any;
+      }
+      if (url === '/api/gap/help') {
+        void init;
+        call += 1;
+        return { ok: true, json: async () => ({ hint: `hint number ${call}` }) } as any;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={vi.fn()} Editor={TextEditor}
+    />);
+    await screen.findByLabelText('gap-input');
+
+    fireEvent.click(screen.getByRole('tab', { name: /help/i }));
+    fireEvent.change(screen.getByPlaceholderText('ask about this exercise…'), { target: { value: 'first question' } });
+    fireEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+    await screen.findByText('hint number 1');
+
+    // Switch away (Help tab's own content unmounts — FocusLayout only renders the active tab) and
+    // back: the transcript is lifted to CodeExercise.tsx, so it must still be there.
+    fireEvent.click(screen.getByRole('tab', { name: /^task$/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /help/i }));
+    expect(screen.getByText('first question')).toBeTruthy();
+    expect(screen.getByText('hint number 1')).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('ask about this exercise…'), { target: { value: 'second question' } });
+    fireEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+    await screen.findByText('hint number 2');
+    expect(screen.getByText('first question')).toBeTruthy();
+    expect(screen.getByText('second question')).toBeTruthy();
+  }, 10_000);
+
+  it('Ctrl+/ switches to the Help tab and focuses the composer from elsewhere in focus mode', async () => {
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={vi.fn()} Editor={TextEditor}
+    />);
+    await screen.findByLabelText('gap-input');
+    expect(screen.queryByPlaceholderText('ask about this exercise…')).toBeNull(); // Task tab active by default
+
+    fireEvent.keyDown(window, { key: '/', ctrlKey: true });
+
+    const composer = await screen.findByPlaceholderText('ask about this exercise…');
+    // rAF-scheduled focus — flush one frame.
+    await new Promise((r) => { requestAnimationFrame(() => r(undefined)); });
+    expect(document.activeElement).toBe(composer);
+  });
 });

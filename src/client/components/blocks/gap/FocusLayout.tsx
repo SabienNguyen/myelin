@@ -16,6 +16,13 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { OfferCard } from './OfferPanel.js';
 
+// Track A (docs/superpowers/plans/2026-07-21-coding-stage.md "A. In-IDE tutor help"): the Help
+// tab's key and its composer's DOM id, shared with HelpPanel.tsx (which renders the element this
+// id names) and the Ctrl+//Cmd+/ handler below (which looks it up). Named constants rather than
+// inline strings on both sides so the two files can't silently drift apart.
+export const HELP_TAB_KEY = 'help';
+export const HELP_COMPOSER_INPUT_ID = 'gap-help-composer-input';
+
 export interface BriefTab {
   key: string;
   label: string;
@@ -44,6 +51,28 @@ export function FocusLayout({ patternTitle, contextLine, ladder, tabs, children 
   useEffect(() => {
     if (!tabs.some((t) => t.key === activeKey)) setActiveKey(tabs[0]?.key ?? 'task');
   }, [tabs, activeKey]);
+
+  // Ctrl+/ (and Cmd+/) focuses the Help tab's composer "from anywhere in focus mode" (spec).
+  // FocusLayout is the one component mounted for the whole IDE shell (brief panel + editor
+  // region) whenever a code exercise is on stage, so this is the only sensible single mount
+  // point for a global-from-anywhere shortcut — everything else here only renders whichever tab
+  // is active. Switching to an already-active Help tab is a no-op state-wise, so the focus is
+  // reapplied via rAF unconditionally on every press rather than relying on a state change to
+  // retrigger it (also covers a fresh mount, where the DOM node doesn't exist yet the instant
+  // this handler runs).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent): void {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== '/') return;
+      if (!tabs.some((t) => t.key === HELP_TAB_KEY)) return;
+      e.preventDefault();
+      setActiveKey(HELP_TAB_KEY);
+      requestAnimationFrame(() => {
+        document.getElementById(HELP_COMPOSER_INPUT_ID)?.focus();
+      });
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [tabs]);
 
   const active = tabs.find((t) => t.key === activeKey) ?? tabs[0];
 

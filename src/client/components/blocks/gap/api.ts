@@ -33,3 +33,26 @@ export async function postRun(rungId: string, code: string, trace?: boolean): Pr
   if (!response.ok) throw new Error(`POST /api/gap/run failed: ${response.status}`);
   return response.json();
 }
+
+// Track A (docs/superpowers/plans/2026-07-21-coding-stage.md "A. In-IDE tutor help"): a one-shot
+// hint generation, deliberately NOT the chat thread — see src/server/gapHelp.ts's top comment.
+export interface HelpRequest {
+  pattern: string;
+  rung: string;
+  question: string;
+  draft: string;
+  failures: string[];
+}
+export interface HelpResponse {
+  hint: string;
+}
+
+export async function postHelp(input: HelpRequest): Promise<HelpResponse> {
+  const response = await fetch('/api/gap/help', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new Error(`POST /api/gap/help failed: ${response.status}`);
+  return response.json();
+}

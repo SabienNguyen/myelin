@@ -9,6 +9,7 @@ import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
 import { buildIngestRoutes } from './ingestRoutes.js';
 import { buildGapRoutes } from './gapProxy.js';
+import { buildGapHelpRoute } from './gapHelp.js';
 import { seedPatternPages } from './seedPatternPages.js';
 import { startScheduler } from './scheduler.js';
 import { AnkiClient } from './anki/client.js';
@@ -74,5 +75,6 @@ app.route('/', buildChatRoute(lw, cfg));
 app.route('/', buildIngestRoutes(lw, cfg));
 // No-op (empty Hono app, 404s) when cfg.gap is absent — see gapProxy.ts's buildGapRoutes doc.
 app.route('/', buildGapRoutes(cfg));
+app.route('/', buildGapHelpRoute(lw, cfg));
 serve({ fetch: app.fetch, port: cfg.port });
 console.log(`loreweaver-harness on :${cfg.port}`);

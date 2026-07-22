@@ -845,3 +845,21 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .rung-editor-frame--fill { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .rung-editor-frame--fill .rung-pane--gap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .rung-editor-frame--fill .rung-pane--gap .cm-editor { height: 100%; }
+
+/* Track A (docs/superpowers/plans/2026-07-21-coding-stage.md "A. In-IDE tutor help"): the Help
+   tab's transcript + composer — same brief-panel visual language as the other tabs (ide-brief-*
+   above), not a separate look. */
+.help-panel { display: flex; flex-direction: column; gap: 0.6rem; }
+.help-transcript { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; max-height: 40vh; overflow-y: auto; }
+.help-transcript-empty { color: var(--text-muted); font-size: 0.82rem; font-style: italic; }
+.help-exchange { border-left: 2px solid var(--border); padding-left: 0.6rem; }
+.help-exchange-question { margin: 0 0 0.3rem; font-size: 0.85rem; font-weight: 600; }
+.help-exchange-hint { font-size: 0.85rem; color: var(--text); }
+.help-exchange-hint p:first-child { margin-top: 0; }
+.help-exchange-hint p:last-child { margin-bottom: 0; }
+.help-exchange-pending { color: var(--text-muted); font-size: 0.82rem; font-style: italic; }
+.help-panel-error { color: var(--bad); font-size: 0.82rem; margin: 0; }
+.help-composer { display: flex; flex-direction: column; gap: 0.4rem; border-top: 1px solid var(--border); padding-top: 0.6rem; }
+.help-composer-label { font-size: 0.78rem; color: var(--text-muted); }
+.help-composer-input { width: 100%; min-height: 3.6rem; resize: vertical; font: inherit; }
+.help-composer-send { align-self: flex-end; }
