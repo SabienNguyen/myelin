@@ -218,6 +218,60 @@ describe('Bug A: text streamed via partials must not also re-emit via the assist
   }, 30_000);
 });
 
+describe('Bug C: real SDK cadence — one assistant envelope PER content block, indices from a different space', () => {
+  it('streams thinking -> text -> tool_use with exactly one text-start, one "Hello tools." delta, one tool-input', async () => {
+    async function* fakeQuery(params: any) {
+      yield initMsg('sess-cadence');
+      yield streamEventMsg('sess-cadence', 'u-ms', { type: 'message_start' });
+      // content_block_start(0, thinking) — real API index 0.
+      yield streamEventMsg('sess-cadence', 'u-cbs0', {
+        type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' },
+      });
+      // Per-block assistant envelope for the thinking block: own uuid, and its ONE block sits at
+      // index 0 of THIS envelope's own content array (that happens to coincide with the real API
+      // index here, but only by accident — the text block below shows it does not in general).
+      yield assistantMsg('sess-cadence', [{ type: 'thinking', thinking: 'let me check the vault', signature: 'sig' }]);
+      yield streamEventMsg('sess-cadence', 'u-cbstop0', { type: 'content_block_stop', index: 0 });
+      // content_block_start(1, text) — real API index 1.
+      yield streamEventMsg('sess-cadence', 'u-cbs1', {
+        type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' },
+      });
+      yield streamEventMsg('sess-cadence', 'u-delta1', {
+        type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Hello tools.' },
+      });
+      // Per-block assistant envelope for the text block: DIFFERENT uuid, arrives BEFORE
+      // content_block_stop(1) — and its ONE block sits at index 0 of ITS OWN content array, not
+      // index 1. An index-keyed dedupe check can never match this against the stream_events above.
+      yield assistantMsg('sess-cadence', [{ type: 'text', text: 'Hello tools.' }]);
+      yield streamEventMsg('sess-cadence', 'u-cbstop1', { type: 'content_block_stop', index: 1 });
+      // content_block_start(2, tool_use) — real API index 2.
+      yield streamEventMsg('sess-cadence', 'u-cbs2', {
+        type: 'content_block_start', index: 2,
+        content_block: { type: 'tool_use', id: 'tc-search', name: 'mcp__loreweaver__search', input: {} },
+      });
+      yield assistantMsg('sess-cadence', [
+        { type: 'tool_use', id: 'tc-search', name: 'mcp__loreweaver__search', input: { query: 'arith' } },
+      ]);
+      yield streamEventMsg('sess-cadence', 'u-cbstop2', { type: 'content_block_stop', index: 2 });
+      yield resultMsg('sess-cadence');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    const res = await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'help me with tools' }] }] as any,
+      'learn', 'thread-cadence',
+    );
+    const chunks = chunksOf(await drain(res));
+
+    const textStarts = chunks.filter((c) => c.type === 'text-start');
+    const deltas = chunks.filter((c) => c.type === 'text-delta' && c.delta === 'Hello tools.');
+    const toolInputs = chunks.filter((c) => c.type === 'tool-input-available' && c.toolCallId === 'tc-search');
+
+    expect(textStarts.length).toBe(1); // exactly one text block was opened, not two
+    expect(deltas.length).toBe(1); // the text streamed exactly once, not twice
+    expect(toolInputs.length).toBe(1); // tool_use is keyed by stable block.id — always exactly once
+  }, 30_000);
+});
+
 describe('Bug B: loreweaver arg sanitization is wired through a live seam, not shadowed canUseTool', () => {
   it('exposes a PreToolUse hook (not a bypassPermissions-shadowed canUseTool) that force-corrects the student id', async () => {
     const calls: any[] = [];

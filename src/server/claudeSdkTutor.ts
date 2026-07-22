@@ -228,18 +228,26 @@ export function createClaudeSdkTutorSession(
           // turn, and a single query() can contain several raw turns (multi-step tool loop).
           let blockKind = new Map<number, 'text' | 'tool_use'>();
           let textIds = new Map<number, string>();
-          // Indices already streamed via stream_event partials THIS raw API turn. Reset at
-          // stream_event message_start, consulted (and cleared) when the matching `assistant`
-          // envelope for that turn arrives. Deliberately keyed by index ALONE, not uuid: the
-          // stream_event envelopes and the `assistant` envelope for the same raw turn carry
-          // DIFFERENT uuids (confirmed against a persisted thread), so a uuid-qualified key never
-          // matches across the two message types and silently doubled every text block. Stream
-          // order within a single query() is sequential — message_start, then that turn's
-          // content_block_* events, then its `assistant` message, before the next turn's
-          // message_start — so pairing "the current set" with "the next assistant message" is
-          // safe. Fakes that emit no stream_events at all leave this empty, so the fallback below
-          // still emits everything (existing behavior for such fakes is preserved).
-          let streamedThisTurn = new Set<number>();
+          // Whether ANY text partial streamed via stream_events THIS raw API turn. Reset to false
+          // at stream_event message_start; set true at content_block_start for a text block.
+          // Per-raw-turn boolean, not an index-keyed set — a set can't work here for two independent
+          // reasons, both confirmed against a real SDK probe (includePartialMessages:true): (a) the
+          // SDK emits one `assistant` envelope PER CONTENT BLOCK, mid-stream — e.g. the [thinking]
+          // envelope arrives (and, under the old Set scheme, cleared the tracking state) BEFORE the
+          // [text] envelope for the same raw turn is even seen, so "clear after an assistant
+          // envelope" wiped state meant for a later block in the SAME turn; (b) stream_events carry
+          // the raw API's content-block index, but each per-block assistant envelope carries its
+          // single block at index 0 of its OWN content array — the two index spaces never line up,
+          // so an index-keyed lookup can never match. (Envelope uuids are per-envelope — the
+          // stream_event envelopes and the `assistant` envelope for the same raw turn all carry
+          // DIFFERENT uuids — so uuids are equally useless as a key.) With includePartialMessages
+          // on, ALL text in a raw turn streams via partials, so ANY assistant-envelope text for that
+          // turn is a duplicate by construction — hence a single flag suffices, and nothing needs to
+          // be cleared on the assistant envelope itself. The fallback branch below exists solely for
+          // streams that emit no partials at all (fakes/tests, or partials disabled): there this flag
+          // simply never flips true, and the fallback still emits everything (existing behavior for
+          // such fakes is preserved).
+          let partialsStreamedText = false;
           let textCounter = 0;
           const pendingLoreweaverCalls = new Set<string>(); // toolCallId awaiting a tool_result
 
@@ -251,14 +259,14 @@ export function createClaudeSdkTutorSession(
               if (event.type === 'message_start') {
                 blockKind = new Map();
                 textIds = new Map();
-                streamedThisTurn = new Set();
+                partialsStreamedText = false;
               } else if (event.type === 'content_block_start') {
                 const block = event.content_block;
                 if (block?.type === 'text') {
                   const id = `sdk-text-${++textCounter}`;
                   blockKind.set(event.index, 'text');
                   textIds.set(event.index, id);
-                  streamedThisTurn.add(event.index);
+                  partialsStreamedText = true;
                   writer.write({ type: 'text-start', id });
                 } else if (block?.type === 'tool_use') {
                   blockKind.set(event.index, 'tool_use');
@@ -274,11 +282,13 @@ export function createClaudeSdkTutorSession(
               }
             } else if (message.type === 'assistant') {
               const content = (message.message as any).content as any[];
-              content.forEach((block, i) => {
+              content.forEach((block) => {
                 if (block.type === 'text') {
-                  // Fallback path: only re-emit if partials didn't already stream this exact block
-                  // (includePartialMessages off, or a fake that skips stream_events entirely).
-                  if (!streamedThisTurn.has(i)) {
+                  // Fallback path: only emit if partials didn't already stream THIS TURN's text
+                  // (includePartialMessages off, or a fake that skips stream_events entirely). Not
+                  // an index/uuid check — see partialsStreamedText's declaration for why neither can
+                  // work against the real per-block envelope cadence.
+                  if (!partialsStreamedText) {
                     const id = `sdk-text-${++textCounter}`;
                     writer.write({ type: 'text-start', id });
                     if (block.text) writer.write({ type: 'text-delta', id, delta: block.text });
@@ -301,9 +311,11 @@ export function createClaudeSdkTutorSession(
                   }
                 }
               });
-              // This assistant envelope consumes the raw turn its stream_events (if any) described;
-              // clear so a later turn's fallback check isn't polluted by a stale index set.
-              streamedThisTurn = new Set();
+              // Deliberately no clearing here: partialsStreamedText tracks "did partials already
+              // cover this turn's text", and per-block envelopes (thinking, text, tool_use, ...) can
+              // arrive interleaved with that turn's remaining stream_events — clearing on ANY
+              // assistant envelope would wipe state a later block's fallback check still needs. It
+              // only resets at the next raw turn's stream_event message_start.
             } else if (message.type === 'user') {
               const content = (message.message as any).content;
               if (Array.isArray(content)) {
