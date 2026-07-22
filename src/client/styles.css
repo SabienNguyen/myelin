@@ -788,6 +788,16 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   vertical-align: middle;
 }
 .code-exercise .ide-brief-body { font-size: 0.88rem; }
+/* Help discoverability (docs/superpowers/plans/2026-07-21-coding-stage.md section C): a quiet
+   footer line, not a banner — same muted-caption treatment as ide-brief-context, just smaller and
+   separated by a hairline so it doesn't read as part of whichever tab is active. */
+.code-exercise .ide-brief-shortcut-hint {
+  margin: 0.2rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
 .code-exercise .ide-task-brief p { margin: 0 0 0.5rem; }
 .code-exercise .ide-sibling-link { color: var(--text-muted); font-size: 0.82rem; }
 .code-exercise .ide-sibling-link summary { cursor: pointer; }
@@ -860,6 +870,5 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .help-exchange-pending { color: var(--text-muted); font-size: 0.82rem; font-style: italic; }
 .help-panel-error { color: var(--bad); font-size: 0.82rem; margin: 0; }
 .help-composer { display: flex; flex-direction: column; gap: 0.4rem; border-top: 1px solid var(--border); padding-top: 0.6rem; }
-.help-composer-label { font-size: 0.78rem; color: var(--text-muted); }
 .help-composer-input { width: 100%; min-height: 3.6rem; resize: vertical; font: inherit; }
 .help-composer-send { align-self: flex-end; }

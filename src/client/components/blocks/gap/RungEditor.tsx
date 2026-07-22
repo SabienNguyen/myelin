@@ -17,7 +17,7 @@
 // paper/ink chrome wraps the block card outside it.
 
 import { useEffect, useRef } from 'react';
-import { EditorState } from '@codemirror/state';
+import { Compartment, EditorState } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { bracketMatching } from '@codemirror/language';
 import { basicSetup } from 'codemirror';
@@ -27,13 +27,24 @@ import { loadDraft, saveDraft } from './draftStorage.js';
 
 const LANGUAGE = javascript({ typescript: true });
 
+// Continuous line numbering (docs/superpowers/plans/2026-07-21-coding-stage.md section C): the
+// three stacked panes read as one file rather than three independently-numbered ones. Pre still
+// numbers from 1 (unchanged — it IS the top of the "file"). Gap's offset is `visiblePre`'s line
+// count, fixed for the life of this mount (visiblePre never changes without a full remount — see
+// the top-of-file comment on rung switches). Post's offset is pre + the GAP's CURRENT line count,
+// which does change as the learner types, so only the post pane needs a Compartment it can
+// reconfigure live (see the gap-mount effect below).
+function countLines(text: string): number {
+  return text.split('\n').length;
+}
+
+function offsetLineNumbers(offset: number) {
+  return lineNumbers({ formatNumber: (lineNo) => String(lineNo + offset) });
+}
+
 // P2 (editor polish): the read-only pre/post panes get line numbers + bracket matching too, so
 // all three stacked CM6 views read as one continuous editor frame rather than the gap pane
-// visibly being "the only real one." Each pane still numbers its own lines from 1 — the file's
-// top comment already documents why these are three independently-mounted views rather than one
-// continuous document (no real seam-free way to lock ranges of a single CM6 doc), and a
-// continuously-numbered virtual line count across the seam would need to track the gap's live
-// line count on every keystroke; not worth the complexity for a cosmetic offset.
+// visibly being "the only real one."
 function useReadOnlyPane(container: React.RefObject<HTMLDivElement | null>, doc: string): void {
   useEffect(() => {
     if (!container.current) return;
@@ -83,11 +94,48 @@ export function RungEditor({
   onRunRequestRef.current = onRunRequest;
 
   useReadOnlyPane(preRef, visiblePre);
-  useReadOnlyPane(postRef, visiblePost);
+
+  // Continuous numbering (see helpers above): preLineCount is stable for this mount's whole life
+  // (visiblePre never changes without a full remount). startGapDoc mirrors the doc the gap pane's
+  // own mount effect below actually starts from (draft-restored or initialGap) — computed once,
+  // via a lazy ref init, so the post pane's INITIAL offset can't drift from the gap's real
+  // starting content even though the two are set up in separate effects.
+  const preLineCount = countLines(visiblePre);
+  const startGapDocRef = useRef<string | null>(null);
+  if (startGapDocRef.current === null) {
+    startGapDocRef.current = draftKey ? (loadDraft(draftKey) ?? initialGap) : initialGap;
+  }
+  const postLineNumberCompartment = useRef(new Compartment()).current;
+  const postViewRef = useRef<EditorView | null>(null);
+  const lastGapLineCountRef = useRef(countLines(startGapDocRef.current));
+
+  useEffect(() => {
+    if (!postRef.current) return;
+    const initialOffset = preLineCount + lastGapLineCountRef.current;
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: visiblePost,
+        extensions: [
+          oneDark, LANGUAGE,
+          postLineNumberCompartment.of(offsetLineNumbers(initialOffset)),
+          bracketMatching(),
+          EditorView.editable.of(false), EditorView.lineWrapping,
+        ],
+      }),
+      parent: postRef.current,
+    });
+    postViewRef.current = view;
+    return () => { view.destroy(); postViewRef.current = null; };
+    // Mounted once, same rationale as the gap effect below. The post pane's LIVE offset updates
+    // (as the learner adds/removes lines in the gap) come through
+    // postLineNumberCompartment.reconfigure(...) fired from the gap effect's updateListener, not
+    // by remounting this effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!gapRef.current) return;
-    const startDoc = draftKey ? (loadDraft(draftKey) ?? initialGap) : initialGap;
+    const startDoc = startGapDocRef.current ?? initialGap;
     const view = new EditorView({
       state: EditorState.create({
         doc: startDoc,
@@ -95,6 +143,13 @@ export function RungEditor({
           basicSetup,
           oneDark,
           LANGUAGE,
+          // basicSetup already includes a plain lineNumbers() — CM6 dedups the shared gutter/plugin
+          // extensions it returns by reference and merges the two lineNumberConfig values (the
+          // default config carries no formatNumber key, so there's no conflict), leaving exactly
+          // one gutter using OUR formatNumber. See node_modules/@codemirror/view's lineNumbers()
+          // (facet-of the shared `gutters()`/`lineNumberGutter` singletons) and
+          // @codemirror/state's combineConfig if this ever needs re-verifying.
+          offsetLineNumbers(preLineCount),
           keymap.of([
             { key: 'Ctrl-Enter', run: () => { onRunRequestRef.current?.(); return true; } },
             { key: 'Cmd-Enter', run: () => { onRunRequestRef.current?.(); return true; } },
@@ -104,6 +159,19 @@ export function RungEditor({
             const next = update.state.doc.toString();
             onGapChangeRef.current(next);
             if (draftKey) saveDraft(draftKey, next);
+
+            // Continuous numbering: the post pane's offset only needs to move when the gap's LINE
+            // COUNT changes, not on every keystroke — guard on that before touching the post view
+            // at all (line-count changes are rare relative to keystrokes).
+            const gapLineCount = update.state.doc.lines;
+            if (gapLineCount !== lastGapLineCountRef.current) {
+              lastGapLineCountRef.current = gapLineCount;
+              postViewRef.current?.dispatch({
+                effects: postLineNumberCompartment.reconfigure(
+                  offsetLineNumbers(preLineCount + gapLineCount),
+                ),
+              });
+            }
           }),
         ],
       }),

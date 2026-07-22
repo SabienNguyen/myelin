@@ -93,12 +93,13 @@ export function HelpPanel({ pattern, rung, draft, failures, exchanges, onExchang
       )}
 
       <div className="help-composer">
-        <label className="help-composer-label" htmlFor={HELP_COMPOSER_INPUT_ID}>
-          ask about this exercise…
-        </label>
+        {/* No visible label here — the placeholder below already reads "ask about this
+            exercise…"; a label repeating it verbatim was pure duplication. aria-label keeps the
+            field named for assistive tech, which loses placeholder text once a value is typed. */}
         <textarea
           id={HELP_COMPOSER_INPUT_ID}
           className="help-composer-input"
+          aria-label="ask about this exercise"
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
           onKeyDown={onKeyDown}

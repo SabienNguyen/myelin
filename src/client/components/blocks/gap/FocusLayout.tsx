@@ -115,6 +115,11 @@ export function FocusLayout({ patternTitle, contextLine, ladder, tabs, children 
         <div className="ide-brief-body" role="tabpanel">
           {active?.onDismiss ? <OfferCard onDismiss={active.onDismiss}>{active.content}</OfferCard> : active?.content}
         </div>
+
+        {/* Help discoverability (docs/superpowers/plans/2026-07-21-coding-stage.md section C):
+            a single subtle pointer to the Ctrl+/ shortcut, always present — not a dismissible
+            banner, no new persistence, just a quiet footer line under the tabs/body. */}
+        <p className="ide-brief-shortcut-hint">Ctrl+/ — ask your tutor for help</p>
       </div>
 
       <div className="ide-editor-region">{children}</div>
