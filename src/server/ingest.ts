@@ -383,7 +383,7 @@ function buildCompilePrompt(
  * invisible to that stale array and got clobbered the instant this finally block fired. See
  * queueStore.ts's module doc comment for the full incident writeup.
  */
-async function compileOne(
+export async function compileOne(
   lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel | undefined, entry: QueueEntry,
   chunkChars: number,
   claudeSdk: { useSdk: boolean; modelId: string; deps?: CompileDeps },
