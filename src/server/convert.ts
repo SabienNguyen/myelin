@@ -433,28 +433,98 @@ export const defaultIncrementalConverter: IncrementalConverter = async (file, ou
 const H1 = /^#\s+(.+)$/gm;
 
 /** marker embeds HTML anchors inside headings (`# <span id="page-30-4"></span>Real Title`) —
- * strip tags + collapse whitespace so chapter titles are human text. */
+ * strip tags + collapse whitespace so chapter titles are human text. Also strips LaTeX heading
+ * markup some Murphy PML chapter titles are wrapped in (marker renders the book's typeset heading
+ * math verbatim, e.g. `$12 \;\; {\rm Generalized \; Linear \; Models \; *}$`): the `$...$` math
+ * wrapper, the `\rm` roman-font switch, `\;`/`\,` spacing commands, and `_{...}`/`{...}` grouping
+ * braces (braces dropped, inner text kept). Backslash-escaped literal spaces (`\ `) are turned into
+ * a real space rather than deleted outright — Murphy sets adjacent words like `Neural\ Networks`
+ * with no real space between them, only the escape, so deleting it outright would run words
+ * together. Murphy's trailing `*` advanced-section marker (escaped as `\*` in plain, non-LaTeX
+ * headings like "17 Kernel Methods \*") is untouched — none of the above targets a bare `\*`. */
 export function cleanHeading(raw: string): string {
-  return raw.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+  return raw
+    .replace(/<[^>]*>/g, '')
+    .replace(/\$/g, '')
+    .replace(/\\ /g, ' ')
+    .replace(/\\rm\b/g, '')
+    .replace(/\\[;,]/g, '')
+    .replace(/_\{/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 const H2 = /^##\s+(.+)$/gm;
 
+/** A promoted chapter/appendix heading: an H2 whose CLEANED text is a bare one-or-two-digit number
+ * or a single capital letter, followed by a space and more text — with no dot right after the
+ * number/letter (a dot means it's an ordinary dotted section, e.g. `4.1 Introduction` or
+ * `A.1 Introduction`, never a chapter). Matches Murphy PML headings marker rendered at H2 instead
+ * of H1 — `5 Decision Theory`, `A Notation` — but never `4.1 Introduction`, `Part I`, `Foundations`,
+ * or `Index`/`Bibliography` (multi-letter words never match `[A-Z]\s`, so they're safe by
+ * construction, no extra exclusion list needed). */
+const PROMOTABLE_CHAPTER_HEADING = /^(\d{1,2}|[A-Z])\s+\S/;
+
 /**
- * Splits a combined markdown document into per-chapter { title, body } pairs, one per H1
- * heading. Falls back to H2 headings when there are fewer than two H1s (some converters flatten
- * the book title into the only H1), and falls back to a single chapter covering the whole
- * document when neither level yields at least two headings. Pure — no I/O.
+ * Within one already-H1-split chapter's body, promotes any H2 matching PROMOTABLE_CHAPTER_HEADING
+ * into its own chapter — some Murphy PML chapters got merged into a neighbor by the H1 split
+ * because marker rendered their heading at H2 (the same level as an ordinary section) instead of
+ * H1. Byte-fidelity preserved: every piece is a straight slice of the original body, same slicing
+ * strategy as the H1 split in splitChapters below; a promoted heading's own `##` line stays intact
+ * in the new chapter's body (never rewritten to `#`). No-op (returns `[chapter]`) when nothing in
+ * the body qualifies.
+ *
+ * Exported (not just used internally by splitChapters) for scripts/repair-book-split.ts: that
+ * script re-splits files that were ALREADY split into one-H1-per-file by a previous (buggy) ingest
+ * run, so calling splitChapters() itself on one of those files would wrongly take the <2-H1s H2-
+ * fallback branch (splitChapters requires >=2 H1s to run the promotion pass at all — see its own
+ * comment) and shatter the file on every dotted subsection heading. Calling this directly with the
+ * file's own already-known {title, body} skips that H1-count heuristic entirely and applies only
+ * the promotion logic, which is what a re-split of an already-isolated chapter file actually needs.
+ */
+export function promoteEmbeddedChapters(chapter: { title: string; body: string }): { title: string; body: string }[] {
+  const promotions = [...chapter.body.matchAll(H2)]
+    .map((m) => ({ index: m.index!, title: cleanHeading(m[1]) }))
+    .filter((m) => PROMOTABLE_CHAPTER_HEADING.test(m.title));
+  if (promotions.length === 0) return [chapter];
+
+  const pieces: { title: string; body: string }[] = [];
+  const head = chapter.body.slice(0, promotions[0].index).trim();
+  if (head) pieces.push({ title: chapter.title, body: head });
+  promotions.forEach((p, i) => {
+    const end = i + 1 < promotions.length ? promotions[i + 1].index : chapter.body.length;
+    pieces.push({ title: p.title, body: chapter.body.slice(p.index, end).trim() });
+  });
+  return pieces;
+}
+
+/**
+ * Splits a combined markdown document into per-chapter { title, body } pairs, one per H1 heading,
+ * then runs each resulting chapter through promoteEmbeddedChapters (see above) to split out any
+ * chapter marker buried it at H2. Falls back to H2 headings — WITHOUT a promotion pass, since in
+ * that branch the H2s themselves already are the chapter boundaries — when there are fewer than
+ * two H1s (some converters flatten the book title into the only H1), and falls back to a single
+ * chapter covering the whole document when neither level yields at least two headings. Pure — no
+ * I/O.
  */
 export function splitChapters(markdown: string): { title: string; body: string }[] {
-  let matches = [...markdown.matchAll(H1)];
-  if (matches.length < 2) matches = [...markdown.matchAll(H2)];
-  if (matches.length < 2) {
+  const h1Matches = [...markdown.matchAll(H1)];
+  if (h1Matches.length >= 2) {
+    return h1Matches.flatMap((m, i) => {
+      const start = m.index!;
+      const end = i + 1 < h1Matches.length ? h1Matches[i + 1].index! : markdown.length;
+      const title = cleanHeading(m[1]) || `Chapter ${i + 1}`;
+      return promoteEmbeddedChapters({ title, body: markdown.slice(start, end).trim() });
+    });
+  }
+  const h2Matches = [...markdown.matchAll(H2)];
+  if (h2Matches.length < 2) {
     const first = [...markdown.matchAll(/^#{1,2}\s+(.+)$/gm)][0];
     return [{ title: cleanHeading(first?.[1] ?? '') || 'Chapter 1', body: markdown.trim() }];
   }
-  return matches.map((m, i) => {
+  return h2Matches.map((m, i) => {
     const start = m.index!;
-    const end = i + 1 < matches.length ? matches[i + 1].index! : markdown.length;
+    const end = i + 1 < h2Matches.length ? h2Matches[i + 1].index! : markdown.length;
     return { title: cleanHeading(m[1]) || `Chapter ${i + 1}`, body: markdown.slice(start, end).trim() };
   });
 }

@@ -286,3 +286,108 @@ describe('cleanHeading (marker HTML anchors)', () => {
     expect(splitChapters(md).map((c) => c.title)).toEqual(['One', 'Two']);
   });
 });
+
+describe('cleanHeading (LaTeX heading markup)', () => {
+  it('strips a $...$ wrapper, \\rm, and \\; spacing commands', () => {
+    expect(cleanHeading('$12 \\;\\; {\\rm Generalized \\; Linear \\; Models \\; *}$'))
+      .toBe('12 Generalized Linear Models *');
+  });
+  it('turns backslash-escaped spaces into real spaces and strips a _{...} group', () => {
+    expect(cleanHeading('$14 \\ _{\\rm Neural\\ Networks\\ for\\ Images}$'))
+      .toBe('14 Neural Networks for Images');
+  });
+  it('leaves a plain title with no LaTeX markup unchanged', () => {
+    expect(cleanHeading('19 Learning with Fewer Labeled Examples'))
+      .toBe('19 Learning with Fewer Labeled Examples');
+  });
+});
+
+describe('splitChapters chapter-promotion pass', () => {
+  it('promotes embedded un-dotted H2 chapter headings into their own chapters', () => {
+    const md = [
+      '# 4 Statistics',
+      'Statistics body text.',
+      '## 4.1 Introduction',
+      'Section text, not a chapter.',
+      '## <span id="x"></span>5 Decision Theory',
+      'Decision theory body.',
+      '## 5.1 Bayesian decision theory',
+      'More section text.',
+      '## 6 Information Theory',
+      'Info theory body.',
+      '# 8 Optimization',
+      'Optimization body.',
+    ].join('\n');
+    const chapters = splitChapters(md);
+    expect(chapters.map((c) => c.title)).toEqual([
+      '4 Statistics', '5 Decision Theory', '6 Information Theory', '8 Optimization',
+    ]);
+    expect(chapters[0].body).toContain('Statistics body text.');
+    expect(chapters[0].body).toContain('4.1 Introduction');
+    expect(chapters[0].body).not.toContain('Decision theory body.');
+    expect(chapters[1].body).toContain('Decision theory body.');
+    expect(chapters[1].body).toContain('5.1 Bayesian decision theory');
+    expect(chapters[1].body).not.toContain('Info theory body.');
+    expect(chapters[2].body).toContain('Info theory body.');
+    expect(chapters[2].body).not.toContain('Optimization body.');
+    expect(chapters[3].body).toContain('Optimization body.');
+  });
+
+  it('never promotes a dotted section heading, however chapter-like its number looks', () => {
+    const md = [
+      '# 4 Statistics',
+      'body',
+      '## 4.1 Introduction',
+      'section body',
+      '## 4.2 Another section',
+      'more section body',
+      '# 8 Optimization',
+      'opt body',
+    ].join('\n');
+    const chapters = splitChapters(md);
+    expect(chapters).toHaveLength(2);
+    expect(chapters[0].title).toBe('4 Statistics');
+    expect(chapters[0].body).toContain('4.1 Introduction');
+    expect(chapters[0].body).toContain('4.2 Another section');
+  });
+
+  it('promotes a single-letter appendix heading but never its dotted A.1 subsections', () => {
+    const md = [
+      '# 21 Clustering',
+      'clustering body',
+      '## A Notation',
+      'appendix body',
+      '## A.1 Introduction',
+      'appendix section body',
+      '## A.2 Common mathematical symbols',
+      'more appendix section body',
+      '# 22 Recommender Systems',
+      'recsys body',
+    ].join('\n');
+    const chapters = splitChapters(md);
+    expect(chapters.map((c) => c.title)).toEqual(['21 Clustering', 'A Notation', '22 Recommender Systems']);
+    expect(chapters[1].body).toContain('appendix body');
+    expect(chapters[1].body).toContain('A.1 Introduction');
+    expect(chapters[1].body).toContain('A.2 Common mathematical symbols');
+    expect(chapters[1].body).not.toContain('recsys body');
+  });
+
+  it('never promotes non-chapter H2s like "Part I" or "Index"', () => {
+    const md = [
+      '# 1 Introduction',
+      'intro body',
+      '## Part I',
+      '## Foundations',
+      'part body',
+      '## Index',
+      'index body',
+      '# 2 Probability',
+      'prob body',
+    ].join('\n');
+    const chapters = splitChapters(md);
+    expect(chapters).toHaveLength(2);
+    expect(chapters[0].title).toBe('1 Introduction');
+    expect(chapters[0].body).toContain('Part I');
+    expect(chapters[0].body).toContain('Index');
+  });
+});
