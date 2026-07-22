@@ -5,6 +5,12 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/Dev/personal/the-gap
+# GAP_EXTRA_STORES (Track B2a): colon-separated absolute dir paths of gauntlet-verified artifact
+# dirs mined by the-gap's packages/miner (see that repo's apps/web/src/server/minedStore.ts) to
+# serve IN ADDITION to the built-in packages/artifacts/store — currently just the harness vault's
+# mined-artifact output dir. Missing/empty dir is tolerated (logged, not fatal) if nothing has
+# been mined yet.
+Environment=GAP_EXTRA_STORES=%h/Dev/personal/loreweaver-vault/.harness/mined
 # `pnpm demo` runs scripts/demo.mjs: a synchronous gauntlet pre-flight check (builds every rung
 # of the demo ladder and runs the full 5-gate gauntlet — content re-earns its place each boot;
 # this is the CORRECT behavior per docs/plan.md G8, not overhead to work around) before starting
