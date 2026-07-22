@@ -439,17 +439,19 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .mark-ok { color: var(--good); font-weight: 700; }
 .mark-bad { color: var(--bad); font-weight: 700; }
 
+.graph-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
 .graph-controls {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  margin-bottom: 0.75rem;
-  position: sticky;
-  top: 0;
-  left: 0;
-  z-index: 1;
-  background: var(--bg-panel);
-  padding: 0.1rem 0 0.5rem;
+  margin-bottom: 0.6rem;
+  flex: none;
 }
 .graph-mode-toggle {
   display: inline-flex;
@@ -473,9 +475,32 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .graph-subtitle.hint { font-style: italic; }
 .graph-subtitle.graph-loading { padding: 2.5rem 0; text-align: center; }
 
+/* The pannable/zoomable canvas — fills whatever vertical room .graph-controls and .graph-legend
+   (both flex: none) don't take. overflow:hidden because navigation is via d3-zoom (pan/wheel/
+   pinch), not native scrolling; touch-action:none stops the browser's own touch-scroll/pinch-zoom
+   from fighting d3-zoom's own touch handling. */
+.graph-canvas {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+.graph-svg { width: 100%; height: 100%; display: block; cursor: grab; }
+.graph-svg:active { cursor: grabbing; }
+
+.graph-node { transition: opacity 0.15s; }
+.graph-node.dim { opacity: 0.18; }
 .graph-node circle { transition: filter 0.12s; }
 .graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }
-.graph-node text { fill: var(--text); }
+.graph-node text { fill: var(--text); pointer-events: none; }
+
+.graph-edge { stroke: var(--text-muted); stroke-width: 1.5; transition: opacity 0.15s; }
+.graph-edge-prereq { opacity: 0.75; }
+.graph-edge-deepens { stroke-dasharray: 4 3; opacity: 0.45; }
+.graph-edge.dim { opacity: 0.08; }
 
 .graph-legend {
   display: flex;
@@ -486,8 +511,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   margin-top: 0.6rem;
   color: var(--text-muted);
   font-size: 0.8rem;
-  position: sticky;
-  left: 0;
+  flex: none;
 }
 .graph-legend span { display: inline-flex; align-items: center; gap: 0.35em; }
 .graph-legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }

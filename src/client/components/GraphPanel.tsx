@@ -1,20 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useThreadRuntime } from '@assistant-ui/react';
-import { getArrow } from 'perfect-arrows';
-import { getGraph } from '../lib/api.js';
 import {
-  graphMeta, positionNodes, type GraphNodeMeta, type LaidOutNode, type LaidOutEdge,
-} from '../lib/graphLayout.js';
+  useCallback, useEffect, useMemo, useReducer, useRef, useState,
+} from 'react';
+import { useThreadRuntime } from '@assistant-ui/react';
+import {
+  forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation,
+  type Simulation, type SimulationLinkDatum, type SimulationNodeDatum,
+} from 'd3-force';
+import { drag, type D3DragEvent } from 'd3-drag';
+import { select } from 'd3-selection';
+import { zoom, zoomIdentity, type D3ZoomEvent, type ZoomBehavior } from 'd3-zoom';
+import { getGraph } from '../lib/api.js';
+import { graphMeta, radiusForDegree, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
 import { parseHash } from '../lib/urlState.js';
 
-const R = 16;
-const PAD = 60;
 export const POLL_MS = 30_000;
-
-// Tuned low so the layered (mostly-vertical) layout reads as refined arcs
-// rather than the swoopy default perfect-arrows curves.
-const PREREQ_ARROW_OPTS = { bow: 0.15, stretch: 0.3, padStart: R + 2, padEnd: R + 7 };
 
 // ── Contextual scope ─────────────────────────────────────────────────────
 // /api/graph always returns the WHOLE vault (a vault of hundreds of pages is cheap to fetch and
@@ -24,17 +24,27 @@ const PREREQ_ARROW_OPTS = { bow: 0.15, stretch: 0.3, padStart: R + 2, padEnd: R 
 export const CONTEXT_HOPS = 2;
 export const CONTEXT_CAP = 40;
 
+// Obsidian's local-graph view always labels every node; its whole-vault view only labels on hover
+// or once you've zoomed in, to avoid "label soup". CONTEXT_CAP doubles as that threshold: below
+// it, always label (covers contextual mode, and small whole vaults where soup was never a risk
+// anyway); at or above it, a label needs hover/neighbor-of-hover or a high enough zoom.
+const ALWAYS_LABEL_MAX = CONTEXT_CAP;
+const LABEL_ZOOM_THRESHOLD = 1.6;
+
+const LINK_DISTANCE = 60;
+const COLLIDE_PAD = 6;
+
 // Membership (this BFS) only ever reads `slug` (for graph structure, via `edges`) and `daysLeft`
-// (for the decay-inference fallback below) — never position/color/etc. Keeping contextualSubgraph
-// generic over this minimal shape means it can run BEFORE the (expensive) layout pass, directly on
-// GraphNodeMeta (un-laid) nodes, while staying source-compatible with the already-laid-out
-// LaidOutNode[] fixtures the existing tests below construct.
+// (for the decay-inference fallback below) — never color/degree/etc. Keeping contextualSubgraph
+// generic over this minimal shape means it can run directly on GraphNodeMeta (the data-seam
+// output of graphLayout.ts's graphMeta), while staying source-compatible with whatever richer
+// node shape a caller/test wants to pass (GraphNodeMeta is the default below).
 export interface ContextualNode {
   slug: string;
   daysLeft: number | null;
 }
 
-export interface Subgraph<N extends ContextualNode = LaidOutNode> {
+export interface Subgraph<N extends ContextualNode = GraphNodeMeta> {
   nodes: N[];
   edges: LaidOutEdge[];
   /** BFS origin actually used — null only when there's truly no usable seed (nothing open this
@@ -51,7 +61,7 @@ export interface Subgraph<N extends ContextualNode = LaidOutNode> {
 
 /**
  * Undirected BFS neighborhood of `requestedSeed` within CONTEXT_HOPS hops, capped at ~`cap`
- * nodes. Pure and synchronous — the caller already holds the full laid-out graph in memory.
+ * nodes. Pure and synchronous — the caller already holds the full graph in memory.
  *
  * Cap strategy ("1-hop completeness, then closest-by-degree"): hop-1 neighbors are ALWAYS
  * included in full, even past the cap — a student's immediate prereqs/dependents/deepens links
@@ -60,7 +70,7 @@ export interface Subgraph<N extends ContextualNode = LaidOutNode> {
  * relevant", since raw BFS discovery order (a Map's insertion order) carries no real signal.
  *
  * `requestedSeed` missing (null, or a slug no longer present in `nodes`) falls back to inferring a
- * seed from decay data — the LaidOutNode with the most `daysLeft` (least elapsed time since
+ * seed from decay data — the node with the most `daysLeft` (least elapsed time since
  * `last_reinforced`, i.e. the freshest "recently touched" node the already-fetched graph exposes)
  * — and, if nothing has decay data either, all the way to the whole graph with `seedSlug: null`.
  */
@@ -122,10 +132,59 @@ export function contextualSubgraph<N extends ContextualNode>(
   };
 }
 
+/** Direct (1-hop) neighbor slugs of `slug`, undirected — the set that lights up on hover
+ * (Obsidian's signature interaction: hover a node, see its edges and neighbors, dim the rest).
+ * Pure and synchronous so it's unit-testable without a DOM or a running simulation. Does NOT
+ * include `slug` itself — callers checking "is this node part of the highlighted set" should
+ * check `slug === hovered || neighborSlugs(hovered, edges).has(slug)` explicitly. */
+export function neighborSlugs(slug: string, edges: LaidOutEdge[]): Set<string> {
+  const out = new Set<string>();
+  for (const e of edges) {
+    if (e.src === slug) out.add(e.dst);
+    else if (e.dst === slug) out.add(e.src);
+  }
+  return out;
+}
+
+// ── Force-directed renderer ──────────────────────────────────────────────
+// Both "This topic" and "Whole vault" share this ONE renderer (an Obsidian-style d3-force
+// simulation) — the only difference between modes is how many nodes/edges `sub` above hands it.
+
+export interface SimNode extends GraphNodeMeta, SimulationNodeDatum {}
+interface SimLink extends SimulationLinkDatum<SimNode> {
+  type: 'prereq' | 'deepens';
+}
+type SimForceLink = ReturnType<typeof forceLink<SimNode, SimLink>>;
+
+function makeSimulation(): Simulation<SimNode, SimLink> {
+  const sim = forceSimulation<SimNode, SimLink>([])
+    .force('link', forceLink<SimNode, SimLink>([]).id((d) => d.slug)
+      .distance(LINK_DISTANCE).strength(0.5))
+    .force('charge', forceManyBody<SimNode>().strength((d) => -90 - 14 * d.degree))
+    .force('center', forceCenter(0, 0))
+    .force('collide', forceCollide<SimNode>((d) => radiusForDegree(d.degree) + COLLIDE_PAD));
+  sim.stop(); // idle until the [sub] effect below feeds it real data
+  return sim;
+}
+
+/** Shortens a src->dst segment at both ends by the given pad, so a straight `<line>` stops at each
+ * node's rim instead of running under it (a plain full-length line would bury its own arrowhead
+ * marker inside the target node's fill, making prereq direction invisible). Pure geometry, no d3
+ * involved — called per edge, per render; cheap even at whole-vault scale. */
+function shortenSegment(x1: number, y1: number, x2: number, y2: number, padStart: number, padEnd: number) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const dist = Math.hypot(dx, dy) || 1;
+  const ux = dx / dist, uy = dy / dist;
+  return {
+    x1: x1 + ux * padStart, y1: y1 + uy * padStart,
+    x2: x2 - ux * padEnd, y2: y2 - uy * padEnd,
+  };
+}
+
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
-  // Raw-ish per-node metadata (color, decay, edges) — cheap to (re)compute for the whole vault on
-  // every poll; does NOT include x/y. Position is computed separately, below, only for whichever
-  // subset actually gets displayed (see `displayNodes`).
+  // Raw-ish per-node metadata (color, decay, degree) — cheap to (re)compute for the whole vault on
+  // every poll; position lives in the simulation's own node objects (see simRef/nodeObjectsRef
+  // below), not here.
   const [meta, setMeta] = useState<{ nodes: GraphNodeMeta[]; edges: LaidOutEdge[] }>({ nodes: [], edges: [] });
   // True until the FIRST fetch+layout has resolved. Gates the "laying out the graph…" placeholder
   // so a student switching to the Graph tab sees that instead of a misleading "open a page to
@@ -139,7 +198,113 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // is mounted for the whole app lifetime, just CSS-hidden while another tab is active, per
   // SidePanel.tsx), then kept live below by panelBus + hash listeners.
   const [contextSeed, setContextSeed] = useState<string | null>(() => parseHash(location.hash).pageSlug);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [labelZoomedIn, setLabelZoomedIn] = useState(false);
   const threadRuntime = useThreadRuntime();
+
+  // ── Simulation plumbing (all refs — see the big comment on the [sub] effect for why) ──────
+  // Built once, lazily, DURING RENDER (not inside an effect): React commits child refs before a
+  // component's own effects run, so a node's drag-behavior ref callback (below) needs the drag
+  // behavior — and the simulation it reheats — to already exist the very first time it fires,
+  // which is during the SAME commit as this component's first render with real data.
+  const simRef = useRef<Simulation<SimNode, SimLink> | null>(null);
+  if (simRef.current === null) simRef.current = makeSimulation();
+
+  const zoomBehaviorRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | null>(null);
+  if (zoomBehaviorRef.current === null) {
+    zoomBehaviorRef.current = zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.15, 6])
+      .filter((event: any) => {
+        if (event.type === 'wheel') return true;
+        // A mousedown/touchstart that started ON a node is that node's own d3-drag's job — let it
+        // fall through instead of also panning the whole canvas.
+        return !(event.target as Element | null)?.closest?.('.graph-node');
+      })
+      .on('zoom', (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
+        zoomLayerElRef.current?.setAttribute('transform', event.transform.toString());
+        const zoomedIn = event.transform.k >= LABEL_ZOOM_THRESHOLD;
+        setLabelZoomedIn((prev) => (prev === zoomedIn ? prev : zoomedIn));
+      });
+  }
+
+  const dragBehaviorRef = useRef<ReturnType<typeof drag<SVGGElement, SimNode>> | null>(null);
+  if (dragBehaviorRef.current === null) {
+    dragBehaviorRef.current = drag<SVGGElement, SimNode>()
+      // Movement under 4px still fires the node's own onClick afterward (React's synthetic click,
+      // untouched by d3-drag) instead of being swallowed as a drag — this is how a tap-to-select
+      // and a drag-to-reposition share one node with no extra bookkeeping.
+      .clickDistance(4)
+      .on('start', (event: D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) => {
+        if (!event.active) simRef.current!.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      })
+      .on('drag', (event: D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) => {
+        d.fx = event.x; d.fy = event.y;
+      })
+      .on('end', (event: D3DragEvent<SVGGElement, SimNode, SimNode>, d: SimNode) => {
+        if (!event.active) simRef.current!.alphaTarget(0);
+        d.fx = null; d.fy = null;
+      });
+  }
+
+  // slug -> live simulation node object. Carried across renders (and across polls/reseeds/mode
+  // toggles) so metadata refreshes can mutate an already-placed node's color/degree/etc IN PLACE
+  // without touching its x/y/vx/vy — the whole trick behind "poll refresh without visual reset":
+  // the sim only reheats when membership actually changes (see the [sub] effect), never on a
+  // metadata-only refresh, so the graph doesn't re-explode every 30s.
+  const nodeObjectsRef = useRef<Map<string, SimNode>>(new Map());
+  const nodeElsRef = useRef<Map<string, SVGGElement>>(new Map());
+  const nodeRefCallbacksRef = useRef<Map<string, (el: SVGGElement | null) => void>>(new Map());
+  const zoomLayerElRef = useRef<SVGGElement | null>(null);
+
+  // Stable (memoized-per-slug) ref callback: React only invokes a ref when its FUNCTION IDENTITY
+  // changes, so a fresh inline arrow per render here would thrash drag-attachment on every one of
+  // the simulation's ~60fps ticks. This callback only ever records the DOM element — datum
+  // binding + drag attachment happens once, in the [sub] effect, for genuinely new nodes only
+  // (see there for why: nodeObjectsRef isn't populated for a brand-new slug until that effect
+  // runs, which is AFTER this ref callback's mount-time firing).
+  const getNodeRefCallback = (slug: string) => {
+    let fn = nodeRefCallbacksRef.current.get(slug);
+    if (!fn) {
+      fn = (el: SVGGElement | null) => {
+        if (el) nodeElsRef.current.set(slug, el);
+        else nodeElsRef.current.delete(slug);
+      };
+      nodeRefCallbacksRef.current.set(slug, fn);
+    }
+    return fn;
+  };
+
+  const svgRefCallback = useCallback((el: SVGSVGElement | null) => {
+    if (!el || !zoomBehaviorRef.current) return;
+    // d3-zoom's default extent() reads the <svg>'s viewBox/width/height SVGAnimatedLength
+    // attributes — this svg has neither (it's sized via CSS 100%/100%, see .graph-svg), so that
+    // default throws (and even where it doesn't throw, e.g. a real browser, it'd silently read a
+    // stale/zero size). Supplying our own extent off getBoundingClientRect sidesteps both.
+    zoomBehaviorRef.current.extent((): [[number, number], [number, number]] => {
+      const r = el.getBoundingClientRect();
+      return [[0, 0], [r.width || 600, r.height || 400]];
+    });
+    const selection = select<SVGSVGElement, unknown>(el);
+    selection.call(zoomBehaviorRef.current);
+    const rect = el.getBoundingClientRect();
+    const cx = rect.width > 0 ? rect.width / 2 : 300;
+    const cy = rect.height > 0 ? rect.height / 2 : 200;
+    selection.call(zoomBehaviorRef.current.transform, zoomIdentity.translate(cx, cy));
+    return () => { selection.on('.zoom', null); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Bumps a counter to force a re-render off the simulation's own mutable node objects, instead of
+  // mirroring positions into React state — positions change up to ~60x/sec while the sim is
+  // settling, and re-reading them straight off simRef's node objects at render time is far cheaper
+  // than cloning a fresh array on every tick.
+  const [, bump] = useReducer((c: number) => c + 1, 0);
+  useEffect(() => {
+    const sim = simRef.current!;
+    sim.on('tick', () => bump());
+    return () => { sim.on('tick', null); sim.stop(); };
+  }, []);
 
   useEffect(() => {
     if (!visible) return;
@@ -181,11 +346,11 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     };
   }, []);
 
-  // Membership pass: cheap (a BFS over `meta.edges`, no layout algorithm) even run over the whole
-  // vault, so it's fine to compute unconditionally regardless of `mode`. `contextualSub` recomputes
-  // only on a genuine reseed or fresh poll data — NOT on a mode toggle — so flipping back to "This
-  // topic" after visiting "Whole vault" doesn't redo the BFS. `fullSub` is a passthrough of every
-  // node/edge (memoized separately for the same reason).
+  // Membership pass: cheap (a BFS over `meta.edges`, no simulation involved) even run over the
+  // whole vault, so it's fine to compute unconditionally regardless of `mode`. `contextualSub`
+  // recomputes only on a genuine reseed or fresh poll data — NOT on a mode toggle — so flipping
+  // back to "This topic" after visiting "Whole vault" doesn't redo the BFS. `fullSub` is a
+  // passthrough of every node/edge (memoized separately for the same reason).
   const contextualSub = useMemo(
     () => contextualSubgraph(meta.nodes, meta.edges, contextSeed),
     [meta, contextSeed],
@@ -196,38 +361,76 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   );
   const sub = mode === 'contextual' ? contextualSub : fullSub;
 
-  // Position pass: the (comparatively expensive) sugiyama/dagre layout, run ONLY over `sub.nodes`
-  // — i.e. the already-filtered membership above, not the whole vault. In contextual mode with a
-  // live seed this is bounded by CONTEXT_CAP; laying out the full node set only happens for the
-  // seedless fallback (see contextualSubgraph's doc comment) or "Whole vault" mode, both of which
-  // genuinely need every node positioned.
-  //
-  // This IS still a synchronous call inline in render, so switching to "Whole vault" on a large
-  // vault can still cost a visible beat with the last-painted (contextual) view frozen on screen
-  // until the new layout commits — we don't reuse the "laying out the graph…" placeholder around
-  // it. Doing so would mean yielding to the browser (e.g. a setTimeout(0) deferral) between setting
-  // a loading flag and running the layout, purely to guarantee an intermediate paint; that's a
-  // second loading-state pathway (with its own once-per-toggle semantics) layered on top of the
-  // first-load one above, for a rare, user-initiated, already one-off action — not worth the added
-  // complexity here. The strict win over the old behavior stands regardless: that same freeze used
-  // to happen on every load/poll, in every mode; now it's scoped to the explicit "Whole vault" ask.
-  const displayNodes = useMemo(() => positionNodes(sub.nodes), [sub]);
-  const displayEdges = sub.edges;
+  // Feeds `sub` into the persistent simulation: merges metadata into already-placed nodes IN
+  // PLACE (positions untouched), spawns genuinely-new nodes near an already-placed neighbor (if
+  // any — organic "grows out of its neighborhood" instead of parachuting in), drops nodes no
+  // longer in scope, and reheats the sim ONLY when membership actually changed. A same-membership
+  // poll (the common case — metadata like decay/mastery color can still change) or a mode toggle
+  // back to an unchanged scope never restarts the sim, so it doesn't re-explode on every 30s poll.
+  useEffect(() => {
+    const sim = simRef.current!;
+    const prevMap = nodeObjectsRef.current;
+    const nextMap = new Map<string, SimNode>();
+    let membershipChanged = false;
+
+    for (const n of sub.nodes) {
+      const existing = prevMap.get(n.slug);
+      if (existing) {
+        existing.title = n.title;
+        existing.color = n.color;
+        existing.effective = n.effective;
+        existing.daysLeft = n.daysLeft;
+        existing.ringFraction = n.ringFraction;
+        existing.misconceptions = n.misconceptions;
+        existing.degree = n.degree;
+        nextMap.set(n.slug, existing);
+      } else {
+        membershipChanged = true;
+        let x = (Math.random() - 0.5) * 20;
+        let y = (Math.random() - 0.5) * 20;
+        for (const e of sub.edges) {
+          const otherSlug = e.src === n.slug ? e.dst : e.dst === n.slug ? e.src : null;
+          const other = otherSlug != null ? prevMap.get(otherSlug) : undefined;
+          if (other?.x != null && other.y != null) { x += other.x; y += other.y; break; }
+        }
+        const fresh: SimNode = { ...n, x, y };
+        nextMap.set(n.slug, fresh);
+        const el = nodeElsRef.current.get(n.slug);
+        if (el && dragBehaviorRef.current) select(el).datum(fresh).call(dragBehaviorRef.current as any);
+      }
+    }
+    for (const slug of prevMap.keys()) {
+      if (!nextMap.has(slug)) {
+        membershipChanged = true;
+        nodeElsRef.current.delete(slug);
+        nodeRefCallbacksRef.current.delete(slug);
+      }
+    }
+    nodeObjectsRef.current = nextMap;
+    if (hovered != null && !nextMap.has(hovered)) setHovered(null);
+
+    const nodesArray = sub.nodes.map((n) => nextMap.get(n.slug)!);
+    const linksArray: SimLink[] = sub.edges.map((e) => ({ source: e.src, target: e.dst, type: e.type }));
+    sim.nodes(nodesArray);
+    sim.force<SimForceLink>('link')!.links(linksArray);
+    if (membershipChanged) sim.alpha(1).restart();
+    bump(); // repaint immediately even when nothing reheats (e.g. a color-only refresh)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sub]);
+
   const seedTitle = mode === 'contextual' && sub.seedSlug != null
     ? (meta.nodes.find((n) => n.slug === sub.seedSlug)?.title ?? sub.seedSlug) : null;
 
-  const byId = new Map(displayNodes.map((n) => [n.slug, n]));
-  const xs = displayNodes.map((n) => n.x);
-  const ys = displayNodes.map((n) => n.y);
-  const minX = (xs.length ? Math.min(...xs) : 0) - PAD;
-  const minY = (ys.length ? Math.min(...ys) : 0) - PAD;
-  const maxX = (xs.length ? Math.max(...xs) : 200) + PAD;
-  const maxY = (ys.length ? Math.max(...ys) : 200) + PAD;
-  const width = maxX - minX;
-  const height = maxY - minY;
+  const alwaysShowLabels = sub.nodes.length <= ALWAYS_LABEL_MAX;
+  const hoverNeighbors = useMemo(
+    () => (hovered != null ? neighborSlugs(hovered, sub.edges) : null),
+    [hovered, sub.edges],
+  );
+
+  const liveNodes = nodeObjectsRef.current;
 
   return (
-    <div className="graph-panel" style={{ overflow: 'auto', width: '100%', height: '100%' }}>
+    <div className="graph-panel">
       <div className="graph-controls">
         <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope">
           <button type="button" role="tab" aria-selected={mode === 'contextual'}
@@ -257,66 +460,91 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       {loading ? (
         <p className="graph-subtitle hint graph-loading">laying out the graph…</p>
       ) : (
-      <svg viewBox={`${minX} ${minY} ${width} ${height}`} width={width} height={height}>
-        {displayEdges.map((e) => {
-          const src = byId.get(e.src);
-          const dst = byId.get(e.dst);
-          if (!src || !dst) return null;
-          if (e.type === 'deepens') {
-            // Dashed S-curve (curveBumpY-style): leave/enter nodes vertically, stop at the rim.
-            const dir = dst.y > src.y ? 1 : -1;
-            const y1 = src.y + dir * (R + 2);
-            const y2 = dst.y - dir * (R + 7);
-            const my = (y1 + y2) / 2;
-            const d = `M ${src.x} ${y1} C ${src.x} ${my}, ${dst.x} ${my}, ${dst.x} ${y2}`;
-            return (
-              <path key={`deepens-${e.src}-${e.dst}`} d={d} fill="none"
-                stroke="#888" strokeWidth={1.5} strokeDasharray="4 3" opacity={0.5} />
-            );
-          }
-          // Prereq edges: perfect-arrows tapered arc, padded to stop at each node's rim.
-          const [sx, sy, cx, cy, ex, ey, ae] = getArrow(src.x, src.y, dst.x, dst.y, PREREQ_ARROW_OPTS);
-          const endAngleDeg = ae * (180 / Math.PI);
-          return (
-            <g key={`prereq-${e.src}-${e.dst}`}>
-              <path d={`M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}`} fill="none" stroke="#888" strokeWidth={1.5} />
-              <polygon points="0,-5 10,0 0,5" fill="#888"
-                transform={`translate(${ex},${ey}) rotate(${endAngleDeg})`} />
+      <div className="graph-canvas">
+        <svg ref={svgRefCallback} className="graph-svg">
+          <defs>
+            <marker id="graph-arrow" viewBox="0 0 10 10" refX="8" refY="5"
+              markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--text-muted)" />
+            </marker>
+          </defs>
+          <g ref={(el) => { zoomLayerElRef.current = el; }}>
+            <g className="graph-edges">
+              {sub.edges.map((e) => {
+                const src = liveNodes.get(e.src);
+                const dst = liveNodes.get(e.dst);
+                if (!src || !dst || src.x == null || src.y == null || dst.x == null || dst.y == null) return null;
+                const srcR = radiusForDegree(src.degree);
+                const dstR = radiusForDegree(dst.degree);
+                const isHoverEdge = hovered != null && (e.src === hovered || e.dst === hovered);
+                const dimmed = hovered != null && !isHoverEdge;
+                if (e.type === 'deepens') {
+                  const seg = shortenSegment(src.x, src.y, dst.x, dst.y, srcR + 2, dstR + 2);
+                  return (
+                    <line key={`deepens-${e.src}-${e.dst}`} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
+                      className={`graph-edge graph-edge-deepens${dimmed ? ' dim' : ''}`} />
+                  );
+                }
+                const seg = shortenSegment(src.x, src.y, dst.x, dst.y, srcR + 2, dstR + 7);
+                return (
+                  <line key={`prereq-${e.src}-${e.dst}`} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
+                    className={`graph-edge graph-edge-prereq${dimmed ? ' dim' : ''}`}
+                    markerEnd="url(#graph-arrow)" />
+                );
+              })}
             </g>
-          );
-        })}
-        {displayNodes.map((n) => (
-          <g key={n.slug} className="graph-node" transform={`translate(${n.x},${n.y})`}
-            onClick={() => { setSelected(n.slug); panelBus.openPage(n.slug); }}
-            style={{ cursor: 'pointer' }}>
-            <title>{`${n.title} — ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft}d until decay` : ''}`}</title>
-            <circle r={R} fill={n.color} />
-            {n.ringFraction != null && (
-              <circle r={R + 4} fill="none" stroke={n.color} strokeWidth={2}
-                pathLength={100} strokeDasharray={`${n.ringFraction * 100} 100`}
-                transform="rotate(-90)" />
-            )}
-            {n.misconceptions.length > 0 && (
-              <g>
-                <title>{n.misconceptions.join('; ')}</title>
-                <text x={R - 6} y={-R + 6} fontSize={12}>⚠</text>
-              </g>
-            )}
-            <text y={R + 14} textAnchor="middle" fontSize={11}>
-              {n.title}{n.daysLeft != null ? ` · ${n.daysLeft}d` : ''}
-            </text>
-            {selected === n.slug && (
-              <foreignObject x={-45} y={R + 20} width={90} height={26}>
-                <button
-                  onClick={(ev) => { ev.stopPropagation(); threadRuntime.append(`Teach me ${n.slug} now`); }}
-                >
-                  Teach me this
-                </button>
-              </foreignObject>
-            )}
+            <g className="graph-nodes">
+              {sub.nodes.map((n) => {
+                const live = liveNodes.get(n.slug);
+                const x = live?.x ?? 0;
+                const y = live?.y ?? 0;
+                const r = radiusForDegree(n.degree);
+                const isHovered = hovered === n.slug;
+                const isNeighbor = hovered != null && (hoverNeighbors?.has(n.slug) ?? false);
+                const dimmed = hovered != null && !isHovered && !isNeighbor;
+                const showLabel = alwaysShowLabels || isHovered || isNeighbor || labelZoomedIn;
+                return (
+                  <g key={n.slug} ref={getNodeRefCallback(n.slug)}
+                    className={`graph-node${dimmed ? ' dim' : ''}`}
+                    transform={`translate(${x},${y})`}
+                    onClick={() => { setSelected(n.slug); panelBus.openPage(n.slug); }}
+                    onMouseEnter={() => setHovered(n.slug)}
+                    onMouseLeave={() => setHovered((h) => (h === n.slug ? null : h))}
+                    style={{ cursor: 'pointer' }}>
+                    <title>{`${n.title} — ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft}d until decay` : ''}`}</title>
+                    <circle r={r} fill={n.color} />
+                    {n.ringFraction != null && (
+                      <circle r={r + 4} fill="none" stroke={n.color} strokeWidth={2}
+                        pathLength={100} strokeDasharray={`${n.ringFraction * 100} 100`}
+                        transform="rotate(-90)" />
+                    )}
+                    {n.misconceptions.length > 0 && (
+                      <g>
+                        <title>{n.misconceptions.join('; ')}</title>
+                        <text x={r - 6} y={-r + 6} fontSize={12}>⚠</text>
+                      </g>
+                    )}
+                    {showLabel && (
+                      <text y={r + 14} textAnchor="middle" fontSize={11}>
+                        {n.title}{n.daysLeft != null ? ` · ${n.daysLeft}d` : ''}
+                      </text>
+                    )}
+                    {selected === n.slug && (
+                      <foreignObject x={-45} y={r + 20} width={90} height={26}>
+                        <button
+                          onClick={(ev) => { ev.stopPropagation(); threadRuntime.append(`Teach me ${n.slug} now`); }}
+                        >
+                          Teach me this
+                        </button>
+                      </foreignObject>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
           </g>
-        ))}
-      </svg>
+        </svg>
+      </div>
       )}
       {!loading && (
       <div className="graph-legend">

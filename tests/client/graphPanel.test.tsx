@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
-import type { LaidOutNode, LaidOutEdge } from '../../src/client/lib/graphLayout.js';
+import type { GraphNodeMeta, LaidOutEdge } from '../../src/client/lib/graphLayout.js';
 import { panelBus } from '../../src/client/lib/panelBus.js';
 
 // GraphPanel calls useThreadRuntime() unconditionally — stub it rather than standing up a real
@@ -11,23 +11,14 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
   return { ...actual, useThreadRuntime: () => ({ append: vi.fn() }) };
 });
 
-// Wraps the real `positionNodes` (the expensive sugiyama/dagre pass) in a spy, so contextual-mode
-// perf tests below can assert what it was actually called with — real layout behavior is
-// preserved (the wrapped function still runs), only call tracking is added.
-vi.mock('../../src/client/lib/graphLayout.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/client/lib/graphLayout.js')>();
-  return { ...actual, positionNodes: vi.fn(actual.positionNodes) };
-});
+const {
+  GraphPanel, contextualSubgraph, neighborSlugs, CONTEXT_HOPS, CONTEXT_CAP, POLL_MS,
+} = await import('../../src/client/components/GraphPanel.js');
 
-const { GraphPanel, contextualSubgraph, CONTEXT_HOPS, CONTEXT_CAP, POLL_MS } =
-  await import('../../src/client/components/GraphPanel.js');
-const { positionNodes } = await import('../../src/client/lib/graphLayout.js');
-const positionNodesSpy = positionNodes as unknown as Mock;
-
-function node(slug: string, overrides: Partial<LaidOutNode> = {}): LaidOutNode {
+function node(slug: string, overrides: Partial<GraphNodeMeta> = {}): GraphNodeMeta {
   return {
-    slug, title: slug, x: 0, y: 0, color: '#000', ringFraction: null, daysLeft: null,
-    misconceptions: [], effective: 'unseen', ...overrides,
+    slug, title: slug, color: '#000', ringFraction: null, daysLeft: null,
+    misconceptions: [], effective: 'unseen', degree: 0, ...overrides,
   };
 }
 function edge(src: string, dst: string, type: LaidOutEdge['type'] = 'prereq'): LaidOutEdge {
@@ -162,6 +153,24 @@ describe('contextualSubgraph', () => {
   });
 });
 
+// The set that lights up on hover (Obsidian's signature interaction). Pure and unit-testable
+// without a DOM or a running d3-force simulation.
+describe('neighborSlugs', () => {
+  it('returns direct neighbors regardless of edge direction or type, excluding the node itself', () => {
+    const edges = [edge('a', 'b', 'prereq'), edge('c', 'a', 'deepens')];
+    expect(neighborSlugs('a', edges)).toEqual(new Set(['b', 'c']));
+  });
+
+  it('a node with no edges has an empty neighbor set', () => {
+    expect(neighborSlugs('lonely', [])).toEqual(new Set());
+  });
+
+  it('does not include nodes 2+ hops away', () => {
+    const edges = [edge('a', 'b'), edge('b', 'c')];
+    expect(neighborSlugs('a', edges)).toEqual(new Set(['b']));
+  });
+});
+
 describe('GraphPanel — contextual mode (component)', () => {
   // a - b(seed) - c - d, plus an unrelated isolated node so contextual vs whole-vault is visibly
   // distinguishable in the rendered SVG text labels.
@@ -225,6 +234,17 @@ describe('GraphPanel — contextual mode (component)', () => {
     expect(screen.getByText('Topic D')).not.toBeNull();
     expect(screen.queryByText('Topic Isolated')).toBeNull();
   });
+
+  it('clicking a node selects it and opens it via panelBus', async () => {
+    const opened: string[] = [];
+    const unsub = panelBus.subscribe((e) => { if (e.type === 'openPage') opened.push(e.slug); });
+    render(<GraphPanel visible />);
+    await screen.findByText(/open a page to focus the graph/i);
+
+    fireEvent.click(screen.getByText('Topic A'));
+    expect(opened).toEqual(['a']);
+    unsub();
+  });
 });
 
 describe('GraphPanel — loading state', () => {
@@ -270,10 +290,13 @@ describe('GraphPanel — loading state', () => {
   });
 });
 
-describe('GraphPanel — contextual-first perf (layout scoped to subgraph)', () => {
+describe('GraphPanel — contextual-first perf (rendering scoped to subgraph)', () => {
   // A seed with 50 one-hop neighbors (comfortably over CONTEXT_CAP, so hop-1 completeness alone
   // forces the subgraph past the cap) plus 100 entirely disconnected filler nodes, so the vault
-  // (151 nodes) is unambiguously larger than both the cap and the resulting subgraph.
+  // (151 nodes) is unambiguously larger than both the cap and the resulting subgraph. GraphPanel
+  // renders directly off `sub.nodes` (the already-filtered membership, fed straight into the force
+  // simulation) — so asserting the rendered node count proves the simulation itself was only ever
+  // handed the contextual subgraph, never the whole vault.
   const HOP1_COUNT = 50;
   const FILLER_COUNT = 100;
   const bigGraphNodes = [
@@ -287,7 +310,6 @@ describe('GraphPanel — contextual-first perf (layout scoped to subgraph)', () 
   ];
 
   beforeEach(() => {
-    positionNodesSpy.mockClear();
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       if (url === '/api/graph') return { ok: true, json: async () => ({ nodes: bigGraphNodes }) } as any;
       throw new Error(`unexpected fetch: ${url}`);
@@ -296,18 +318,12 @@ describe('GraphPanel — contextual-first perf (layout scoped to subgraph)', () 
   });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); location.hash = ''; });
 
-  it('lays out only the contextual subgraph, never the whole (151-node) vault', async () => {
+  it('renders only the contextual subgraph, never the whole (151-node) vault', async () => {
     const { container } = render(<GraphPanel visible />);
     await screen.findByText(/around Seed Topic/i);
 
     // Rendered scope: seed + its 50 hop-1 children, none of the 100 disconnected filler nodes.
     expect(container.querySelectorAll('.graph-node')).toHaveLength(HOP1_COUNT + 1);
     expect(screen.queryByText('Isolated 0')).toBeNull();
-
-    // `positionNodes` (the expensive sugiyama/dagre pass) must only ever have been asked to
-    // position the subgraph — never all 151 nodes of the full vault.
-    const calledSizes = positionNodesSpy.mock.calls.map((args: unknown[]) => (args[0] as unknown[]).length);
-    expect(calledSizes).toContain(HOP1_COUNT + 1);
-    expect(calledSizes).not.toContain(bigGraphNodes.length);
   });
 });
