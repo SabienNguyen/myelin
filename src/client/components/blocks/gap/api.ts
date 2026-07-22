@@ -4,11 +4,15 @@
 // ported — the harness records evidence through grading.ts + Loreweaver's record_evidence instead
 // of the gap's standalone watched/written ledger.
 
-import type { Ladder, Rung } from './types.js';
+import type { Ladder, MinedEntry, Rung } from './types.js';
 
 export interface LadderPayload {
   ladder: Ladder;
   rungs: Rung[];
+  // Final integration (docs/superpowers/plans/2026-07-21-coding-stage.md B2c): optional — a
+  // pre-B2c sidecar response (or a fixture built before this landed) simply omits it, which
+  // CodeExercise.tsx's resolution treats identically to an empty array.
+  mined?: MinedEntry[];
 }
 
 export interface RunResponse {

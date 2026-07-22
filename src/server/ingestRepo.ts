@@ -290,7 +290,11 @@ async function waitForGapUp(ping: () => Promise<boolean>, timeoutMs = GAP_RESTAR
  * page. Slug = the artifact directory's own basename, which is EXACTLY the `artifactId` the-gap's
  * minedStore.ts derives for the same directory (`path.basename(artifactDir)`) — so a mined
  * ladder entry's `rung.artifactId` and this page's slug are the same string by construction,
- * with no extra wiring needed for PracticePanel's pageSlug.
+ * with no extra wiring needed for PracticePanel's pageSlug. The body also spells that id out
+ * verbatim as a `pattern: <slug>` line (final integration, docs/superpowers/plans/
+ * 2026-07-21-coding-stage.md) — the tutor reads this page freeform when deciding to author a
+ * code_exercise block, and a hyphenated, directory-derived artifactId is exactly the kind of
+ * string a model paraphrases or mistypes if it has to reconstruct it instead of copying it.
  */
 export async function seedMinedArtifactPage(
   lw: Loreweaver, artifact: PassedArtifact, existingSlugs: Set<string>,
@@ -312,6 +316,8 @@ export async function seedMinedArtifactPage(
     `Mined automatically from \`${artifact.source.path}\` in ${artifact.source.repo} `
       + `(commit ${artifact.source.commit}) — real code from the repo, gauntlet-verified (5/5 gates), `
       + 'not a hand-authored lesson.',
+    '',
+    `pattern: ${slug}`,
     '',
     'Ask the tutor to practice this pattern with a code exercise — it can offer a `code_exercise` '
       + 'block against this artifact — rather than reading this stub as the lesson itself.',

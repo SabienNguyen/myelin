@@ -36,6 +36,23 @@ export interface Ladder {
   rungs: string[];
 }
 
+// Final integration (docs/superpowers/plans/2026-07-21-coding-stage.md B2c): repo-mined
+// artifacts served alongside the built-in ladder's `rungs` — mirrors gapProxy.ts's
+// GapMinedEntry/GapMinedArtifactMeta (duplicated rather than imported for the same
+// server/client boundary reason as the rest of this file). Each entry is exactly ONE rung
+// (whatever template packages/miner selected, typically full_body, answer-stripped the same
+// way every non-worked_example built-in rung already is) plus provenance for the brief panel.
+export interface MinedArtifactMeta {
+  title: string;
+  family: string; // e.g. "mined:<repo>"
+  source: { repo: string; commit: string; path: string };
+}
+
+export interface MinedEntry {
+  rung: Rung;
+  meta: MinedArtifactMeta;
+}
+
 export interface TestResult {
   name: string;
   pass: boolean;

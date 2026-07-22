@@ -39,11 +39,11 @@ import { PlanPanel } from './gap/PlanPanel.js';
 import { PredictRunPanel } from './gap/PredictRunPanel.js';
 import { DocsPanel } from './gap/DocsPanel.js';
 import { HelpPanel, type HelpExchange } from './gap/HelpPanel.js';
-import { FocusLayout, type BriefTab } from './gap/FocusLayout.js';
+import { FocusLayout, type BriefTab, type MinedProvenance } from './gap/FocusLayout.js';
 import { useDebouncedRun } from './gap/hooks/useDebouncedRun.js';
 import { useDetectorState } from './gap/hooks/useDetectorState.js';
 import { gapDraftKey, clearDraft } from './gap/draftStorage.js';
-import type { Rung, TemplateKind, TestResult } from './gap/types.js';
+import type { MinedEntry, Rung, TemplateKind, TestResult } from './gap/types.js';
 
 const STEP_LABELS: Record<TemplateKind, string> = {
   worked_example: 'worked example',
@@ -69,6 +69,11 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   Editor?: typeof RungEditor;
 }) {
   const [rungs, setRungs] = useState<Rung[] | null>(null);
+  // Final integration (docs/superpowers/plans/2026-07-21-coding-stage.md B2c): the ladder
+  // payload's `mined` array and the built-in ladder's own advertised pattern id — both loaded
+  // alongside `rungs` (same fetch, same effect below) and used only for rung resolution.
+  const [mined, setMined] = useState<MinedEntry[] | undefined>(undefined);
+  const [ladderPattern, setLadderPattern] = useState<string | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   const [stepIndex, setStepIndex] = useState(0);
 
@@ -109,20 +114,54 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   useEffect(() => {
     let cancelled = false;
     getLadder()
-      .then((payload) => { if (!cancelled) setRungs(payload.rungs); })
+      .then((payload) => {
+        if (cancelled) return;
+        setRungs(payload.rungs);
+        setMined(payload.mined);
+        setLadderPattern(payload.ladder?.pattern);
+      })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message); });
     return () => { cancelled = true; };
   }, []);
 
-  const sequence: TemplateKind[] = args.rung === 'ladder'
-    ? ['worked_example', 'inline_completion', 'full_body']
-    : [args.rung as TemplateKind];
+  // Final integration (docs/superpowers/plans/2026-07-21-coding-stage.md B2c, "the KNOWN GAP"):
+  // pattern resolution. The single MVP built-in ladder always advertises its own pattern id via
+  // payload.ladder.pattern — args.pattern matching THAT (not "does some rung happen to have this
+  // template", which would silently match any of the 3 valid template values against the wrong
+  // artifact) is what makes a request "built-in". Anything else is looked up by rung.artifactId
+  // in payload.mined instead: a mined pattern has exactly ONE rung (whatever template the miner
+  // selected), so it's forced single-rung here — args.rung's requested step is ignored entirely
+  // for a mined match, since there is no ladder to walk. A pattern matching neither falls through
+  // to the existing "no rung available" error below, unchanged.
+  const isBuiltInPattern = ladderPattern !== undefined && args.pattern === ladderPattern;
+  const minedEntry: MinedEntry | null = !isBuiltInPattern
+    ? (mined?.find((m) => m.rung.artifactId === args.pattern) ?? null)
+    : null;
+
+  const sequence: TemplateKind[] = minedEntry
+    ? [minedEntry.rung.template]
+    : args.rung === 'ladder'
+      ? ['worked_example', 'inline_completion', 'full_body']
+      : [args.rung as TemplateKind];
 
   const template = sequence[stepIndex];
-  const currentRung = rungs?.find((r) => r.template === template) ?? null;
+  const currentRung = minedEntry
+    ? minedEntry.rung
+    : (isBuiltInPattern ? (rungs?.find((r) => r.template === template) ?? null) : null);
   // I2's ladder response carries a sibling worked-example artifact even in single-rung full_body
   // mode (getLadder() always returns the whole rung set) — used for the Task tab's sibling link.
-  const siblingRung = rungs?.find((r) => r.template === 'worked_example') ?? null;
+  // Mined artifacts have no sibling (the miner never pairs one) — the Task tab's `siblingRung &&`
+  // guard already degrades to omitting that link, no separate branch needed.
+  const siblingRung = minedEntry ? null : (rungs?.find((r) => r.template === 'worked_example') ?? null);
+
+  const minedProvenance: MinedProvenance | undefined = minedEntry
+    ? {
+      family: minedEntry.meta.family,
+      source: `${minedEntry.meta.source.repo} — ${minedEntry.meta.source.path}`,
+      commit: minedEntry.meta.source.commit,
+    }
+    : undefined;
+  const patternTitle = minedEntry ? minedEntry.meta.title : args.pattern;
 
   const finish = useCallback((
     completed: boolean, rungReached: TemplateKind, testsPassed: number, testsTotal: number, wroteCode: boolean,
@@ -288,9 +327,10 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     <div className="block code-exercise">
       <FocusLayout
         key={currentRung.id}
-        patternTitle={args.pattern}
+        patternTitle={patternTitle}
         contextLine={currentRung.prose.context_line}
         ladder={ladder}
+        mined={minedProvenance}
         tabs={[taskTab, helpTab, ...offerTabs]}
       >
         {template === 'worked_example' && (

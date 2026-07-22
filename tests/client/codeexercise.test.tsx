@@ -33,9 +33,30 @@ const fullBodyRung = {
   prose: {},
 };
 
+// Final integration (docs/superpowers/plans/2026-07-21-coding-stage.md B2c): a mined artifact's
+// single rung — same shape as a built-in rung (answer-stripped), plus meta.
+const minedRung = {
+  id: 'packages-core-src-fetch-all-pages--full_body--0',
+  template: 'full_body',
+  artifactId: 'packages-core-src-fetch-all-pages',
+  visible_pre: 'export async function fetchAllPages(url) {\n',
+  visible_post: '\n}',
+  reference_answer: '',
+  prose: {},
+};
+const minedEntryFixture = {
+  rung: minedRung,
+  meta: {
+    title: 'Fetch All Pages',
+    family: 'mined:the-gap',
+    source: { repo: '/repo', commit: 'abc123', path: 'src/fetch.ts' },
+  },
+};
+
 function mockFetch(
   runResponse: any = { pass: true, results: [{ name: 't1', pass: true }] },
   helpResponse: any = { hint: 'name what handles a null body before touching a reader.' },
+  mined: any[] = [],
 ) {
   return vi.fn(async (url: string, init?: any) => {
     if (url === '/api/gap/ladder') {
@@ -44,6 +65,7 @@ function mockFetch(
         json: async () => ({
           ladder: { pattern: 'stream-consumer', targetArtifactId: 'stream-consumer', siblingArtifactId: 'route-handler', rungs: [] },
           rungs: [workedExampleRung, inlineCompletionRung, fullBodyRung],
+          mined,
         }),
       } as any;
     }
@@ -108,6 +130,72 @@ describe('CodeExercise — ladder sequence enforcement', () => {
     // sibling-worked-example link legitimately mentions "worked example" text elsewhere (P1), so
     // this checks the ladder progress nav specifically rather than any occurrence of the phrase.
     expect(screen.queryByRole('navigation', { name: /ladder progress/i })).toBeNull();
+  });
+});
+
+describe('CodeExercise — mined pattern resolution (final integration, docs/superpowers/plans/2026-07-21-coding-stage.md)', () => {
+  it('a mined pattern resolves via payload.mined by rung.artifactId, renders single-rung with no ladder chrome, and shows brief-panel provenance', async () => {
+    (globalThis as any).fetch = mockFetch(undefined, undefined, [minedEntryFixture]);
+    render(<CodeExerciseInner
+      args={{ pattern: 'packages-core-src-fetch-all-pages', rung: 'ladder', pageSlug: 'packages-core-src-fetch-all-pages' }}
+      addResult={vi.fn()} Editor={TextEditor}
+    />);
+
+    await screen.findByLabelText('gap-input');
+    // No ladder progression chrome for a single-rung mined exercise — even though args.rung
+    // asked for 'ladder' (the tutor has no way to know a mined pattern is single-rung ahead of
+    // time; the UI degrades gracefully regardless of what it was asked for).
+    expect(screen.queryByRole('navigation', { name: /ladder progress/i })).toBeNull();
+
+    // Brief panel: meta.title (not the raw artifactId) as the heading, family badge, source path.
+    expect(screen.getByRole('heading', { name: 'Fetch All Pages' })).toBeTruthy();
+    expect(screen.getByText('mined:the-gap')).toBeTruthy();
+    expect(screen.getByText('/repo — src/fetch.ts')).toBeTruthy();
+  });
+
+  it("single-rung mined flow completes via Submit with the pinned result contract, rungReached = the mined rung's template", async () => {
+    (globalThis as any).fetch = mockFetch(
+      { pass: true, results: [{ name: 't1', pass: true }, { name: 't2', pass: true }] },
+      undefined,
+      [minedEntryFixture],
+    );
+    const addResult = vi.fn();
+    render(<CodeExerciseInner
+      args={{ pattern: 'packages-core-src-fetch-all-pages', rung: 'ladder', pageSlug: 'packages-core-src-fetch-all-pages' }}
+      addResult={addResult} Editor={TextEditor}
+    />);
+    const input = await screen.findByLabelText('gap-input');
+    fireEvent.change(input, { target: { value: 'return fetchPage(url);' } });
+
+    await screen.findByText('2/2 passing');
+    fireEvent.click(screen.getByRole('button', { name: /^submit$/i }));
+
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({
+      completed: true, rungReached: 'full_body', testsPassed: 2, testsTotal: 2, wroteCode: true,
+    });
+  }, 10_000);
+
+  it('an unknown pattern (neither built-in nor mined) still yields the existing not-found behavior', async () => {
+    (globalThis as any).fetch = mockFetch(undefined, undefined, [minedEntryFixture]);
+    render(<CodeExerciseInner
+      args={{ pattern: 'totally-unknown-pattern', rung: 'full_body', pageSlug: 'totally-unknown-pattern' }}
+      addResult={vi.fn()}
+    />);
+
+    expect(await screen.findByText(/no full_body rung available for pattern "totally-unknown-pattern"/i)).toBeTruthy();
+  });
+
+  it('built-in patterns are unaffected by mined entries present in the same payload', async () => {
+    (globalThis as any).fetch = mockFetch(undefined, undefined, [minedEntryFixture]);
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={vi.fn()} Editor={TextEditor}
+    />);
+    await screen.findByLabelText('gap-input');
+    // The built-in's own raw pattern string still titles the brief panel — no meta.title
+    // substitution, no mined badge, even though an unrelated mined entry is present.
+    expect(screen.getByRole('heading', { name: 'stream-consumer' })).toBeTruthy();
+    expect(screen.queryByText('mined:the-gap')).toBeNull();
   });
 });
 

@@ -166,6 +166,10 @@ describe('seedMinedArtifactPage', () => {
     });
     expect(writes[0].sources).toContain('/repo@abc123:src/fetch.ts');
     expect(writes[0].body).toContain('src/fetch.ts');
+    // The tutor reads this page freeform to author a code_exercise block's `pattern` field —
+    // this line gives it the exact, un-paraphrasable slug to copy (final integration, docs/
+    // superpowers/plans/2026-07-21-coding-stage.md contract point 4).
+    expect(writes[0].body).toContain('pattern: packages-core-src-fetch-all-pages');
   });
 
   it('is idempotent — skips a slug already in existingSlugs, never calls write_page', async () => {

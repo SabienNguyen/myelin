@@ -34,15 +34,25 @@ export interface BriefTab {
   onDismiss?: () => void;
 }
 
+// Final integration (docs/superpowers/plans/2026-07-21-coding-stage.md B2c): a mined exercise's
+// provenance — CodeExercise.tsx passes this only when the resolved rung came from `payload.mined`
+// (undefined for every built-in exercise, so the brief panel's existing look is untouched there).
+export interface MinedProvenance {
+  family: string; // e.g. "mined:<repo>"
+  source: string; // "<repo> — <path>", full commit in the title attr for hover
+  commit: string;
+}
+
 export interface FocusLayoutProps {
   patternTitle: string;
   contextLine?: string;
   ladder?: { steps: string[]; stepIndex: number };
+  mined?: MinedProvenance;
   tabs: BriefTab[];
   children: ReactNode;
 }
 
-export function FocusLayout({ patternTitle, contextLine, ladder, tabs, children }: FocusLayoutProps) {
+export function FocusLayout({ patternTitle, contextLine, ladder, mined, tabs, children }: FocusLayoutProps) {
   const [activeKey, setActiveKey] = useState(tabs[0]?.key ?? 'task');
 
   // An offer tab can vanish out from under the active selection (its detector state flips back
@@ -80,6 +90,12 @@ export function FocusLayout({ patternTitle, contextLine, ladder, tabs, children 
     <div className="ide-focus">
       <div className="ide-brief">
         <h2 className="ide-brief-title">{patternTitle}</h2>
+        {mined && (
+          <p className="ide-brief-mined">
+            <span className="ide-brief-mined-badge">{mined.family}</span>
+            <span className="ide-brief-mined-source" title={`commit ${mined.commit}`}>{mined.source}</span>
+          </p>
+        )}
         {contextLine !== undefined && <p className="ide-brief-context">{contextLine}</p>}
 
         {ladder && (
