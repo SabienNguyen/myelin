@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 import { PracticePanel } from './PracticePanel.js';
 import { PathsSection } from './PathsSection.js';
@@ -156,18 +156,42 @@ function AddRepoForm({ onQueued }: { onQueued: () => void }) {
 const POLL_MS = 10_000;
 
 export function LibraryPanel({ visible = true }: { visible?: boolean }) {
-  const [queue, setQueue] = useState<Entry[]>([]);
+  // null = not loaded yet, distinct from [] = loaded and genuinely empty. Starting at [] meant the
+  // first render asserted "No books yet" before the fetch had even been issued, so every visit to
+  // the Library flashed a false statement at anyone who does have books.
+  const [queue, setQueue] = useState<Entry[] | null>(null);
+  const [queueError, setQueueError] = useState<string | null>(null);
+  // A ref, not `queue` in the effect's deps: this effect SETS queue, so depending on it would
+  // tear down and rebuild the poll interval on every single response.
+  const loadedOnceRef = useRef(false);
   const [compiling, setCompiling] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [autoCompile, setAutoCompile] = useState(false);
 
-  const converting = queue.some((e) => e.status === 'converting');
+  const converting = (queue ?? []).some((e) => e.status === 'converting');
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    const load = () => fetch('/api/ingest/queue').then((r) => r.json())
-      .then((q) => { if (!cancelled) setQueue(Array.isArray(q) ? q : []); }).catch(() => {});
+    // Swallowing the error was harmless while `queue` started at [] — the panel just showed "no
+    // books". Now that null means "not asked yet", swallowing would pin it on "Loading…" forever,
+    // which is the same defect PagePanel and GraphPanel already had to fix.
+    const load = () => fetch('/api/ingest/queue')
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
+      .then((q) => {
+        if (cancelled) return;
+        loadedOnceRef.current = true;
+        setQueue(Array.isArray(q) ? q : []);
+        setQueueError(null);
+      })
+      .catch(() => {
+        // Only replace a view that was never populated; a failed background poll must not throw
+        // away a library the learner is already looking at.
+        if (!cancelled && !loadedOnceRef.current) setQueueError('Couldn’t load your library — the harness didn’t answer.');
+      });
     load();
     // Poll fast while a conversion is running so chapters appear the moment it finishes.
     const id = setInterval(load, converting ? 3_000 : POLL_MS);
@@ -193,6 +217,16 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
     } finally {
       setCompiling(false);
     }
+  }
+
+  if (queue === null) {
+    return (
+      <div className="library-panel">
+        {queueError
+          ? <p className="panel-error" role="status">{queueError}</p>
+          : <p className="empty">Loading your library…</p>}
+      </div>
+    );
   }
 
   if (queue.length === 0) {
