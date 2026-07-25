@@ -39,8 +39,17 @@ const COLLIDE_PAD = 6;
 // simulation laid nodes out at whatever scale the forces produced — so a 5-node subgraph occupied
 // ~160px of an ~1100px canvas, dead centre, with its labels piled on top of each other. Fitting the
 // node bounding box to the viewport is the actual fix; the label spreading below is secondary.
-const FIT_PAD = 72;        // room for a node's radius, its decay ring, and its label underneath
-const FIT_MAX_SCALE = 1.5; // never magnify a two-node graph to fill the screen — it reads as broken
+// Padding is SCREEN pixels held back from the viewport, not simulation units added to the content
+// box. The old version added 72 sim units per side, which at the fitted scale meant >100 real pixels
+// of margin — the single biggest reason an 8-node graph filled 7% of its canvas.
+const FIT_PAD_PX = 28;     // breathing room at the canvas edge, in real pixels
+const FIT_LABEL_PX = 22;   // a label hangs below its node; reserve its height at the bottom edge
+// No node-size ceiling is needed, because zooming in no longer inflates nodes (see the render's
+// `/ Math.max(1, zoomScale)`). That was the whole reason the old ceiling existed and the whole
+// reason it bound so early: with everything growing together, "fill the canvas" and "don't turn a
+// two-node graph into two dinner plates" were the same knob. They are not any more — zoom now
+// spreads positions apart while circles, strokes and type keep their size, so filling is free.
+const FIT_MAX_SCALE = 6;   // matches the zoom behaviour's own scaleExtent ceiling
 const FIT_MIN_SCALE = 0.15; // matches the zoom behaviour's own scaleExtent floor
 
 // Labels are centred under their node at ~11px. Nodes collided at radius+6, so any two nodes closer
@@ -228,6 +237,9 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const [contextSeed, setContextSeed] = useState<string | null>(() => parseHash(location.hash).pageSlug);
   const [hovered, setHovered] = useState<string | null>(null);
   const [labelZoomedIn, setLabelZoomedIn] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  // Never magnify (k>1 divides back out), always let things shrink (k<1 leaves them alone).
+  const zoomClamp = Math.max(1, zoomScale);
   const threadRuntime = useThreadRuntime();
 
   // ── Simulation plumbing (all refs — see the big comment on the [sub] effect for why) ──────
@@ -250,6 +262,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       })
       .on('zoom', (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
         zoomLayerElRef.current?.setAttribute('transform', event.transform.toString());
+        // Everything inside the zoom layer scales, text included — which is why the fit had to be
+        // clamped so tightly before: filling the canvas also blew the labels up. Tracking k lets
+        // the sizes below divide it back out, so type stays the same physical size at any zoom.
+        // Rounded so a wheel gesture doesn't re-render on every sub-percent change.
+        setZoomScale((prev) => {
+          const next = Math.round(event.transform.k * 100) / 100;
+          return prev === next ? prev : next;
+        });
         const zoomedIn = event.transform.k >= LABEL_ZOOM_THRESHOLD;
         setLabelZoomedIn((prev) => (prev === zoomedIn ? prev : zoomedIn));
         // `sourceEvent` is null for a programmatic .transform call and set for a real gesture, so this
@@ -333,15 +353,29 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     const vw = rect.width || 600;
     const vh = rect.height || 400;
     let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+    let rMaxPx = 0;
     for (const n of nodes) {
       minX = Math.min(minX, n.x!); maxX = Math.max(maxX, n.x!);
       minY = Math.min(minY, n.y!); maxY = Math.max(maxY, n.y!);
+      // Painted radius is `radiusForDegree(d) / max(1, k)`, so this is its UPPER bound in screen
+      // pixels at any zoom — reserving it can over-reserve slightly but can never let the outermost
+      // circle, or its decay ring (hence the +6), clip at the canvas edge.
+      rMaxPx = Math.max(rMaxPx, radiusForDegree(n.degree) + 6);
     }
-    // A single node (or a perfectly vertical/horizontal pair) gives a zero-width or zero-height box;
-    // the padding keeps the divisions below finite either way.
-    const bw = (maxX - minX) + FIT_PAD * 2;
-    const bh = (maxY - minY) + FIT_PAD * 2;
-    const scale = Math.max(FIT_MIN_SCALE, Math.min(FIT_MAX_SCALE, Math.min(vw / bw, vh / bh)));
+    // Box of node CENTRES. A single node (or a perfectly vertical/horizontal pair) gives a
+    // zero-width or zero-height box; max(1, ...) keeps the divisions below finite either way.
+    const bw = Math.max(1, maxX - minX);
+    const bh = Math.max(1, maxY - minY);
+    // Everything reserved here is SCREEN space, taken off the viewport before dividing, so each
+    // allowance costs a fixed number of real pixels instead of one that grows with the zoom level.
+    // The old code added its padding to the content box in SIMULATION units, which is why an
+    // 8-node graph ended up with over 100px of margin per side and filled 7% of its canvas.
+    const usableW = Math.max(1, vw - FIT_PAD_PX * 2 - rMaxPx * 2);
+    const usableH = Math.max(1, vh - FIT_PAD_PX * 2 - rMaxPx * 2 - FIT_LABEL_PX);
+    const scale = Math.max(
+      FIT_MIN_SCALE,
+      Math.min(FIT_MAX_SCALE, usableW / bw, usableH / bh),
+    );
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     select<SVGSVGElement, unknown>(el).call(
@@ -350,8 +384,44 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     );
   }, []);
 
-  // Fit once the forces settle. d3 fires 'end' when alpha decays below alphaMin, which is exactly
-  // "the layout has stopped moving" — fitting earlier would frame a picture that then drifts.
+  /**
+   * Re-fit whenever the canvas CHANGES SIZE. 'end' alone is not enough: it fires once per settle,
+   * and the panel's box changes long after that — it starts at 0x0 while its tab is hidden (so a
+   * fit computed then used the 600x400 fallback), it changes when focus mode collapses the chat to
+   * a rail, and it changes on any window resize, which nothing handled at all. Every one of those
+   * left a transform fitted to a viewport that no longer exists.
+   *
+   * Still routed through fitToNodes, so it respects userAdjustedRef: resizing the window does not
+   * yank the view away from someone who has panned to a corner.
+   */
+  useEffect(() => {
+    const el = svgElRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let raf = 0;
+    let last = '';
+    const ro = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (!box || box.width === 0 || box.height === 0) return;
+      // Same-size notifications happen (a re-layout that lands on the same box); refitting on them
+      // would be pointless work every time the tab is toggled.
+      const key = `${Math.round(box.width)}x${Math.round(box.height)}`;
+      if (key === last) return;
+      last = key;
+      cancelAnimationFrame(raf);
+      // Deferred a frame so the fit measures the post-layout box, not the one being replaced.
+      raf = requestAnimationFrame(() => fitToNodes());
+    });
+    ro.observe(el);
+    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
+  }, [fitToNodes, visible]);
+
+  // The tick handler above is installed once and must not re-subscribe on every render, so it
+  // reaches the current fitToNodes through this ref rather than closing over one.
+  const fitToNodesRef = useRef(fitToNodes);
+  fitToNodesRef.current = fitToNodes;
+
+  // Final fit once the forces settle. d3 fires 'end' when alpha decays below alphaMin, which is
+  // exactly "the layout has stopped moving".
   useEffect(() => {
     const sim = simRef.current!;
     sim.on('end.fit', () => fitToNodes());
@@ -386,7 +456,23 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const [, bump] = useReducer((c: number) => c + 1, 0);
   useEffect(() => {
     const sim = simRef.current!;
-    sim.on('tick', () => bump());
+    // Fitting ONLY on 'end' meant the graph sat at scale 1 — a tiny cluster adrift in a big empty
+    // canvas — for the ~5 seconds the forces take to settle, then snapped into place. That is the
+    // exact picture this whole fix exists to remove, and it was on screen for most of the time
+    // anyone spends looking at a freshly-opened graph. Re-fitting as it settles keeps it framed the
+    // whole way instead, so the layout grows into the canvas rather than jumping.
+    //
+    // Throttled to ~10fps: the fit is an O(nodes) bounding box and a transform, cheap enough to run
+    // on every one of the ~60 ticks a second, but re-framing that often reads as jitter while the
+    // forces are still jiggling. The 'end' handler below still lands the final, exact fit.
+    let lastFit = 0;
+    sim.on('tick', () => {
+      bump();
+      const now = performance.now();
+      if (now - lastFit < 100) return;
+      lastFit = now;
+      fitToNodesRef.current();
+    });
     return () => { sim.on('tick', null); sim.stop(); };
   }, []);
 
@@ -594,18 +680,22 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                 const src = liveNodes.get(e.src);
                 const dst = liveNodes.get(e.dst);
                 if (!src || !dst || src.x == null || src.y == null || dst.x == null || dst.y == null) return null;
-                const srcR = radiusForDegree(src.degree);
-                const dstR = radiusForDegree(dst.degree);
+                // Same /zoomClamp as the node render below. An edge is trimmed back by its
+                // endpoints' radii so it meets the circle rather than the centre; trimming by the
+                // UNSCALED radius while the circles are painted smaller leaves every arrow
+                // floating in space, which is exactly what happened when nodes stopped inflating.
+                const srcR = radiusForDegree(src.degree) / zoomClamp;
+                const dstR = radiusForDegree(dst.degree) / zoomClamp;
                 const isHoverEdge = hovered != null && (e.src === hovered || e.dst === hovered);
                 const dimmed = hovered != null && !isHoverEdge;
                 if (e.type === 'deepens') {
-                  const seg = shortenSegment(src.x, src.y, dst.x, dst.y, srcR + 2, dstR + 2);
+                  const seg = shortenSegment(src.x, src.y, dst.x, dst.y, srcR + 2 / zoomClamp, dstR + 2 / zoomClamp);
                   return (
                     <line key={`deepens-${e.src}-${e.dst}`} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
                       className={`graph-edge graph-edge-deepens${dimmed ? ' dim' : ''}`} />
                   );
                 }
-                const seg = shortenSegment(src.x, src.y, dst.x, dst.y, srcR + 2, dstR + 7);
+                const seg = shortenSegment(src.x, src.y, dst.x, dst.y, srcR + 2 / zoomClamp, dstR + 7 / zoomClamp);
                 return (
                   <line key={`prereq-${e.src}-${e.dst}`} x1={seg.x1} y1={seg.y1} x2={seg.x2} y2={seg.y2}
                     className={`graph-edge graph-edge-prereq${dimmed ? ' dim' : ''}`}
@@ -618,7 +708,12 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                 const live = liveNodes.get(n.slug);
                 const x = live?.x ?? 0;
                 const y = live?.y ?? 0;
-                const r = radiusForDegree(n.degree);
+                // Painted size, not layout size. Dividing by the clamped zoom keeps a node the
+                // same physical dot as the view zooms IN (so filling the canvas spreads the graph
+                // out instead of inflating it), while still shrinking normally as it zooms OUT —
+                // where the collision force reserved only simulation units, so holding size
+                // constant would let a dense whole-vault view overlap itself.
+                const r = radiusForDegree(n.degree) / zoomClamp;
                 const isHovered = hovered === n.slug;
                 const isNeighbor = hovered != null && (hoverNeighbors?.has(n.slug) ?? false);
                 const dimmed = hovered != null && !isHovered && !isNeighbor;
@@ -634,14 +729,16 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                     <title>{`${n.title} — ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft}d until decay` : ''}`}</title>
                     <circle r={r} fill={n.color} />
                     {n.ringFraction != null && (
-                      <circle r={r + 4} fill="none" stroke={n.color} strokeWidth={2}
+                      <circle r={r + 4 / zoomClamp} fill="none" stroke={n.color} strokeWidth={2 / zoomClamp}
                         pathLength={100} strokeDasharray={`${n.ringFraction * 100} 100`}
                         transform="rotate(-90)" />
                     )}
                     {n.misconceptions.length > 0 && (
                       <g>
                         <title>{n.misconceptions.join('; ')}</title>
-                        <text x={r - 6} y={-r + 6} fontSize={12}>⚠</text>
+                        {/* Offsets divided too — a bare 6 here is 6 SIMULATION units, which at a
+                            fitted scale of 5 flung the marker 30px off its own node. */}
+                        <text x={r - 6 / zoomClamp} y={-r + 6 / zoomClamp} fontSize={12 / zoomScale}>⚠</text>
                       </g>
                     )}
                     {showLabel && (
@@ -651,19 +748,28 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                       // collisions (the hub "Derivatives · 45d" overlapped its neighbours at any
                       // spreading strength worth using). Shown on hover/selection, where it is
                       // actually being read.
-                      <text y={r + 14} textAnchor="middle" fontSize={11}>
+                      <text y={r + 14 / zoomScale} textAnchor="middle" fontSize={11 / zoomScale}>
                         {n.title}
                         {(isHovered || selected === n.slug) && n.daysLeft != null ? ` · ${n.daysLeft}d` : ''}
                       </text>
                     )}
                     {selected === n.slug && (
-                      <foreignObject x={-45} y={r + 20} width={90} height={26}>
-                        <button
-                          onClick={(ev) => { ev.stopPropagation(); threadRuntime.append(`Teach me ${n.slug} now`); }}
-                        >
-                          Teach me this
-                        </button>
-                      </foreignObject>
+                      // Shrinking the box alone was not enough: foreignObject CONTENT is HTML, so
+                      // the button's CSS pixels scale with the SVG transform too and would burst
+                      // out of a smaller box. Counter-scaling the whole group instead makes every
+                      // number inside it a real screen pixel — including the button's own type.
+                      // r * zoomClamp is r_sim, since r above is r_sim / zoomClamp.
+                      <g transform={`scale(${1 / zoomClamp})`}>
+                        {/* Real screen pixels now that the group counter-scales, so this has to
+                            actually fit the rendered label — at 90x26 it clipped to "Teach". */}
+                        <foreignObject x={-64} y={r * zoomClamp + 18} width={128} height={32}>
+                          <button
+                            onClick={(ev) => { ev.stopPropagation(); threadRuntime.append(`Teach me ${n.slug} now`); }}
+                          >
+                            Teach me this
+                          </button>
+                        </foreignObject>
+                      </g>
                     )}
                   </g>
                 );
