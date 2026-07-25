@@ -103,7 +103,8 @@ export function PagePanel({ slug }: { slug: string | null }) {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [slug]);
   if (!slug) return <p className="empty">Click a wiki-link or graph node.</p>;
-  if (error) return <p className="empty" role="status">Could not load “{slug}” — {error}</p>;
+  // getPage names the slug in the message itself, so no prefix here — see PathsSection.
+  if (error) return <p className="panel-error" role="status">{error}</p>;
   if (!page) return <p className="empty">Loading…</p>;
 
   const meta = page.page.meta ?? {};

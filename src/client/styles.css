@@ -524,6 +524,14 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .graph-subtitle { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
 .graph-subtitle.hint { font-style: italic; }
 .graph-subtitle.graph-loading { padding: 2.5rem 0; text-align: center; }
+/* Not `hint`-muted: this is a failure, and the panel it replaces is the whole tab. Same centred
+   placement as the loading line so nothing shifts when one becomes the other. */
+.graph-subtitle.graph-error {
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  font-style: normal;
+  color: var(--bad);
+}
 
 /* The pannable/zoomable canvas — fills whatever vertical room .graph-controls and .graph-legend
    (both flex: none) don't take. overflow:hidden because navigation is via d3-zoom (pan/wheel/
@@ -746,6 +754,10 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .page-sources li { font-size: 0.85rem; color: var(--text-muted); word-break: break-word; }
 
 .empty { color: var(--text-muted); font-style: italic; }
+/* A failure is not an empty state. These used to share `.empty`'s muted italic, which read as
+   "there is nothing here" rather than "something went wrong" — and the two call for different
+   reactions from the reader. */
+.panel-error { color: var(--bad); font-size: 0.9rem; line-height: 1.5; margin: 0.2rem 0; }
 
 /* ── Incremental conversion progress (T33) ───────────── */
 .q-progress-bar {

@@ -218,6 +218,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // focus" hint or a blank canvas. A plain `let firstLoad` flag inside the load effect (rather than
   // resetting this state elsewhere) means subsequent poll refreshes never flip it back to true.
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [mode, setMode] = useState<'contextual' | 'full'>('contextual');
   // The "currently open page" context signal. Seeded once from the URL (covers a deep link
@@ -394,10 +395,23 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     let cancelled = false;
     let firstLoad = true;
     const load = async () => {
-      const data = await getGraph();
-      if (cancelled) return;
-      setMeta(graphMeta(data.nodes ?? [], new Date()));
-      if (firstLoad) { firstLoad = false; setLoading(false); }
+      // Uncaught, this rejected on every poll while the backend was down — an unhandled rejection
+      // each tick, and `loading` stuck true forever, so a dead backend was indistinguishable from
+      // a slow layout. PagePanel already learned this; the graph had the same hole with a timer
+      // behind it.
+      try {
+        const data = await getGraph();
+        if (cancelled) return;
+        setMeta(graphMeta(data.nodes ?? [], new Date()));
+        setLoadError(null);
+      } catch (e) {
+        if (cancelled) return;
+        // Only surface a failure that leaves nothing on screen. Once a graph has loaded, a failed
+        // background poll is not worth replacing a working view with an error.
+        if (firstLoad) setLoadError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled && firstLoad) { firstLoad = false; setLoading(false); }
+      }
     };
     load();
     const id = setInterval(load, POLL_MS);
@@ -561,6 +575,10 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       </div>
       {loading ? (
         <p className="graph-subtitle hint graph-loading">laying out the graph…</p>
+      ) : loadError ? (
+        <p className="graph-subtitle hint graph-error" role="status">
+          {loadError} The graph will reappear on its own once it loads.
+        </p>
       ) : (
       <div className="graph-canvas">
         <svg ref={svgRefCallback} className="graph-svg">
@@ -655,7 +673,9 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         </svg>
       </div>
       )}
-      {!loading && (
+      {/* Also gated on loadError: a mastery legend under an error message is a key to a graph that
+          is not there. */}
+      {!loading && !loadError && (
       <div className="graph-legend">
         {/* var(--mastery-*), not literal hex: the tokens in styles.css are the single source these
             swatches and lib/graphLayout.ts's node fills both read, so the legend can no longer

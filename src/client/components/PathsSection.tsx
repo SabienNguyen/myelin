@@ -73,7 +73,10 @@ export function PathsSection({ visible = true }: { visible?: boolean }) {
     }
   }
 
-  if (error) return <p className="empty" role="status">Could not load paths — {error}</p>;
+  // No "Could not load paths —" prefix: lib/api.ts already names the subject, and wrapping it
+  // produced "Could not load paths — Couldn’t load your learning paths — ...". `.panel-error`
+  // rather than `.empty` because an empty state and a failure are not the same news.
+  if (error) return <p className="panel-error" role="status">{error}</p>;
   if (!data) return null;
 
   // Do NOT trust the payload's shape. A partial or unexpected response (a proxy error page, an older
