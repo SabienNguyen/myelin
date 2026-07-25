@@ -34,6 +34,28 @@ const LABEL_ZOOM_THRESHOLD = 1.6;
 const LINK_DISTANCE = 60;
 const COLLIDE_PAD = 6;
 
+// Zoom-to-fit. The view used to sit at a fixed scale 1 translated to the viewport centre, while the
+// simulation laid nodes out at whatever scale the forces produced — so a 5-node subgraph occupied
+// ~160px of an ~1100px canvas, dead centre, with its labels piled on top of each other. Fitting the
+// node bounding box to the viewport is the actual fix; the label spreading below is secondary.
+const FIT_PAD = 72;        // room for a node's radius, its decay ring, and its label underneath
+const FIT_MAX_SCALE = 1.5; // never magnify a two-node graph to fill the screen — it reads as broken
+const FIT_MIN_SCALE = 0.15; // matches the zoom behaviour's own scaleExtent floor
+
+// Labels are centred under their node at ~11px. Nodes collided at radius+6, so any two nodes closer
+// than a label-width overlapped their text. Widening the collision radius by a FRACTION of the label
+// half-width spreads them enough to read without inflating the layout so much that zoom-to-fit
+// shrinks everything back again — the two changes have to be tuned against each other.
+const LABEL_CHAR_PX = 5.6;
+const LABEL_COLLIDE_FACTOR = 0.68;
+
+/** Rendered width estimate for a node's always-on label. Must match what the <text> below actually
+ *  prints in its resting state — the decay suffix is hover-only, so including it here would size the
+ *  collision radius for a string that is not on screen. */
+function labelWidthPx(n: { title: string }): number {
+  return n.title.length * LABEL_CHAR_PX;
+}
+
 // Membership (this BFS) only ever reads `slug` (for graph structure, via `edges`) and `daysLeft`
 // (for the decay-inference fallback below) — never color/degree/etc. Keeping contextualSubgraph
 // generic over this minimal shape means it can run directly on GraphNodeMeta (the data-seam
@@ -162,7 +184,10 @@ function makeSimulation(): Simulation<SimNode, SimLink> {
       .distance(LINK_DISTANCE).strength(0.5))
     .force('charge', forceManyBody<SimNode>().strength((d) => -90 - 14 * d.degree))
     .force('center', forceCenter(0, 0))
-    .force('collide', forceCollide<SimNode>((d) => radiusForDegree(d.degree) + COLLIDE_PAD));
+    .force('collide', forceCollide<SimNode>((d) => Math.max(
+      radiusForDegree(d.degree) + COLLIDE_PAD,
+      (labelWidthPx(d) / 2) * LABEL_COLLIDE_FACTOR,
+    )));
   sim.stop(); // idle until the [sub] effect below feeds it real data
   return sim;
 }
@@ -224,6 +249,10 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         zoomLayerElRef.current?.setAttribute('transform', event.transform.toString());
         const zoomedIn = event.transform.k >= LABEL_ZOOM_THRESHOLD;
         setLabelZoomedIn((prev) => (prev === zoomedIn ? prev : zoomedIn));
+        // `sourceEvent` is null for a programmatic .transform call and set for a real gesture, so this
+        // distinguishes "the user chose this view" from "we fitted it". Once the user has panned or
+        // zoomed, auto-fit stops fighting them — see fitToNodes.
+        if (event.sourceEvent) userAdjustedRef.current = true;
       });
   }
 
@@ -275,7 +304,59 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     return fn;
   };
 
+  // Held so fitToNodes can measure the viewport and apply a transform outside the ref callback.
+  const svgElRef = useRef<SVGSVGElement | null>(null);
+  // Set by a user gesture (see the zoom handler); cleared when membership changes, because a
+  // different node set is a new picture the learner has not positioned yet.
+  const userAdjustedRef = useRef(false);
+
+  /**
+   * Fits the current node bounding box into the viewport. Skipped once the user has panned/zoomed
+   * unless forced (the "fit" button), so an auto-fit can never yank the view out from under someone
+   * mid-inspection. Applied through the zoom behaviour rather than by setting the layer transform
+   * directly, so d3's internal transform stays in sync and the next wheel gesture continues from
+   * here instead of jumping.
+   */
+  const fitToNodes = useCallback((opts: { force?: boolean } = {}) => {
+    const el = svgElRef.current;
+    const zb = zoomBehaviorRef.current;
+    if (!el || !zb) return;
+    if (userAdjustedRef.current && !opts.force) return;
+    const nodes = [...nodeObjectsRef.current.values()]
+      .filter((n) => Number.isFinite(n.x) && Number.isFinite(n.y));
+    if (nodes.length === 0) return;
+
+    const rect = el.getBoundingClientRect();
+    const vw = rect.width || 600;
+    const vh = rect.height || 400;
+    let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
+    for (const n of nodes) {
+      minX = Math.min(minX, n.x!); maxX = Math.max(maxX, n.x!);
+      minY = Math.min(minY, n.y!); maxY = Math.max(maxY, n.y!);
+    }
+    // A single node (or a perfectly vertical/horizontal pair) gives a zero-width or zero-height box;
+    // the padding keeps the divisions below finite either way.
+    const bw = (maxX - minX) + FIT_PAD * 2;
+    const bh = (maxY - minY) + FIT_PAD * 2;
+    const scale = Math.max(FIT_MIN_SCALE, Math.min(FIT_MAX_SCALE, Math.min(vw / bw, vh / bh)));
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    select<SVGSVGElement, unknown>(el).call(
+      zb.transform,
+      zoomIdentity.translate(vw / 2, vh / 2).scale(scale).translate(-cx, -cy),
+    );
+  }, []);
+
+  // Fit once the forces settle. d3 fires 'end' when alpha decays below alphaMin, which is exactly
+  // "the layout has stopped moving" — fitting earlier would frame a picture that then drifts.
+  useEffect(() => {
+    const sim = simRef.current!;
+    sim.on('end.fit', () => fitToNodes());
+    return () => { sim.on('end.fit', null); };
+  }, [fitToNodes]);
+
   const svgRefCallback = useCallback((el: SVGSVGElement | null) => {
+    svgElRef.current = el;
     if (!el || !zoomBehaviorRef.current) return;
     // d3-zoom's default extent() reads the <svg>'s viewBox/width/height SVGAnimatedLength
     // attributes — this svg has neither (it's sized via CSS 100%/100%, see .graph-svg), so that
@@ -413,7 +494,13 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     const linksArray: SimLink[] = sub.edges.map((e) => ({ source: e.src, target: e.dst, type: e.type }));
     sim.nodes(nodesArray);
     sim.force<SimForceLink>('link')!.links(linksArray);
-    if (membershipChanged) sim.alpha(1).restart();
+    if (membershipChanged) {
+      // A different node set is a picture the learner has not positioned yet, so re-enable auto-fit
+      // (a mode toggle or an opened page should reframe) — but a metadata-only refresh must NOT, or a
+      // 30s poll would silently undo their panning.
+      userAdjustedRef.current = false;
+      sim.alpha(1).restart();
+    }
     bump(); // repaint immediately even when nothing reheats (e.g. a color-only refresh)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sub]);
@@ -432,6 +519,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   return (
     <div className="graph-panel">
       <div className="graph-controls">
+        <div className="graph-row">
         <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope">
           <button type="button" role="tab" aria-selected={mode === 'contextual'}
             className={mode === 'contextual' ? 'on' : ''} onClick={() => setMode('contextual')}>
@@ -441,6 +529,16 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
             className={mode === 'full' ? 'on' : ''} onClick={() => setMode('full')}>
             Whole vault
           </button>
+        </div>
+        {/* Outside the tablist on purpose: it is an action, not a third scope, and putting a
+            non-tab button inside role="tablist" would break the tab semantics for a screen reader.
+            `force` because this is the one place an explicit re-fit should override the
+            user-adjusted guard. */}
+        <div className="graph-actions">
+          <button type="button" className="ghost-btn graph-fit" onClick={() => fitToNodes({ force: true })}>
+            fit
+          </button>
+        </div>
         </div>
         {/* Never show the "open a page" hint (nor an empty-looking canvas below) while the first
             load+layout is still in flight — both would misleadingly read as "there's nothing
@@ -525,8 +623,15 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                       </g>
                     )}
                     {showLabel && (
+                      // The decay suffix is detail-on-demand: the ring arc already encodes time-till-
+                      // decay visually and the <title> above carries the exact number, so printing
+                      // " · 45d" on every label only widened every label and drove the label
+                      // collisions (the hub "Derivatives · 45d" overlapped its neighbours at any
+                      // spreading strength worth using). Shown on hover/selection, where it is
+                      // actually being read.
                       <text y={r + 14} textAnchor="middle" fontSize={11}>
-                        {n.title}{n.daysLeft != null ? ` · ${n.daysLeft}d` : ''}
+                        {n.title}
+                        {(isHovered || selected === n.slug) && n.daysLeft != null ? ` · ${n.daysLeft}d` : ''}
                       </text>
                     )}
                     {selected === n.slug && (

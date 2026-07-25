@@ -1227,3 +1227,12 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border-color: var(--border);
 }
 .path-row-actions .ghost-btn:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* Graph controls: `fit` sits beside the scope toggle but outside its tablist. */
+.graph-actions { display: inline-flex; align-items: center; gap: 0.4rem; }
+/* The scope toggle and the actions share one row. Note .graph-controls (the parent, above) is a
+   COLUMN — naming this inner div .graph-controls too made it match the parent's own rule and stack
+   the button onto its own line. */
+.graph-controls > .graph-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.graph-fit { font-size: 0.78rem; padding: 0.15rem 0.5rem; border-color: var(--border); }
+.graph-fit:hover { border-color: var(--accent); background: var(--accent-soft); }
