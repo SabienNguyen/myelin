@@ -10,7 +10,7 @@ import { drag, type D3DragEvent } from 'd3-drag';
 import { select } from 'd3-selection';
 import { zoom, zoomIdentity, type D3ZoomEvent, type ZoomBehavior } from 'd3-zoom';
 import { getGraph } from '../lib/api.js';
-import { useTablistKeys } from '../lib/tablist.js';
+import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
 import { graphMeta, radiusForDegree, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
 import { parseHash } from '../lib/urlState.js';
@@ -218,6 +218,7 @@ function shortenSegment(x1: number, y1: number, x2: number, y2: number, padStart
 
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const onScopeKeys = useTablistKeys();
+  const onNodeKeys = useRovingKeys({ selector: '.graph-node', orientation: 'both', activateOnFocus: false });
   // Raw-ish per-node metadata (color, decay, degree) — cheap to (re)compute for the whole vault on
   // every poll; position lives in the simulation's own node objects (see simRef/nodeObjectsRef
   // below), not here.
@@ -703,8 +704,15 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                 );
               })}
             </g>
-            <g className="graph-nodes">
-              {sub.nodes.map((n) => {
+            {/* The graph was mouse-only: nodes had a click handler and nothing else, so the app's
+                most information-dense surface was unreachable by keyboard and announced nothing.
+                One tab stop for the whole group, arrows between nodes, Enter/Space to open — the
+                same roving-focus contract the tab strips use. Activation is MANUAL here (unlike the
+                tab strips): arrowing across a graph should not fire a page navigation per keypress.
+                The mastery list under the canvas remains the text equivalent of the layout itself,
+                which no amount of focus management can convey. */}
+            <g className="graph-nodes" role="group" aria-label="Concept nodes" onKeyDown={onNodeKeys}>
+              {sub.nodes.map((n, nodeIndex) => {
                 const live = liveNodes.get(n.slug);
                 const x = live?.x ?? 0;
                 const y = live?.y ?? 0;
@@ -722,12 +730,34 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                   <g key={n.slug} ref={getNodeRefCallback(n.slug)}
                     className={`graph-node${dimmed ? ' dim' : ''}`}
                     transform={`translate(${x},${y})`}
+                    role="link"
+                    // The <title> below is the tooltip; aria-label is what a screen reader reads,
+                    // and it has to carry the mastery and decay a sighted user gets from the node's
+                    // colour and ring — those are the only place that information exists.
+                    aria-label={`${n.title}, ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft} days until decay` : ''}${n.misconceptions.length > 0 ? ', has a recorded misconception' : ''}`}
+                    // Roving tabindex: the selected node if there is one, else the first, so the
+                    // group is a single Tab stop that resumes where the learner left off.
+                    tabIndex={(selected != null ? selected === n.slug : nodeIndex === 0) ? 0 : -1}
                     onClick={() => { setSelected(n.slug); panelBus.openPage(n.slug); }}
+                    onKeyDown={(ev) => {
+                      if (ev.key !== 'Enter' && ev.key !== ' ') return;
+                      ev.preventDefault();   // Space would otherwise scroll the panel.
+                      ev.stopPropagation();  // and the worked-example player binds Space globally.
+                      setSelected(n.slug);
+                      panelBus.openPage(n.slug);
+                    }}
+                    // Focus doubles as hover so the neighbour highlighting — the thing that makes
+                    // an edge readable — is not a mouse-only affordance either.
+                    onFocus={() => setHovered(n.slug)}
+                    onBlur={() => setHovered((h) => (h === n.slug ? null : h))}
                     onMouseEnter={() => setHovered(n.slug)}
                     onMouseLeave={() => setHovered((h) => (h === n.slug ? null : h))}
                     style={{ cursor: 'pointer' }}>
                     <title>{`${n.title} — ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft}d until decay` : ''}`}</title>
                     <circle r={r} fill={n.color} />
+                    {/* Focus ring. Rendered always, revealed by CSS on :focus-visible — a
+                        conditional element would rebuild the subtree on every focus move. */}
+                    <circle className="graph-focus-ring" r={r + 6 / zoomClamp} />
                     {n.ringFraction != null && (
                       <circle r={r + 4 / zoomClamp} fill="none" stroke={n.color} strokeWidth={2 / zoomClamp}
                         pathLength={100} strokeDasharray={`${n.ringFraction * 100} 100`}

@@ -14,7 +14,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { useState } from 'react';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { useTablistKeys } from '../../src/client/lib/tablist.js';
+import { useRovingKeys, useTablistKeys } from '../../src/client/lib/tablist.js';
 
 afterEach(cleanup);
 
@@ -116,5 +116,54 @@ describe('useTablistKeys', () => {
     (document.activeElement as HTMLElement | null)?.blur();
     fireEvent.keyDown(strip(), { key: 'ArrowRight' });
     expect(selected()).toBe('stage');
+  });
+});
+
+// ── useRovingKeys: the graph's variant ───────────────────────────────────────
+//
+// The graph is the same roving-focus contract with two settings flipped: vertical arrows also move
+// (a graph has no reading axis), and focus must NOT activate — arrowing across nodes would
+// otherwise fire a page navigation on every keypress.
+
+function Nodes() {
+  const onKeys = useRovingKeys({ selector: '.node', orientation: 'both', activateOnFocus: false });
+  const [opened, setOpened] = useState<string[]>([]);
+  const [current, setCurrent] = useState('a');
+  return (
+    <div>
+      <div role="group" onKeyDown={onKeys} data-testid="nodes">
+        {['a', 'b', 'c'].map((k) => (
+          <span
+            key={k}
+            role="link"
+            className="node"
+            tabIndex={current === k ? 0 : -1}
+            onClick={() => { setCurrent(k); setOpened((o) => [...o, k]); }}
+          >{k}</span>
+        ))}
+      </div>
+      <div data-testid="opened">{opened.join(',')}</div>
+    </div>
+  );
+}
+
+describe('useRovingKeys (graph nodes)', () => {
+  it('moves on vertical arrows too', () => {
+    render(<Nodes />);
+    screen.getByText('a').focus();
+    fireEvent.keyDown(screen.getByTestId('nodes'), { key: 'ArrowDown' });
+    expect(document.activeElement?.textContent).toBe('b');
+    fireEvent.keyDown(screen.getByTestId('nodes'), { key: 'ArrowUp' });
+    expect(document.activeElement?.textContent).toBe('a');
+  });
+
+  it('does not activate the item it focuses', () => {
+    render(<Nodes />);
+    screen.getByText('a').focus();
+    fireEvent.keyDown(screen.getByTestId('nodes'), { key: 'ArrowRight' });
+    fireEvent.keyDown(screen.getByTestId('nodes'), { key: 'ArrowRight' });
+    expect(document.activeElement?.textContent).toBe('c');
+    // Automatic activation here would have navigated the Page panel twice on the way past.
+    expect(screen.getByTestId('opened').textContent).toBe('');
   });
 });

@@ -554,6 +554,24 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .graph-node circle { transition: filter 0.12s; }
 .graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }
 .graph-node text { fill: var(--text); pointer-events: none; }
+/* The global focus-visible rule only names input/textarea/select/button, so a focusable <g> got
+   nothing. An SVG outline follows the element's own bounding box, which for a node group is the
+   circle plus its label — close enough to read as "this node", and it scales with the zoom for
+   free because the outline is painted in user space. */
+.graph-node:focus { outline: none; }
+/* Not `outline`: on an SVG element outline-width is measured in USER units AND rounded to whole
+   pixels, so at a fitted zoom of 3.3 the closest it can get to a 2px ring is 1 user unit — 3.3 real
+   pixels. A stroked circle with vector-effect gives exactly 2 real pixels at any zoom, the same
+   property that already keeps the edges honest. */
+.graph-node:focus-visible { outline: none; }
+.graph-focus-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  opacity: 0;
+}
+.graph-node:focus-visible .graph-focus-ring { opacity: 1; }
 
 /* non-scaling-stroke keeps edges 1.5 REAL pixels at any zoom. Without it, filling the canvas on a
    small graph also thickened every line into a slab — the same inflation the label font-size
