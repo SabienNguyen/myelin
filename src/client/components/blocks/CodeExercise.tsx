@@ -41,11 +41,13 @@ import { RungEditor } from './gap/RungEditor.js';
 import { WorkedExample } from './gap/WorkedExample.js';
 import { InlineCompletion } from './gap/InlineCompletion.js';
 import { ProximityHeader } from './gap/ProximityHeader.js';
+import { ScratchPanel } from './gap/ScratchPanel.js';
 import { TestResultsPanel } from './gap/TestResultsPanel.js';
 import { SyntaxErrorNote } from './gap/SyntaxErrorNote.js';
 import { PlanPanel } from './gap/PlanPanel.js';
 import { PredictRunPanel } from './gap/PredictRunPanel.js';
 import { DocsPanel } from './gap/DocsPanel.js';
+import { PROBLEM_SPEC_BY_ARTIFACT } from './gap/handWrittenProse.js';
 import { HelpPanel, type HelpExchange } from './gap/HelpPanel.js';
 import { FocusLayout, type BriefTab, type MinedProvenance } from './gap/FocusLayout.js';
 import { useDebouncedRun } from './gap/hooks/useDebouncedRun.js';
@@ -101,6 +103,10 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   // caller-owned lifting reasoning above) — session-local, never persisted to the lesson thread.
   const [helpExchanges, setHelpExchanges] = useState<HelpExchange[]>([]);
   const completedRef = useRef(false);
+  // Sticky for the whole ladder walk, not just the current rung: revealing an expected value on
+  // inline_completion still caps the full_body evidence, because the same understanding was
+  // shortcut. Never reset — a reveal cannot be taken back.
+  const revealedRef = useRef(false);
   // P2 (editor polish): Run and Submit are now distinct actions (see the full_body render branch
   // below) — `run()` only ever populates these two, never `finish()`.
   const [lastRunMs, setLastRunMs] = useState<number | undefined>(undefined);
@@ -174,13 +180,22 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     }
     : undefined;
   const patternTitle = minedEntry ? minedEntry.meta.title : args.pattern;
+  // Keyed by the rung's artifactId (not args.pattern) so a mined artifact without a
+  // hand-written spec simply gets none rather than borrowing the built-in ladder's.
+  const problemSpec = PROBLEM_SPEC_BY_ARTIFACT[currentRung?.artifactId ?? ''];
 
   const finish = useCallback((
     completed: boolean, rungReached: TemplateKind, testsPassed: number, testsTotal: number, wroteCode: boolean,
   ) => {
     if (completedRef.current) return; // one result per block — guards a stray double-fire (e.g. a
     completedRef.current = true;       // pass event racing a "stop here" click).
-    addResult({ completed, rungReached, testsPassed, testsTotal, wroteCode });
+    // revealedExpected rides on the result so server/grading.ts can apply the reveal ceiling. A ref,
+    // not state: it must not re-render the editor mid-run, and `finish` must read the value at call
+    // time rather than close over a stale one.
+    addResult({
+      completed, rungReached, testsPassed, testsTotal, wroteCode,
+      ...(revealedRef.current ? { revealedExpected: true } : {}),
+    });
   }, [addResult]);
 
   function advanceOrFinish(): void {
@@ -287,6 +302,32 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     content: (
       <div className="ide-task-brief">
         <p>{TASK_BRIEF[template]}</p>
+        {/* Fuller problem statement (statement + constraints + a spec example) for the rungs where
+            the learner is actually writing code. worked_example is a read-only sibling walk, so a
+            spec for the target artifact would only be noise there. Absent artifact -> renders
+            nothing, same graceful-degradation shape as the rest of the hand-written prose maps. */}
+        {template !== 'worked_example' && problemSpec && (
+          <div className="ide-problem-spec">
+            <p className="ide-spec-statement">{problemSpec.statement}</p>
+            <p className="ide-spec-heading">constraints</p>
+            <ul className="ide-spec-constraints">
+              {problemSpec.constraints.map((c) => <li key={c}>{c}</li>)}
+            </ul>
+            {problemSpec.examples.length > 0 && (
+              <>
+                <p className="ide-spec-heading">example</p>
+                {problemSpec.examples.map((ex) => (
+                  <dl className="ide-spec-example" key={ex.input}>
+                    <dt>input</dt>
+                    <dd><code>{ex.input}</code></dd>
+                    <dt>yields</dt>
+                    <dd><code>{ex.output}</code></dd>
+                  </dl>
+                ))}
+              </>
+            )}
+          </div>
+        )}
         {template === 'full_body' && siblingRung && (
           <details className="ide-sibling-link">
             <summary>see the worked example ({siblingRung.artifactId})</summary>
@@ -295,6 +336,15 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
         )}
       </div>
     ),
+  };
+
+  // Custom-input scratch run. Editable rungs only — worked_example is read-only and has no code of
+  // the learner's to run. Carries no evidence consequence (see ScratchPanel's top comment).
+  const scratchTab: BriefTab | null = template === 'worked_example' ? null : {
+    key: 'scratch',
+    label: 'Input',
+    active: false,
+    content: <ScratchPanel rungId={currentRung.id} code={code} />,
   };
 
   // Track A: always present, alongside the offer tabs (not gated by a detector) — draft/failures
@@ -354,7 +404,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
         contextLine={currentRung.prose.context_line}
         ladder={ladder}
         mined={minedProvenance}
-        tabs={[taskTab, helpTab, ...offerTabs]}
+        tabs={[taskTab, ...(scratchTab ? [scratchTab] : []), helpTab, ...offerTabs]}
       >
         {template === 'worked_example' && (
           <WorkedExample rung={currentRung} onContinue={advanceOrFinish} />
@@ -419,7 +469,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
               </div>
               {syntaxError !== undefined
                 ? <SyntaxErrorNote message={syntaxError} />
-                : <TestResultsPanel results={results} />}
+                : <TestResultsPanel results={results} onReveal={() => { revealedRef.current = true; }} />}
             </div>
           </div>
         )}

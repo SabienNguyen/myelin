@@ -64,6 +64,12 @@ const codeExercise = {
     testsPassed: z.number(),
     testsTotal: z.number(),
     wroteCode: z.boolean(),       // true only if learner-authored code passed full_body
+    // CodeSignal-style expected-vs-actual reveal (see TestResultsPanel). Optional so every existing
+    // producer and stored result stays valid. TRUE means the learner revealed at least one test's
+    // expected value before passing, which is why grading.ts caps the evidence: the same reasoning
+    // as the Anki ceiling — assistance that could substitute for understanding must not be able to
+    // mint 'applied-correctly'. Recording it is what keeps the reveal honest rather than forbidden.
+    revealedExpected: z.boolean().optional(),
   }),
 };
 

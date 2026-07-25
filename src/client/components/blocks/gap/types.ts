@@ -63,4 +63,11 @@ export interface MinedEntry {
 export interface TestResult {
   name: string;
   pass: boolean;
+  // CodeSignal-style case detail. BOTH optional and absent from the real the-gap sidecar's
+  // /api/run today — the contract there is {name, pass} only. A sidecar that omits them renders
+  // exactly as before (no reveal affordance at all), which is the same graceful-degradation shape
+  // `mined?` and `scaffold?` already use. Only ever shown behind a deliberate per-test reveal, and
+  // revealing caps the evidence — see TestResultsPanel and server/grading.ts's reveal ceiling.
+  expected?: string;
+  actual?: string;
 }

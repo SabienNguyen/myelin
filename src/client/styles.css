@@ -780,6 +780,41 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .test-result--pass .test-result-status { color: var(--good); }
 .test-result--fail .test-result-status { color: var(--bad); }
 .test-results-empty { color: var(--text-muted); font-size: 0.82rem; }
+/* Expected-vs-actual reveal. `.test-result` is a flex row, so the detail block takes a full basis to
+   drop onto its own line instead of squeezing in beside the status and name. */
+.test-result { flex-wrap: wrap; }
+.test-result-reveal {
+  font-family: system-ui, sans-serif;
+  font-size: 0.72rem;
+  padding: 0.05rem 0.4rem;
+  color: var(--text-muted);
+}
+.test-result-reveal:hover { color: var(--warn); border-color: var(--warn); }
+.test-result-detail {
+  flex-basis: 100%;
+  margin: 0.3rem 0 0.2rem;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-inset);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--radius-sm);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.15rem 0.6rem;
+}
+.test-result-detail dt {
+  font-family: system-ui, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  align-self: baseline;
+}
+.test-result-detail dd { margin: 0; min-width: 0; }
+.test-result-detail code {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
 
 .worked-example-code { background: var(--bg-inset); border-radius: var(--radius-sm); padding: 0.7rem; font-size: 0.82rem; font-family: var(--font-mono); overflow-x: auto; }
 .worked-example-code--prior { opacity: 0.55; }
@@ -983,6 +1018,62 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   font-size: 0.76rem;
 }
 .code-exercise .ide-task-brief p { margin: 0 0 0.5rem; }
+/* Problem spec (Task tab): statement + constraints + a spec example. */
+.code-exercise .ide-problem-spec { margin-top: 0.6rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.code-exercise .ide-spec-statement { margin: 0 0 0.5rem; }
+.code-exercise .ide-spec-heading {
+  margin: 0.5rem 0 0.25rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.code-exercise .ide-spec-constraints { margin: 0; padding-left: 1.1rem; font-size: 0.85rem; }
+.code-exercise .ide-spec-constraints li { margin-bottom: 0.25rem; }
+.code-exercise .ide-spec-example {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.15rem 0.5rem;
+  font-size: 0.82rem;
+}
+.code-exercise .ide-spec-example dt { color: var(--text-muted); }
+.code-exercise .ide-spec-example dd { margin: 0; min-width: 0; }
+.code-exercise .ide-spec-example code { font-family: var(--font-mono); font-size: 0.78rem; overflow-wrap: anywhere; }
+
+/* Scratch panel (Input tab): custom input, learner's own output, nothing graded. */
+.scratch-panel { font-size: 0.85rem; }
+.scratch-note { margin: 0 0 0.5rem; color: var(--text-muted); font-size: 0.8rem; }
+.scratch-label {
+  display: block;
+  font-family: system-ui, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.2rem;
+}
+.scratch-input { width: 100%; font-family: var(--font-mono); font-size: 0.8rem; resize: vertical; }
+.scratch-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; }
+.scratch-error, .scratch-unsupported { margin: 0.5rem 0 0; font-size: 0.82rem; color: var(--bad); }
+.scratch-unsupported { color: var(--warn); }
+.scratch-output {
+  margin: 0.5rem 0 0;
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+}
+.scratch-output dt {
+  font-family: system-ui, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.scratch-output dd { margin: 0.15rem 0 0; }
+.scratch-output code { font-family: var(--font-mono); font-size: 0.8rem; overflow-wrap: anywhere; }
+
 .code-exercise .ide-sibling-link { color: var(--text-muted); font-size: 0.82rem; }
 .code-exercise .ide-sibling-link summary { cursor: pointer; }
 .code-exercise .ide-sibling-link pre {
@@ -1068,3 +1159,4 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .help-composer { display: flex; flex-direction: column; gap: 0.4rem; border-top: 1px solid var(--border); padding-top: 0.6rem; }
 .help-composer-input { width: 100%; min-height: 3.6rem; resize: vertical; font: inherit; }
 .help-composer-send { align-self: flex-end; }
+.scratch-output .scratch-chunks { font-size: 0.78rem; color: var(--text-muted); }

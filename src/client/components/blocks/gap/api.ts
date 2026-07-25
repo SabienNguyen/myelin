@@ -17,9 +17,18 @@ export interface LadderPayload {
 
 export interface RunResponse {
   pass: boolean;
-  results: { name: string; pass: boolean }[];
+  // `expected`/`actual` are optional and absent from the real sidecar today — see types.ts's
+  // TestResult. TestResultsPanel only offers them behind a deliberate reveal.
+  results: { name: string; pass: boolean; expected?: string; actual?: string }[];
   syntaxError?: string;
   trace?: { fired: string[] };
+  // Scratch-run fields (request carried `input`): the suite did not run, so `results` is empty and
+  // `actual` is the learner's own output. No expected value exists for a scratch run, which is why
+  // it carries no evidence consequence — unlike the reveal above.
+  scratch?: boolean;
+  actual?: string;
+  chunks?: number;
+  runtimeError?: string;
 }
 
 export async function getLadder(): Promise<LadderPayload> {
@@ -38,6 +47,12 @@ export interface PostRunOptions {
    *  were a bare gap fragment. */
   mode?: 'file';
   trace?: boolean;
+  /** Scratch run against the learner's OWN input instead of the artifact suite. The sidecar returns
+   *  `{scratch:true, actual}` and skips grading entirely. Deliberately routed through /api/run
+   *  rather than a new endpoint so the harness's existing proxy — which forwards the request body
+   *  verbatim — needs no change. A sidecar that doesn't implement it simply grades as usual, which
+   *  the panel reports rather than pretending it ran. */
+  input?: string;
 }
 
 export async function postRun(rungId: string, code: string, options?: PostRunOptions): Promise<RunResponse> {
@@ -49,6 +64,7 @@ export async function postRun(rungId: string, code: string, options?: PostRunOpt
       code,
       ...(options?.mode ? { mode: options.mode } : {}),
       ...(options?.trace ? { trace: true } : {}),
+      ...(options?.input !== undefined ? { input: options.input } : {}),
     }),
   });
   if (!response.ok) throw new Error(`POST /api/gap/run failed: ${response.status}`);

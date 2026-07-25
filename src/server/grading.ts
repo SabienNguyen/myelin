@@ -105,10 +105,21 @@ export async function gradeBlockOutput(
     // model — completed && wroteCode -> 'applied-correctly' (passed real tests with own code);
     // completed && !wroteCode -> 'exposed' (watched/completed guided rungs only, no own code
     // graded); !completed -> 'struggled' (abandoned via the "stop here" affordance).
-    const kind: EvidenceKind = !result.completed ? 'struggled'
+    // Reveal ceiling: revealing a test's expected value can substitute for understanding the
+    // pattern, so a run where the learner did that can reach 'exposed' at best — it can never mint
+    // 'applied-correctly', however green the suite ended up. Exactly the Anki-review ceiling
+    // applied to a different shortcut: the affordance stays available, the evidence stays honest.
+    // 'struggled' is left alone; a reveal is not evidence of struggling.
+    const revealed = result.revealedExpected === true;
+    const earned: EvidenceKind = !result.completed ? 'struggled'
       : result.wroteCode ? 'applied-correctly' : 'exposed';
+    const kind: EvidenceKind = earned === 'applied-correctly' && revealed ? 'exposed' : earned;
     const note = result.completed
-      ? (result.wroteCode ? 'passed real tests with own code' : `completed ${result.rungReached} (guided)`)
+      ? (result.wroteCode
+        ? (revealed
+          ? 'passed real tests with own code, but revealed expected values — capped at exposed'
+          : 'passed real tests with own code')
+        : `completed ${result.rungReached} (guided)`)
       : `stopped at ${result.rungReached}`;
     return {
       verdict: result.completed ? 'correct' : 'incorrect',

@@ -75,6 +75,43 @@ export const DOC_CARDS_BY_ARTIFACT: Readonly<Record<string, readonly DocCard[]>>
   'stream-consumer': STREAM_CONSUMER_DOC_CARDS,
 };
 
+/**
+ * CodeSignal-style problem statement for the Task tab: statement + constraints + examples, in place
+ * of a single line of brief copy.
+ *
+ * Answer-integrity rule for the `examples` field — read before adding any: an example is part of the
+ * SPECIFICATION, not a peek at the suite. Examples here cover only the trivial well-formed case (the
+ * one a naive implementation already passes). The hazards that the suite actually discriminates on —
+ * an event split across reads, a multi-byte character split across reads, a final line with no
+ * newline — are stated in `constraints` as PROSE, never as an input/output pair. Adding an example
+ * that mirrors a discriminating test case would be equivalent to TestResultsPanel's reveal, except
+ * without the evidence ceiling that makes the reveal honest.
+ */
+export interface ProblemSpec {
+  statement: string;
+  constraints: readonly string[];
+  examples: readonly { input: string; output: string }[];
+}
+
+const STREAM_CONSUMER_SPEC: ProblemSpec = {
+  statement: 'Decode an SSE token stream into event payloads. Given an async iterable of Uint8Array '
+    + 'chunks, yield each event\'s data string in order, and stop when the [DONE] sentinel arrives.',
+  constraints: [
+    'Chunk boundaries do not align with line boundaries — one event may arrive across two reads, and one read may carry several events.',
+    'A multi-byte UTF-8 character can be split across two reads.',
+    'Lines that are blank, or that carry a field other than data:, are ignored.',
+    'The stream may end with a final data line that has no trailing newline.',
+    'Nothing after the [DONE] sentinel is emitted.',
+  ],
+  examples: [
+    { input: 'data: alpha\\ndata: beta\\ndata: [DONE]\\n', output: '"alpha", "beta"' },
+  ],
+};
+
+export const PROBLEM_SPEC_BY_ARTIFACT: Readonly<Record<string, ProblemSpec>> = {
+  'stream-consumer': STREAM_CONSUMER_SPEC,
+};
+
 const PLAN_CONCEPT_LABELS = STREAM_CONSUMER_PLAN_CONCEPTS.map((c) => c.label);
 const PREDICT_ITEM_LABELS = STREAM_CONSUMER_PREDICT_ITEMS.map((i) => i.label);
 const DOC_CARD_STRINGS = STREAM_CONSUMER_DOC_CARDS.flatMap((c) => [c.title, c.snippet]);
@@ -85,4 +122,8 @@ export const ALL_HAND_WRITTEN_PROSE: readonly string[] = [
   ...PLAN_CONCEPT_LABELS,
   ...PREDICT_ITEM_LABELS,
   ...DOC_CARD_STRINGS,
+  // Problem-spec prose is tone-checked on the same terms as everything else in this file — the
+  // statement and constraints are learner-facing copy, so they must not drift into filler or praise.
+  STREAM_CONSUMER_SPEC.statement,
+  ...STREAM_CONSUMER_SPEC.constraints,
 ];

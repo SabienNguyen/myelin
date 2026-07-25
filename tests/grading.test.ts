@@ -48,6 +48,36 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(g.detail).toBe('8/8 tests');
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'applied-correctly' });
   });
+  // Reveal ceiling: expected-vs-actual is available in TestResultsPanel, but a run that used it
+  // cannot mint 'applied-correctly' — same shape as the Anki-review ceiling.
+  it('completed + wroteCode + revealedExpected -> capped at exposed, not applied-correctly', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
+      {
+        completed: true, rungReached: 'full_body', testsPassed: 8, testsTotal: 8,
+        wroteCode: true, revealedExpected: true,
+      }, cfg);
+    expect(g.verdict).toBe('correct'); // the suite really did pass — the verdict is not a lie
+    expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'exposed' });
+    expect(g.evidence[0].note).toContain('revealed expected values');
+  });
+  it('revealedExpected does not upgrade an abandoned run away from struggled', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
+      {
+        completed: false, rungReached: 'full_body', testsPassed: 1, testsTotal: 8,
+        wroteCode: false, revealedExpected: true,
+      }, cfg);
+    expect(g.evidence[0]).toMatchObject({ kind: 'struggled' });
+  });
+  it('absent revealedExpected behaves exactly as before (optional field)', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
+      { completed: true, rungReached: 'full_body', testsPassed: 8, testsTotal: 8, wroteCode: true }, cfg);
+    expect(g.evidence[0]).toMatchObject({ kind: 'applied-correctly' });
+    expect(g.evidence[0].note).not.toContain('revealed');
+  });
+
   it('completed + !wroteCode (guided rungs only) -> exposed', async () => {
     const g = await gradeBlockOutput('code_exercise',
       { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
