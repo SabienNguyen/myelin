@@ -1236,3 +1236,21 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .graph-controls > .graph-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .graph-fit { font-size: 0.78rem; padding: 0.15rem 0.5rem; border-color: var(--border); }
 .graph-fit:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+/* code_exercise: unloadable sandbox. A real card like every other block, learner-facing first. */
+.code-exercise-unavailable { border-left: 3px solid var(--warn); }
+.cxu-headline { margin: 0 0 0.35rem; font-family: var(--font-serif); font-size: 1rem; }
+.cxu-body { margin: 0 0 0.7rem; color: var(--text-muted); font-size: 0.9rem; max-width: 60ch; }
+.cxu-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.cxu-detail { margin-top: 0.7rem; color: var(--text-muted); font-size: 0.8rem; }
+.cxu-detail summary { cursor: pointer; }
+.cxu-detail code {
+  display: block;
+  margin-top: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}

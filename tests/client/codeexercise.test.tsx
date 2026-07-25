@@ -190,14 +190,41 @@ describe('CodeExercise — mined pattern resolution (final integration, docs/sup
     });
   }, 10_000);
 
-  it('an unknown pattern (neither built-in nor mined) still yields the existing not-found behavior', async () => {
+  // An unknown pattern and a down sandbox are DIFFERENT failures and must not share copy: the ladder
+  // answered fine here, so claiming the sandbox is unresponsive would be false and would misdirect
+  // anyone debugging. Both now render a proper block card with an escape that records no evidence.
+  it('an unknown pattern reports a missing exercise — not an offline sandbox — and offers no retry', async () => {
     (globalThis as any).fetch = mockFetch(undefined, undefined, [minedEntryFixture]);
     render(<CodeExerciseInner
       args={{ pattern: 'totally-unknown-pattern', rung: 'full_body', pageSlug: 'totally-unknown-pattern' }}
       addResult={vi.fn()}
     />);
 
-    expect(await screen.findByText(/no full_body rung available for pattern "totally-unknown-pattern"/i)).toBeTruthy();
+    expect(await screen.findByText(/isn’t available yet/i)).toBeTruthy();
+    expect(screen.getByText(/no coding exercise has been written for/i)).toBeTruthy();
+    // Retrying an intact ladder would return the identical answer, so the button is not offered.
+    expect(screen.queryByRole('button', { name: /try again/i })).toBeNull();
+    // The endpoint/status stays available for debugging, folded away rather than shown first.
+    expect(screen.getByText(/technical detail/i)).toBeTruthy();
+  });
+
+  it('a failed ladder fetch reports an offline sandbox, offers a retry, and can be skipped without evidence', async () => {
+    (globalThis as any).fetch = vi.fn(async () => ({ ok: false, status: 502 })) as any;
+    const addResult = vi.fn();
+    render(<CodeExerciseInner
+      args={{ pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' }}
+      addResult={addResult}
+    />);
+
+    expect(await screen.findByText(/can’t start right now/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /try again/i })).toBeTruthy();
+    // The raw "GET /api/gap/ladder failed: 502" must not be the headline a learner reads.
+    expect(screen.queryByText(/^could not load the exercise/i)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: /skip this exercise/i }));
+    // unavailable:true is what makes grading.ts record NOTHING rather than blaming the learner with
+    // 'struggled' for a service being down.
+    expect(addResult).toHaveBeenCalledWith(expect.objectContaining({ unavailable: true, completed: false }));
   });
 
   it('built-in patterns are unaffected by mined entries present in the same payload', async () => {

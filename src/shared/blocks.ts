@@ -74,6 +74,11 @@ const codeExercise = {
     // as the Anki ceiling — assistance that could substitute for understanding must not be able to
     // mint 'applied-correctly'. Recording it is what keeps the reveal honest rather than forbidden.
     revealedExpected: z.boolean().optional(),
+    // The exercise could not be loaded at all (the coding sandbox is down). This is an
+    // INFRASTRUCTURE failure, not a learner outcome — without it the only way out of an unloadable
+    // block is `completed: false`, which grading maps to 'struggled' and blames the learner for a
+    // service being offline. grading.ts returns no evidence at all for this.
+    unavailable: z.boolean().optional(),
   }),
 };
 

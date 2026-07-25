@@ -284,6 +284,16 @@ export async function gradeBlockOutput(
   }
 
   if (tool === 'code_exercise') {
+    // Sandbox unreachable: record NOTHING. A learner who never got to attempt the exercise has
+    // demonstrated neither success nor struggle, and an empty evidence array is what stops the
+    // session guardrail nagging the tutor to record something that does not exist.
+    if (result.unavailable === true) {
+      return {
+        verdict: 'reviewed',
+        detail: 'exercise unavailable — the coding sandbox did not respond',
+        evidence: [],
+      };
+    }
     // Mechanical (docs/superpowers/plans/2026-07-20-gap-integration.md I2 contract): NEVER calls a
     // model — completed && wroteCode -> 'applied-correctly' (passed real tests with own code);
     // completed && !wroteCode -> 'exposed' (watched/completed guided rungs only, no own code

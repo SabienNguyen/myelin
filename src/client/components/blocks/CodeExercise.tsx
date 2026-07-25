@@ -89,6 +89,10 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   const [mined, setMined] = useState<MinedEntry[] | undefined>(undefined);
   const [ladderPattern, setLadderPattern] = useState<string | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
+  // Bumped by the unavailable-state's Try again, so the ladder fetch below re-runs. A down
+  // sandbox is usually transient (it is a separate service), so retrying in place beats
+  // making the learner restart the whole exercise.
+  const [reloadKey, setReloadKey] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
 
   // full_body-only run state — worked_example and inline_completion manage their own internally.
@@ -124,10 +128,14 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   // result yet — see CodeExercise() below) and clears via cleanup, which covers BOTH natural exits
   // (a result arrives -> the parent stops rendering this component -> unmount) and abnormal ones
   // (thread switch, reload).
+  // Gated on `loadError`: focus mode collapses the chat column to a rail across EVERY tab, so an
+  // exercise that can never load used to pin the whole app there indefinitely with only "back to
+  // tutor" as an exit. An unloadable exercise releases focus instead of holding the UI hostage.
   useEffect(() => {
+    if (loadError) { panelBus.setFocusMode(false); return undefined; }
     panelBus.setFocusMode(true);
     return () => panelBus.setFocusMode(false);
-  }, []);
+  }, [loadError]);
 
   useEffect(() => {
     let cancelled = false;
@@ -140,7 +148,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
       })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message); });
     return () => { cancelled = true; };
-  }, []);
+  }, [reloadKey]);
 
   // Final integration (docs/superpowers/plans/2026-07-21-coding-stage.md B2c, "the KNOWN GAP"):
   // pattern resolution. The single MVP built-in ladder always advertises its own pattern id via
@@ -186,6 +194,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
 
   const finish = useCallback((
     completed: boolean, rungReached: TemplateKind, testsPassed: number, testsTotal: number, wroteCode: boolean,
+    extra: { unavailable?: boolean } = {},
   ) => {
     if (completedRef.current) return; // one result per block — guards a stray double-fire (e.g. a
     completedRef.current = true;       // pass event racing a "stop here" click).
@@ -195,6 +204,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     addResult({
       completed, rungReached, testsPassed, testsTotal, wroteCode,
       ...(revealedRef.current ? { revealedExpected: true } : {}),
+      ...extra,
     });
   }, [addResult]);
 
@@ -281,14 +291,63 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     detector.dispatch({ type: 'gap-empty-check', at: now, gapEmpty: nextCode === initialScaffold });
   }, [detector, initialScaffold]);
 
-  if (loadError) {
-    return <p className="code-exercise-error">could not load the exercise: {loadError}</p>;
+  // Unloadable exercise. This used to render as one bare line of unstyled body text —
+  // `could not load the exercise: GET /api/gap/ladder failed: 502` — outside the block card every
+  // other block uses, leaking an HTTP method, path and status at a learner, with no way forward. A
+  // block that can never produce a result also PAUSES the whole conversation, so an escape hatch is
+  // not optional; `unavailable` makes that escape record no evidence rather than 'struggled'.
+  // TWO different failures, deliberately not merged: a fetch that failed means the sandbox is down,
+  // whereas a ladder that loaded fine but has no matching rung means this pattern simply has no
+  // exercise authored for it. Telling a learner "the sandbox isn't responding" when it answered
+  // perfectly well would be a plain lie, and sends anyone debugging in the wrong direction.
+  const failure: { detail: string; offline: boolean } | null = loadError
+    ? { detail: loadError, offline: true }
+    : (rungs && !currentRung
+      ? { detail: `ladder loaded, but it has no ${template} step for "${args.pattern}"`, offline: false }
+      : null);
+  if (failure) {
+    return (
+      <div className="block code-exercise-unavailable">
+        <p className="cxu-headline">
+          {failure.offline ? 'This exercise can’t start right now.' : 'This exercise isn’t available yet.'}
+        </p>
+        <p className="cxu-body">
+          {failure.offline
+            ? 'The coding sandbox that runs and marks your code isn’t responding, so there’s nothing '
+              + 'to practise against yet. Nothing has been recorded against you.'
+            : `No coding exercise has been written for “${args.pattern}” yet, so there is nothing to `
+              + 'practise here. Nothing has been recorded against you.'}
+        </p>
+        <div className="cxu-actions">
+          {/* Retry is offered only for an offline sandbox. Re-fetching an intact ladder that simply
+              has no exercise for this pattern would return the identical answer every time. */}
+          {failure.offline && (
+            <button type="button" onClick={() => { setLoadError(undefined); setRungs(null); setReloadKey((k) => k + 1); }}>
+              Try again
+            </button>
+          )}
+          <button
+            type="button"
+            className="ghost-btn"
+            onClick={() => finish(false, template, 0, 0, false, { unavailable: true })}
+          >
+            Skip this exercise
+          </button>
+        </div>
+        {/* Kept, but folded away: the endpoint and status are what someone debugging needs and
+            exactly what a learner should not be shown first. */}
+        <details className="cxu-detail">
+          <summary>technical detail</summary>
+          <code>{failure.detail}</code>
+        </details>
+      </div>
+    );
   }
-  if (!rungs) {
+  // Both conditions in one guard so `currentRung` narrows to non-null below. The `!currentRung` half
+  // is unreachable in practice — `failure` above already returned for a resolved-but-empty ladder —
+  // but stating it is cheaper than a non-null assertion at each of the three use sites.
+  if (!rungs || !currentRung) {
     return <p className="code-exercise-loading">loading exercise…</p>;
-  }
-  if (!currentRung) {
-    return <p className="code-exercise-error">no {template} rung available for pattern &quot;{args.pattern}&quot;.</p>;
   }
 
   const ladder = sequence.length > 1

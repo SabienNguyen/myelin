@@ -251,7 +251,10 @@ export function createTutorSession(
           return called;
         };
         const recorded = await run(model_messages);
-        if (grades.length && !recorded) {
+        // Gate on evidence, not on grade COUNT: a grade can legitimately carry none (an unavailable
+        // code_exercise — see grading.ts), and nagging the tutor to record evidence that does not
+        // exist would train it to invent some.
+        if (grades.some((g) => g.evidence.length > 0) && !recorded) {
           // Guardrail: one nudged retry
           const nudged = await run([...model_messages, {
             role: 'user',
