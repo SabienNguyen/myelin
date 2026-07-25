@@ -5,7 +5,7 @@
 // I2's "assertToneClean equivalent: no praise strings in ported failureMessages" requirement.
 import { describe, expect, it } from 'vitest';
 import { assertToneClean } from '../../../src/client/components/blocks/gap/tone.js';
-import { streamConsumerMessages, proximityMessage } from '../../../src/client/components/blocks/gap/failureMessages.js';
+import { streamConsumerMessages, proximityMessage, testPredicate } from '../../../src/client/components/blocks/gap/failureMessages.js';
 import { ALL_HAND_WRITTEN_PROSE } from '../../../src/client/components/blocks/gap/handWrittenProse.js';
 import { WRONG_PICK_NOTE } from '../../../src/client/components/blocks/gap/WorkedExample.js';
 import { OFFER_LABEL } from '../../../src/client/components/blocks/gap/OfferPanel.js';
@@ -46,9 +46,28 @@ describe('proximityMessage', () => {
     expect(proximityMessage(failing)).toBe('nothing handles a null body yet');
   });
 
-  it('falls back to the generic count message for an unrecognized failing-test combination', () => {
-    const failing = new Set(['some future test name not covered by any rule']);
-    expect(proximityMessage(failing)).toBe('1 tests still failing — read their names in the panel.');
+  // Was: a bare count ("1 tests still failing — read their names in the panel.", pluralisation bug
+  // included). Any artifact without a hand-written rule set above — i.e. every artifact but one —
+  // got no information at all, which is the bottleneck that stops the coding path scaling. The
+  // fallback now DERIVES a message from the suite's own test names.
+  it('derives a message from the failing test names when no rule matches', () => {
+    expect(proximityMessage(new Set(['some future test name not covered by any rule'])))
+      .toBe('still to handle: some future test name not covered by any rule.');
+  });
+  it('strips a camelCase subject but keeps a lowercase opening verb', () => {
+    expect(testPredicate('consumeStream reassembles a split line')).toBe('reassembles a split line');
+    expect(testPredicate('parseSSE flushes the tail')).toBe('flushes the tail');
+    expect(testPredicate('handles a null body')).toBe('handles a null body'); // verb, not a subject
+  });
+  it('summarises two and more-than-two failing tests', () => {
+    expect(proximityMessage(new Set(['aFn does x', 'bFn does y'])))
+      .toBe('still to handle: does x; and does y.');
+    const three = proximityMessage(new Set(['aFn does x', 'bFn does y', 'cFn does z']));
+    expect(three).toBe('still to handle: does x; and 2 more.');
+  });
+  it('derived messages are tone-clean like the hand-written ones', () => {
+    const msg = proximityMessage(new Set(['aFn does x', 'bFn does y']));
+    expect(() => assertToneClean(msg)).not.toThrow();
   });
 
   it('first match wins: null-body rule fires even when other tests are also failing', () => {

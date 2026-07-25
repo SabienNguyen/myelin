@@ -54,13 +54,50 @@ export const streamConsumerMessages: FailureMessageRule[] = [
   },
 ];
 
-const DEFAULT_FALLBACK = (count: number): string => `${count} tests still failing — read their names in the panel.`;
+/**
+ * Drops the leading subject from a gap test name so the predicate can be read as prose:
+ * "consumeStream reassembles a single SSE line split across chunks" -> "reassembles a single SSE
+ * line split across chunks".
+ *
+ * Only strips a token that looks like a camelCase identifier — it must carry an uppercase letter
+ * somewhere after the first character. That is what distinguishes the artifact's function name
+ * (`consumeStream`, `parseSSE`) from a test name that simply opens with a lowercase verb
+ * (`handles a null body`), whose first word must be kept.
+ */
+export function testPredicate(name: string): string {
+  return name.replace(/^[a-z][A-Za-z0-9_$]*[A-Z][A-Za-z0-9_$]*\s+/, '').trim();
+}
 
-/** Applies streamConsumerMessages to a set of currently-failing test names, first match wins, and
- *  falls back to the generic "N tests still failing" message when nothing matches. Returns '' for
- *  an empty failing set (callers decide what to show when everything is passing). */
+/**
+ * Artifact-agnostic proximity message, derived from the suite's OWN test names.
+ *
+ * The previous fallback — "N tests still failing — read their names in the panel." — carried no
+ * information, so any artifact without a hand-written rule set above gave the learner nothing. Since
+ * the per-artifact rule sets are hand-authored, that was every artifact but one, which is exactly
+ * the bottleneck that stops this scaling to arbitrary subjects.
+ *
+ * This names what is left using the suite's own words, which is the same thing the hand-written
+ * rules do ("nothing handles a null body yet") — just mechanically, and less polished. It cannot leak
+ * an answer: a test name states a requirement, not how to satisfy it. Hand-written rules still win
+ * when one matches, because a human sentence beats a derived one.
+ */
+export function derivedProximityMessage(failing: Set<string>): string {
+  const preds = [...failing].sort().map(testPredicate).filter(Boolean);
+  if (preds.length === 0) return '';
+  if (preds.length === 1) return `still to handle: ${preds[0]}.`;
+  if (preds.length === 2) return `still to handle: ${preds[0]}; and ${preds[1]}.`;
+  return `still to handle: ${preds[0]}; and ${preds.length - 1} more.`;
+}
+
+/** Applies streamConsumerMessages to a set of currently-failing test names, first match wins, then
+ *  falls back to a message DERIVED from the failing test names. Returns '' for an empty failing set
+ *  (callers decide what to show when everything is passing). */
 export function proximityMessage(failing: Set<string>): string {
   if (failing.size === 0) return '';
   const rule = streamConsumerMessages.find((r) => r.when(failing));
-  return rule ? rule.message : DEFAULT_FALLBACK(failing.size);
+  if (rule) return rule.message;
+  const derived = derivedProximityMessage(failing);
+  // Only if every name somehow reduced to nothing — keep a grammatical count rather than the old
+  // "1 tests still failing".
+  return derived || `${failing.size} test${failing.size === 1 ? '' : 's'} still failing — read their names in the panel.`;
 }
