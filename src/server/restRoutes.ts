@@ -120,7 +120,19 @@ export function buildRestRoutes(
   });
 
   app.get('/api/page/:slug', async (c) => {
-    const page = await lw.call('read_page', { slug: c.req.param('slug') });
+    const slug = c.req.param('slug');
+    let page: any;
+    try {
+      page = await lw.call('read_page', { slug });
+    } catch (e: any) {
+      // read_page answers `page not found: <slug>` for a slug with no file, and lw.call turns any
+      // tool error into a throw — so an ordinary dead wiki-link came back as a 500 and the panel
+      // told the learner "the harness hit an error". A page that was never written is not a
+      // failure of the harness; it is the most common thing a graph with dangling edges produces.
+      const message = String(e?.message ?? e);
+      if (/page not found/i.test(message)) return c.json({ error: `no page for “${slug}” yet` }, 404);
+      throw e;
+    }
     return c.json({ ...page, neighbors: await resolveNeighbors(lw, cfg, page) });
   });
   app.get('/api/student', async (c) =>

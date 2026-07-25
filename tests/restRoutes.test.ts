@@ -293,3 +293,29 @@ describe('GET /api/page/:slug neighbours', () => {
     expect((await res.json()).neighbors).toEqual({ derivatives: { title: 'Derivatives', mastery: null } });
   });
 });
+
+describe('GET /api/page/:slug for a page that does not exist', () => {
+  const missingLw = {
+    listSlugs: async () => [],
+    // Mirrors read_page's own wording, routed through lw.call's throw-on-isError.
+    call: async () => { throw new Error('loreweaver read_page: page not found: ghost'); },
+  } as any;
+
+  it('answers 404, not 500', async () => {
+    const res = await buildRestRoutes(missingLw, cfg).request('/api/page/ghost');
+    // A dangling wiki-link is the most ordinary thing a typed graph produces — Loreweaver models it
+    // (`missingTargets`) — so it must not be reported to the learner as a harness malfunction.
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toMatch(/no page for/i);
+  });
+
+  it('still propagates a genuine failure as a 500', async () => {
+    const brokenLw = {
+      listSlugs: async () => [],
+      call: async () => { throw new Error('loreweaver read_page: ENOSPC writing index'); },
+    } as any;
+    // Blanket-catching would have turned every backend fault into a soothing "not written yet".
+    const res = await buildRestRoutes(brokenLw, cfg).request('/api/page/ghost');
+    expect(res.status).toBe(500);
+  });
+});

@@ -53,6 +53,13 @@ describe('client api error handling', () => {
     await expect(getPaths()).rejects.toThrow(/wasn’t readable/i);
   });
 
+  it('reads a 404 as "not written yet" rather than as a malfunction', async () => {
+    respond({ ok: false, status: 404, body: '' });
+    const err = await getPage('ghost').catch((e) => e as ApiError);
+    expect(err.message).toBe('Nothing written for “ghost” yet.');
+    expect(err.message).not.toMatch(/error|failed/i);
+  });
+
   it('resolves normally on a good response', async () => {
     respond({ ok: true, status: 200, body: JSON.stringify({ nodes: [{ slug: 'a' }], goal: null }) });
     await expect(getGraph()).resolves.toMatchObject({ nodes: [{ slug: 'a' }] });

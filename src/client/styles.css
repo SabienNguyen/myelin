@@ -208,6 +208,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .thread {
   display: flex;
   flex-direction: column;
+  /* flex:1 so the chat fills .thread-column. Without it the thread sized to its CONTENT — 482px of
+     a 945px column — which left the composer floating in mid-air and the column's border-right
+     stopping halfway down the window, with bare page background under both. */
+  flex: 1;
   min-height: 0;
   border-right: 1px solid var(--border);
 }
@@ -526,6 +530,17 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .graph-subtitle.graph-loading { padding: 2.5rem 0; text-align: center; }
 /* Not `hint`-muted: this is a failure, and the panel it replaces is the whole tab. Same centred
    placement as the loading line so nothing shifts when one becomes the other. */
+/* Cold start. Not italic-muted like `.empty`: this one has something for the reader to DO, and a
+   directive set in the same whisper as "nothing here" reads as decoration. */
+.graph-controls.is-hidden { display: none; }
+.graph-subtitle.graph-empty {
+  padding: 3rem 2rem;
+  text-align: center;
+  max-width: 42ch;
+  margin: 0 auto;
+  line-height: 1.6;
+  font-size: 0.9rem;
+}
 .graph-subtitle.graph-error {
   padding: 2.5rem 1.5rem;
   text-align: center;
@@ -1453,3 +1468,44 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   color: var(--bad);
 }
 .code-exercise-stress-result.ok { color: var(--good); }
+
+/* ── First run ────────────────────────────────────────
+   The thread used to open as a blank half-screen with a placeholder in the composer. This is the
+   one moment where the app has to say what it is, and the examples span three unrelated subjects
+   on purpose: the most useful thing to convey in the first three seconds is that this is a tutor,
+   not a programming tutor. */
+.thread-empty {
+  max-width: 46ch;
+  margin: 12vh auto 0;
+  padding: 0 1.5rem;
+  text-align: center;
+}
+.thread-empty h2 {
+  font-family: var(--font-serif);
+  font-weight: 560;
+  font-size: 1.35rem;
+  margin: 0 0 0.7rem;
+}
+.thread-empty p {
+  font-family: var(--font-prose);
+  font-size: 0.95rem;
+  line-height: 1.65;
+  color: var(--text-muted);
+  margin: 0 0 1.2rem;
+}
+.thread-empty-examples {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.thread-empty-examples li {
+  font-family: var(--font-prose);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  padding: 0.35rem 0.7rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}

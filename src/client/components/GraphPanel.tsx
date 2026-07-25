@@ -618,10 +618,17 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   );
 
   const liveNodes = nodeObjectsRef.current;
+  // `hidden` alone does nothing here: the attribute's UA rule is `display: none`, which any explicit
+  // `display` in the stylesheet beats — and .graph-controls is `display: flex`. Keep the attribute
+  // for semantics and add the class the stylesheet actually acts on.
+  const controlsHidden = !loading && sub.nodes.length === 0;
 
   return (
     <div className="graph-panel">
-      <div className="graph-controls">
+      {/* The whole control row is hidden on an empty vault: a scope toggle with nothing to scope
+          and a "fit" button with nothing to fit are just noise in front of the one sentence that
+          tells a new learner what to do. */}
+      <div className={`graph-controls${controlsHidden ? ' is-hidden' : ''}`} hidden={controlsHidden}>
         <div className="graph-row">
         <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope" onKeyDown={onScopeKeys}>
           <button type="button" role="tab" aria-selected={mode === 'contextual'}
@@ -662,6 +669,15 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       </div>
       {loading ? (
         <p className="graph-subtitle hint graph-loading">laying out the graph…</p>
+      ) : sub.nodes.length === 0 ? (
+        // Cold start: an empty vault rendered an empty SVG under a full mastery legend — a key to
+        // nothing, and no indication that the way to fill it is to go and ask. This is the FIRST
+        // thing a new learner sees, and the north star is "help someone learn anything", which
+        // begins with nothing in the vault.
+        <p className="graph-subtitle graph-empty" role="status">
+          Nothing in the graph yet. Ask your tutor about anything you want to learn — pages and the
+          links between them are written as you go.
+        </p>
       ) : loadError ? (
         <p className="graph-subtitle hint graph-error" role="status">
           {loadError} The graph will reappear on its own once it loads.
@@ -811,7 +827,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       )}
       {/* Also gated on loadError: a mastery legend under an error message is a key to a graph that
           is not there. */}
-      {!loading && !loadError && (
+      {!loading && !loadError && sub.nodes.length > 0 && (
       <div className="graph-legend">
         {/* var(--mastery-*), not literal hex: the tokens in styles.css are the single source these
             swatches and lib/graphLayout.ts's node fills both read, so the legend can no longer

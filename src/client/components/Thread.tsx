@@ -45,6 +45,24 @@ export function Thread() {
   return (
     <ThreadPrimitive.Root className="thread">
       <ThreadPrimitive.Viewport className="thread-viewport">
+        {/* First run showed a blank half-screen and a placeholder — the single most important
+            moment in the app said nothing about what it is or what to type. The suggestions are
+            deliberately across different SUBJECTS: the thing most worth conveying in the first
+            three seconds is that this is not a programming tutor, it is a tutor. */}
+        <ThreadPrimitive.Empty>
+          <div className="thread-empty">
+            <h2>What do you want to learn?</h2>
+            <p>
+              Ask for anything — a topic, a paper, a book you are stuck in. Your tutor writes pages
+              as you go, links them into a graph, and tracks what you have actually shown you know.
+            </p>
+            <ul className="thread-empty-examples">
+              <li>“Teach me how derivatives work”</li>
+              <li>“I want to understand counterpoint”</li>
+              <li>“Walk me through consideration in contract law”</li>
+            </ul>
+          </div>
+        </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
         <ThreadPrimitive.If running>
           <div className="working" role="status">

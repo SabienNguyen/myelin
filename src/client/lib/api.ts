@@ -28,6 +28,10 @@ async function getJson<T>(path: string, subject: string): Promise<T> {
     throw new ApiError(path, 0, `Can’t reach the harness — check that the server is running.`);
   }
   if (!res.ok) {
+    // 404 is not a malfunction — for a page it means nobody has written that page yet, which is a
+    // normal state in a vault whose graph can name a prereq before it exists. Saying so beats
+    // reporting a status code the learner can do nothing with.
+    if (res.status === 404) throw new ApiError(path, 404, `Nothing written for ${subject} yet.`);
     throw new ApiError(path, res.status, res.status >= 500
       ? `Couldn’t load ${subject} — the harness hit an error (${res.status}).`
       : `Couldn’t load ${subject} — the harness returned ${res.status}.`);
