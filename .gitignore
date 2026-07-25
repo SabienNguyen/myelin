@@ -11,3 +11,4 @@ test-results/
 playwright-report/
 blob-report/
 .uitour.mjs
+.sdk-live-probe.mjs
