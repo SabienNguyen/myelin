@@ -16,7 +16,9 @@ const TTL_MS = 60_000;
 
 export interface GraphPayload {
   nodes: unknown[];
-  goal: null;
+  /** The active goal's slug, or null when none is set. Was typed as the literal `null` — a
+   *  placeholder that was never populated — until goalStore gave the field something to carry. */
+  goal: string | null;
   summary: unknown;
 }
 

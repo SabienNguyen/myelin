@@ -24,8 +24,12 @@ export function buildBootstrapContext(a: {
   lessons: { slug: string; title: string; reason: string; detail: string }[];
   reviewsDue: string[];
   ankiLapses: { slug: string; count: number }[];
+  /** Active goal plus its progress, when one is set — see goalStore.ts. */
+  goal?: { kind: 'path' | 'page'; slug: string; title?: string; known?: number; total?: number; nextSlug?: string | null } | null;
+  /** True when the vault has no pages at all. Drives the cold-start line below. */
+  emptyVault?: boolean;
 }): string {
-  return [
+  const lines = [
     'SESSION CONTEXT (auto-injected by harness — not visible to the student):',
     FRAMING[a.mode],
     `Student state: ${JSON.stringify(a.state)}`,
@@ -34,5 +38,30 @@ export function buildBootstrapContext(a: {
     a.ankiLapses.length
       ? `Anki trouble: ${a.ankiLapses.map((l) => `${l.slug} — ${l.count} lapses this week; probe for misconceptions`).join('; ')}`
       : 'Anki trouble: none',
-  ].join('\n');
+  ];
+
+  // The goal is what makes "how far through this subject am I" answerable. Without it every session
+  // starts from the whole vault and the learner has no spine to follow.
+  lines.push(a.goal
+    ? `Active goal: ${a.goal.kind} "${a.goal.title ?? a.goal.slug}" (${a.goal.slug})`
+      + (a.goal.total ? ` — ${a.goal.known ?? 0}/${a.goal.total} pages known`
+        + (a.goal.nextSlug ? `, resume at ${a.goal.nextSlug}` : ', complete') : '')
+      + '. Teach toward this unless the student asks otherwise.'
+    : 'Active goal: none. If the student names something they want to learn, offer to set it as a goal '
+      + '(a curated path via create_path in freeform mode) so progress becomes trackable.');
+
+  // Cold start. Without this the tutor is silently unable to act: `learn`/`review`/`quiz` expose no
+  // write_page, no search and no ingest (freeform only — session.ts's TEACH_TOOLS), so against an
+  // empty vault it can neither teach an existing page nor create one, and nothing tells it why.
+  if (a.emptyVault) {
+    lines.push(a.mode === 'freeform'
+      ? 'COLD START: the vault has no pages yet. Research the subject the student names, then write '
+        + 'its first pages (write_page) and a curated path (create_path) before teaching.'
+      : `COLD START: the vault has no pages yet, and ${a.mode.toUpperCase()} mode gives you no `
+        + 'page-writing, search or ingest tools — you cannot create the curriculum from here. Say so '
+        + 'plainly in one sentence and ask the student to switch to freeform mode (or to add a book), '
+        + 'rather than improvising a lesson you cannot record evidence against.');
+  }
+
+  return lines.join('\n');
 }

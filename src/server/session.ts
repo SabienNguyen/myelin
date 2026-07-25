@@ -10,6 +10,7 @@ import { gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
+import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { logGuardrail } from './sessionStore.js';
 import { buildWebTools } from './webTools.js';
@@ -120,16 +121,40 @@ export function createTutorSession(
   const model = opts.model ?? modelFor('tutor', cfg);
 
   async function bootstrap(mode: Mode, slugs: string[]): Promise<string> {
+    const activeGoal = readGoal(cfg.vault);
     const [state, lessonsRes] = await Promise.all([
       lw.call('get_student_state', { student: cfg.student }),
-      lw.call('next_lessons', { student: cfg.student }),
+      // A page-kind goal narrows next_lessons to the prerequisite walk toward it (queries.ts's
+      // unmetPrereqs) instead of the whole-vault frontier. Guarded: next_lessons errors on a goal
+      // that is not a real page, and a stale goal must not break the session — fall back to the
+      // unscoped call and let the goal line still report itself.
+      (async () => {
+        if (activeGoal?.kind === 'page') {
+          try { return await lw.call('next_lessons', { student: cfg.student, goal: activeGoal.slug }); }
+          catch (e) { console.error('[goal] next_lessons rejected goal', activeGoal.slug, e); }
+        }
+        return lw.call('next_lessons', { student: cfg.student });
+      })(),
     ]);
     const lessons = lessonsRes.lessons ?? [];
+    // Path-kind goals get their progress folded in so the tutor can resume at the right step.
+    let goalCtx = activeGoal as any;
+    if (activeGoal?.kind === 'path') {
+      try {
+        const doc = await lw.call('read_path', { slug: activeGoal.slug });
+        // pathProgress already carries the path's title, so it must not be set separately here.
+        goalCtx = { ...activeGoal, ...pathProgress(doc, state) };
+      } catch (e) {
+        console.error('[goal] read_path failed for goal', activeGoal.slug, e);
+      }
+    }
     const ctx = buildBootstrapContext({
       mode, state,
       lessons,
       reviewsDue: lessons.filter((l: any) => l.reason === 'review-due').map((l: any) => l.slug),
       ankiLapses: recentLapses(cfg.vault),
+      goal: goalCtx,
+      emptyVault: slugs.length === 0,
     });
     // Ground the model in the REAL page ids — small models otherwise invent slugs like
     // "derivatives-introduction" and every downstream slug-taking call fails.

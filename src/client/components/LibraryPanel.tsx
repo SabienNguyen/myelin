@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 import { PracticePanel } from './PracticePanel.js';
+import { PathsSection } from './PathsSection.js';
 
 type Entry = {
   book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string;
@@ -197,6 +198,10 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   if (queue.length === 0) {
     return (
       <div className="library-panel">
+        {/* Paths belong in BOTH branches. This one — an empty compile queue — is the new learner's
+            state, and it is exactly when a syllabus matters most: they may have a path and no books
+            at all. Omitting it here hid the whole feature for the default case. */}
+        <PathsSection visible={visible} />
         <AddRepoForm onQueued={() => setRefresh((r) => r + 1)} />
         <p className="empty">No books yet — use “Add book” in the top bar, or ask the tutor (freeform) to pull in a paper.</p>
         <PracticePanel visible={visible} />
@@ -209,6 +214,8 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
 
   return (
     <div className="library-panel">
+      {/* Paths first — the syllabus is the frame the books and practice rows sit inside. */}
+      <PathsSection visible={visible} />
       <AddRepoForm onQueued={() => setRefresh((r) => r + 1)} />
       <div className="library-actions">
         <button

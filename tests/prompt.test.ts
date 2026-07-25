@@ -5,6 +5,50 @@ describe('prompt assembly', () => {
   it('instructions include the evidence rule', () => {
     expect(buildInstructions()).toMatch(/record_evidence/);
   });
+
+  // Goal + cold start. Both exist because the system could previously answer "what next across the
+  // whole vault" but not "how far through THIS subject am I", and because learn/review/quiz expose no
+  // page-writing tools — so an empty vault left the tutor silently unable to act.
+  const base = { mode: 'learn' as const, state: {}, lessons: [], reviewsDue: [], ankiLapses: [] };
+
+  it('reports an active path goal with its progress and resume point', () => {
+    const ctx = buildBootstrapContext({
+      ...base,
+      goal: { kind: 'path', slug: 'music-theory', title: 'Music Theory', known: 2, total: 5, nextSlug: 'intervals' },
+    });
+    expect(ctx).toMatch(/Active goal: path "Music Theory" \(music-theory\)/);
+    expect(ctx).toMatch(/2\/5 pages known/);
+    expect(ctx).toMatch(/resume at intervals/);
+  });
+  it('says a complete goal is complete rather than printing a resume point', () => {
+    const ctx = buildBootstrapContext({
+      ...base, goal: { kind: 'path', slug: 'p', known: 3, total: 3, nextSlug: null },
+    });
+    expect(ctx).toMatch(/3\/3 pages known, complete/);
+    expect(ctx).not.toMatch(/resume at/);
+  });
+  it('invites setting a goal when none is active', () => {
+    const ctx = buildBootstrapContext({ ...base, goal: null });
+    expect(ctx).toMatch(/Active goal: none/);
+    expect(ctx).toMatch(/create_path/);
+  });
+  it('cold start in a teaching mode tells the tutor it CANNOT build the curriculum here', () => {
+    const ctx = buildBootstrapContext({ ...base, mode: 'learn', emptyVault: true });
+    expect(ctx).toMatch(/COLD START/);
+    expect(ctx).toMatch(/LEARN mode gives you no/);
+    expect(ctx).toMatch(/switch to freeform/);
+  });
+  it('cold start in freeform tells it to research and build instead', () => {
+    const ctx = buildBootstrapContext({ ...base, mode: 'freeform', emptyVault: true });
+    expect(ctx).toMatch(/COLD START/);
+    expect(ctx).toMatch(/write_page/);
+    expect(ctx).toMatch(/create_path/);
+    expect(ctx).not.toMatch(/switch to freeform/);
+  });
+  it('omits the cold-start line entirely when the vault has pages', () => {
+    expect(buildBootstrapContext({ ...base, emptyVault: false })).not.toMatch(/COLD START/);
+    expect(buildBootstrapContext({ ...base })).not.toMatch(/COLD START/);
+  });
   it('instructions forbid narrating block mechanics after a block tool call (docs/superpowers/'
     + 'plans/2026-07-21-coding-stage.md section C)', () => {
     const instructions = buildInstructions();
