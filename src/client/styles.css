@@ -645,6 +645,105 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 .page-panel p, .page-panel li { line-height: 1.7; }
 .page-panel code { font-family: var(--font-mono); font-size: 0.88em; }
+.page-panel h2 + .page-meta { margin-top: -0.2rem; }
+
+/* Metadata chips: status / difficulty / domain / tags. Small, quiet, and above the body — this is
+   orientation, not content, and it must never compete with the page title. */
+.page-meta { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0 0 0.9rem; }
+.page-chip {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+}
+.page-chip.page-tag { border-style: dashed; }
+/* `solid` earns colour because it is the one status that means "trust this page". stub/draft stay
+   in the muted default rather than getting a warning colour — an unfinished page is normal, not a
+   problem, and three coloured chips in a row would just be noise. */
+.page-status-solid { color: var(--good); border-color: var(--good); }
+
+.page-warnings {
+  margin: 0 0 1rem;
+  padding: 0.5rem 0.7rem 0.5rem 1.6rem;
+  border-left: 2px solid var(--warn);
+  background: var(--bg-inset);
+  color: var(--text-muted);
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+}
+.page-warnings li { line-height: 1.5; }
+
+/* ── Connections: the typed graph, on the page it belongs to ── */
+.page-edges { margin-top: 2rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+.page-edges h3, .page-sources h3 {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 0.8rem;
+}
+.page-edge-group { margin-bottom: 1.1rem; }
+.page-edge-group h4 {
+  font-family: var(--font-ui);
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+.page-edge-blurb { font-weight: 400; color: var(--text-muted); }
+.page-edge-group ul { list-style: none; margin: 0; padding: 0; }
+.page-edge-group li { margin-bottom: 0.5rem; }
+.page-edge-head { display: flex; align-items: baseline; gap: 0.45rem; }
+.page-mastery-dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--mastery-unseen);
+  /* Baseline-aligned with the link text rather than centred on the row, so a wrapped two-line
+     title keeps the dot beside its FIRST line where the eye expects it. */
+  transform: translateY(-0.05rem);
+}
+.page-mastery-dot.mastery-exposed { background: var(--mastery-exposed); }
+.page-mastery-dot.mastery-practicing { background: var(--mastery-practicing); }
+.page-mastery-dot.mastery-mastered { background: var(--mastery-mastered); }
+/* An unseen neighbour is hollow, not just grey: the four levels then differ by shape as well as
+   hue, which is what makes "have I started this?" readable without colour vision. */
+.page-mastery-dot.mastery-unseen { background: transparent; box-shadow: inset 0 0 0 1px var(--mastery-unseen); }
+.page-edge-link {
+  font-family: var(--font-prose);
+  font-size: 1rem;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  /* text-decoration rather than border-bottom: a button's bottom border sits under the whole box
+     including descender space, which rendered as a dashed rule visibly detached from the words.
+     An underline hugs the text and follows it across a wrap. */
+  text-decoration: underline dashed;
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+}
+.page-edge-link:hover { text-decoration-style: solid; }
+.page-edge-missing { color: var(--text-muted); }
+.page-edge-missing em { font-style: normal; font-size: 0.85em; }
+.page-edge-rationale {
+  margin: 0.1rem 0 0 0.95rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.page-sources { margin-top: 1.6rem; }
+.page-sources ul { margin: 0; padding-left: 1.1rem; }
+.page-sources li { font-size: 0.85rem; color: var(--text-muted); word-break: break-word; }
 
 .empty { color: var(--text-muted); font-style: italic; }
 

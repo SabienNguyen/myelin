@@ -26,6 +26,50 @@ async function fetchGraph(lw: Loreweaver, cfg: HarnessConfig): Promise<GraphPayl
   return { nodes, goal: readGoal(cfg.vault)?.slug ?? null, summary: student };
 }
 
+/**
+ * Resolve every slug this page points at (or is pointed at by) to a title plus the learner's own
+ * effective mastery on it.
+ *
+ * `read_page` returns edges as bare slugs, which is why the Page panel could only ever have shown
+ * `[[chain-rule]]`-style identifiers — accurate, and useless for deciding whether to click. What the
+ * learner needs on a prerequisite is "do I already know this?", and the vault knows.
+ *
+ * Deliberately NOT sourced from the graph cache: that cache is populated by fetchGraph, which reads
+ * EVERY page in the vault (~3s cold), and making the first page view pay that is a bad trade for a
+ * handful of titles. This resolves only the actual neighbours — bounded by the page's own edge
+ * count, issued in parallel, plus one bulk student-state call for all of them.
+ *
+ * A neighbour that fails to resolve gets `title: null` rather than being dropped. That case is real
+ * (Loreweaver's `missingTargets` names it: a page may declare a prereq nobody has written yet) and
+ * showing it as a dead link is more honest than silently rendering a shorter list.
+ */
+async function resolveNeighbors(lw: Loreweaver, cfg: HarnessConfig, page: any) {
+  const slugs = new Set<string>([
+    ...(page?.edges?.out ?? []).map((e: any) => e.dst),
+    ...(page?.edges?.in ?? []).map((e: any) => e.src),
+  ]);
+  slugs.delete(page?.page?.slug);
+  if (slugs.size === 0) return {};
+
+  const [state, resolved] = await Promise.all([
+    lw.call('get_student_state', { student: cfg.student }).catch(() => ({})),
+    Promise.all([...slugs].map(async (slug) => {
+      const title = await lw.call('read_page', { slug })
+        .then((p: any) => p.page.meta.title as string)
+        .catch(() => null);
+      return [slug, title] as const;
+    })),
+  ]);
+
+  const out: Record<string, { title: string | null; mastery: string | null }> = {};
+  for (const [slug, title] of resolved) {
+    // `effective` is the decay-adjusted level — the same number the graph and the tutor act on, so
+    // a prereq that has rotted back to `exposed` reads as exposed here too rather than as mastered.
+    out[slug] = { title, mastery: (state as any)?.[slug]?.effective ?? null };
+  }
+  return out;
+}
+
 export function buildRestRoutes(
   lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string | boolean> = {}, anki?: AnkiClient,
 ) {
@@ -75,8 +119,10 @@ export function buildRestRoutes(
     }
   });
 
-  app.get('/api/page/:slug', async (c) =>
-    c.json(await lw.call('read_page', { slug: c.req.param('slug') })));
+  app.get('/api/page/:slug', async (c) => {
+    const page = await lw.call('read_page', { slug: c.req.param('slug') });
+    return c.json({ ...page, neighbors: await resolveNeighbors(lw, cfg, page) });
+  });
   app.get('/api/student', async (c) =>
     c.json(await lw.call('get_student_state', { student: cfg.student })));
   app.get('/api/status', async (c) => {

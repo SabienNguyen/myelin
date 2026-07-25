@@ -150,3 +150,146 @@ describe('GET /api/graph caching', () => {
     errorSpy.mockRestore();
   });
 });
+
+// ── GET /api/page/:slug neighbour resolution ─────────────────────────────────
+//
+// The Page panel renders edges with a title and the learner's mastery on each neighbour. Those two
+// facts are resolved server-side, and every case below is one the panel would otherwise get wrong:
+// a neighbour with no page behind it, an IN edge (whose slug is `src`, not `dst`), and a neighbour
+// the student has never seen.
+
+/** Stub of a vault with `pages` present and `edges` on the page under test. */
+function pageLw(opts: {
+  slug: string;
+  edges: { in?: any[]; out?: any[] };
+  pages: Record<string, string>;
+  student?: Record<string, { effective: string }>;
+}) {
+  let readPageCalls = 0;
+  let studentCalls = 0;
+  const lw = {
+    listSlugs: async () => Object.keys(opts.pages),
+    call: async (name: string, args: any) => {
+      if (name === 'get_student_state') { studentCalls++; return opts.student ?? {}; }
+      if (name === 'read_page') {
+        readPageCalls++;
+        if (args.slug === opts.slug) {
+          return {
+            page: { slug: opts.slug, domain: 'calculus', meta: { title: opts.pages[opts.slug] }, body: 'b', warnings: [] },
+            edges: { in: opts.edges.in ?? [], out: opts.edges.out ?? [] },
+          };
+        }
+        const title = opts.pages[args.slug];
+        // Mirrors the real tool: a slug with no page is an error, not an empty page.
+        if (title === undefined) throw new Error(`loreweaver read_page: page not found: ${args.slug}`);
+        return { page: { slug: args.slug, meta: { title } }, edges: { in: [], out: [] } };
+      }
+      throw new Error(`pageLw: unexpected call ${name}`);
+    },
+  } as any;
+  return { lw, readPageCalls: () => readPageCalls, studentCalls: () => studentCalls };
+}
+
+describe('GET /api/page/:slug neighbours', () => {
+  it('resolves titles and effective mastery for out- and in-edges alike', async () => {
+    const { lw } = pageLw({
+      slug: 'chain-rule',
+      pages: { 'chain-rule': 'Chain Rule', derivatives: 'Derivatives', 'implicit-diff': 'Implicit Differentiation' },
+      edges: {
+        out: [{ dst: 'derivatives', type: 'prereq', rationale: 'you differentiate the outer fn' }],
+        in: [{ src: 'implicit-diff', type: 'prereq' }],
+      },
+      student: { derivatives: { effective: 'mastered' }, 'implicit-diff': { effective: 'exposed' } },
+    });
+    const body = await (await buildRestRoutes(lw, cfg).request('/api/page/chain-rule')).json();
+
+    expect(body.neighbors).toEqual({
+      derivatives: { title: 'Derivatives', mastery: 'mastered' },
+      // An IN edge carries its neighbour on `src`. Reading `dst` here would resolve the page's own
+      // slug and the panel would render "Chain Rule" as its own prerequisite.
+      'implicit-diff': { title: 'Implicit Differentiation', mastery: 'exposed' },
+    });
+    // The original read_page payload is passed through untouched, rationale included.
+    expect(body.edges.out[0].rationale).toBe('you differentiate the outer fn');
+    expect(body.page.meta.title).toBe('Chain Rule');
+  });
+
+  it('reports a neighbour with no page as title null instead of dropping it', async () => {
+    const { lw } = pageLw({
+      slug: 'chain-rule',
+      pages: { 'chain-rule': 'Chain Rule' },
+      edges: { out: [{ dst: 'limits', type: 'prereq' }] },
+    });
+    const body = await (await buildRestRoutes(lw, cfg).request('/api/page/chain-rule')).json();
+    // Dropping it would hide a real hole in the vault: a declared prereq nobody has written.
+    expect(body.neighbors).toEqual({ limits: { title: null, mastery: null } });
+  });
+
+  it('gives a never-seen neighbour null mastery rather than inventing a level', async () => {
+    const { lw } = pageLw({
+      slug: 'chain-rule',
+      pages: { 'chain-rule': 'Chain Rule', derivatives: 'Derivatives' },
+      edges: { out: [{ dst: 'derivatives', type: 'prereq' }] },
+      student: {},
+    });
+    const body = await (await buildRestRoutes(lw, cfg).request('/api/page/chain-rule')).json();
+    expect(body.neighbors.derivatives).toEqual({ title: 'Derivatives', mastery: null });
+  });
+
+  it('costs one read_page per DISTINCT neighbour and one student call, not one per edge', async () => {
+    const { lw, readPageCalls, studentCalls } = pageLw({
+      slug: 'chain-rule',
+      pages: { 'chain-rule': 'Chain Rule', derivatives: 'Derivatives' },
+      // Same neighbour reached by two different edge types — a real shape (a page can both require
+      // and mention another). Resolving it twice would double the cost for no new information.
+      edges: {
+        out: [{ dst: 'derivatives', type: 'prereq' }, { dst: 'derivatives', type: 'related' }],
+      },
+    });
+    await buildRestRoutes(lw, cfg).request('/api/page/chain-rule');
+    expect(readPageCalls()).toBe(2); // the page itself + one neighbour
+    expect(studentCalls()).toBe(1);
+  });
+
+  it('skips the whole resolution for a page with no edges', async () => {
+    const { lw, readPageCalls, studentCalls } = pageLw({
+      slug: 'chain-rule', pages: { 'chain-rule': 'Chain Rule' }, edges: {},
+    });
+    const body = await (await buildRestRoutes(lw, cfg).request('/api/page/chain-rule')).json();
+    expect(body.neighbors).toEqual({});
+    expect(readPageCalls()).toBe(1);
+    expect(studentCalls()).toBe(0); // no neighbours -> no reason to ask about the student at all
+  });
+
+  it('does not resolve the page as its own neighbour', async () => {
+    const { lw } = pageLw({
+      slug: 'chain-rule',
+      pages: { 'chain-rule': 'Chain Rule' },
+      // buildEdges drops self-edges, but read_page is not the only possible source of this payload
+      // and rendering a page as its own prerequisite would be an obvious lie.
+      edges: { out: [{ dst: 'chain-rule', type: 'related' }] },
+    });
+    const body = await (await buildRestRoutes(lw, cfg).request('/api/page/chain-rule')).json();
+    expect(body.neighbors).toEqual({});
+  });
+
+  it('still serves the page when the student state call fails', async () => {
+    const lw = {
+      listSlugs: async () => ['chain-rule'],
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') throw new Error('student file unreadable');
+        if (args.slug === 'chain-rule') {
+          return {
+            page: { slug: 'chain-rule', meta: { title: 'Chain Rule' }, body: 'b', warnings: [] },
+            edges: { in: [], out: [{ dst: 'derivatives', type: 'prereq' }] },
+          };
+        }
+        return { page: { slug: args.slug, meta: { title: 'Derivatives' } } };
+      },
+    } as any;
+    const res = await buildRestRoutes(lw, cfg).request('/api/page/chain-rule');
+    expect(res.status).toBe(200);
+    // Losing mastery is a degraded panel; losing the page is a broken one. Titles still resolve.
+    expect((await res.json()).neighbors).toEqual({ derivatives: { title: 'Derivatives', mastery: null } });
+  });
+});

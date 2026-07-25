@@ -3,7 +3,90 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getPage } from '../lib/api.js';
 import { WikiLink } from './MarkdownText.js';
-import { wikiPreprocess } from '../lib/panelBus.js';
+import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
+
+// The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
+// system whose whole thesis is a JUSTIFIED TYPED GRAPH — every edge carries a rationale someone had
+// to write — the page view showed none of the graph, so the one place a learner naturally lands
+// after clicking a wiki-link was the one place the structure was invisible. Everything below comes
+// out of the payload `/api/page/:slug` already returned, plus neighbour titles and mastery that
+// restRoutes.ts now resolves; no new concepts, no new authoring burden, and it works identically for
+// chemistry or music theory because none of it knows what the subject is.
+
+type Dir = 'out' | 'in';
+type LinkType = 'prereq' | 'deepens' | 'related';
+
+// Direction matters and is easy to get backwards: buildEdges (loreweaver src/graph/graph.ts) writes
+// `prereqs: [x]` on page A as A -prereq-> x, i.e. an OUT prereq edge means "A requires x". Labelling
+// both directions the same way would invert the teaching order for half the list.
+const GROUPS: { dir: Dir; type: LinkType; heading: string; blurb: string }[] = [
+  { dir: 'out', type: 'prereq', heading: 'Learn these first', blurb: 'this page assumes them' },
+  { dir: 'in', type: 'prereq', heading: 'This unlocks', blurb: 'they assume this page' },
+  { dir: 'out', type: 'deepens', heading: 'Goes deeper into', blurb: 'the broader idea underneath' },
+  { dir: 'in', type: 'deepens', heading: 'Deeper treatments', blurb: 'pages that refine this one' },
+  { dir: 'out', type: 'related', heading: 'Mentions', blurb: '' },
+  { dir: 'in', type: 'related', heading: 'Mentioned by', blurb: '' },
+];
+
+const MASTERY_LABEL: Record<string, string> = {
+  unseen: 'not started',
+  exposed: 'seen once',
+  practicing: 'practising',
+  mastered: 'mastered',
+};
+
+function MasteryDot({ level }: { level: string | null }) {
+  const key = level ?? 'unseen';
+  const label = MASTERY_LABEL[key] ?? key;
+  // The dot is a colour, and colour is never the only channel — the label carries the same fact to a
+  // screen reader and to anyone who cannot separate the four hues.
+  return <span className={`page-mastery-dot mastery-${key}`} role="img" aria-label={label} title={label} />;
+}
+
+function EdgeList({
+  edges, neighbors, group,
+}: {
+  edges: any[];
+  neighbors: Record<string, { title: string | null; mastery: string | null }>;
+  group: { dir: Dir; heading: string; blurb: string };
+}) {
+  return (
+    <section className="page-edge-group">
+      <h4>
+        {group.heading}
+        {group.blurb && <span className="page-edge-blurb"> — {group.blurb}</span>}
+      </h4>
+      <ul>
+        {edges.map((e, i) => {
+          const slug = group.dir === 'out' ? e.dst : e.src;
+          const info = neighbors[slug];
+          const missing = info !== undefined && info.title === null;
+          return (
+            <li key={`${slug}-${i}`}>
+              <span className="page-edge-head">
+                <MasteryDot level={info?.mastery ?? null} />
+                {missing
+                  // A declared prereq with no page behind it. Loreweaver models this case
+                  // (`missingTargets`), and naming it beats a link that silently lands on
+                  // "Could not load" — the vault genuinely has a hole here.
+                  ? <span className="page-edge-missing">{slug} <em>— no page yet</em></span>
+                  : (
+                    <button type="button" className="page-edge-link" onClick={() => panelBus.openPage(slug)}>
+                      {info?.title ?? slug}
+                    </button>
+                  )}
+              </span>
+              {/* The rationale is why this edge exists — the thing that makes the graph a taught
+                  structure rather than a pile of associations. It is the point of showing edges at
+                  all, so it is shown, not folded behind a disclosure. */}
+              {e.rationale && <p className="page-edge-rationale">{e.rationale}</p>}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
 
 export function PagePanel({ slug }: { slug: string | null }) {
   const [page, setPage] = useState<any>(null);
@@ -22,12 +105,55 @@ export function PagePanel({ slug }: { slug: string | null }) {
   if (!slug) return <p className="empty">Click a wiki-link or graph node.</p>;
   if (error) return <p className="empty" role="status">Could not load “{slug}” — {error}</p>;
   if (!page) return <p className="empty">Loading…</p>;
+
+  const meta = page.page.meta ?? {};
+  const edges = page.edges ?? {};
+  const neighbors = page.neighbors ?? {};
+  const warnings: string[] = page.page.warnings ?? [];
+  const groups = GROUPS
+    .map((g) => ({ g, edges: (edges[g.dir] ?? []).filter((e: any) => e.type === g.type) }))
+    .filter(({ edges: es }) => es.length > 0);
+
   return (
     <article className="page-panel">
-      <h2>{page.page.meta.title}</h2>
+      <h2>{meta.title ?? page.page.slug}</h2>
+
+      <div className="page-meta">
+        {meta.status && <span className={`page-chip page-status-${meta.status}`}>{meta.status}</span>}
+        {typeof meta.difficulty === 'number' && (
+          <span className="page-chip">difficulty {meta.difficulty}/5</span>
+        )}
+        {page.page.domain && <span className="page-chip">{page.page.domain}</span>}
+        {(meta.tags ?? []).map((t: string) => <span key={t} className="page-chip page-tag">#{t}</span>)}
+      </div>
+
+      {/* Vault-authored warnings (e.g. a body that outgrew its `stub` status). Previously visible
+          only to someone reading the markdown by hand. */}
+      {warnings.length > 0 && (
+        <ul className="page-warnings" role="status">
+          {warnings.map((w, i) => <li key={i}>{w}</li>)}
+        </ul>
+      )}
+
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: WikiLink }}>
         {wikiPreprocess(page.page.body)}
       </ReactMarkdown>
+
+      {groups.length > 0 && (
+        <div className="page-edges">
+          <h3>Connections</h3>
+          {groups.map(({ g, edges: es }) => (
+            <EdgeList key={`${g.dir}-${g.type}`} edges={es} neighbors={neighbors} group={g} />
+          ))}
+        </div>
+      )}
+
+      {(meta.sources ?? []).length > 0 && (
+        <div className="page-sources">
+          <h3>Sources</h3>
+          <ul>{meta.sources.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
+        </div>
+      )}
     </article>
   );
 }
