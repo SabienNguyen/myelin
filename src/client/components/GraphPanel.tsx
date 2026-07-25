@@ -548,10 +548,13 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       )}
       {!loading && (
       <div className="graph-legend">
-        <span><i className="dot" style={{ background: '#9e9e9e' }} /> unseen</span>
-        <span><i className="dot" style={{ background: '#e0b040' }} /> exposed</span>
-        <span><i className="dot" style={{ background: '#5b8def' }} /> practicing</span>
-        <span><i className="dot" style={{ background: '#4caf7d' }} /> mastered</span>
+        {/* var(--mastery-*), not literal hex: the tokens in styles.css are the single source these
+            swatches and lib/graphLayout.ts's node fills both read, so the legend can no longer
+            disagree with the graph it describes, and both follow the colour scheme. */}
+        <span><i className="dot" style={{ background: 'var(--mastery-unseen)' }} /> unseen</span>
+        <span><i className="dot" style={{ background: 'var(--mastery-exposed)' }} /> exposed</span>
+        <span><i className="dot" style={{ background: 'var(--mastery-practicing)' }} /> practicing</span>
+        <span><i className="dot" style={{ background: 'var(--mastery-mastered)' }} /> mastered</span>
         <span><i className="ring" /> time till decay</span>
         <span>⚠ misconception</span>
       </div>

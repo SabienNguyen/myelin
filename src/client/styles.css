@@ -26,6 +26,16 @@
   --good: #356e4a;
   --bad: #a2493b;
   --warn: #845f1e;
+  /* Graph mastery scale. Previously four raw hexes literal in lib/graphLayout.ts AND duplicated
+     inline in GraphPanel's legend swatches — two copies, free to drift, and no dark counterpart.
+     Tokenised here as the single source: graphLayout resolves them via getComputedStyle (it draws
+     to SVG and needs strings), the legend uses var(). Deliberately NOT --good/--warn/--accent:
+     these encode a four-step ordinal scale, not pass/fail, and reusing the verdict tokens would
+     conflate "mastered" with "correct". */
+  --mastery-unseen: #8a8578;
+  --mastery-exposed: #9a7420;
+  --mastery-practicing: #3f6ea8;
+  --mastery-mastered: #2f7a55;
   --radius: 10px;
   --radius-sm: 6px;
   --shadow: 0 1px 2px rgba(38, 30, 15, 0.05);
@@ -59,6 +69,12 @@
     --good: #6fae86;
     --bad: #d4867a;
     --warn: #c99a4a;
+    /* Lifted for the dark canvas — the light values are mid-tone and survived here, but they were
+       never *chosen* for dark, they simply leaked. These are tuned against --bg-inset. */
+    --mastery-unseen: #9e9787;
+    --mastery-exposed: #d9ad57;
+    --mastery-practicing: #7ba5db;
+    --mastery-mastered: #6cba8d;
   }
 }
 
@@ -615,6 +631,20 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   cursor: pointer;
 }
 .wiki-link:hover { border-bottom-style: solid; }
+
+/* .page-panel previously had NO rules at all, so a concept page — the longest-form reading surface
+   in the app — inherited system-ui at full panel width. design.md assigns --font-prose to page
+   bodies; 68ch is a reading measure rather than a decorative cap (unbounded line length is the
+   actual legibility problem on a wide panel). */
+.page-panel { font-family: var(--font-prose); max-width: 68ch; }
+.page-panel h2 {
+  font-family: var(--font-serif);
+  font-weight: 560;
+  font-size: 1.5rem;
+  margin: 0 0 0.6rem;
+}
+.page-panel p, .page-panel li { line-height: 1.7; }
+.page-panel code { font-family: var(--font-mono); font-size: 0.88em; }
 
 .empty { color: var(--text-muted); font-style: italic; }
 

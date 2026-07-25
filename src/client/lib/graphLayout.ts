@@ -1,8 +1,22 @@
 import { DECAY, type MasteryLevel } from '../../shared/loreweaver.js';
 
-const COLORS: Record<MasteryLevel, string> = {
+// Mastery colours live in styles.css :root as --mastery-* so they have dark-scheme counterparts and
+// so GraphPanel's legend can render swatches with var() instead of re-literalling these values (it
+// used to duplicate all four, free to drift). The graph itself draws into SVG/canvas from JS and
+// needs resolved strings, so read the tokens once per layout rather than hardcoding them here.
+// FALLBACKS matter: jsdom unit tests mount the component without styles.css, where
+// getPropertyValue() returns '' — the literals below keep those tests meaningful.
+const FALLBACK_COLORS: Record<MasteryLevel, string> = {
   unseen: '#9e9e9e', exposed: '#e0b040', practicing: '#5b8def', mastered: '#4caf7d',
 };
+
+function masteryColors(): Record<MasteryLevel, string> {
+  if (typeof document === 'undefined') return FALLBACK_COLORS;
+  const cs = getComputedStyle(document.documentElement);
+  const pick = (level: MasteryLevel) =>
+    cs.getPropertyValue(`--mastery-${level}`).trim() || FALLBACK_COLORS[level];
+  return { unseen: pick('unseen'), exposed: pick('exposed'), practicing: pick('practicing'), mastered: pick('mastered') };
+}
 const WINDOW: Partial<Record<MasteryLevel, number>> = {
   mastered: DECAY.masteredDays, practicing: DECAY.practicingDays,
 };
@@ -73,6 +87,7 @@ export function graphMeta(nodes: any[], now: Date): { nodes: GraphNodeMeta[]; ed
     degree.set(e.dst, (degree.get(e.dst) ?? 0) + 1);
   }
 
+  const colors = masteryColors(); // resolved once per call, not per node
   const metaNodes: GraphNodeMeta[] = nodes.map((n) => {
     const effective: MasteryLevel = n.mastery?.effective ?? 'unseen';
     const window = WINDOW[effective];
@@ -84,7 +99,7 @@ export function graphMeta(nodes: any[], now: Date): { nodes: GraphNodeMeta[]; ed
     }
     return {
       slug: n.slug, title: n.title,
-      color: COLORS[effective], effective, daysLeft, ringFraction,
+      color: colors[effective], effective, daysLeft, ringFraction,
       misconceptions: n.mastery?.misconceptions ?? [],
       degree: degree.get(n.slug) ?? 0,
     };
