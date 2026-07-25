@@ -5,7 +5,13 @@ export function QuickCheck({ args, result, addResult }: {
     return (
       <div className="block quick-check done">
         <p>{args.question}</p>
-        <p>You: {result.answer}{result.grading && <em className={`verdict ${result.grading.verdict}`}> — {result.grading.verdict}</em>}</p>
+        {/* QuickText submits whatever is in the field, empty string included, so a learner who
+            presses Enter on a blank input got a graded card reading "You:" and nothing else. That
+            is reachable in real use, not a scripted-model artifact. Blank is left submittable on
+            purpose — it is honest evidence of not knowing, and blocking it would strand the learner
+            on a block they cannot clear — so the card just says so, using StructuredCheck's
+            existing wording rather than inventing a second one. */}
+        <p>You: {result.answer?.trim() ? result.answer : '(blank)'}{result.grading && <em className={`verdict ${result.grading.verdict}`}> — {result.grading.verdict}</em>}</p>
       </div>
     );
   }
