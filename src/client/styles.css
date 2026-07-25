@@ -1160,3 +1160,24 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .help-composer-input { width: 100%; min-height: 3.6rem; resize: vertical; font: inherit; }
 .help-composer-send { align-self: flex-end; }
 .scratch-output .scratch-chunks { font-size: 0.78rem; color: var(--text-muted); }
+
+/* structured_check — the generic applied block. */
+.structured-check .structured-prompt { margin: 0 0 0.5rem; }
+.structured-check .structured-hint { margin: 0 0 0.5rem; color: var(--text-muted); font-size: 0.85rem; }
+.structured-check .structured-list-label {
+  margin: 0 0 0.2rem;
+  font-family: system-ui, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.structured-check textarea { width: 100%; resize: vertical; }
+.structured-single { display: flex; align-items: center; gap: 0.5rem; }
+.structured-single input { flex: 1; min-width: 0; }
+.structured-unit { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.85rem; }
+.structured-matching { list-style: none; margin: 0 0 0.6rem; padding: 0; display: grid; gap: 0.4rem; }
+.structured-matching li { display: flex; align-items: center; gap: 0.6rem; }
+.structured-left { flex: 1; min-width: 0; }
+.structured-check button { margin-top: 0.6rem; }
+.structured-answer { margin: 0.3rem 0 0; }

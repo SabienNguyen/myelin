@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mathEquivalent, gradeBlockOutput } from '../src/server/grading.js';
+import { mathEquivalent, freeVariables, gradeBlockOutput } from '../src/server/grading.js';
 import type { ClaudeSdkGenerateOpts, ClaudeSdkResult } from '../src/server/claudeSdk.js';
 
 describe('mathEquivalent (numeric sampling)', () => {
@@ -11,8 +11,124 @@ describe('mathEquivalent (numeric sampling)', () => {
   it('rejects different functions', () => {
     expect(mathEquivalent('x^2', 'x^3', 'x')).toBe(false);
   });
+
+  // Multivariate (learn-anything pass): single-variable-only capped applied maths evidence at
+  // one-unknown algebra, excluding physics/stats/engineering.
+  describe('multivariate', () => {
+    // THE correctness question in >1 dimension. If every variable were assigned the same value per
+    // sample point, x+y and 2x would agree everywhere and a wrong answer would grade correct.
+    it('does not confuse x+y with 2x (decorrelated sampling)', () => {
+      expect(mathEquivalent('x+y', '2x')).toBe(false);
+      expect(mathEquivalent('x\\cdot y', 'x+y')).toBe(false);
+      expect(mathEquivalent('a-b', 'b-a')).toBe(false);
+      expect(mathEquivalent('\\frac{a}{b}', '\\frac{b}{a}')).toBe(false);
+    });
+    it('accepts genuinely equal multivariate forms', () => {
+      expect(mathEquivalent('x+y', 'y+x')).toBe(true);
+      expect(mathEquivalent('x\\cdot y', 'y\\cdot x')).toBe(true);
+      expect(mathEquivalent('a\\cdot b\\cdot c', 'c\\cdot b\\cdot a')).toBe(true);
+      expect(mathEquivalent('\\left(x+y\\right)^{2}', 'x^{2}+2\\cdot x\\cdot y+y^{2}')).toBe(true);
+      expect(mathEquivalent('\\sqrt{x^{2}+y^{2}}', '\\sqrt{y^{2}+x^{2}}')).toBe(true);
+    });
+    it('grades real formulas without the caller naming the variables', () => {
+      expect(mathEquivalent('\\frac{nRT}{P}', '\\frac{nRT}{P}')).toBe(true);   // ideal gas, 4 vars
+      expect(mathEquivalent('\\frac{nRT}{P}', 'nRTP')).toBe(false);            // P on the wrong side
+      expect(mathEquivalent('\\frac{1}{2}m v^{2}', '0.5m v^{2}')).toBe(true);  // kinetic energy
+    });
+    it('detects free variables, excluding function names and constants', () => {
+      expect(freeVariables('\\frac{nRT}{P}')).toEqual(['P', 'R', 'T', 'n']);
+      expect(freeVariables('\\sin(x)+y')).toEqual(['x', 'y']);   // not 'sin'
+      expect(freeVariables('\\pi r^{2}')).toEqual(['r']);        // not 'pi'
+    });
+    it('stays backward compatible with a single declared variable', () => {
+      expect(mathEquivalent('2x', 'x+x', 'x')).toBe(true);
+      expect(mathEquivalent('x^2', 'x^3', 'x')).toBe(false);
+    });
+  });
+
+  // Regression: \div is on MathLive's keypad and converts to AsciiMath's `-:`, which math.compile
+  // threw on — so mathEquivalent returned false and a CORRECT answer was graded wrong.
+  it('accepts \\div as division', () => {
+    expect(mathEquivalent('x\\div y', '\\frac{x}{y}')).toBe(true);
+    expect(mathEquivalent('6\\div 2', '3')).toBe(true);
+    expect(mathEquivalent('x\\div y', '\\frac{y}{x}')).toBe(false);
+  });
   it('handles ln via rewrite', () => {
     expect(mathEquivalent('\\ln(x)', '\\ln(x)', 'x')).toBe(true);
+  });
+});
+
+// structured_check — the generic applied block. `cfg = {} as any` in the suite below is the guard
+// that matters: if any checker ever reached for a model it would throw on cfg.models.grader.
+describe('structured_check checkers (mechanical, any subject)', () => {
+  const cfg = {} as any;
+  const grade = (checker: any, values: string[]) => gradeBlockOutput('structured_check',
+    { prompt: 'p', pageSlug: 'topic', checker }, { values }, cfg);
+
+  it('numeric: tolerance, units, and non-numeric input', async () => {
+    const c = { kind: 'numeric', expected: 9.81, tolerance: 0.01, unit: 'm/s^2' };
+    expect((await grade(c, ['9.81 m/s^2'])).verdict).toBe('correct');
+    expect((await grade(c, ['9.807 m/s2'])).verdict).toBe('correct');   // unit spelling normalised
+    // Right value, missing unit -> partial, not incorrect: the computation WAS done, and the detail
+    // names what is missing. Evidence still caps at 'struggled' (see the applied-correctly test
+    // below), so partial credit never becomes mastery.
+    const noUnit = await grade(c, ['9.81']);
+    expect(noUnit.verdict).toBe('partial');
+    expect(noUnit.detail).toContain('unit should be m/s^2');
+    expect(noUnit.evidence[0]).toMatchObject({ kind: 'struggled' });
+    expect((await grade(c, ['12 m/s^2'])).verdict).toBe('incorrect'); // wrong value -> nothing right
+    const nan = await grade(c, ['about ten']);
+    expect(nan.verdict).toBe('incorrect');
+    expect(nan.detail).toContain('no number');
+  });
+  it('numeric: relative tolerance handles large magnitudes', async () => {
+    const c = { kind: 'numeric', expected: 6.022e23, tolerance: 1e-3, relative: true };
+    expect((await grade(c, ['6.022e23'])).verdict).toBe('correct');
+    expect((await grade(c, ['6.1e23'])).verdict).toBe('incorrect');
+  });
+  it('numeric: parses thousands separators and trailing units', async () => {
+    const c = { kind: 'numeric', expected: 1024, tolerance: 0.5 };
+    expect((await grade(c, ['1,024'])).verdict).toBe('correct');
+  });
+  it('set: order-insensitive, penalises extras and duplicates', async () => {
+    const c = { kind: 'set', expected: ['fluorine', 'chlorine', 'bromine'] };
+    expect((await grade(c, ['Bromine', 'fluorine', 'CHLORINE'])).verdict).toBe('correct');
+    const partial = await grade(c, ['fluorine']);
+    expect(partial.verdict).toBe('partial');
+    expect(partial.detail).toBe('1/3 correct');
+    const extra = await grade(c, ['fluorine', 'chlorine', 'bromine', 'sodium']);
+    expect(extra.verdict).toBe('partial');           // coverage complete but a wrong one was added
+    expect(extra.detail).toContain('not on the list');
+    const dupe = await grade(c, ['fluorine', 'fluorine', 'fluorine']);
+    expect(dupe.verdict).toBe('partial');            // duplication is not coverage
+  });
+  it('sequence: order is graded, not just membership', async () => {
+    const c = { kind: 'sequence', expected: ['a', 'b', 'c'] };
+    expect((await grade(c, ['a', 'b', 'c'])).verdict).toBe('correct');
+    const scrambled = await grade(c, ['c', 'b', 'a']);
+    expect(scrambled.verdict).toBe('partial');       // 'b' alone is in position
+    expect(scrambled.detail).toBe('1/3 in the right position');
+  });
+  it('matching: per-item, keyed by the left label', async () => {
+    const c = { kind: 'matching', items: [
+      { left: 'tonic', right: 'I' }, { left: 'dominant', right: 'V' },
+    ] };
+    expect((await grade(c, ['I', 'V'])).verdict).toBe('correct');
+    const half = await grade(c, ['I', 'IV']);
+    expect(half.verdict).toBe('partial');
+    expect(half.perItem).toEqual([{ id: 'tonic', correct: true }, { id: 'dominant', correct: false }]);
+  });
+  it('pattern: normalises case, spacing and stray quotes', async () => {
+    const c = { kind: 'pattern', expected: 'sodium chloride' };
+    expect((await grade(c, ['  Sodium   Chloride '])).verdict).toBe('correct');
+    expect((await grade(c, ['"sodium chloride"'])).verdict).toBe('correct');
+    expect((await grade(c, ['potassium chloride'])).verdict).toBe('incorrect');
+  });
+  it('full pass earns applied-correctly; anything less is struggled', async () => {
+    const c = { kind: 'set', expected: ['x', 'y'] };
+    expect((await grade(c, ['x', 'y'])).evidence[0]).toMatchObject({ slug: 'topic', kind: 'applied-correctly' });
+    expect((await grade(c, ['x'])).evidence[0]).toMatchObject({ kind: 'struggled' });
+    expect((await grade(c, [])).evidence[0]).toMatchObject({ kind: 'struggled' });
   });
 });
 

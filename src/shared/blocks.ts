@@ -32,6 +32,10 @@ const mathScratchpad = {
     stepMode: z.boolean(),
     expectedLatex: z.string(), // final answer for numeric-equivalence grading
     variable: z.string().default('x'),
+    // Multivariate maths (learn-anything pass): physics/stats/engineering problems have more than
+    // one free variable. Optional and additive — grading detects free variables from the expressions
+    // themselves, so this is only needed to name one the expressions don't mention.
+    variables: z.array(z.string()).optional(),
     pageSlug: z.string(),
   }),
   result: z.object({
@@ -73,8 +77,70 @@ const codeExercise = {
   }),
 };
 
+/**
+ * structured_check — the generic APPLIED block (learn-anything pass).
+ *
+ * Why it exists: of the other four blocks, only quick_check and quiz work in every subject, and both
+ * grade recall or explanation. Applied evidence — the harder, more trustworthy kind — was reachable
+ * only through math_scratchpad (maths), writing_draft (prose), and code_exercise (programming). A
+ * chemistry, statistics, music-theory, or law learner could be probed and could explain, but had no
+ * way to *apply*. This block is the missing primitive.
+ *
+ * How it stays trustworthy: every checker below is MECHANICAL — graded in grading.ts with no model
+ * call, exactly like quick_check's exact match and math_scratchpad's numeric sampling. A model may
+ * author the question; only arithmetic and string comparison decide whether it was answered. That is
+ * the seam that lets the system generalise without the evidence becoming a model's opinion.
+ *
+ * KNOWN LIMITATION, shared with quick_check and quiz: the answer key travels in the block's tool
+ * input, which is rendered client-side, so it is visible in devtools. Acceptable for a single-user
+ * localhost tutor and consistent with the existing blocks; the fix (a server-side key store keyed by
+ * toolCallId, as the gap sidecar effectively does) is a larger change than this block.
+ */
+const structuredCheck = {
+  input: z.object({
+    prompt: z.string(),
+    pageSlug: z.string(),
+    // Shown above the input; use for units, significant figures, or "one per line" guidance.
+    hint: z.string().optional(),
+    checker: z.discriminatedUnion('kind', [
+      // Any quantitative subject: physics, chemistry, stats, finance, engineering.
+      z.object({
+        kind: z.literal('numeric'),
+        expected: z.number(),
+        // Absolute by default; `relative: true` compares against |expected| instead, which is what
+        // you want for large or tiny magnitudes (Avogadro, Planck).
+        tolerance: z.number().optional(),
+        relative: z.boolean().optional(),
+        // Checked case-insensitively against whatever trails the number, when given.
+        unit: z.string().optional(),
+      }),
+      // "Name all X" — order irrelevant. Cardinality is deliberately NOT sent to the client.
+      z.object({ kind: z.literal('set'), expected: z.array(z.string()).min(1) }),
+      // "Put these in order" — order is the whole point.
+      z.object({ kind: z.literal('sequence'), expected: z.array(z.string()).min(1) }),
+      // "Match term to definition". `options` are what the learner picks from; without it the right
+      // sides double as the option list.
+      z.object({
+        kind: z.literal('matching'),
+        items: z.array(z.object({ left: z.string(), right: z.string() })).min(1),
+        options: z.array(z.string()).optional(),
+      }),
+      // Normalised free text: nomenclature, notation, a term of art.
+      z.object({ kind: z.literal('pattern'), expected: z.string() }),
+    ]),
+  }),
+  result: z.object({
+    // One unified shape across every checker so the client and grader stay simple:
+    //   numeric / pattern -> a single value
+    //   set / sequence    -> the learner's list
+    //   matching          -> the chosen right for each item, in `items` order
+    values: z.array(z.string()),
+  }),
+};
+
 export const BLOCK_TOOLS = {
   quick_check: quickCheck,
+  structured_check: structuredCheck,
   quiz,
   math_scratchpad: mathScratchpad,
   writing_draft: writingDraft,

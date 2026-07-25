@@ -2,6 +2,7 @@ import { defineToolkit } from '@assistant-ui/react';
 import { BLOCK_TOOLS } from '../shared/blocks.js';
 import { QuickCheck } from './components/blocks/QuickCheck.js';
 import { Quiz } from './components/blocks/Quiz.js';
+import { StructuredCheck } from './components/blocks/StructuredCheck.js';
 import { MathScratchpad } from './components/blocks/MathScratchpad.js';
 import { WritingDraft } from './components/blocks/WritingDraft.js';
 import { CodeExercise } from './components/blocks/CodeExercise.js';
@@ -17,6 +18,8 @@ const human = (name: keyof typeof BLOCK_TOOLS, description: string, Component: a
 export const toolkit = defineToolkit({
   quick_check: human('quick_check', 'Quick inline probe', QuickCheck),
   quiz: human('quiz', 'Multi-item quiz', Quiz),
+  // The generic applied block — mechanical checkers, any subject (src/shared/blocks.ts).
+  structured_check: human('structured_check', 'Applied check with a mechanical checker (numeric, set, sequence, matching, pattern)', StructuredCheck),
   math_scratchpad: human('math_scratchpad', 'Math work with steps', MathScratchpad),
   writing_draft: human('writing_draft', 'Writing exercise with annotations', WritingDraft),
   code_exercise: human('code_exercise', 'Programming-pattern code exercise (the Gap ladder)', CodeExercise),

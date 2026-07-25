@@ -2,10 +2,28 @@ import { describe, it, expect } from 'vitest';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES } from '../src/shared/blocks.js';
 
 describe('block schemas', () => {
-  it('exposes exactly the five v1 kinds', () => {
+  // Was "the five v1 kinds". structured_check is the sixth: the generic applied block, added so
+  // applied evidence is reachable outside maths/prose/programming (see src/shared/blocks.ts). This
+  // list stays exhaustive on purpose — a new block kind should have to be added here deliberately.
+  it('exposes exactly the six block kinds', () => {
     expect(BLOCK_TOOL_NAMES.sort()).toEqual(
-      ['code_exercise', 'math_scratchpad', 'quick_check', 'quiz', 'writing_draft'],
+      ['code_exercise', 'math_scratchpad', 'quick_check', 'quiz', 'structured_check', 'writing_draft'],
     );
+  });
+  it('structured_check round-trips each checker kind', () => {
+    const base = { prompt: 'p', pageSlug: 'topic' };
+    const kinds = [
+      { kind: 'numeric', expected: 9.81, tolerance: 0.01, unit: 'm/s^2' },
+      { kind: 'set', expected: ['a', 'b'] },
+      { kind: 'sequence', expected: ['a', 'b'] },
+      { kind: 'matching', items: [{ left: 'l', right: 'r' }] },
+      { kind: 'pattern', expected: 'sodium chloride' },
+    ];
+    for (const checker of kinds) {
+      expect(BLOCK_TOOLS.structured_check.input.parse({ ...base, checker })).toMatchObject({ checker });
+    }
+    expect(BLOCK_TOOLS.structured_check.result.parse({ values: ['9.81 m/s^2'] }))
+      .toEqual({ values: ['9.81 m/s^2'] });
   });
   it('quick_check round-trips', () => {
     const input = { question: '2+2?', mode: 'choice', choices: ['3', '4'], pageSlug: 'arith' };
