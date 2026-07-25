@@ -8,14 +8,24 @@
   --bg-panel: #fdfbf6;
   --bg-inset: #ebe6da;
   --text: #26241f;
-  --text-muted: #7d7668;
+  /* Was #7d7668 — only 4.03:1 on --bg and 3.62:1 on --bg-inset, under WCAG AA (4.5:1) for the
+     normal-size text this token actually carries (.empty, .graph-subtitle, notes, labels).
+     #6b6456 is the smallest darkening that clears AA on all three surfaces: 5.24 / 5.67 / 4.71. */
+  --text-muted: #6b6456;
   --border: #ddd5c5;
   --accent: #3b5b8c;
   --accent-soft: #e7ecf4;
   --accent-text: #fdfbf6;
-  --good: #38754f;
-  --bad: #a84d3f;
-  --warn: #a87b2f;
+  /* The three semantic tokens below are the graded-verdict signal (correct / incorrect / partial),
+     so their contrast is a correctness concern, not a taste one. The binding surface is NOT --bg
+     but --bg-inset: .ide-test-console is inset and hosts .test-result-status in --good/--bad, so
+     the per-test pass/fail of a code exercise is read against the darkest light surface. Values
+     below clear AA (4.5:1) on inset / bg / panel respectively — good 4.84/5.39/5.83,
+     bad 4.75/5.28/5.72, warn 4.64/5.16/5.58. Previously good 4.41 and bad 4.44 on inset (under AA)
+     and warn #a87b2f at 3.04. See the dark block — these three had NO dark counterpart at all. */
+  --good: #356e4a;
+  --bad: #a2493b;
+  --warn: #845f1e;
   --radius: 10px;
   --radius-sm: 6px;
   --shadow: 0 1px 2px rgba(38, 30, 15, 0.05);
@@ -32,17 +42,33 @@
     --bg-panel: #24221c;
     --bg-inset: #2c2a22;
     --text: #e7e1d2;
-    --text-muted: #948d7b;
+    /* Was #948d7b — 4.35 on --bg-inset, under AA for .test-results-empty inside the inset test
+       console. #9b9483 clears it at 4.76 / 5.70 / 5.27 (inset / bg / panel). */
+    --text-muted: #9b9483;
     --border: #3b382d;
     --accent: #93aed4;
     --accent-soft: #2b3547;
     --accent-text: #1d1b16;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    /* These three were MISSING here, so the light-mode values leaked into dark and the graded
+       verdict — the single most important signal in the UI — rendered below WCAG AA on a dark
+       ground: good 3.13 on --bg / 2.90 on --bg-panel, bad 3.11 / 2.88 (both under even the 3:1
+       non-text floor). Lightened counterparts, verified on bg / panel / inset respectively:
+       good 6.62 / 6.11 / 5.53 · bad 6.14 / 5.67 / 5.13 · warn 6.72 / 6.21 / 5.61. Hue is
+       preserved — these are the same three hues lifted, not new colours. */
+    --good: #6fae86;
+    --bad: #d4867a;
+    --warn: #c99a4a;
   }
 }
 
 * { box-sizing: border-box; }
 
+/* overflow-x: clip (not hidden) on BOTH html and body — hidden would break position: sticky and
+   position: fixed on descendants. No horizontal scroll is currently observable at 320–1920px;
+   this is the unconditional guard so a future wide child (a code pane, a graph canvas) can't
+   introduce one silently. */
+html, body { overflow-x: clip; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--bg); color: var(--text); }
 
@@ -307,6 +333,14 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   text-transform: uppercase;
   color: var(--good);
 }
+
+/* Tabular figures on the graded readouts only — NOT on prose, where proportional figures are
+   typographically correct. These are the places a digit changes in place while the reader is
+   looking at it (grading.detail carries "3/7", the code-exercise row counts up testsPassed as the
+   gauntlet runs), and proportional figures make the whole string shift sideways on each tick. */
+.verdict,
+.test-results-panel,
+.code-exercise.done p { font-variant-numeric: tabular-nums; }
 
 .verdict { font-style: normal; font-weight: 600; }
 .verdict.correct, .verdict.reviewed { color: var(--good); }
@@ -941,9 +975,21 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border-radius: 50%;
   border: 2px solid var(--border);
   border-top-color: var(--accent);
-  animation: ide-spin 0.7s linear infinite;
+  /* Delay-show 150ms: a local gauntlet run often finishes in tens of milliseconds, and a spinner
+     that appears for three frames reads as a glitch rather than as progress. The second animation
+     holds opacity at 0 until 150ms, so a fast run never paints it at all. */
+  opacity: 0;
+  animation: ide-spin 0.7s linear infinite, ide-spinner-appear 0s linear 150ms forwards;
 }
 @keyframes ide-spin { to { transform: rotate(360deg); } }
+@keyframes ide-spinner-appear { to { opacity: 1; } }
+/* The global prefers-reduced-motion rule sets `animation: none !important`, which would strand the
+   base `opacity: 0` above and hide this status indicator permanently. Restore it here — later in
+   source order at equal specificity, so it wins. Losing the delay-show under reduced motion is the
+   correct trade: a visible spinner beats an invisible one. */
+@media (prefers-reduced-motion: reduce) {
+  .code-exercise .ide-spinner { opacity: 1; }
+}
 
 /* Console (P2): test list + per-run timing, boxed like a terminal pane for legibility against the
    dark CM6 chrome directly above it. */

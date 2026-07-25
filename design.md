@@ -8,6 +8,20 @@ Scope note: this is a single-user localhost tool, not a marketing site. There is
 no hero, no CTA funnel. Hallmark verbs that assume a marketing page (`redesign` with a new section
 rhythm, hero enrichment) do not apply to the app shell. `hallmark audit` does apply, and is welcome.
 
+## System
+
+The structured picks, in the shape Hallmark's pre-flight and amend flows read:
+
+- Genre · **editorial** (utilitarian register; not modern-minimal, not atmospheric, not playful)
+- Macrostructure · **n/a — app shell**, not a page. No hero, no marketing sections, no footer.
+- Theme · **custom** (vibe: "warm paper study, dense instrument")
+- Axes · paper-band **light** (dark counterpart via `prefers-color-scheme`) / display-style
+  **high-contrast-serif** (Fraunces) / accent-hue **cool** (muted blue, 250°)
+- Motion stance · **motion-cut**
+- Tokens · `src/client/styles.css` `:root` is the source of truth. There is no `tokens.css`, and one
+  must not be introduced — a second token file would immediately drift from the stylesheet the app
+  actually loads.
+
 ## Genre and tone
 
 **Warm paper study.** Editorial and utilitarian at once: the reading surface of a good print
@@ -37,14 +51,14 @@ All colour lives in `:root` custom properties in `src/client/styles.css`, each w
 | `--bg-panel` | `#fdfbf6` | `#24221c` | raised surface |
 | `--bg-inset` | `#ebe6da` | `#2c2a22` | recessed surface |
 | `--text` | `#26241f` | `#e7e1d2` | body type |
-| `--text-muted` | `#7d7668` | `#948d7b` | secondary type |
+| `--text-muted` | `#6b6456` | `#948d7b` | secondary type |
 | `--border` | `#ddd5c5` | `#3b382d` | hairlines |
 | `--accent` | `#3b5b8c` | `#93aed4` | the single accent |
 | `--accent-soft` | `#e7ecf4` | `#2b3547` | accent wash |
 | `--accent-text` | `#fdfbf6` | `#1d1b16` | type on accent |
-| `--good` | `#38754f` | — | semantic: pass/correct |
-| `--bad` | `#a84d3f` | — | semantic: fail/incorrect |
-| `--warn` | `#a87b2f` | — | semantic: caution |
+| `--good` | `#38754f` | `#6fae86` | semantic: pass/correct |
+| `--bad` | `#a84d3f` | `#d4867a` | semantic: fail/incorrect |
+| `--warn` | `#8a6420` | `#c99a4a` | semantic: caution |
 
 Rules:
 - A raw hex, `rgb()`, or `oklch()` in a component or new rule is a bug. Need a new shade? Add a
@@ -52,6 +66,22 @@ Rules:
 - **One accent hue.** Emphasis comes from weight, size, and `--accent-soft` — never a second hue.
 - `--good` / `--bad` / `--warn` are semantic. Never decorative.
 - No gradients. No `backdrop-filter`.
+
+### Contrast is a correctness requirement, not taste
+
+`--good` / `--bad` / `--warn` carry the **graded verdict**. A learner misreading "incorrect" as
+"correct" is a pedagogy failure, so these three are held to WCAG AA (4.5:1) for normal-size text on
+whatever surface they actually render on — not to the 3:1 non-text floor.
+
+Every token pair is verified with real WCAG math, both schemes, before a value changes. Current
+worst cases: `--text-muted` 4.71 on `--bg-inset` (light), `--bad` 5.13 on `--bg-inset` (dark). The
+one knowingly-failing pair is `--border` at 1.30:1 (light) / 1.47:1 (dark) — see § Accepted
+deviations.
+
+**Do not "harmonise" these three hues toward the accent.** Their job is to be distinguishable from
+the accent and from each other, including for red-green colour blindness — which is why every
+verdict also carries a text label or a glyph (`.verdict`, `.tool-note::before`, `.mark-ok`), never
+colour alone.
 
 ## Typography
 
@@ -134,3 +164,37 @@ critique of *new* surfaces, accessibility review.
 Not welcome without explicit user confirmation: a theme from the catalog, a new font stack, a second
 accent hue, a motion library, a macrostructure applied to an existing panel, gradients, emoji, or a
 rewrite of `styles.css` into a token system that isn't the one above.
+
+## Variants
+
+None. Every surface shares this one system — the diversification rule is inverted here, as Hallmark
+specifies for a `design.md`-managed project: panels must look like each other, not differ.
+
+If a genuinely new standalone surface ever needs different treatment, **amend this section** with a
+named variant and its deltas. Do not override locally in a component; a local override is invisible
+to the next audit and is how a second design language gets in.
+
+## Exports
+
+`src/client/styles.css` `:root` is the only export, and is canonical. Deliberately absent:
+
+- **No `tokens.css`** — see § System. One source of truth, and it is the file the app loads.
+- **No Tailwind `@theme`, no DTCG `tokens.json`, no shadcn CSS variables.** Nothing consumes them;
+  each would be a second copy free to drift.
+
+If a real consumer ever appears, generate its format *from* the `:root` block and say so here.
+
+## Accepted deviations from Hallmark
+
+Settled decisions. A future `hallmark audit` should **not** re-raise these as findings — and if it
+does, the answer is this section, not a code change.
+
+| Hallmark rule | Our state | Why |
+| --- | --- | --- |
+| OKLCH for every colour | hex | 12 tokens × 2 schemes with no visual change; contrast is verified with real WCAG math either way, which is what the rule is protecting. |
+| 4-pt `--space-*` scale | informal rem steps (`0.3/0.4/0.5/0.6/0.9`, `0.6rem` most common) | The rhythm is already consistent and dense. Retrofitting a scale would touch nearly every rule to no visible end. |
+| Named `--ease-*` / `--dur-*` tokens | literal `0.12s` / `ease` | Six declarations total. Tokenising is defensible but low-value; revisit if motion grows. |
+| Macrostructure / nav + footer archetypes / hero enrichment / eyebrow rules | n/a | App shell, not a page. No hero, no footer, no marketing sections. |
+| `tokens.css` emission · `.hallmark/log.json` | absent | Page-build artifacts. Nothing here is a page build. |
+| CSS `/* Hallmark · macrostructure: … */` stamp | **absent, deliberately** | `verbs/audit.md` wants a stamp on a system-managed project, but the same file makes a stamp that misdescribes what shipped a `critical: stamp lies`. This stylesheet was hand-built and has no macrostructure — any stamp would be that lie. No stamp is the honest resolution. |
+| `--border` ≥ 3:1 (WCAG 1.4.11) | 1.30:1 light / 1.47:1 dark | The hairline *is* the paper aesthetic; darkening it changes the whole look. Mitigated rather than fixed: every control also shifts `background` on hover and carries a 2px `--accent` focus ring (6.13:1) — the border is never the sole affordance cue. **Flagged as the one open accessibility trade in this system; revisit if a real user reports it.** |
