@@ -15,6 +15,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { OfferCard } from './OfferPanel.js';
+import { useTablistKeys } from '../../../lib/tablist.js';
 
 // Track A (docs/superpowers/plans/2026-07-21-coding-stage.md "A. In-IDE tutor help"): the Help
 // tab's key and its composer's DOM id, shared with HelpPanel.tsx (which renders the element this
@@ -53,6 +54,7 @@ export interface FocusLayoutProps {
 }
 
 export function FocusLayout({ patternTitle, contextLine, ladder, mined, tabs, children }: FocusLayoutProps) {
+  const onBriefKeys = useTablistKeys();
   const [activeKey, setActiveKey] = useState(tabs[0]?.key ?? 'task');
 
   // An offer tab can vanish out from under the active selection (its detector state flips back
@@ -112,13 +114,15 @@ export function FocusLayout({ patternTitle, contextLine, ladder, mined, tabs, ch
           </nav>
         )}
 
-        <nav className="ide-brief-tabs" role="tablist" aria-label="exercise panel">
+        <nav className="ide-brief-tabs" role="tablist" aria-label="exercise panel" onKeyDown={onBriefKeys}>
           {tabs.map((t) => (
             <button
               key={t.key}
               type="button"
               role="tab"
+              id={`ide-tab-${t.key}`}
               aria-selected={t.key === active?.key}
+              tabIndex={t.key === active?.key ? 0 : -1}
               className={t.key === active?.key ? 'ide-tab ide-tab--active' : 'ide-tab'}
               onClick={() => setActiveKey(t.key)}
             >
@@ -128,7 +132,7 @@ export function FocusLayout({ patternTitle, contextLine, ladder, mined, tabs, ch
           ))}
         </nav>
 
-        <div className="ide-brief-body" role="tabpanel">
+        <div className="ide-brief-body" role="tabpanel" aria-labelledby={active ? `ide-tab-${active.key}` : undefined}>
           {active?.onDismiss ? <OfferCard onDismiss={active.onDismiss}>{active.content}</OfferCard> : active?.content}
         </div>
 

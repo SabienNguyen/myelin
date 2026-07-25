@@ -161,7 +161,9 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
       { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
       { completed: true, rungReached: 'full_body', testsPassed: 8, testsTotal: 8, wroteCode: true }, cfg);
     expect(g.verdict).toBe('correct');
-    expect(g.detail).toBe('8/8 tests');
+    // `detail` names the evidence, not the test count — the graded card already renders
+    // "8/8 tests" one line above, and repeating it left nothing saying what was earned.
+    expect(g.detail).toBe('recorded as applied-correctly');
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'applied-correctly' });
   });
   // Reveal ceiling: expected-vs-actual is available in TestResultsPanel, but a run that used it
@@ -176,6 +178,11 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(g.verdict).toBe('correct'); // the suite really did pass — the verdict is not a lie
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'exposed' });
     expect(g.evidence[0].note).toContain('revealed expected values');
+    // The cap was previously invisible to the learner: a green 8/8 card, no hint that the run
+    // could not mint applied-correctly. `detail` is the line that now says so — and it reaches
+    // the tutor too, via session.ts appending every grade's verdict + detail to the thread.
+    expect(g.detail).toBe(
+      'recorded as exposed — expected values were revealed, so this cannot count as applying the pattern');
   });
   it('revealedExpected does not upgrade an abandoned run away from struggled', async () => {
     const g = await gradeBlockOutput('code_exercise',
@@ -199,13 +206,16 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
       { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
       { completed: true, rungReached: 'inline_completion', testsPassed: 0, testsTotal: 0, wroteCode: false }, cfg);
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'exposed' });
+    // Distinguishable from the reveal-capped exposed above: same evidence kind, different reason,
+    // and the learner needs to know which one they got.
+    expect(g.detail).toBe('recorded as exposed — guided rungs only, no code of your own was graded');
   });
   it('!completed (abandoned via "stop here") -> struggled', async () => {
     const g = await gradeBlockOutput('code_exercise',
       { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
       { completed: false, rungReached: 'full_body', testsPassed: 3, testsTotal: 8, wroteCode: false }, cfg);
     expect(g.verdict).toBe('incorrect');
-    expect(g.detail).toBe('3/8 tests');
+    expect(g.detail).toBe('recorded as struggled — stopped at full_body');
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'struggled' });
   });
 });

@@ -314,9 +314,22 @@ export async function gradeBlockOutput(
           : 'passed real tests with own code')
         : `completed ${result.rungReached} (guided)`)
       : `stopped at ${result.rungReached}`;
+    // `detail` used to be `${testsPassed}/${testsTotal} tests`, which the graded card ALREADY
+    // renders one line above — the same number twice, and no room left to say the thing neither
+    // line said: which evidence this run actually minted. That mattered most in the reveal case,
+    // where a learner saw a green 5/5 and no indication their evidence had been capped. It also
+    // reaches the tutor (session.ts appends every grade's verdict + detail to the thread), so the
+    // tutor now knows the ceiling applied rather than inferring a clean pass from "5/5 tests".
+    const detail = !result.completed
+      ? `recorded as struggled — stopped at ${result.rungReached}`
+      : kind === 'applied-correctly'
+        ? 'recorded as applied-correctly'
+        : revealed
+          ? 'recorded as exposed — expected values were revealed, so this cannot count as applying the pattern'
+          : 'recorded as exposed — guided rungs only, no code of your own was graded';
     return {
       verdict: result.completed ? 'correct' : 'incorrect',
-      detail: `${result.testsPassed}/${result.testsTotal} tests`,
+      detail,
       evidence: [ev(input.pageSlug, kind, note)],
     };
   }

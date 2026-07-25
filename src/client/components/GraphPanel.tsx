@@ -10,6 +10,7 @@ import { drag, type D3DragEvent } from 'd3-drag';
 import { select } from 'd3-selection';
 import { zoom, zoomIdentity, type D3ZoomEvent, type ZoomBehavior } from 'd3-zoom';
 import { getGraph } from '../lib/api.js';
+import { useTablistKeys } from '../lib/tablist.js';
 import { graphMeta, radiusForDegree, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
 import { parseHash } from '../lib/urlState.js';
@@ -207,6 +208,7 @@ function shortenSegment(x1: number, y1: number, x2: number, y2: number, padStart
 }
 
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
+  const onScopeKeys = useTablistKeys();
   // Raw-ish per-node metadata (color, decay, degree) — cheap to (re)compute for the whole vault on
   // every poll; position lives in the simulation's own node objects (see simRef/nodeObjectsRef
   // below), not here.
@@ -520,12 +522,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     <div className="graph-panel">
       <div className="graph-controls">
         <div className="graph-row">
-        <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope">
+        <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope" onKeyDown={onScopeKeys}>
           <button type="button" role="tab" aria-selected={mode === 'contextual'}
+            tabIndex={mode === 'contextual' ? 0 : -1}
             className={mode === 'contextual' ? 'on' : ''} onClick={() => setMode('contextual')}>
             This topic
           </button>
           <button type="button" role="tab" aria-selected={mode === 'full'}
+            tabIndex={mode === 'full' ? 0 : -1}
             className={mode === 'full' ? 'on' : ''} onClick={() => setMode('full')}>
             Whole vault
           </button>
