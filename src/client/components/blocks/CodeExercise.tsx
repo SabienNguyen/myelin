@@ -115,6 +115,11 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   // below) — `run()` only ever populates these two, never `finish()`.
   const [lastRunMs, setLastRunMs] = useState<number | undefined>(undefined);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  // Expert path: an adversarial re-run of the SAME suite (see gap/api.ts's `stress`). Exploratory
+  // like Run and the scratch panel — it never calls finish() and carries no evidence consequence,
+  // so passing it is a private satisfaction rather than a grade. `null` = not run this session.
+  const [stress, setStress] = useState<{ ok: boolean; passed: number; total: number; failing: string[]; supported: boolean } | null>(null);
+  const [stressing, setStressing] = useState(false);
 
   // Two independent detector instances: full_body gets the full plan/predict/docs set (unchanged
   // from I2); inline_completion gets docs only (its own scoping rationale — see
@@ -535,10 +540,66 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
       </FocusLayout>
 
       <div className="code-exercise-controls">
+        {/* Offered only once the real suite is green: "your code works — does it still work when the
+            reads are hostile?" is the question an expert has next, and asking it before they pass
+            would just be noise. */}
+        {template === 'full_body' && results.length > 0 && results.every((r) => r.pass) && (
+          <button
+            type="button"
+            className="ghost-btn code-exercise-stress"
+            disabled={stressing}
+            onClick={async () => {
+              setStressing(true);
+              try {
+                const res = await postRun(currentRung.id, code, { mode: 'file', stress: true });
+                setStress({
+                  ok: res.pass,
+                  passed: res.results.filter((r) => r.pass).length,
+                  total: res.results.length,
+                  failing: res.results.filter((r) => !r.pass).map((r) => r.name).slice(0, 3),
+                  supported: res.stressed === true,
+                });
+              } catch {
+                setStress({ ok: false, passed: 0, total: 0, failing: [], supported: false });
+              } finally {
+                setStressing(false);
+              }
+            }}
+          >
+            {stressing ? 'stressing…' : 'stress test'}
+          </button>
+        )}
+        {/* Expert path. The ladder walks worked_example -> inline_completion -> full_body, and until
+            now only the TUTOR chose the entry rung: someone who already knows the pattern had to sit
+            through a read-only worked example of a SIBLING artifact before being allowed to type.
+            No evidence consequence — skipping removes scaffolding, not rigour: full_body is still
+            graded by the same real suite, and wroteCode is still an exact diff against the pristine
+            scaffold, so applied-correctly is if anything harder to earn this way. */}
+        {sequence.length > 1 && stepIndex < sequence.length - 1 && (
+          <button
+            type="button"
+            className="ghost-btn code-exercise-skip"
+            onClick={() => setStepIndex(sequence.length - 1)}
+          >
+            skip ahead — let me just write it
+          </button>
+        )}
         <button type="button" className="code-exercise-stop" onClick={stopHere}>
           stop here
         </button>
       </div>
+
+      {stress && (
+        <p className={`code-exercise-stress-result${stress.ok && stress.supported ? ' ok' : ''}`} role="status">
+          {!stress.supported
+            // Do not report "survived" for a run that never happened — an older sidecar ignores
+            // `stress` and grades normally, which would otherwise read as a pass.
+            ? 'this sandbox doesn’t support stress runs, so nothing was stressed.'
+            : stress.ok
+              ? `survived all ${stress.total} adversarial re-chunkings — 1-byte reads, single-read bodies, empty reads.`
+              : `${stress.passed}/${stress.total} under adversarial reads. Still breaking: ${stress.failing.join('; ')}`}
+        </p>
+      )}
     </div>
   );
 }

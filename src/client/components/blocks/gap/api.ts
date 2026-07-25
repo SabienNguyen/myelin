@@ -29,6 +29,9 @@ export interface RunResponse {
   actual?: string;
   chunks?: number;
   runtimeError?: string;
+  /** Set when the run was a STRESS run (request carried `stress`). Absent from a sidecar that does
+   *  not implement it, which is how the UI tells "your code survived" from "nothing was stressed". */
+  stressed?: boolean;
 }
 
 export async function getLadder(): Promise<LadderPayload> {
@@ -53,6 +56,11 @@ export interface PostRunOptions {
    *  verbatim — needs no change. A sidecar that doesn't implement it simply grades as usual, which
    *  the panel reports rather than pretending it ran. */
   input?: string;
+  /** Re-run the SAME suite under adversarial conditions (for stream-consumer: 1-byte reads, the
+   *  whole body in one read, empty reads interleaved). Derived mechanically from the existing cases
+   *  rather than hand-authored per artifact, so it costs no new content to offer on any artifact the
+   *  sidecar supports. Passing the normal suite but failing this is the interesting result. */
+  stress?: boolean;
 }
 
 export async function postRun(rungId: string, code: string, options?: PostRunOptions): Promise<RunResponse> {
@@ -65,6 +73,7 @@ export async function postRun(rungId: string, code: string, options?: PostRunOpt
       ...(options?.mode ? { mode: options.mode } : {}),
       ...(options?.trace ? { trace: true } : {}),
       ...(options?.input !== undefined ? { input: options.input } : {}),
+      ...(options?.stress ? { stress: true } : {}),
     }),
   });
   if (!response.ok) throw new Error(`POST /api/gap/run failed: ${response.status}`);

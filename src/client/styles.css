@@ -1265,3 +1265,20 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   color: var(--text-muted);
 }
 .help-still-stuck:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+
+/* Expert affordances on the code exercise: skip-ahead and the adversarial stress run. */
+.code-exercise-skip, .code-exercise-stress {
+  font-size: 0.78rem;
+  padding: 0.15rem 0.5rem;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.code-exercise-skip:hover, .code-exercise-stress:hover {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--text);
+}
+.code-exercise-stress-result {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  color: var(--bad);
+}
+.code-exercise-stress-result.ok { color: var(--good); }
