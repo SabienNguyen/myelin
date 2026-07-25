@@ -659,6 +659,39 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 
+/* ── More contrast on request ─────────────────────────
+   Cheap because the system is tokenised: raising contrast is a handful of token overrides, not a
+   sweep of rules. Two things get fixed that are recorded elsewhere as accepted trades — --border
+   sits at 1.30:1 (design.md's one open accessibility trade, mitigated by hover and focus states),
+   and --text-muted clears AA but not AAA. A reader who has asked the OS for more contrast is
+   exactly the reader those trades were made against, so for them the paper hairline gives way. */
+@media (prefers-contrast: more) {
+  :root {
+    --text-muted: #4a4438;  /* 8.9:1 on --bg, up from 5.8:1 — clears AAA */
+    /* Solved against ALL THREE surfaces, not just --bg: an inset panel is where the old
+       value was weakest (1.17:1), and a border that clears 3:1 on the page but not inside a
+       card has not actually fixed anything. bg 3.39 / panel 3.67 / inset 3.05. */
+    --border: #8a8276;
+    --accent: #24406b;      /* 9.4:1 on --bg, up from 6.1:1 */
+    --good: #245537;
+    --bad: #8a3527;
+    --warn: #634614;
+  }
+  /* The hairline is decorative at 1px; at this contrast it should read as a real division. */
+  .page-chip, .graph-edge { opacity: 1; }
+  .graph-edge-deepens { opacity: 0.8; }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --text-muted: #c3bcab;  /* 9.6:1 on dark --bg */
+    --border: #7a7266;  /* bg 3.63 / panel 3.35 / inset 3.03 */
+    --accent: #9dc0f0;
+    --good: #93c9a6;
+    --bad: #e5a89e;
+    --warn: #dcb76e;
+  }
+}
+
 .wiki-link {
   color: var(--accent);
   text-decoration: none;
