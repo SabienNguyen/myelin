@@ -40,15 +40,20 @@ export function HelpPanel({ pattern, rung, draft, failures, exchanges, onExchang
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  async function ask(): Promise<void> {
-    const trimmed = question.trim();
+  // Hints already shown, oldest first. Sending these is what turns the server's concept -> strategy
+  // -> structure ladder into escalation ACROSS turns: without them every question restarted at
+  // concept level, so a learner who was still stuck got the same nudge rephrased.
+  const priorHints = exchanges.map((x) => x.hint);
+
+  async function ask(text?: string): Promise<void> {
+    const trimmed = (text ?? question).trim();
     if (trimmed === '' || pending) return;
     setPending(true);
     setError(undefined);
     try {
-      const { hint } = await postHelp({ pattern, rung, question: trimmed, draft, failures });
+      const { hint } = await postHelp({ pattern, rung, question: trimmed, draft, failures, priorHints });
       onExchangeAdded({ question: trimmed, hint });
-      setQuestion('');
+      if (text === undefined) setQuestion('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'could not reach the tutor.');
     } finally {
@@ -85,6 +90,20 @@ export function HelpPanel({ pattern, rung, draft, failures, exchanges, onExchang
           </li>
         )}
       </ul>
+
+      {/* Escalation should not depend on the learner finding the words for "that did not help".
+          One click sends a canned follow-up, and because priorHints goes with it the server is
+          required to go a level further rather than repeat itself. Only offered once a hint exists
+          to escalate FROM. */}
+      {exchanges.length > 0 && !pending && (
+        <button
+          type="button"
+          className="ghost-btn help-still-stuck"
+          onClick={() => void ask('That did not get me unstuck — go further than the hints so far.')}
+        >
+          Still stuck — go further
+        </button>
+      )}
 
       {error && (
         <p className="help-panel-error" role="alert">

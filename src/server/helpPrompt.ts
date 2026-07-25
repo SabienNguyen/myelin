@@ -28,6 +28,18 @@ export interface BuildHelpPromptInput {
   /** The pattern's vault page body, or undefined when no page exists yet (tolerated, not an error). */
   vaultPage?: string;
   question: string;
+  /**
+   * Hints already given during THIS exercise, oldest first.
+   *
+   * Without these the help route is stateless, so the escalation ladder in the system prompt could
+   * only ever run inside a single reply: a learner who was still stuck and asked again got a fresh
+   * concept-level nudge every time, with no signal that the previous one had not landed. That is the
+   * difference between "escalating help" and "the same hint rephrased".
+   *
+   * Safe to include: every string here is something the learner has already read, so this widens no
+   * answer-integrity surface. `reference_answer` still has no slot anywhere in this type.
+   */
+  priorHints?: string[];
 }
 
 export interface HelpPrompt {
@@ -49,10 +61,15 @@ export const HELP_SYSTEM_PROMPT = [
   'wrong; do not supply it. Ground the hint in their specific failing tests and their own draft,',
   'not generic advice. Keep the entire reply to 180 words or fewer. No praise, no encouragement,',
   'no emoji — plain, direct, technical tone only.',
+  'If the prompt lists hints already given for this exercise, the learner tried them and is STILL',
+  'stuck: do not restate or rephrase any of them. Start at least one level higher than the highest',
+  'you already gave (concept -> strategy -> structure), and if you are already at structure, name',
+  'the single specific line or branch of their own draft that is wrong. Even then, do not write the',
+  'replacement code.',
 ].join(' ');
 
 export function buildHelpPrompt(input: BuildHelpPromptInput): HelpPrompt {
-  const { pattern, rung, draft, failures, vaultPage, question } = input;
+  const { pattern, rung, draft, failures, vaultPage, question, priorHints = [] } = input;
 
   const lines: string[] = [
     `Pattern: ${pattern} (${rung.template} rung, artifact "${rung.artifactId}")`,
@@ -81,6 +98,11 @@ export function buildHelpPrompt(input: BuildHelpPromptInput): HelpPrompt {
     vaultPage !== undefined
       ? `Reference material — this pattern's vault page:\n${vaultPage}`
       : 'No vault page exists for this pattern yet.',
+    '',
+    priorHints.length > 0
+      ? 'Hints already given for this exercise, oldest first — the learner has read all of these and '
+        + `is still stuck, so go further than the last one:\n${priorHints.map((h, i) => `${i + 1}. ${h}`).join('\n')}`
+      : 'No hints have been given for this exercise yet.',
     '',
     `Student question: ${question}`,
   );

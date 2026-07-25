@@ -1254,3 +1254,14 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   font-size: 0.78rem;
   overflow-wrap: anywhere;
 }
+
+/* Help: the escalation affordance. Sits between the transcript and the composer. */
+.help-still-stuck {
+  align-self: flex-start;
+  margin: 0.4rem 0;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.5rem;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+.help-still-stuck:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }

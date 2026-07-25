@@ -79,6 +79,10 @@ export interface HelpRequest {
   question: string;
   draft: string;
   failures: string[];
+  /** Hints already shown for this exercise, oldest first. Lets the server escalate ACROSS turns
+   *  instead of restarting the concept -> strategy -> structure ladder on every question — see
+   *  src/server/helpPrompt.ts. Optional: omitting it yields the previous single-shot behaviour. */
+  priorHints?: string[];
 }
 export interface HelpResponse {
   hint: string;

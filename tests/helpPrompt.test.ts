@@ -80,4 +80,43 @@ describe('buildHelpPrompt', () => {
     expect(system).not.toContain(SENTINEL);
     expect(prompt).not.toContain(SENTINEL);
   });
+
+  // Cross-turn escalation. The concept -> strategy -> structure ladder already existed, but the
+  // route was stateless, so it could only run INSIDE one reply: a learner who was still stuck and
+  // asked again got a fresh concept-level nudge with no signal the last one had not landed.
+  describe('prior hints (escalation across turns)', () => {
+    const base = {
+      pattern: 'stream-consumer',
+      rung: baseRung,
+      draft: 'let x = 1;',
+      failures: ['reassembles a split line'],
+      question: 'still not working',
+    };
+
+    it('renders prior hints in order and tells the model the learner is still stuck', () => {
+      const { prompt } = buildHelpPrompt({ ...base, priorHints: ['think about buffering', 'the buffer must outlive the loop'] });
+      expect(prompt).toMatch(/1\. think about buffering/);
+      expect(prompt).toMatch(/2\. the buffer must outlive the loop/);
+      expect(prompt).toMatch(/still stuck, so go further than the last one/i);
+    });
+
+    it('says so explicitly when no hints have been given yet', () => {
+      const { prompt } = buildHelpPrompt(base);
+      expect(prompt).toMatch(/No hints have been given for this exercise yet/i);
+    });
+
+    it('treats an empty array the same as absent', () => {
+      expect(buildHelpPrompt({ ...base, priorHints: [] }).prompt)
+        .toMatch(/No hints have been given for this exercise yet/i);
+    });
+
+    it('the system prompt instructs escalation rather than rephrasing', () => {
+      const { system } = buildHelpPrompt(base);
+      expect(system).toMatch(/do not restate or rephrase/i);
+      expect(system).toMatch(/at least one level higher/i);
+      // The no-code-writing invariant must survive the escalation rule — the highest level still
+      // names the wrong line, it does not supply the replacement.
+      expect(system).toMatch(/do not write the/i);
+    });
+  });
 });

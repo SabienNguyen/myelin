@@ -22,6 +22,9 @@ import { modelFor } from './models.js';
 
 const DRAFT_CAP = 20_000;
 const QUESTION_CAP = 2_000;
+// Only the most recent few hints matter for escalation, and the whole transcript would otherwise
+// grow the prompt without bound across a long exercise.
+const PRIOR_HINT_CAP = 6;
 
 export interface GapHelpDeps {
   /** Injectable seam for the ollama:/anthropic ai-sdk route (mirrors ingestRoutes.ts's deps.model). */
@@ -36,9 +39,10 @@ interface HelpRequestBody {
   question?: unknown;
   draft?: unknown;
   failures?: unknown;
+  priorHints?: unknown;
 }
 
-function validate(body: HelpRequestBody): { pattern: string; rung: string; question: string; draft: string; failures: string[] } | { error: string } {
+function validate(body: HelpRequestBody): { pattern: string; rung: string; question: string; draft: string; failures: string[]; priorHints: string[] } | { error: string } {
   if (typeof body.pattern !== 'string' || body.pattern.trim() === '') return { error: '"pattern" must be a non-empty string' };
   if (typeof body.rung !== 'string' || body.rung.trim() === '') return { error: '"rung" must be a non-empty string' };
   if (typeof body.question !== 'string' || body.question.trim() === '') return { error: '"question" must be a non-empty string' };
@@ -46,12 +50,21 @@ function validate(body: HelpRequestBody): { pattern: string; rung: string; quest
   if (!Array.isArray(body.failures) || body.failures.some((f) => typeof f !== 'string')) {
     return { error: '"failures" must be a string[]' };
   }
+  // priorHints is OPTIONAL and absent-tolerant: an older client simply gets the previous
+  // single-shot behaviour rather than a 400. Capped in count and length for the same reason
+  // question/draft are — this text goes straight into a model prompt.
+  if (body.priorHints !== undefined
+    && (!Array.isArray(body.priorHints) || body.priorHints.some((h) => typeof h !== 'string'))) {
+    return { error: '"priorHints" must be a string[] when present' };
+  }
   return {
     pattern: body.pattern,
     rung: body.rung,
     question: body.question.slice(0, QUESTION_CAP),
     draft: body.draft.slice(0, DRAFT_CAP),
     failures: body.failures as string[],
+    priorHints: ((body.priorHints as string[] | undefined) ?? [])
+      .slice(-PRIOR_HINT_CAP).map((h) => h.slice(0, QUESTION_CAP)),
   };
 }
 
@@ -63,7 +76,7 @@ export function buildGapHelpRoute(lw: Loreweaver, cfg: HarnessConfig, deps: GapH
     const raw = await c.req.json().catch(() => ({})) as HelpRequestBody;
     const parsed = validate(raw);
     if ('error' in parsed) return c.json({ error: parsed.error }, 400);
-    const { pattern, rung, question, draft, failures } = parsed;
+    const { pattern, rung, question, draft, failures, priorHints } = parsed;
 
     let ladder: Awaited<ReturnType<typeof fetchLadderPayload>>;
     try {
@@ -93,7 +106,7 @@ export function buildGapHelpRoute(lw: Loreweaver, cfg: HarnessConfig, deps: GapH
       vaultPage = undefined; // tolerate page-missing (or any read failure) — help still works
     }
 
-    const { system, prompt } = buildHelpPrompt({ pattern, rung: rungContext, draft, failures, vaultPage, question });
+    const { system, prompt } = buildHelpPrompt({ pattern, rung: rungContext, draft, failures, vaultPage, question, priorHints });
 
     const tutorModelId = cfg.models.tutor.model;
     let text: string;
