@@ -19,6 +19,16 @@ export default defineConfig({
   workers: 1,
   use: {
     baseURL: 'http://localhost:4173',
+    // Escape hatch for sandboxes/CI images that ship a PINNED Chromium build under
+    // PLAYWRIGHT_BROWSERS_PATH which doesn't match the build this @playwright/test version wants
+    // (e.g. a 1194 image against playwright 1.61.1, which looks for 1228 and dies with
+    // "Executable doesn't exist"). Those images forbid `npx playwright install`, so point this at
+    // the browser they DO ship — `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
+    // Unset (a normal dev machine, browsers installed by playwright itself) -> no launchOptions
+    // override at all, so the default resolution is untouched.
+    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
+      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
+      : {}),
   },
   webServer: [
     {
