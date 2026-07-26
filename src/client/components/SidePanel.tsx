@@ -6,10 +6,28 @@ import { LibraryPanel } from './LibraryPanel.js';
 import { PagePanel } from './PagePanel.js';
 import { useTablistKeys } from '../lib/tablist.js';
 
+// How often the tab strip re-asks how much is due. Slow on purpose: due-ness changes on the scale
+// of days; the only same-session change is reinforcement clearing an item, and switching to the
+// Library re-fetches anyway.
+const DUE_POLL_MS = 5 * 60_000;
+
 export function SidePanel() {
   const onTabKeys = useTablistKeys();
   const [tab, setTab] = useState<PanelTab>(() => parseHash(location.hash).tab);
   const [pageSlug, setPageSlug] = useState<string | null>(() => parseHash(location.hash).pageSlug);
+  // The due count lives on the TAB, not only inside the Library — review is only optimal when the
+  // system reminds you, and a reminder you must open a tab to see is not one.
+  const [dueCount, setDueCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => fetch('/api/due')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d) setDueCount((d.due ?? []).length); })
+      .catch(() => { /* a missing count is a quiet state, never an error surface */ });
+    load();
+    const id = setInterval(load, DUE_POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
   useEffect(() => panelBus.subscribe((e) => {
     if (e.type === 'openPage') { setPageSlug(e.slug); setTab('page'); }
     if (e.type === 'setTab') setTab(e.tab);
@@ -60,7 +78,12 @@ export function SidePanel() {
             tabIndex={tab === t ? 0 : -1}
             role="tab"
             onClick={() => setTab(t)}
-          >{t}</button>
+          >
+            {t}
+            {t === 'library' && dueCount > 0 && (
+              <span className="tab-due-badge" aria-label={`${dueCount} pages due for review`}>{dueCount}</span>
+            )}
+          </button>
         ))}
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage" />

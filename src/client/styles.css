@@ -1870,3 +1870,17 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 .review-when { font-size: 0.8rem; color: var(--warn); white-space: nowrap; }
 .review-when--slipped { color: var(--bad); font-weight: 600; }
+
+/* Due-count badge on the Library tab — the review reminder that follows you to every tab. */
+.tab-due-badge {
+  display: inline-block;
+  margin-left: 0.45em;
+  padding: 0 0.45em;
+  border-radius: 999px;
+  background: var(--warn);
+  color: var(--bg-panel);
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
