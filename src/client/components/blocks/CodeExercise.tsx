@@ -211,10 +211,14 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     // revealedExpected rides on the result so server/grading.ts can apply the reveal ceiling. A ref,
     // not state: it must not re-render the editor mid-run, and `finish` must read the value at call
     // time rather than close over a stale one.
+    // failingTests only travels when there IS a diagnosis — an empty list would just be the
+    // pass count restated, and existing consumers pin the result shape for clean runs.
+    const { failingTests, ...rest } = extra;
     addResult({
       completed, rungReached, testsPassed, testsTotal, wroteCode,
       ...(revealedRef.current ? { revealedExpected: true } : {}),
-      ...extra,
+      ...(failingTests && failingTests.length > 0 ? { failingTests } : {}),
+      ...rest,
     });
   }, [addResult]);
 
