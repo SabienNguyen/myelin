@@ -1826,3 +1826,17 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 .rubric-upfront-title { margin: 0 0 0.2rem; font-weight: 600; font-size: 0.8rem; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-muted); }
 .rubric-upfront ul { margin: 0; padding-left: 1.1rem; }
+
+/* ── Page tab vault index (empty state) ─────────────────────────────────── */
+.page-index ul { list-style: none; margin: 0.4rem 0 0; padding: 0; }
+.page-index li + li { margin-top: 0.3rem; }
+.page-index button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.45rem 0.7rem;
+}
+/* Same 10px swatch as the graph legend — it is the same mastery scale, read in a list. */
+.page-index .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }

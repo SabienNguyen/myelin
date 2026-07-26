@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { getPage } from '../lib/api.js';
+import { getGraph, getPage } from '../lib/api.js';
 import { WikiLink } from './MarkdownText.js';
 import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
 import { DECAY } from '../../shared/loreweaver.js';
@@ -137,6 +137,44 @@ function EdgeList({
   );
 }
 
+/**
+ * What the Page tab shows before any page is open. "Click a wiki-link or graph node" was a dead
+ * end — it named two things that live on OTHER tabs, so the tab's own empty state was the one
+ * place in the app you could not get to a page from. The vault is already one cheap fetch
+ * (/api/graph, the same call GraphPanel makes), so list it: every page, its mastery dot, one click
+ * to open.
+ */
+function VaultIndex() {
+  const [nodes, setNodes] = useState<any[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    getGraph()
+      .then((g) => setNodes(g.nodes ?? []))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+  }, []);
+  if (error) return <p className="panel-error" role="status">{error}</p>;
+  if (!nodes) return <p className="empty">Loading…</p>;
+  if (nodes.length === 0) {
+    return <p className="empty">Nothing in the vault yet — add a book, or ask the tutor about a topic and let it research.</p>;
+  }
+  const sorted = [...nodes].sort((a, b) => String(a.title ?? a.slug).localeCompare(String(b.title ?? b.slug)));
+  return (
+    <nav className="page-index" aria-label="All pages">
+      <p className="empty">No page open yet — everything in your vault:</p>
+      <ul>
+        {sorted.map((n) => (
+          <li key={n.slug}>
+            <button type="button" onClick={() => panelBus.openPage(n.slug)}>
+              <i className="dot" style={{ background: `var(--mastery-${n.mastery?.effective ?? 'unseen'}, var(--mastery-unseen))` }} aria-hidden="true" />
+              {n.title ?? n.slug}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
 export function PagePanel({ slug }: { slug: string | null }) {
   const [page, setPage] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
@@ -151,7 +189,7 @@ export function PagePanel({ slug }: { slug: string | null }) {
       .then(setPage)
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, [slug]);
-  if (!slug) return <p className="empty">Click a wiki-link or graph node.</p>;
+  if (!slug) return <VaultIndex />;
   // getPage names the slug in the message itself, so no prefix here — see PathsSection.
   if (error) return <p className="panel-error" role="status">{error}</p>;
   if (!page) return <p className="empty">Loading…</p>;
