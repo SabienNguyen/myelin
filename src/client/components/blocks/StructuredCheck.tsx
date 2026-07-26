@@ -74,7 +74,11 @@ export function StructuredCheck({ args, result, addResult }: {
     const g = result.grading;
     return (
       <div className="block structured-check done">
-        <span className="graded-tag">graded</span>
+        {/* 'graded' only when grading has actually arrived. With several blocks in one turn, the
+            harness grades on the resubmit that fires after ALL of them are answered — until then
+            this card is submitted-not-graded, and the tag saying otherwise was a lie a screenshot
+            caught. */}
+        <span className="graded-tag">{g ? 'graded' : 'submitted'}</span>
         <div className="structured-prompt"><BlockProse text={args.prompt} /></div>
         <p className="structured-answer">
           You: {result.values.length === 0 ? '(blank)'

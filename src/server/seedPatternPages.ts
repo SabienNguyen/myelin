@@ -68,8 +68,9 @@ export async function seedPatternPages(lw: Loreweaver, cfg: HarnessConfig): Prom
     slug: ex.pattern,
     title: ex.title,
     domain: 'programming',
+    // No `# title` heading: the Page panel renders the title itself, and the audit screenshot
+    // showed the seeded h1 doubling it immediately below.
     body: [
-      `# ${ex.title}`, '',
       'Stub page, seeded at boot for a generated coding exercise (reviewed and approved). '
         + 'Practice it with a real code exercise — ask the tutor.', '',
       ex.statement,

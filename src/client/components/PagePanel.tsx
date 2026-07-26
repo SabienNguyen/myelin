@@ -162,6 +162,18 @@ export function PagePanel({ slug }: { slug: string | null }) {
   const warnings: string[] = page.page.warnings ?? [];
   const standing = page.standing ?? null;
   const decayIn = standing ? daysUntilDecay(standing.effective, standing.lastReinforced, (standing as any).restsOnRubric) : null;
+  // The applied-route hint must not depend on HAVING a standing: a page never attempted is
+  // exactly where "how would I confirm this" matters most, and the audit found the hint silently
+  // absent there because it only rendered inside the standing section.
+  const routeHint = page.routes?.length > 0 && (!standing || standing.applied === 0)
+    ? (
+      <p className="page-standing-route">
+        {page.noLadder
+          ? 'No coding exercise has been written for this page yet — until one exists, ask your tutor for '
+          : 'To confirm it, ask your tutor for '}
+        <strong>{page.routes[0].ask}</strong> — {page.routes[0].why}.
+      </p>
+    ) : null;
   const groups = GROUPS
     .map((g) => ({ g, edges: (edges[g.dir] ?? []).filter((e: any) => e.type === g.type) }))
     .filter(({ edges: es }) => es.length > 0);
@@ -197,14 +209,7 @@ export function PagePanel({ slug }: { slug: string | null }) {
           {/* Backlog item 3: when nothing applied has confirmed the page, NAME the route that
               could — "you have not done the exercise" and "no exercise exists" must stop sharing
               one ambiguous sentence. Routes are derived server-side from what exists. */}
-          {standing.applied === 0 && page.routes?.length > 0 && (
-            <p className="page-standing-route">
-              {page.noLadder
-                ? 'No coding exercise has been written for this page yet — until one exists, ask your tutor for '
-                : 'To confirm it, ask your tutor for '}
-              <strong>{page.routes[0].ask}</strong> — {page.routes[0].why}.
-            </p>
-          )}
+          {routeHint}
           {decayIn != null && (
             <p className="page-standing-decay">
               {decayIn === 0
@@ -217,6 +222,16 @@ export function PagePanel({ slug }: { slug: string | null }) {
               {standing.misconceptions.map((m: string, i: number) => <li key={i}>{m}</li>)}
             </ul>
           )}
+        </section>
+      )}
+      {/* A page with NO standing at all still gets the route hint, in its own small section — a
+          learner who has never attempted a page is the one who most needs to know how it could be
+          confirmed. */}
+      {!standing && routeHint && (
+        <section className="page-standing">
+          <h3>Your standing</h3>
+          <p className="page-standing-why">Nothing recorded yet.</p>
+          {routeHint}
         </section>
       )}
 
