@@ -35,8 +35,12 @@ export interface ExecCase {
 export interface Runtime {
   /** The id an exercise names, e.g. 'python3'. */
   id: string;
-  /** argv[0] plus fixed flags; the program file path is appended. Local runtimes only. */
+  /** argv[0] plus fixed flags; the program file path is appended. Local interpreted runtimes. */
   command?: string[];
+  /** Compiled runtimes: run ONCE per suite with $SRC/$OUT substituted; the produced binary then
+   *  runs per case. Compiler stderr becomes the run's syntaxError — a C learner's compile error
+   *  belongs in the same slot a JS learner's syntax error uses. */
+  compileArgv?: string[];
   /** Container runtimes only: the image the program runs in, and the in-container command the
    *  program file path is appended to. The image is NEVER pulled implicitly — a missing image is
    *  reported with the exact `docker pull` to run, because a grading request that silently starts
@@ -53,9 +57,17 @@ export interface Runtime {
 // inside the packaged app where no system node is installed.
 const RUNTIMES: Runtime[] = [
   { id: 'node', command: [process.execPath], file: 'main.js', comment: '//' },
+  // TypeScript through node's own type stripping — no tsc, no install, works wherever node (i.e.
+  // this app) runs. Erasable syntax only: enums and namespaces are out, which for judge-sized
+  // programs is the right trade against dragging a compiler along.
+  { id: 'typescript', command: [process.execPath, '--experimental-strip-types'], file: 'main.ts', comment: '//' },
   { id: 'python3', command: ['python3'], file: 'main.py', comment: '#' },
   { id: 'bash', command: ['bash'], file: 'main.sh', comment: '#' },
   { id: 'ruby', command: ['ruby'], file: 'main.rb', comment: '#' },
+  // Compiled local runtimes: one compile per suite, then the binary per case. cc is the portable
+  // C compiler name on Linux and macOS alike; rustc alone (no cargo) handles a single file fine.
+  { id: 'c', compileArgv: ['cc', '$SRC', '-O2', '-o', '$OUT'], file: 'main.c', comment: '//' },
+  { id: 'rust', compileArgv: ['rustc', '$SRC', '-O', '-o', '$OUT'], file: 'main.rs', comment: '//' },
   // The container tier: languages the machine itself need not have. `go run` compiles per case;
   // `java Main.java` is the single-file source launcher (Java 11+). Both are one-file judge runs —
   // multi-file projects and services stay out of scope, containers or not.
@@ -75,9 +87,9 @@ export interface RuntimeStatus {
 const statusCache = new Map<string, RuntimeStatus>();
 
 /** Probe one command; true iff it spawns and exits 0. */
-function probeOk(cmd: string, args: string[]): Promise<boolean> {
+function probeOk(cmd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<boolean> {
   return new Promise((resolve) => {
-    const probe = spawn(cmd, args, { stdio: 'ignore' });
+    const probe = spawn(cmd, args, { stdio: 'ignore', env: env ? { ...process.env, ...env } : process.env });
     probe.on('error', () => resolve(false));
     probe.on('close', (code) => resolve(code === 0));
   });
@@ -98,7 +110,17 @@ export async function runtimeStatus(id: string): Promise<RuntimeStatus> {
 
   let status: RuntimeStatus;
   let cacheable = true;
-  if (!isContainerRuntime(rt)) {
+  if (id === 'typescript') {
+    // The strip-types flag exists on the bundled node or it does not — probe THAT, under
+    // ELECTRON_RUN_AS_NODE so the packaged app's binary answers as node, not as a window.
+    const ok = await probeOk(process.execPath, ['--experimental-strip-types', '--version'], { ELECTRON_RUN_AS_NODE: '1' });
+    status = ok ? { id, available: true }
+      : { id, available: false, reason: 'this build of the app bundles a node too old for TypeScript type stripping' };
+  } else if (rt.compileArgv) {
+    const ok = await probeOk(rt.compileArgv[0], ['--version']);
+    status = ok ? { id, available: true }
+      : { id, available: false, reason: `${rt.compileArgv[0]} (the ${id} compiler) is not installed on this machine` };
+  } else if (!isContainerRuntime(rt)) {
     const ok = await probeOk(rt.command![0], ['--version']);
     status = ok ? { id, available: true }
       : { id, available: false, reason: `${id} is not installed on this machine` };
@@ -167,11 +189,28 @@ const MAX_OUTPUT_BYTES = 256 * 1024;
 
 interface ProgramRun { stdout: string; exitCode: number | null; killed: boolean; spawnError?: string }
 
-/** The full argv for one case run, local or containerized. */
+/** The full argv for one case run, local, compiled or containerized. */
 function argvFor(rt: Runtime, dir: string, args: string[]): string[] {
-  return isContainerRuntime(rt)
-    ? ['docker', ...dockerArgs(rt, dir, args)]
-    : [...rt.command!, join(dir, rt.file), ...args];
+  if (isContainerRuntime(rt)) return ['docker', ...dockerArgs(rt, dir, args)];
+  if (rt.compileArgv) return [join(dir, 'prog'), ...args];
+  return [...rt.command!, join(dir, rt.file), ...args];
+}
+
+/** Compile once per suite for compiled runtimes. Returns null on success, else the compiler's
+ *  complaint — which the caller puts in syntaxError, the same slot every other family uses. */
+function compileOnce(rt: Runtime, dir: string): Promise<string | null> {
+  const argv = rt.compileArgv!.map((a) => (a === '$SRC' ? join(dir, rt.file) : a === '$OUT' ? join(dir, 'prog') : a));
+  return new Promise((resolve) => {
+    const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    let settled = false;
+    const finish = (v: string | null) => { if (!settled) { settled = true; clearTimeout(killer); resolve(v); } };
+    // Compiles get the container-sized clock: rustc on a cold cache is legitimately slow.
+    const killer = setTimeout(() => { child.kill('SIGKILL'); finish('the compile step ran past 30s and was stopped'); }, CONTAINER_KILL_AFTER_MS);
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', (e) => finish(`could not start ${argv[0]}: ${e.message}`));
+    child.on('close', (code) => finish(code === 0 ? null : (stderr.trim().slice(0, 1500) || `compiler exited with code ${code}`)));
+  });
 }
 
 const killAfterFor = (rt: Runtime) => (isContainerRuntime(rt) ? CONTAINER_KILL_AFTER_MS : KILL_AFTER_MS);
@@ -183,7 +222,10 @@ function runOnce(rt: Runtime, dir: string, args: string[], stdin: string): Promi
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,
-        ...(rt.id === 'node' ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+        // Anything that spawns THIS binary must say run-as-node, or the packaged app opens a
+        // second window instead of running the program. Keyed on the argv, not the runtime id —
+        // the audit caught 'typescript' (also execPath) silently missing from an id check.
+        ...(argv[0] === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
       },
     });
     let stdout = '';
@@ -226,6 +268,10 @@ export async function runProgram(runtimeId: string, code: string, cases: ExecCas
   const dir = mkdtempSync(join(tmpdir(), 'lwh-exec-'));
   writeFileSync(join(dir, rt.file), code);
   try {
+    if (rt.compileArgv) {
+      const compileError = await compileOnce(rt, dir);
+      if (compileError) return { pass: false, results: [], syntaxError: compileError };
+    }
     const results: RunnerResult['results'] = [];
     const fired: string[] = [];
     for (const c of cases) {
@@ -265,6 +311,10 @@ export async function scratchProgram(runtimeId: string, code: string, stdin: str
   const dir = mkdtempSync(join(tmpdir(), 'lwh-exec-'));
   writeFileSync(join(dir, rt.file), code);
   try {
+    if (rt.compileArgv) {
+      const compileError = await compileOnce(rt, dir);
+      if (compileError) return { pass: false, results: [], scratch: true, runtimeError: compileError };
+    }
     const run = await runOnce(rt, dir, [], stdin);
     if (run.spawnError) {
       return { pass: false, results: [], scratch: true, runtimeError: `could not start ${rt.id}: ${run.spawnError}` };

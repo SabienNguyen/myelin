@@ -395,10 +395,10 @@ export function createTutorSession(
               description: z.string().describe('what the exercise should teach, 1-3 sentences'),
               family: z.enum(['function', 'manifest', 'exec', 'stream']).optional()
                 .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); exec for whole programs in a chosen language; stream only for byte-stream parsing'),
-              runtime: z.enum(['python3', 'bash', 'ruby', 'node', 'go', 'java']).optional()
-                .describe('exec family only: which runtime the program targets. python3/bash/ruby must be installed locally (node always is); go and java run in Docker containers and need Docker running with the image pulled. Generation fails loudly with the exact fix when something is missing.'),
+              runtime: z.enum(['python3', 'bash', 'ruby', 'node', 'typescript', 'c', 'rust', 'go', 'java']).optional()
+                .describe('exec family only: which runtime the program targets. node and typescript always work (the app itself runs them); python3/bash/ruby need a local install; c needs cc, rust needs rustc; go and java run in Docker containers and need Docker running with the image pulled. Generation fails loudly with the exact fix when something is missing.'),
             }),
-            execute: async ({ pattern, description, family, runtime }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' | 'go' | 'java' }) => {
+            execute: async ({ pattern, description, family, runtime }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' | 'typescript' | 'c' | 'rust' | 'go' | 'java' }) => {
               const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
               if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
                 return { error: `an exercise for "${slug}" already exists` };

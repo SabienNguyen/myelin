@@ -234,3 +234,53 @@ describe('container runtimes', () => {
     expect(runtimeFor('java')?.file).toBe('Main.java'); // the single-file source launcher cares
   });
 });
+
+// ── typescript, c, rust: the local compile tier ─────────────────────────────────────────────────
+
+describe('typescript runtime (node type stripping)', () => {
+  it('runs an annotated TS program against the same judge', async () => {
+    const ts = `const lines: string[] = require('node:fs').readFileSync(0, 'utf8').trim().split('\\n');
+const total: number = lines.map(Number).reduce((a: number, b: number) => a + b, 0);
+console.log(total);`;
+    const out = await runProgram('typescript', ts, CASES);
+    expect(out.pass).toBe(true);
+  });
+});
+
+describe('c runtime (when cc is installed)', () => {
+  it('compiles once and passes the suite', async () => {
+    if (!(await runtimeAvailable('c'))) return;
+    const cSrc = `#include <stdio.h>
+int main(void) {
+  long total = 0, n;
+  while (scanf("%ld", &n) == 1) total += n;
+  printf("%ld\\n", total);
+  return 0;
+}`;
+    const out = await runProgram('c', cSrc, CASES);
+    expect(out.pass).toBe(true);
+  });
+
+  it('a compile error lands in syntaxError with the compiler message', async () => {
+    if (!(await runtimeAvailable('c'))) return;
+    const out = await runProgram('c', 'int main(void) { this does not compile }', CASES.slice(0, 1));
+    expect(out.pass).toBe(false);
+    expect(out.syntaxError).toBeDefined();
+    expect(out.results).toHaveLength(0); // nothing ran — there was no binary to run
+  });
+});
+
+describe('rust runtime (when rustc is installed)', () => {
+  it('compiles once and passes the suite', async () => {
+    if (!(await runtimeAvailable('rust'))) return;
+    const rs = `use std::io::Read;
+fn main() {
+    let mut s = String::new();
+    std::io::stdin().read_to_string(&mut s).unwrap();
+    let total: i64 = s.split_whitespace().map(|w| w.parse::<i64>().unwrap()).sum();
+    println!("{}", total);
+}`;
+    const out = await runProgram('rust', rs, CASES);
+    expect(out.pass).toBe(true);
+  }, 60_000);
+});
