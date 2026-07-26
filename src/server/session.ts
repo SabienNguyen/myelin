@@ -382,6 +382,10 @@ export function createTutorSession(
               + 'Family "manifest": the student writes a YAML manifest from an exam-style task '
               + '(Kubernetes/CKA prep, CI configs, any YAML-configured system), graded by '
               + 'mechanical assertions over the parsed document. '
+              + 'Family "exec": the student writes a WHOLE PROGRAM in a named runtime (python3, '
+              + 'bash, ruby, or node), judged per test case on stdin/argv in and exact stdout out — '
+              + 'use it for algorithm practice, CLI tools, text processing, and any language the '
+              + 'student wants that their machine has. '
               + 'Family "stream": async-generator-over-byte-chunks (SSE, NDJSON, line protocols, '
               + 'framing). The result is verified mechanically and stored PENDING REVIEW — tell the '
               + 'student it is waiting in the Library\'s Practice section for their approval, and do '
@@ -389,10 +393,12 @@ export function createTutorSession(
             inputSchema: z.object({
               pattern: z.string().describe('kebab-case pattern id, e.g. dilution-calculator'),
               description: z.string().describe('what the exercise should teach, 1-3 sentences'),
-              family: z.enum(['function', 'manifest', 'stream']).optional()
-                .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); stream only for byte-stream parsing'),
+              family: z.enum(['function', 'manifest', 'exec', 'stream']).optional()
+                .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); exec for whole programs in a chosen language; stream only for byte-stream parsing'),
+              runtime: z.enum(['python3', 'bash', 'ruby', 'node']).optional()
+                .describe('exec family only: which runtime the program targets. Must be installed on the student\'s machine (node always is); generation fails loudly if absent.'),
             }),
-            execute: async ({ pattern, description, family }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'stream' }) => {
+            execute: async ({ pattern, description, family, runtime }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' }) => {
               const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
               if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
                 return { error: `an exercise for "${slug}" already exists` };
@@ -400,7 +406,7 @@ export function createTutorSession(
               try {
                 const ex = await generateExercise(cfg.vault, slug, description, {
                   generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
-                }, family ?? 'function');
+                }, family ?? 'function', runtime);
                 return {
                   pattern: ex.pattern, status: ex.status,
                   gates: ex.verification.gates.map((g) => `${g.ok ? 'PASS' : 'FAIL'} ${g.gate}`),

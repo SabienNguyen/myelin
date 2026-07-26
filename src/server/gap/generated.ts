@@ -21,14 +21,15 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runProgram, runtimeAvailable, runtimeFor, type ExecCase } from './exec.js';
 import { gradeManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
 import { scaffoldFor, type SuiteCase } from './streamConsumer.js';
 
-export type GeneratedFamily = 'stream' | 'function' | 'manifest';
+export type GeneratedFamily = 'stream' | 'function' | 'manifest' | 'exec';
 
 export interface StreamGeneratedCase { name: string; inputText: string; expect: string[] }
-export type GeneratedCase = StreamGeneratedCase | FnCase | ManifestAssertion;
+export type GeneratedCase = StreamGeneratedCase | FnCase | ManifestAssertion | ExecCase;
 
 export interface GeneratedExercise {
   pattern: string;
@@ -36,6 +37,8 @@ export interface GeneratedExercise {
   /** Absent in files stored before the function family existed — read through familyOf(), which
    *  defaults it to 'stream', so no stored exercise needs migrating. */
   family?: GeneratedFamily;
+  /** exec family only: which runtime runs the program ('node' | 'python3' | 'bash' | 'ruby'). */
+  runtime?: string;
   entryPoint: string;
   /** The problem statement, emitted as comment lines above the scaffold. */
   statement: string;
@@ -66,17 +69,25 @@ export function toSuiteCases(cases: StreamGeneratedCase[]): SuiteCase[] {
   });
 }
 
-// Comment syntax follows the language the learner writes in: JS families get //, manifests get #.
-const statementComment = (statement: string, family: GeneratedFamily) =>
-  statement.split('\n').map((l) => `${family === 'manifest' ? '#' : '//'} ${l}`.trimEnd()).join('\n');
-
-export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'entryPoint' | 'family'>) {
+// Comment syntax follows the language the learner writes in: JS families get //, manifests get #,
+// exec follows its runtime's own comment prefix.
+function commentPrefix(ex: Pick<GeneratedExercise, 'family' | 'runtime'>): string {
   const family = familyOf(ex);
-  const visible_pre = statementComment(ex.statement, family);
+  if (family === 'manifest') return '#';
+  if (family === 'exec') return runtimeFor(ex.runtime ?? 'node')?.comment ?? '#';
+  return '//';
+}
+
+export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'entryPoint' | 'family' | 'runtime'>) {
+  const family = familyOf(ex);
+  const prefix = commentPrefix(ex);
+  const visible_pre = ex.statement.split('\n').map((l) => `${prefix} ${l}`.trimEnd()).join('\n');
   const visible_post = '';
   const scaffold = family === 'manifest'
     ? `${visible_pre}\n# YOUR TURN — write the manifest below.\n`
-    : scaffoldFor(visible_pre, visible_post);
+    : family === 'exec'
+      ? `${visible_pre}\n${prefix} YOUR TURN — write the whole program below.\n`
+      : scaffoldFor(visible_pre, visible_post);
   return { visible_pre, visible_post, scaffold };
 }
 
@@ -87,7 +98,7 @@ export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'en
  * an unverified exercise is never surfaced.
  */
 export async function verifyExercise(
-  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases' | 'family'>,
+  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases' | 'family' | 'runtime'>,
 ): Promise<VerificationReport> {
   const gates: VerificationReport['gates'] = [];
   const family = familyOf(ex);
@@ -101,6 +112,7 @@ export async function verifyExercise(
 
   const run = (code: string) => {
     if (family === 'manifest') return Promise.resolve(gradeManifest(code, ex.cases as ManifestAssertion[]));
+    if (family === 'exec') return runProgram(ex.runtime ?? 'node', code, ex.cases as ExecCase[]);
     return family === 'function'
       ? runInChild({ kind: 'suite', family, code, entryPoint: ex.entryPoint, cases: ex.cases as FnCase[] })
       : runInChild({ kind: 'suite', code, entryPoint: ex.entryPoint, cases: toSuiteCases(ex.cases as StreamGeneratedCase[]) });
@@ -117,7 +129,9 @@ export async function verifyExercise(
   // the check that catches a vacuous suite before it can mint false mastery. Per family because
   // "do nothing" has a different spelling: yield nothing, return undefined, or an empty file (a
   // manifest suite of only `absent` assertions passes an empty file — exactly what this catches).
-  const vacuous = family === 'manifest' ? ''
+  // For exec the vacuous program is an empty file: it runs, exits 0, prints nothing — so a suite
+  // whose every case expects empty stdout is graded as vacuous, exactly right.
+  const vacuous = family === 'manifest' || family === 'exec' ? ''
     : family === 'function'
       ? `function ${ex.entryPoint}() {}`
       : `async function* ${ex.entryPoint}(chunks) { for await (const c of chunks) { /* consume */ } }`;
@@ -143,13 +157,14 @@ export async function verifyExercise(
   // check, and the gate passes vacuously for this family.
   const answersOf = (c: GeneratedCase): string[] => {
     if (family === 'manifest') return [];
+    if (family === 'exec') return [(c as ExecCase).expect];
     return family === 'function'
       ? [JSON.stringify((c as FnCase).expect) ?? '']
       : (c as StreamGeneratedCase).expect;
   };
-  // Function answers are often SHORT scalars — word-boundary matching at length > 1; streams keep
-  // the substring rule their tests pin.
-  const leaksIn = (name: string, answer: string): boolean => (family === 'function'
+  // Function and exec answers are often SHORT scalars ("10", "30") — word-boundary matching at
+  // length > 1; streams keep the substring rule their tests pin.
+  const leaksIn = (name: string, answer: string): boolean => (family === 'function' || family === 'exec'
     ? answer.length > 1 && new RegExp(`(^|[^\\w.])${answer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w.])`, 'i').test(name)
     : answer.length > 2 && name.toLowerCase().includes(answer.toLowerCase()));
   const leaks = ex.cases.filter((c) => answersOf(c).some((e) => leaksIn(c.name, e)));
@@ -225,6 +240,26 @@ Respond with ONLY valid JSON, no fences:
   "prose": {"context_line": <one line of framing>, "hint": <one nudge>, "success_line": <one line for after>}
 }`;
 
+// The generalist family: a whole program in a named runtime, judged on stdout. The prompt pins
+// the judge contract (stdin/args in, exact stdout out, deterministic) and leaves the subject and
+// language free.
+const EXEC_PROMPT = (pattern: string, description: string, runtime: string) => `Author a coding exercise for the pattern "${pattern}".
+${description ? `Context from the tutor: ${description}\n` : ''}
+The exercise family is: the learner writes a COMPLETE PROGRAM for the ${runtime} runtime. Each test
+case runs the program as its own process with a given stdin and argv, and compares stdout exactly
+(trailing whitespace ignored). The program must be deterministic — no randomness, no clock, no
+network, no files beyond stdin/stdout — and must exit 0 on success. Pick a task worth earning in
+the subject named by the pattern and context, sized for one file.
+
+Respond with ONLY valid JSON, no fences:
+{
+  "title": <short human title>,
+  "statement": <3-6 line problem statement: input format on stdin/argv, output format on stdout, edge rules>,
+  "reference": <the complete correct program as one string of ${runtime} source>,
+  "cases": [4-6 of {"name": <what requirement this checks — never containing the answer>, "stdin": <input text, "" if unused>, "args": [<argv strings>], "expect": <the exact stdout>}],
+  "prose": {"context_line": <one line of framing>, "hint": <one nudge>, "success_line": <one line for after>}
+}`;
+
 export interface GenerateDeps {
   /** Injectable model call, same seam as grading.ts's GradingDeps — testable with a stub. */
   generate: (prompt: string) => Promise<string>;
@@ -277,11 +312,19 @@ Respond with ONLY valid JSON, no fences:
  */
 export async function generateExercise(
   vault: string, pattern: string, description: string, deps: GenerateDeps,
-  family: GeneratedFamily = 'stream',
+  family: GeneratedFamily = 'stream', runtime?: string,
 ): Promise<GeneratedExercise> {
-  const prompt = family === 'manifest' ? MANIFEST_PROMPT(pattern, description)
-    : family === 'function' ? FUNCTION_PROMPT(pattern, description)
-      : STREAM_PROMPT(pattern, description);
+  if (family === 'exec') {
+    const rt = runtime ?? 'node';
+    if (!runtimeFor(rt)) throw new Error(`unknown runtime "${rt}"`);
+    // Degrade loudly at authoring time: an exercise for a runtime this machine lacks would pass
+    // no gate and confuse everyone downstream.
+    if (!(await runtimeAvailable(rt))) throw new Error(`${rt} is not installed on this machine`);
+  }
+  const prompt = family === 'exec' ? EXEC_PROMPT(pattern, description, runtime ?? 'node')
+    : family === 'manifest' ? MANIFEST_PROMPT(pattern, description)
+      : family === 'function' ? FUNCTION_PROMPT(pattern, description)
+        : STREAM_PROMPT(pattern, description);
   const raw = await deps.generate(prompt);
   let parsed: any;
   try {
@@ -297,6 +340,12 @@ export async function generateExercise(
         const op = ['eq', 'exists', 'absent', 'matches'].includes(c.op) ? c.op : 'eq';
         return { name: String(c.name ?? ''), path: String(c.path ?? ''), op, ...(c.value === undefined ? {} : { value: c.value }) };
       }
+      if (family === 'exec') {
+        return {
+          name: String(c.name ?? ''), stdin: String(c.stdin ?? ''),
+          args: Array.isArray(c.args) ? c.args.map(String) : [], expect: String(c.expect ?? ''),
+        };
+      }
       if (family === 'function') {
         return { name: String(c.name ?? ''), args: Array.isArray(c.args) ? c.args : [], expect: c.expect ?? null };
       }
@@ -310,7 +359,8 @@ export async function generateExercise(
     pattern,
     title: String(parsed.title ?? pattern),
     family,
-    entryPoint: String(parsed.entryPoint ?? 'parse'),
+    ...(family === 'exec' ? { runtime: runtime ?? 'node' } : {}),
+    entryPoint: String(parsed.entryPoint ?? (family === 'exec' ? 'main' : 'parse')),
     statement: String(parsed.statement ?? ''),
     reference: String(parsed.reference ?? ''),
     cases,

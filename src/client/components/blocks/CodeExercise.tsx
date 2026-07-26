@@ -374,7 +374,11 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
           {ladderFamily === 'manifest' && template === 'full_body'
             ? 'write the YAML manifest the task describes. checks run automatically as you type, '
               + 'or press run (ctrl/cmd+enter) any time — nothing is graded until you press submit.'
-            : TASK_BRIEF[template]}
+            : ladderFamily === 'exec' && template === 'full_body'
+              ? 'write the whole program — it is run once per test case with that case\'s stdin '
+                + 'and arguments. tests run automatically as you type, or press run (ctrl/cmd+enter) '
+                + 'any time — nothing is graded until you press submit.'
+              : TASK_BRIEF[template]}
         </p>
         {/* Fuller problem statement (statement + constraints + a spec example) for the rungs where
             the learner is actually writing code. worked_example is a read-only sibling walk, so a

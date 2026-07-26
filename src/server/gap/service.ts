@@ -19,6 +19,7 @@ import {
   setGeneratedStatus, toSuiteCases, type GeneratedExercise, type GeneratedFamily,
   type StreamGeneratedCase,
 } from './generated.js';
+import { availableRuntimes, runProgram, scratchProgram, type ExecCase } from './exec.js';
 import { gradeManifest, scratchManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
 import {
@@ -34,12 +35,14 @@ export type BuiltinExercise = {
   | { family: 'stream'; cases: SuiteCase[] }
   | { family: 'function'; cases: FnCase[] }
   | { family: 'manifest'; cases: ManifestAssertion[] }
+  | { family: 'exec'; cases: ExecCase[]; runtime: string }
 );
 
 /** One suite run, spelled per family so every call site dispatches identically. Manifests never
- *  touch the child: they are data, graded by parse-and-assert in this process (manifest.ts). */
-function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?: SuiteCase[] | FnCase[] | ManifestAssertion[]) {
+ *  touch the child (data, not code); exec spawns the named runtime per case (exec.ts). */
+function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?: SuiteCase[] | FnCase[] | ManifestAssertion[] | ExecCase[]) {
   if (ex.family === 'manifest') return Promise.resolve(gradeManifest(code, (cases ?? ex.cases) as ManifestAssertion[]));
+  if (ex.family === 'exec') return runProgram(ex.runtime, code, (cases ?? ex.cases) as ExecCase[]);
   return ex.family === 'function'
     ? runInChild({ kind: 'suite', family: 'function', code, entryPoint, cases: (cases ?? ex.cases) as FnCase[] })
     : runInChild({ kind: 'suite', code, entryPoint, cases: (cases ?? ex.cases) as SuiteCase[] });
@@ -78,8 +81,9 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
   const parts = generatedRungParts(g);
   const family: GeneratedFamily = familyOf(g);
   const cases = family === 'manifest' ? (g.cases as ManifestAssertion[])
-    : family === 'function' ? (g.cases as FnCase[])
-      : toSuiteCases(g.cases as StreamGeneratedCase[]);
+    : family === 'exec' ? (g.cases as ExecCase[])
+      : family === 'function' ? (g.cases as FnCase[])
+        : toSuiteCases(g.cases as StreamGeneratedCase[]);
   return {
     ladder: { pattern: g.pattern, targetArtifactId: g.pattern, siblingArtifactId: g.pattern, rungs: [`${g.pattern}:full_body`] },
     rungs: [{
@@ -88,8 +92,9 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
       artifactId: g.pattern,
       entryPoint: g.entryPoint,
       // Predictable cases: the first, same as the hand-built ladder — stream inputs are authored
-      // as text so they read cleanly; a function case reads as the call expression itself. A
-      // manifest has no output to predict (assertions are the whole grade), so no gate.
+      // as text so they read cleanly; a function case reads as the call expression itself; an
+      // exec case reads as its stdin. A manifest has no output to predict (assertions are the
+      // whole grade), so no gate.
       predictCases: family !== 'manifest' && cases.length ? [cases[0].name] : [],
       visible_pre: parts.visible_pre,
       visible_post: parts.visible_post,
@@ -98,6 +103,7 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
       scaffold: parts.scaffold,
     }],
     family,
+    ...(family === 'exec' ? { runtime: g.runtime ?? 'node' } : {}),
     cases,
     entryPoint: g.entryPoint,
   } as BuiltinExercise;
@@ -117,13 +123,19 @@ export function builtinLadderPayload(pattern = DEFAULT_PATTERN, vault?: string):
   const ex = lookupExercise(pattern, vault);
   if (!ex) throw new Error(`no built-in exercise for pattern "${pattern}"`);
   const preview = (name: string) => {
-    const c = (ex.cases as (SuiteCase | FnCase)[]).find((k) => k.name === name);
+    const c = (ex.cases as (SuiteCase | FnCase | ExecCase)[]).find((k) => k.name === name);
     if (!c) return null;
     // Stream: the case's bytes as readable text (predictCases are restricted to cases where this
-    // is clean). Function: the call expression — args ARE the input.
+    // is clean). Function: the call expression — args ARE the input. Exec: the program's stdin
+    // and argv, spelled the way a shell user reads them.
     const inputPreview = ex.family === 'function'
       ? callPreview(ex.entryPoint, c as FnCase)
-      : new TextDecoder().decode(Uint8Array.from((c as SuiteCase).chunks.flat()));
+      : ex.family === 'exec'
+        ? [
+          (c as ExecCase).args?.length ? `argv: ${(c as ExecCase).args!.join(' ')}` : null,
+          `stdin:\n${(c as ExecCase).stdin || '(empty)'}`,
+        ].filter(Boolean).join('\n')
+        : new TextDecoder().decode(Uint8Array.from((c as SuiteCase).chunks.flat()));
     return { caseName: name, inputPreview };
   };
   return {
@@ -184,7 +196,7 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
   /** The review gate's surface: everything generated, gates and status visible. */
   app.get('/api/gap/generated', (c) => c.json({
     exercises: listGenerated(vault ?? '').map((e) => ({
-      pattern: e.pattern, title: e.title, family: familyOf(e), status: e.status,
+      pattern: e.pattern, title: e.title, family: familyOf(e), runtime: e.runtime, status: e.status,
       verification: e.verification, generatedAt: e.generatedAt, generatedBy: e.generatedBy,
       cases: e.cases.length,
     })),
@@ -215,17 +227,22 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
       return c.json({ error: `an exercise for "${pattern}" already exists` }, 409);
     }
     const family: GeneratedFamily = body?.family === 'function' ? 'function'
-      : body?.family === 'manifest' ? 'manifest' : 'stream';
+      : body?.family === 'manifest' ? 'manifest'
+        : body?.family === 'exec' ? 'exec' : 'stream';
     try {
       const ex = await generateExercise(vault, pattern, String(body?.description ?? ''), {
         generate: opts.generate, modelName: opts.modelName,
-      }, family);
+      }, family, typeof body?.runtime === 'string' ? body.runtime : undefined);
       console.log(`[gap] generated "${pattern}" -> ${ex.status} (${ex.verification.gates.filter((g) => !g.ok).length} failed gates)`);
       return c.json(ex, ex.status === 'rejected' ? 422 : 200);
     } catch (e: any) {
       return c.json({ error: e?.message ?? String(e) }, 500);
     }
   });
+
+  /** Which runtimes the exec family can serve on THIS machine — what a tutor (or the UI) should
+   *  consult before offering "practice this in Python". node is always present (it is the app). */
+  app.get('/api/gap/environments', async (c) => c.json({ runtimes: await availableRuntimes() }));
 
   /**
    * Predict-the-output, graded server-side — comprehension before production.
@@ -244,7 +261,7 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     const ex = exerciseForRung(body?.rungId, vault);
     const rung = ex?.rungs.find((r) => r.id === body?.rungId);
     if (!ex || !rung) return c.json({ error: `no rung "${body?.rungId}"` }, 404);
-    const suiteCase = (ex.cases as (SuiteCase | FnCase)[]).find((k) => k.name === body?.caseName && rung.predictCases.includes(k.name));
+    const suiteCase = (ex.cases as (SuiteCase | FnCase | ExecCase)[]).find((k) => k.name === body?.caseName && rung.predictCases.includes(k.name));
     if (!suiteCase) return c.json({ error: `no predictable case "${body?.caseName}" on this rung` }, 404);
     if (!Array.isArray(body.prediction)) return c.json({ error: 'prediction must be an array of strings' }, 400);
 
@@ -267,6 +284,13 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
       try { predictedVal = JSON.parse(typed); } catch { /* a bare string is a fine way to say a string */ }
       pass = JSON.stringify(predictedVal) === JSON.stringify(expectVal);
       actual = [JSON.stringify(expectVal)];
+    } else if (ex.family === 'exec') {
+      // The prediction is the program's stdout: compare the typed lines against the expected
+      // output line-by-line, whitespace-trimmed — the same normalization the judge itself applies.
+      const expected = (suiteCase as ExecCase).expect.replace(/\r\n/g, '\n').trimEnd();
+      const typed = body.prediction.map((p: unknown) => String(p).trimEnd()).join('\n').trimEnd();
+      pass = typed === expected;
+      actual = expected.split('\n');
     } else {
       actual = (suiteCase as SuiteCase).expect;
       const predicted = body.prediction.map((p: unknown) => String(p).trim()).filter((p: string) => p !== '');
@@ -295,8 +319,9 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     if (typeof body.input === 'string') {
       console.log(`[gap] scratch rung=${body.rungId} inputBytes=${body.input.length}`);
       // Manifest scratch ignores `input`: the interesting question is "what does MY YAML parse
-      // to", and the YAML is the code itself.
+      // to", and the YAML is the code itself. Exec scratch feeds the input as the program's stdin.
       if (ex.family === 'manifest') return c.json(scratchManifest(body.code));
+      if (ex.family === 'exec') return c.json(await scratchProgram(ex.runtime, body.code, body.input));
       return c.json(await runInChild(ex.family === 'function'
         ? { kind: 'scratch', family: 'function', code: body.code, entryPoint: ex.entryPoint, input: body.input }
         : { kind: 'scratch', code: body.code, entryPoint: ex.entryPoint, input: body.input }));

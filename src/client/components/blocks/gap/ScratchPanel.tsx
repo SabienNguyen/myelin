@@ -27,7 +27,9 @@ export function ScratchPanel({ rungId, code, family }: ScratchPanelProps) {
   // server's scratch run answers "what does my YAML parse to". The box is hidden; `input` still
   // posts (empty) because the route dispatches scratch-vs-suite on the field's presence.
   const isManifest = family === 'manifest';
-  const [input, setInput] = useState(isFn || isManifest ? '' : 'data: alpha\ndata: beta\ndata: [DONE]\n');
+  // Exec programs read the box as their stdin, verbatim.
+  const isExec = family === 'exec';
+  const [input, setInput] = useState(isFn || isManifest || isExec ? '' : 'data: alpha\ndata: beta\ndata: [DONE]\n');
   const [out, setOut] = useState<string | null>(null);
   const [chunks, setChunks] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,9 @@ export function ScratchPanel({ rungId, code, family }: ScratchPanelProps) {
       </p>
       {!isManifest && (
         <>
-          <label className="scratch-label" htmlFor="scratch-input">{isFn ? 'arguments (a JSON array)' : 'input'}</label>
+          <label className="scratch-label" htmlFor="scratch-input">
+            {isFn ? 'arguments (a JSON array)' : isExec ? 'stdin' : 'input'}
+          </label>
           <textarea
             id="scratch-input"
             className="scratch-input"
@@ -71,7 +75,7 @@ export function ScratchPanel({ rungId, code, family }: ScratchPanelProps) {
             spellCheck={false}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isFn ? '[2, 1, 30]' : undefined}
+            placeholder={isFn ? '[2, 1, 30]' : isExec ? 'what the program reads from stdin' : undefined}
           />
         </>
       )}
