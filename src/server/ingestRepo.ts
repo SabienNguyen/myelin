@@ -473,7 +473,11 @@ export function ingestRepo(
       // queue. Before the built-in pass existed, a shipped app hit this branch and the whole
       // ingest ended in "mining failed: miner CLI failed", docs pass and all.
       const useExternal = deps.miner !== undefined || existsSync(THE_GAP_ROOT);
-      if (!useExternal) {
+
+      // The built-in pass, shared by both the no-external-checkout case AND the external-miner-
+      // failed fallback below. `notePrefix` carries the fallback's honesty: when the external CLI
+      // died, the ledger says so even though the ingest went on to succeed.
+      const runBuiltinPass = async (notePrefix = '') => {
         await setPhase('authoring exercises from the code…');
         try {
           const mined = await (deps.builtinMiner
@@ -483,12 +487,16 @@ export function ingestRepo(
           const summary = mined.pending.length > 0
             ? `${mined.pending.length} exercise(s) waiting for your approval in the Library`
             : `no exercises authored (${mined.qualified}/${mined.candidates} candidate functions qualified)`;
-          await finish('done', `docs: ${queuedChapters} queued — ${summary}${mined.rejected.length ? ` — ${mined.rejected.length} rejected by the gates` : ''}`);
+          await finish('done', `${notePrefix}docs: ${queuedChapters} queued — ${summary}${mined.rejected.length ? ` — ${mined.rejected.length} rejected by the gates` : ''}`);
         } catch (e: any) {
           const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
           // The docs pass already succeeded; say so rather than branding the whole ingest failed.
-          await finish('done', `docs: ${queuedChapters} queued — exercise authoring failed: ${msg}`);
+          await finish('done', `${notePrefix}docs: ${queuedChapters} queued — exercise authoring failed: ${msg}`);
         }
+      };
+
+      if (!useExternal) {
+        await runBuiltinPass();
         return;
       }
 
@@ -499,8 +507,12 @@ export function ingestRepo(
       try {
         report = await (deps.miner ?? defaultRunMiner)(repoPath, mineOutDir);
       } catch (e: any) {
-        const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-        await finish('error', `mining failed: ${msg}`, msg);
+        const msg = (e instanceof Error ? e.message : String(e)).slice(0, 200);
+        // A the-gap checkout EXISTS but its toolchain is broken (no npm on PATH is the packaged
+        // app's normal state) — the exact 'mining failed: spawn npm ENOENT' dead end a user asked
+        // about twice. The external miner being broken is not a reason to mine nothing: fall back
+        // to the built-in pass, with the external failure named in the ledger row.
+        await runBuiltinPass(`external miner failed (${msg}) — used the built-in pass. `);
         return;
       }
       await setPhase(`mined ${report.passed.length}/${report.candidates} passed`);

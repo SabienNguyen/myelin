@@ -273,22 +273,31 @@ describe('ingestRepo orchestration (local path source)', () => {
     expect(docEntries).toHaveLength(0); // zero markdown files is fine, not an error
   });
 
-  it('a miner failure sets status error with a stderr-tail message, never touches the sidecar', async () => {
+  it('an external miner failure FALLS BACK to the built-in pass, naming the failure, never touching the sidecar', async () => {
+    // The 'mining failed: spawn npm ENOENT' dead end: a the-gap checkout exists but its toolchain
+    // is broken (the packaged app's normal state). The ingest must still mine — via the built-in
+    // pass — and the ledger must still say the external CLI died.
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
     const repo = repoFixture();
     const cfg = cfgFor(vault);
     let restarted = false;
+    let builtinRan = false;
 
     const result = ingestRepo(fakeLw(), cfg, repo, {
       miner: async () => { throw new Error('miner exploded: no module foo'); },
+      builtinMiner: async () => {
+        builtinRan = true;
+        return { candidates: 2, qualified: 1, pending: ['x-clamp'], rejected: [] };
+      },
       restartSidecar: async () => { restarted = true; },
     });
 
-    await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'error'));
+    await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
     const entry = readQueue(vault).find((e) => e.book === result.name)!;
-    expect(entry.status).toBe('error');
-    expect(entry.error).toMatch(/miner exploded: no module foo/);
-    expect(entry.phase).toMatch(/mining failed/);
+    expect(builtinRan).toBe(true);
+    expect(entry.status).toBe('done');
+    expect(entry.phase).toMatch(/external miner failed \(miner exploded: no module foo\)/);
+    expect(entry.phase).toMatch(/waiting for your approval/);
     expect(restarted).toBe(false);
   });
 
