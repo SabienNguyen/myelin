@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
@@ -75,6 +76,54 @@ function ExampleAsks() {
   );
 }
 
+interface PlanItem { kind: string; slug: string; title: string; why: string }
+
+/**
+ * "Start today's session" — the interleaved plan (/api/session-plan) as the empty thread's primary
+ * action once there is anything to plan. Spacing and interleaving are the system's job; the CTA is
+ * where the system does the deciding and the learner just sits down. The whole plan travels in the
+ * message so the tutor works through it in order — the same delegation shape as every other row
+ * that hands the composer a request.
+ */
+function SessionPlanCta() {
+  const composer = useComposerRuntime();
+  const [plan, setPlan] = useState<PlanItem[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/session-plan')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d) setPlan(d.plan ?? []); })
+      .catch(() => { /* no plan is a quiet state — the examples still carry the empty screen */ });
+    return () => { cancelled = true; };
+  }, []);
+  if (!plan || plan.length === 0) return null;
+
+  const KIND_LABEL: Record<string, string> = { review: 'review', new: 'new', misconception: 'fix' };
+  const start = () => {
+    const lines = plan.map((p, i) => `${i + 1}. [${p.kind}] "${p.slug}" — ${p.why}`).join('\n');
+    composer.setText(
+      `Run today's session, in this order, one item at a time:\n${lines}\n`
+      + 'For reviews and misconceptions, probe or set an exercise before any reteaching; for new items, teach then check.',
+    );
+    composer.send();
+  };
+  return (
+    <div className="session-plan">
+      <button type="button" className="primary session-plan-start" onClick={start}>
+        Start today’s session ({plan.length} items)
+      </button>
+      <ol className="session-plan-preview">
+        {plan.map((p) => (
+          <li key={p.slug}>
+            <span className={`session-plan-kind session-plan-kind--${p.kind}`}>{KIND_LABEL[p.kind] ?? p.kind}</span>
+            {p.title}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 export function Thread() {
   return (
     <ThreadPrimitive.Root className="thread">
@@ -90,6 +139,7 @@ export function Thread() {
               Ask for anything — a topic, a paper, a book you are stuck in. Your tutor writes pages
               as you go, links them into a graph, and tracks what you have actually shown you know.
             </p>
+            <SessionPlanCta />
             <ExampleAsks />
           </div>
         </ThreadPrimitive.Empty>

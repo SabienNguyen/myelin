@@ -198,6 +198,64 @@ export function buildRestRoutes(
    * are within DUE_SOON_DAYS of losing one. Sorted most-urgent-first, capped — a wall of 40 due
    * items teaches avoidance, not review.
    */
+  /**
+   * An interleaved plan for one sitting — spacing AND interleaving, the two best-evidenced
+   * practice effects, decided by the system instead of left to the learner's mood.
+   *
+   * Three queues, rotated: due reviews (slipped first — the /api/due ordering), misconception
+   * repairs (recorded misconceptions are data nothing acted on until now), and new material
+   * (loreweaver's next_lessons — frontier and unmet-prereq picks). Rotation is the interleaving:
+   * blocked practice (all review, then all new) is exactly what the rotation exists to prevent.
+   * Capped at 6 — a session plan, not a syllabus.
+   */
+  app.get('/api/session-plan', async (c) => {
+    const CAP = 6;
+    const state = await lw.call('get_student_state', { student: cfg.student }).catch(() => ({})) as Record<string, any>;
+    const entries = Object.entries(state).filter(([, m]) => m && typeof m === 'object');
+
+    const review = entries
+      .map(([slug, m]) => ({ slug, daysLeft: (m.days_left ?? null) as number | null, slipped: m.slipped === true }))
+      .filter((e) => e.slipped || (e.daysLeft !== null && e.daysLeft <= 5))
+      .sort((a, b) => (a.slipped === b.slipped ? (a.daysLeft ?? 0) - (b.daysLeft ?? 0) : a.slipped ? -1 : 1))
+      .map((e) => ({ kind: 'review' as const, slug: e.slug, why: e.slipped ? 'this has slipped — re-earn it' : `${e.daysLeft}d before it slips` }));
+
+    const inReview = new Set(review.map((r) => r.slug));
+    const misconception = entries
+      .filter(([slug, m]) => !inReview.has(slug) && Array.isArray(m.misconceptions) && m.misconceptions.length > 0)
+      .map(([slug, m]) => ({
+        kind: 'misconception' as const, slug,
+        why: `recorded misconception: “${String(m.misconceptions[m.misconceptions.length - 1]).slice(0, 80)}”`,
+      }));
+
+    const taken = new Set([...inReview, ...misconception.map((m) => m.slug)]);
+    const lessons = await lw.call('next_lessons', { student: cfg.student, k: CAP })
+      .then((r: any) => (Array.isArray(r?.lessons) ? r.lessons : []))
+      .catch(() => []);
+    const fresh = lessons
+      .filter((l: any) => l?.slug && !taken.has(l.slug))
+      .map((l: any) => ({
+        kind: 'new' as const, slug: l.slug as string,
+        why: l.reason === 'unmet-prereq' ? (l.detail ?? 'a prerequisite on your path') : 'next on your frontier',
+      }));
+
+    // Rotate the queues; whichever still has items feeds the next slot. Review leads — the most
+    // urgent item should be the first thing in the sitting.
+    const queues = [review, fresh, misconception];
+    const plan: { kind: string; slug: string; why: string }[] = [];
+    for (let i = 0; plan.length < CAP && queues.some((q) => q.length > 0); i++) {
+      const q = queues[i % queues.length];
+      const next = q.shift();
+      if (next) plan.push(next);
+    }
+    const titled = await Promise.all(plan.map(async (p) => ({
+      ...p,
+      title: await lw.call('read_page', { slug: p.slug })
+        .then((pg: any) => pg.page?.meta?.title ?? p.slug)
+        .catch(() => p.slug),
+    })));
+    return c.json({ plan: titled });
+  });
+
   app.get('/api/due', async (c) => {
     const DUE_SOON_DAYS = 5;
     const CAP = 12;

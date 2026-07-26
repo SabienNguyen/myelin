@@ -1884,3 +1884,31 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   line-height: 1.5;
   vertical-align: 1px;
 }
+
+/* ── Today's session: the interleaved plan as the empty thread's primary action ────────────── */
+.session-plan {
+  margin: 0 0 1.1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  text-align: left;
+}
+.session-plan-start { width: 100%; }
+.session-plan-preview { margin: 0.6rem 0 0; padding-left: 1.4rem; font-size: 0.88rem; }
+.session-plan-preview li { margin-bottom: 0.2rem; }
+.session-plan-kind {
+  display: inline-block;
+  margin-right: 0.5em;
+  padding: 0 0.5em;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-inset);
+  color: var(--text-muted);
+}
+.session-plan-kind--review { background: color-mix(in srgb, var(--warn) 18%, var(--bg-inset)); color: var(--warn); }
+.session-plan-kind--misconception { background: color-mix(in srgb, var(--bad) 15%, var(--bg-inset)); color: var(--bad); }
+.session-plan-kind--new { background: var(--accent-soft); color: var(--accent); }

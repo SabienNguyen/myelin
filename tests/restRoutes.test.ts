@@ -324,3 +324,51 @@ describe('GET /api/page/:slug for a page that does not exist', () => {
     expect(res.status).toBe(500);
   });
 });
+
+describe('GET /api/due and /api/session-plan', () => {
+  const day = (ago: number) => new Date(Date.now() - ago * 86_400_000).toISOString().slice(0, 10);
+
+  function spacedLw() {
+    const state: Record<string, any> = {
+      // slipped: practicing, window passed, loreweaver reports slipped=true, days_left=null
+      slipped: { level: 'practicing', effective: 'exposed', last_reinforced: day(25), days_left: null, slipped: true, misconceptions: [] },
+      // due soon
+      soon: { level: 'practicing', effective: 'practicing', last_reinforced: day(19), days_left: 2, slipped: false, misconceptions: [] },
+      // healthy — must appear in neither list
+      healthy: { level: 'mastered', effective: 'mastered', last_reinforced: day(5), days_left: 40, slipped: false, misconceptions: [] },
+      // healthy but with a recorded misconception — session plan's repair queue
+      confused: { level: 'practicing', effective: 'practicing', last_reinforced: day(2), days_left: 19, slipped: false, misconceptions: ['mixes up X with Y'] },
+    };
+    return {
+      listSlugs: async () => Object.keys(state),
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') return state;
+        if (name === 'read_page') return { page: { meta: { title: `T:${args.slug}` } } };
+        if (name === 'next_lessons') {
+          return { lessons: [{ slug: 'fresh-one', reason: 'frontier' }, { slug: 'slipped', reason: 'review-due' }] };
+        }
+        throw new Error(`unexpected call ${name}`);
+      },
+    } as any;
+  }
+
+  it('/api/due: slipped leads, healthy excluded, titles resolved', async () => {
+    const app = buildRestRoutes(spacedLw(), cfg);
+    const { due } = await (await app.request('/api/due')).json();
+    expect(due.map((d: any) => d.slug)).toEqual(['slipped', 'soon']);
+    expect(due[0].slipped).toBe(true);
+    expect(due[0].title).toBe('T:slipped');
+  });
+
+  it('/api/session-plan interleaves review, new and misconception queues without duplicates', async () => {
+    const app = buildRestRoutes(spacedLw(), cfg);
+    const { plan } = await (await app.request('/api/session-plan')).json();
+    expect(plan.map((p: any) => `${p.kind}:${p.slug}`)).toEqual([
+      'review:slipped',       // most urgent leads
+      'new:fresh-one',        // rotation to the new queue; 'slipped' from next_lessons deduped
+      'misconception:confused',
+      'review:soon',
+    ]);
+    expect(plan.find((p: any) => p.kind === 'misconception').why).toContain('mixes up X with Y');
+  });
+});
