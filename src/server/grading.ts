@@ -105,6 +105,7 @@ export function mathEquivalent(
 }
 
 import { gradeChemEquation, gradeNotes, gradeUnitAnswer } from './structuredCheckers.js';
+import { z } from 'zod';
 
 // ── structured_check: mechanical checkers ──────────────────────────────────────────────────────
 // Every branch is arithmetic or string comparison. Nothing here calls a model, so the resulting
@@ -247,6 +248,7 @@ export interface Grade {
   detail: string;
   perItem?: { id: string; correct: boolean }[];
   annotations?: WritingAnnotations;
+  rubric?: { criterion: string; pass: boolean; note: string }[];
   evidence: { slug: string; kind: EvidenceKind; note: string }[];
 }
 
@@ -448,6 +450,54 @@ export async function gradeBlockOutput(
       source: 'mechanical',
       detail,
       evidence: [ev(input.pageSlug, kind, note, 'mechanical')],
+    };
+  }
+
+  // writing_draft with an explicit rubric — the judged-work path for essay subjects. The grader
+  // marks each stated criterion pass/fail; passing ALL of them mints 'rubric-passed', the third
+  // positive evidence kind (loreweaver caps it at practicing and decays it on its own shorter
+  // window). It is deliberately NOT 'applied-correctly' — a rubric is a model applying criteria,
+  // and naming it keeps it from ever laundering into the evidence that gates 'mastered'.
+  if (Array.isArray(input.rubric) && input.rubric.length > 0) {
+    const rubricPrompt = `Judge this draft against each rubric criterion. Prompt: "${input.prompt}"\n`
+      + `Draft:\n${result.draft}\n\nCriteria:\n${input.rubric.map((r: string, i: number) => `${i + 1}. ${r}`).join('\n')}\n`
+      + 'For each criterion, decide pass or fail and give a one-line note quoting the draft where possible.';
+    const rubricSchema = z.object({
+      criteria: z.array(z.object({ criterion: z.string(), pass: z.boolean(), note: z.string() })),
+    });
+    const graderId = cfg.models.grader.model;
+    let judged: { criteria: { criterion: string; pass: boolean; note: string }[] };
+    if (isClaudeSdkModel(graderId)) {
+      const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
+      const { text } = await sdkGenerate({
+        model: stripClaudeSdkPrefix(graderId),
+        prompt: `${rubricPrompt}\n\nRespond with ONLY valid JSON: {"criteria": [{"criterion": <string>, "pass": <boolean>, "note": <string>}]}`,
+        maxTurns: 1,
+      });
+      judged = JSON.parse(text);
+    } else {
+      const { output } = await generateText({
+        model: modelFor('grader', cfg), prompt: rubricPrompt, output: Output.object({ schema: rubricSchema }),
+      });
+      judged = output as typeof judged;
+    }
+    // The MODEL's list is advisory; the RUBRIC's list is authoritative. A grader that returned
+    // fewer criteria than were asked must not pass the draft by omission.
+    const byName = new Map(judged.criteria.map((c) => [c.criterion.trim().toLowerCase(), c]));
+    const results = input.rubric.map((criterion: string) => {
+      const found = byName.get(criterion.trim().toLowerCase())
+        ?? judged.criteria.find((c) => c.criterion.toLowerCase().includes(criterion.slice(0, 24).toLowerCase()));
+      return found ? { criterion, pass: found.pass, note: found.note }
+        : { criterion, pass: false, note: 'the grader did not address this criterion' };
+    });
+    const passed = results.filter((r: { pass: boolean }) => r.pass).length;
+    const all = passed === results.length;
+    return {
+      verdict: 'reviewed', source: 'model',
+      detail: `rubric: ${passed}/${results.length} criteria met`,
+      rubric: results,
+      evidence: [ev(input.pageSlug, all ? 'rubric-passed' : 'struggled',
+        `rubric (${passed}/${results.length}): ${input.rubric.join('; ')}`, 'model')],
     };
   }
 

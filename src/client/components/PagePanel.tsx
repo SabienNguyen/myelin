@@ -43,14 +43,22 @@ const GROUPS: { dir: Dir; type: LinkType; heading: string; blurb: string }[] = [
  * not even something they could act on, which is why the copy says what is missing rather than what
  * they should have done.
  */
-function standingLine(st: { applied: number; explained: number; struggled: number }): string {
-  if (st.applied > 0 && st.explained > 0) {
-    return `Earned by ${st.applied} verified exercise${st.applied === 1 ? '' : 's'} `
-      + `and ${st.explained} explanation${st.explained === 1 ? '' : 's'}.`;
-  }
+function standingLine(st: { applied: number; explained: number; rubric?: number; struggled: number }): string {
+  const rubric = st.rubric ?? 0;
   if (st.applied > 0) {
-    return `Earned by ${st.applied} verified exercise${st.applied === 1 ? '' : 's'} — `
-      + 'checked mechanically, not judged.';
+    const also = [
+      st.explained > 0 ? `${st.explained} explanation${st.explained === 1 ? '' : 's'}` : null,
+      rubric > 0 ? `${rubric} rubric pass${rubric === 1 ? '' : 'es'}` : null,
+    ].filter(Boolean).join(' and ');
+    return `Earned by ${st.applied} verified exercise${st.applied === 1 ? '' : 's'}`
+      + (also ? ` and ${also}.` : ' — checked mechanically, not judged.');
+  }
+  if (rubric > 0) {
+    // Its own sentence, not folded into "explanations": a rubric pass is judged WORK, it holds the
+    // page up on a shorter decay window, and the learner deserves to know which kind is doing the
+    // holding.
+    return `Held up by ${rubric} rubric pass${rubric === 1 ? '' : 'es'}${st.explained > 0 ? ` and ${st.explained} explanation${st.explained === 1 ? '' : 's'}` : ''} — `
+      + 'work judged against stated criteria, re-checked sooner than machine-verified work.';
   }
   if (st.explained > 0) {
     return `Earned by ${st.explained} explanation${st.explained === 1 ? '' : 's'}, judged by the tutor. `
@@ -61,9 +69,9 @@ function standingLine(st: { applied: number; explained: number; struggled: numbe
 }
 
 /** Days until this level decays, using the same windows the graph's rings use. */
-function daysUntilDecay(effective: string, lastReinforced: string, now = new Date()): number | null {
+function daysUntilDecay(effective: string, lastReinforced: string, restsOnRubric = false, now = new Date()): number | null {
   const window = effective === 'mastered' ? DECAY.masteredDays
-    : effective === 'practicing' ? DECAY.practicingDays : null;
+    : effective === 'practicing' ? (restsOnRubric ? DECAY.rubricDays : DECAY.practicingDays) : null;
   if (window == null) return null;
   const elapsed = Math.floor((now.getTime() - new Date(lastReinforced).getTime()) / 86_400_000);
   return Math.max(0, window - elapsed);
@@ -153,7 +161,7 @@ export function PagePanel({ slug }: { slug: string | null }) {
   const neighbors = page.neighbors ?? {};
   const warnings: string[] = page.page.warnings ?? [];
   const standing = page.standing ?? null;
-  const decayIn = standing ? daysUntilDecay(standing.effective, standing.lastReinforced) : null;
+  const decayIn = standing ? daysUntilDecay(standing.effective, standing.lastReinforced, (standing as any).restsOnRubric) : null;
   const groups = GROUPS
     .map((g) => ({ g, edges: (edges[g.dir] ?? []).filter((e: any) => e.type === g.type) }))
     .filter(({ edges: es }) => es.length > 0);

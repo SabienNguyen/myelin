@@ -68,6 +68,17 @@ export function WritingDraftInner({ args, result, addResult }: {
             ))}
           </ol>
         )}
+        {grading?.rubric && (
+          <ul className="rubric-results">
+            {grading.rubric.map((r: any) => (
+              <li key={r.criterion} className={r.pass ? 'rubric-pass' : 'rubric-fail'}>
+                <span className={r.pass ? 'mark-ok' : 'mark-bad'}>{r.pass ? '✓' : '✗'}</span>{' '}
+                {r.criterion}
+                {r.note && <em> — {r.note}</em>}
+              </li>
+            ))}
+          </ul>
+        )}
         {grading?.annotations?.skillGrades && (
           <ul className="skill-grades">
             {Object.entries(grading.annotations.skillGrades).map(([skill, grade]) => (

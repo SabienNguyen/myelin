@@ -1741,3 +1741,8 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   overflow-x: auto;
 }
 .mermaid-fallback-note { color: var(--text-muted); font-style: italic; }
+
+/* Rubric verdicts on the graded writing card (WritingDraft.tsx). */
+.rubric-results { margin: 0.4rem 0; padding-left: 0; list-style: none; }
+.rubric-results li { margin: 0.15rem 0; font-size: 0.9rem; }
+.rubric-results em { color: var(--text-muted); }

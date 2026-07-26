@@ -30,12 +30,19 @@ import type { HarnessConfig } from '../src/server/config.js';
  *  so adding a third model-graded block does not silently get the wrong shape. */
 const yesGrader = {
   sdkGenerate: async ({ prompt }: { prompt: string }) => ({
-    text: /annotations/i.test(prompt)
+    text: /criteria/i.test(prompt) && /rubric|criterion/i.test(prompt)
       ? JSON.stringify({
-        annotations: [],
-        skillGrades: { claim: 'good', concision: 'good', specificity: 'good' },
+        criteria: [
+          { criterion: 'thesis is arguable', pass: true, note: 'yes' },
+          { criterion: 'cites a source', pass: true, note: 'yes' },
+        ],
       })
-      : 'CORRECT — fine.',
+      : /annotations/i.test(prompt)
+        ? JSON.stringify({
+          annotations: [],
+          skillGrades: { claim: 'good', concision: 'good', specificity: 'good' },
+        })
+        : 'CORRECT — fine.',
   }),
 };
 const cfg = {
@@ -119,6 +126,17 @@ const BEST_CASE: { tool: any; input: any; result: any; expect: GradeSource }[] =
     result: { draft: 'a strong, concise, specific paragraph.' },
     expect: 'model',
   },
+  {
+    tool: 'writing_draft',
+    // The rubric path: judged WORK. Its best case mints 'rubric-passed' — a model verdict that is
+    // allowed to exist precisely because it is named as one, never as applied.
+    input: {
+      prompt: 'argue it', round: 1, pageSlug: 'p',
+      rubric: ['thesis is arguable', 'cites a source'],
+    },
+    result: { draft: 'a draft with a thesis and a source.' },
+    expect: 'model',
+  },
 ];
 
 const grade = (c: typeof BEST_CASE[number]): Promise<Grade> =>
@@ -148,6 +166,26 @@ describe('THE RULE: a model-graded verdict can never mint applied-correctly', ()
       }
     });
   }
+
+  it('a full rubric pass mints rubric-passed — and never applied-correctly', async () => {
+    const rubricCase = BEST_CASE.find((c) => c.tool === 'writing_draft' && c.input.rubric)!;
+    const g = await grade(rubricCase);
+    expect(g.evidence.map((e) => e.kind)).toEqual(['rubric-passed']);
+    expect(g.rubric?.every((r) => r.pass)).toBe(true);
+  });
+
+  it('a criterion the grader forgot to address FAILS — the rubric is authoritative, not the model', async () => {
+    const forgetful = {
+      sdkGenerate: async () => ({
+        text: JSON.stringify({ criteria: [{ criterion: 'thesis is arguable', pass: true, note: 'ok' }] }),
+      }),
+    };
+    const rubricCase = BEST_CASE.find((c) => c.tool === 'writing_draft' && c.input.rubric)!;
+    const g = await gradeBlockOutput(rubricCase.tool, rubricCase.input, rubricCase.result, cfg, forgetful as any);
+    // One of two criteria unaddressed -> not a pass. A grader cannot pass a draft by omission.
+    expect(g.evidence.map((e) => e.kind)).toEqual(['struggled']);
+    expect(g.rubric?.find((r) => r.criterion === 'cites a source')?.pass).toBe(false);
+  });
 
   it('holds for the aggregate too — one model-graded item taints the whole quiz slug', async () => {
     const mixed = BEST_CASE.find((c) => c.tool === 'quiz' && Array.isArray(c.input.items) && c.input.items.length === 2)!;

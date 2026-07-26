@@ -142,6 +142,18 @@ export function buildRestRoutes(
       lastReinforced: d.last_reinforced as string,
       applied: count('applied-correctly'),
       explained: count('explained-correctly'),
+      rubric: count('rubric-passed'),
+      // Mirrors loreweaver's restsOnRubric walk, so the panel's decay countdown uses the SAME
+      // window the memory layer will actually decay on. Without this the countdown promised 21
+      // days to a page that rots in 14.
+      restsOnRubric: (() => {
+        for (let i = evidence.length - 1; i >= 0; i--) {
+          const k = evidence[i].kind;
+          if (k === 'applied-correctly' || k === 'explained-correctly') return false;
+          if (k === 'rubric-passed') return true;
+        }
+        return false;
+      })(),
       struggled: count('struggled'),
       misconceptions: (d.misconceptions ?? []) as string[],
     };

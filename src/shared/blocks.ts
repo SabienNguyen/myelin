@@ -46,6 +46,12 @@ const mathScratchpad = {
 
 const writingDraft = {
   input: z.object({
+    // An explicit rubric turns this from skill-annotation into rubric judgment: the grader marks
+    // each criterion pass/fail, and passing ALL of them mints 'rubric-passed' — the evidence kind
+    // for essay subjects (history, law, literature) where nothing mechanical can check the work.
+    // Write criteria the learner could read beforehand: "thesis is arguable", "cites a primary
+    // source", "addresses one counterargument".
+    rubric: z.array(z.string()).min(2).max(6).optional(),
     prompt: z.string(),
     round: z.number().int().min(1),
     priorDraft: z.string().optional(),
