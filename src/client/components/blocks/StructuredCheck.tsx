@@ -14,6 +14,9 @@ type Checker =
   | { kind: 'set'; expected: string[] }
   | { kind: 'sequence'; expected: string[] }
   | { kind: 'matching'; items: { left: string; right: string }[]; options?: string[] }
+  | { kind: 'unit'; expected: number; unit: string }
+  | { kind: 'chem_equation'; reactants?: string[]; products?: string[] }
+  | { kind: 'notes'; expected: string[]; ordered?: boolean }
   | { kind: 'pattern'; expected: string };
 
 interface Args { prompt: string; pageSlug: string; hint?: string; checker: Checker }
@@ -58,6 +61,9 @@ export function StructuredCheck({ args, result, addResult }: {
   args: Args; result: any; addResult: (r: any) => void;
 }) {
   const { checker } = args;
+  // Everything the learner answers in ONE input. `unit` includes its unit in the answer (that is
+  // the point of the checker), `chem_equation` is one equation, `notes` split server-side.
+  const isSingle = ['numeric', 'pattern', 'unit', 'chem_equation', 'notes'].includes(checker.kind);
   const [single, setSingle] = useState('');
   const [lines, setLines] = useState('');
   const [picks, setPicks] = useState<string[]>(
@@ -83,7 +89,7 @@ export function StructuredCheck({ args, result, addResult }: {
 
   function submit() {
     const values = checker.kind === 'matching' ? picks
-      : (checker.kind === 'set' || checker.kind === 'sequence')
+      : !isSingle
         ? lines.split('\n').map((l) => l.trim()).filter(Boolean)
         : [single];
     addResult({ values });
@@ -98,11 +104,14 @@ export function StructuredCheck({ args, result, addResult }: {
       <div className="structured-prompt"><BlockProse text={args.prompt} /></div>
       {args.hint && <p className="structured-hint">{args.hint}</p>}
 
-      {(checker.kind === 'numeric' || checker.kind === 'pattern') && (
+      {isSingle && (
         <div className="structured-single">
           <input
             aria-label={checker.kind === 'numeric' ? 'numeric answer' : 'answer'}
             inputMode={checker.kind === 'numeric' ? 'decimal' : 'text'}
+            placeholder={checker.kind === 'unit' ? 'value with unit — e.g. 20 m/s'
+              : checker.kind === 'chem_equation' ? 'e.g. CH4 + 2O2 -> CO2 + 2H2O'
+                : checker.kind === 'notes' ? 'note names — e.g. C E G' : undefined}
             value={single}
             onChange={(e) => setSingle(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
@@ -112,7 +121,7 @@ export function StructuredCheck({ args, result, addResult }: {
           )}
         </div>
       )}
-      {(checker.kind === 'numeric' || checker.kind === 'pattern') && <AnswerPreview value={single} />}
+      {isSingle && <AnswerPreview value={single} />}
 
       {(checker.kind === 'set' || checker.kind === 'sequence') && (
         <>

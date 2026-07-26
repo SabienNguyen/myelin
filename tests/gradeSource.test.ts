@@ -101,6 +101,19 @@ const BEST_CASE: { tool: any; input: any; result: any; expect: GradeSource }[] =
     expect: 'mechanical',
   },
   {
+    tool: 'label_diagram',
+    input: {
+      prompt: 'label the heart', pageSlug: 'p',
+      svg: '<svg xmlns="http://www.w3.org/2000/svg"/>',
+      regions: [
+        { id: 'a', x: 10, y: 10, label: 'aorta' },
+        { id: 'b', x: 60, y: 60, label: 'left ventricle' },
+      ],
+    },
+    result: { placements: [{ regionId: 'a', label: 'aorta' }, { regionId: 'b', label: 'left ventricle' }] },
+    expect: 'mechanical',
+  },
+  {
     tool: 'writing_draft',
     input: { prompt: 'write', round: 1, pageSlug: 'p' },
     result: { draft: 'a strong, concise, specific paragraph.' },

@@ -1673,3 +1673,71 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border-radius: 4px;
   overflow-wrap: anywhere;
 }
+
+/* ── label_diagram (LabelDiagram.tsx) — the picture-subject applied block ─────
+   Pins sit at percent coordinates over an inert <img>; the tray holds the labels.
+   Click-click, not drag: keyboard and touch get the same interaction for free. */
+.label-diagram-canvas {
+  position: relative;
+  margin: 0.6rem 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.label-diagram-canvas img { display: block; width: 100%; height: auto; }
+.label-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 1.9rem;
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--bg);
+  border: 1.5px dashed var(--accent);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.label-pin.is-placed { border-style: solid; background: var(--accent-soft); }
+/* While a label is selected, every pin is a live target — make that legible. */
+.label-pin.is-target { box-shadow: 0 0 0 3px var(--accent-soft); }
+.label-tray { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.2rem; }
+.label-chip {
+  padding: 0.25rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.label-chip.is-selected { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.label-chip.is-used { opacity: 0.4; cursor: default; }
+.label-diagram-hint { margin: 0.2rem 0 0.5rem; font-size: 0.82rem; color: var(--text-muted); }
+.label-diagram-submit {
+  padding: 0.45rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.label-diagram-submit:disabled { opacity: 0.5; cursor: default; }
+.label-diagram-summary { margin: 0.4rem 0; padding-left: 1.1rem; }
+
+/* Mermaid diagrams in chat prose (Mermaid.tsx). The svg scales to the message column. */
+.mermaid-diagram { margin: 0.6rem 0; overflow-x: auto; }
+.mermaid-diagram svg { max-width: 100%; height: auto; }
+.mermaid-loading { font-size: 0.85rem; color: var(--text-muted); }
+.mermaid-fallback {
+  padding: 0.6rem 0.8rem;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm, 6px);
+  overflow-x: auto;
+}
+.mermaid-fallback-note { color: var(--text-muted); font-style: italic; }

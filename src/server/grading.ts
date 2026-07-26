@@ -104,6 +104,8 @@ export function mathEquivalent(
   } catch { return false; }
 }
 
+import { gradeChemEquation, gradeNotes, gradeUnitAnswer } from './structuredCheckers.js';
+
 // ── structured_check: mechanical checkers ──────────────────────────────────────────────────────
 // Every branch is arithmetic or string comparison. Nothing here calls a model, so the resulting
 // applied-correctly evidence rests on a machine decision rather than a model's opinion — the
@@ -198,6 +200,23 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
       detail: `${hits}/${checker.items.length} matched`,
       perItem,
     };
+  }
+
+  if (checker.kind === 'unit') {
+    const v = gradeUnitAnswer(clean[0] ?? '', checker);
+    return { allCorrect: v.ok, anyCorrect: v.ok, detail: v.detail };
+  }
+
+  if (checker.kind === 'chem_equation') {
+    const v = gradeChemEquation(clean[0] ?? '', checker);
+    return { allCorrect: v.ok, anyCorrect: v.ok, detail: v.detail };
+  }
+
+  if (checker.kind === 'notes') {
+    // One input, notes separated however the learner separates them — "C E G", "C, E, G".
+    const parts = (clean[0] ?? '').split(/[,\s]+/).filter(Boolean);
+    const v = gradeNotes(parts, checker);
+    return { allCorrect: v.ok, anyCorrect: v.ok, detail: v.detail };
   }
 
   // pattern
@@ -352,6 +371,28 @@ export async function gradeBlockOutput(
       detail: g.detail,
       ...(g.perItem ? { perItem: g.perItem } : {}),
       evidence: [ev(input.pageSlug, kind, `${input.checker.kind} check: ${input.prompt}`, 'mechanical')],
+    };
+  }
+
+  // label_diagram — region-membership equality. Arithmetic, no model: the block that makes
+  // picture-first subjects (anatomy, circuits, voicings) capable of minting applied evidence.
+  if (tool === 'label_diagram') {
+    const placed = new Map<string, string>(
+      (result.placements ?? []).map((p: any) => [String(p.regionId), String(p.label)]),
+    );
+    const perItem = (input.regions ?? []).map((r: any) => ({
+      id: r.id,
+      correct: normKey(placed.get(r.id) ?? '') === normKey(r.label),
+    }));
+    const hits = perItem.filter((p: { correct: boolean }) => p.correct).length;
+    const all = hits === perItem.length && perItem.length > 0;
+    const kind: EvidenceKind = all ? 'applied-correctly' : 'struggled';
+    return {
+      verdict: all ? 'correct' : hits > 0 ? 'partial' : 'incorrect',
+      source: 'mechanical',
+      detail: `${hits}/${perItem.length} regions labelled correctly`,
+      perItem,
+      evidence: [ev(input.pageSlug, kind, `labelled a diagram: ${input.prompt}`, 'mechanical')],
     };
   }
 

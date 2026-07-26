@@ -132,6 +132,34 @@ const structuredCheck = {
       }),
       // Normalised free text: nomenclature, notation, a term of art.
       z.object({ kind: z.literal('pattern'), expected: z.string() }),
+      // A quantity where the UNIT is part of being right and equivalent units must count — graded
+      // by real unit algebra (mathjs), so "1 N·m" satisfies an expected "1 J" and "72 km/h"
+      // satisfies "20 m/s". Physics, chemistry, engineering.
+      z.object({
+        kind: z.literal('unit'),
+        expected: z.number(),
+        unit: z.string(),
+        // Relative by default (0.5%): conversion multiplies magnitudes, so absolute tolerance is
+        // wrong at one end of the scale or the other. `relative: false` for exact-count questions.
+        tolerance: z.number().optional(),
+        relative: z.boolean().optional(),
+      }),
+      // A balanced chemical equation, checked by conservation per element and per charge. Give
+      // reactants/products (formulas, no coefficients) so a DIFFERENT balanced equation is not
+      // accepted as the answer to this one.
+      z.object({
+        kind: z.literal('chem_equation'),
+        reactants: z.array(z.string()).min(1).optional(),
+        products: z.array(z.string()).min(1).optional(),
+      }),
+      // Note names graded by semitone arithmetic: C# and Db name the same pitch and both are
+      // right. Octaves compared only when the expected note carries one. Music theory's
+      // intervals, chord spellings, scale degrees.
+      z.object({
+        kind: z.literal('notes'),
+        expected: z.array(z.string()).min(1),
+        ordered: z.boolean().optional(),
+      }),
     ]),
   }),
   result: z.object({
@@ -143,9 +171,43 @@ const structuredCheck = {
   }),
 };
 
+/**
+ * label_diagram — the applied block for subjects that are pictures.
+ *
+ * Anatomy, circuits, graph theory, chord voicings, chemical structures: until this block, the app
+ * could only DESCRIBE them. The tutor draws an inline SVG and names regions; the learner assigns
+ * labels to regions; grading is region-membership equality — pure arithmetic, no model — so this
+ * mints real applied-correctly for any subject with a picture.
+ *
+ * The SVG is rendered INERT client-side (an <img> data URI, where scripts never run), so a
+ * model-authored drawing cannot script the page.
+ */
+const labelDiagram = {
+  input: z.object({
+    prompt: z.string(),
+    pageSlug: z.string(),
+    // Inline SVG the tutor draws. Keep it simple: shapes, paths, text callout lines.
+    svg: z.string(),
+    // Anchor points in PERCENT coordinates of the image box, each with its correct term.
+    regions: z.array(z.object({
+      id: z.string(),
+      x: z.number().min(0).max(100),
+      y: z.number().min(0).max(100),
+      label: z.string(),
+    })).min(2),
+    // Wrong labels mixed into the tray, so the exercise is not solvable by elimination alone.
+    distractors: z.array(z.string()).optional(),
+  }),
+  result: z.object({
+    // regionId -> the label the learner placed there. A region they left blank is simply absent.
+    placements: z.array(z.object({ regionId: z.string(), label: z.string() })),
+  }),
+};
+
 export const BLOCK_TOOLS = {
   quick_check: quickCheck,
   structured_check: structuredCheck,
+  label_diagram: labelDiagram,
   quiz,
   math_scratchpad: mathScratchpad,
   writing_draft: writingDraft,

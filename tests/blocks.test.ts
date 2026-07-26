@@ -5,14 +5,17 @@ describe('block schemas', () => {
   // Was "the five v1 kinds". structured_check is the sixth: the generic applied block, added so
   // applied evidence is reachable outside maths/prose/programming (see src/shared/blocks.ts). This
   // list stays exhaustive on purpose — a new block kind should have to be added here deliberately.
-  it('exposes exactly the six block kinds', () => {
+  it('exposes exactly the seven block kinds', () => {
     expect(BLOCK_TOOL_NAMES.sort()).toEqual(
-      ['code_exercise', 'math_scratchpad', 'quick_check', 'quiz', 'structured_check', 'writing_draft'],
+      ['code_exercise', 'label_diagram', 'math_scratchpad', 'quick_check', 'quiz', 'structured_check', 'writing_draft'],
     );
   });
   it('structured_check round-trips each checker kind', () => {
     const base = { prompt: 'p', pageSlug: 'topic' };
     const kinds = [
+      { kind: 'unit', expected: 20, unit: 'm/s' },
+      { kind: 'chem_equation', reactants: ['CH4', 'O2'], products: ['CO2', 'H2O'] },
+      { kind: 'notes', expected: ['C', 'E', 'G'] },
       { kind: 'numeric', expected: 9.81, tolerance: 0.01, unit: 'm/s^2' },
       { kind: 'set', expected: ['a', 'b'] },
       { kind: 'sequence', expected: ['a', 'b'] },
