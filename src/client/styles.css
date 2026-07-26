@@ -1917,3 +1917,19 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .session-plan-kind--review { background: color-mix(in srgb, var(--warn) 18%, var(--bg-inset)); color: var(--warn); }
 .session-plan-kind--misconception { background: color-mix(in srgb, var(--bad) 15%, var(--bg-inset)); color: var(--bad); }
 .session-plan-kind--new { background: var(--accent-soft); color: var(--accent); }
+
+/* Dismiss on terminal ledger rows — quiet until hovered, never louder than the row it removes.
+   Anchored to the row's top-right corner: repo rows contain block children, so an inline ✕
+   wrapped onto its own line below the text (caught in the audit screenshot). */
+.library-book li { position: relative; padding-right: 1.8rem; }
+.q-dismiss {
+  position: absolute;
+  top: 0.1rem;
+  right: 0;
+  padding: 0 0.45em;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: transparent;
+  border-color: transparent;
+}
+.q-dismiss:hover { color: var(--bad); border-color: var(--border); background: var(--bg-panel); }

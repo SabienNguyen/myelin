@@ -295,12 +295,21 @@ export async function gradeBlockOutput(
   if (tool === 'quick_check') {
     if (input.expected != null) {
       const ok = result.answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
-      return {
-        verdict: ok ? 'correct' : 'incorrect',
-        source: 'mechanical',
-        detail: ok ? 'exact match' : `expected "${input.expected}"`,
-        evidence: [ev(input.pageSlug, ok ? 'applied-correctly' : 'struggled', `quick_check: ${input.question}`, 'mechanical')],
-      };
+      if (ok) {
+        return {
+          verdict: 'correct',
+          source: 'mechanical',
+          detail: 'exact match',
+          evidence: [ev(input.pageSlug, 'applied-correctly', `quick_check: ${input.question}`, 'mechanical')],
+        };
+      }
+      // A miss on the EXACT string is not yet a wrong answer — the audit caught "a buffer carried
+      // across reads" graded incorrect against expected "buffer". Fall back to the model grader
+      // with the expected answer as context: a right-but-rephrased answer earns the model-graded
+      // kind (capApplied keeps it from minting applied-correctly — a model judged it, honestly so),
+      // and a genuinely wrong one still records struggled. Free-text punishing phrasing teaches
+      // learners to guess the grader's wording, which is the opposite of knowing the thing.
+      return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps, input.expected);
     }
     return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps);
   }
@@ -559,8 +568,11 @@ function latexParses(latex: string): boolean {
 
 async function gradeOpenAnswer(
   question: string, answer: string, slug: string, cfg: HarnessConfig, deps: GradingDeps = {},
+  expected?: string,
 ): Promise<Grade> {
-  const prompt = `Question: ${question}\nStudent answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
+  // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
+  // model, never copied into the evidence note.
+  const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
   const graderModelId = cfg.models.grader.model;
   let text: string;
   if (isClaudeSdkModel(graderModelId)) {

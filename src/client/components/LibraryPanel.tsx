@@ -279,6 +279,24 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
                 {e.mode === 'repo' ? <RepoIngestRow entry={e} />
                   : e.status === 'converting' ? <ConvertingRow entry={e} />
                     : ` ${e.title}`}
+                {/* Terminal rows are history the learner has read — dismissable, so a failed
+                    ingest from weeks ago stops haunting the Library. The server refuses
+                    non-terminal rows, so this renders only where the request can succeed. */}
+                {(e.status === 'error' || e.status === 'convert-error' || (e.status === 'done' && e.mode === 'repo')) && (
+                  <button
+                    type="button"
+                    className="q-dismiss"
+                    aria-label={`dismiss this ${e.status === 'done' ? 'finished' : 'failed'} entry`}
+                    onClick={async () => {
+                      await fetch('/api/ingest/entry', {
+                        method: 'DELETE',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ chapter: e.chapter }),
+                      });
+                      setRefresh((r) => r + 1);
+                    }}
+                  >✕</button>
+                )}
                 {e.error && <div className="q-error">{e.error}</div>}
               </li>
             ))}

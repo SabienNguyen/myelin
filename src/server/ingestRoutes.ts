@@ -7,6 +7,7 @@ import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
 import { compileNext, readQueue, renameBook, startConversion } from './ingest.js';
+import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
 import type { Loreweaver } from './mcp.js';
 
@@ -52,6 +53,26 @@ export function buildIngestRoutes(
   });
 
   app.get('/api/ingest/queue', (c) => c.json(readQueue(cfg.vault)));
+
+  /**
+   * Dismiss one finished ledger row. Terminal rows only — a failed repo ingest from weeks ago is
+   * history the learner has read and cannot act on further, and until this route existed it sat
+   * in the Library forever (the audit found a stale 'mining failed' row confusing the exact
+   * person it was written to inform). Pending/converting rows refuse: removing one would orphan
+   * work that is still running or still owed.
+   */
+  app.delete('/api/ingest/entry', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const chapter = String(body?.chapter ?? '');
+    if (!chapter) return c.json({ error: 'chapter is required' }, 400);
+    const entry = readQueue(cfg.vault).find((e) => e.chapter === chapter);
+    if (!entry) return c.json({ error: 'no such ledger entry' }, 404);
+    if (entry.status !== 'error' && entry.status !== 'convert-error' && entry.status !== 'done') {
+      return c.json({ error: `only finished rows can be dismissed — this one is ${entry.status}` }, 409);
+    }
+    await updateQueue(cfg.vault, (entries) => entries.filter((e) => e.chapter !== chapter));
+    return c.json({ dismissed: chapter });
+  });
 
   // B2c: "Add repo" ingestion — git URL or absolute local path. Name derivation/validation
   // (ingestRepo.ts's deriveRepoName + local-path existence check) happens synchronously before

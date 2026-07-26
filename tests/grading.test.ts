@@ -293,3 +293,41 @@ describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {
       .rejects.toThrow(/invalid JSON/i);
   });
 });
+
+describe('quick_check phrasing tolerance (audit: correct answer graded wrong on wording)', () => {
+  function fakeSdk2(text: string) {
+    const calls: ClaudeSdkGenerateOpts[] = [];
+    const sdkGenerate = async (opts: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
+      calls.push(opts);
+      return { text, toolCallNames: [] };
+    };
+    return { calls, sdkGenerate };
+  }
+  const input = { question: 'What must the parser hold between reads?', mode: 'text', expected: 'buffer', pageSlug: 'p' };
+  const cfg = { models: { grader: { model: 'claude-sdk:sonnet' } } } as any;
+
+  it('an exact match stays mechanical applied-correctly, no model consulted', async () => {
+    const { calls, sdkGenerate } = fakeSdk2('should not be called');
+    const g = await gradeBlockOutput('quick_check', input, { answer: ' Buffer ' }, cfg, { sdkGenerate });
+    expect(g.source).toBe('mechanical');
+    expect(g.evidence[0].kind).toBe('applied-correctly');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a rephrased-but-right answer falls back to the model grader, expected passed as context', async () => {
+    const { calls, sdkGenerate } = fakeSdk2('CORRECT — names the cross-read buffer');
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'a buffer carried across reads' }, cfg, { sdkGenerate });
+    expect(g.verdict).toBe('correct');
+    expect(g.source).toBe('model');
+    // capApplied: a model judged it — it must not mint applied-correctly.
+    expect(g.evidence[0].kind).toBe('explained-correctly');
+    expect(calls[0].prompt).toContain('A correct answer conveys: buffer');
+  });
+
+  it('a wrong answer still records struggled through the fallback', async () => {
+    const { sdkGenerate } = fakeSdk2('INCORRECT — that is not it');
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'the file descriptor' }, cfg, { sdkGenerate });
+    expect(g.verdict).toBe('incorrect');
+    expect(g.evidence[0].kind).toBe('struggled');
+  });
+});
