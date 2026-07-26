@@ -7,9 +7,10 @@ reason.
 The goal has a precise failure mode worth stating once, because it decides every ranking below:
 
 > The knowledge half already generalises. Ingest handles PDF/EPUB/DOCX/papers/repos; `web_search`
-> and `read_url` cover subjects not in any file; the graph queries are pure graph math with no
-> domain knowledge in them; the student model is slugs and evidence. Point it at music theory and
-> the memory layer does not care.
+> and `read_url` cover subjects not in any file — and since the research rework they need no
+> infrastructure, so the tutor researches a new subject itself instead of asking the learner to go
+> find books for it; the graph queries are pure graph math with no domain knowledge in them; the
+> student model is slugs and evidence. Point it at music theory and the memory layer does not care.
 >
 > **Applied practice is where it stops.** Of six blocks, `math_scratchpad` serves maths,
 > `writing_draft` serves prose, `code_exercise` serves programming — and only artifacts someone
@@ -161,6 +162,32 @@ Ranked, and honestly labelled: none of these move the goal.
    later full runs; the name was not captured. Unresolved, and recorded so it is not forgotten.
 5. **`structured_check` placement.** Renders inline; the other applied blocks use the Stage. Decide
    which, deliberately.
+
+## Research: what the rework closed, and what it left open
+
+Closed: research no longer needs a self-hosted SearXNG. An Anthropic-routed tutor gets
+`web_search` from Anthropic's server-side search (`web_search_20260209`, dynamic filtering), so the
+API key the tutor already requires is the entire setup — and `read_url` is now ungated, because it
+never needed infrastructure in the first place. Research also unlocks in `learn`/`review`/`quiz`
+when the vault has no page for what the learner asked, which removes a dead end: that turn used to
+have no search, no `write_page` and no ingest, so its only honest move was to refuse.
+
+Still open, and deliberately so:
+
+1. **An `ollama:` tutor with no SearXNG has `read_url` but no search.** A provider-executed tool has
+   no meaning off Anthropic's servers. The fix, if it is ever worth it, is a locally-executed
+   `web_search` that makes its own one-shot Anthropic call and returns the results — that would make
+   research infra-free for *every* route, at one extra model call per search. Not built because it
+   serves only the local-model path, which already requires configuration.
+2. **The `claude-sdk:` tutor route has no web tools at all** (README records this). Unchanged by
+   this rework.
+3. **Not verified against the live API.** No `ANTHROPIC_API_KEY` was available, so what is proven is
+   the request shape — a fake Anthropic endpoint records `type: web_search_20260209`,
+   `max_uses: 8`, with `read_url` surviving the same tool-set merge (`tests/webtools.test.ts`). The
+   first run with a real key should confirm results actually come back and land in `sources`.
+4. **Nothing found in a teaching-mode turn is saved.** By design — writing stays freeform-only, so
+   the single-writer rule holds — but it means the learner has to switch modes to keep what they
+   just learned. Whether that is the right trade is a product question, not a bug.
 
 ## Closed by measuring — do not re-open
 

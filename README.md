@@ -104,8 +104,8 @@ How it bridges the Agent SDK's run-to-completion `query()` async generator to a 
   shadowed by either cause, and `PreToolUseHookSpecificOutput.updatedInput` rewrites tool input the
   same way `canUseTool`'s `updatedInput` would have. Each sanitized call logs `[sdk-sanitize]
   <tool>` to stderr so a live run can confirm the seam fires.
-- **Known limitations of this path** (only `web_search`/`read_url` and `ingest_paper` — both
-  freeform-only research tools on the ai-sdk path — are not wired up here yet; everything else
+- **Known limitations of this path** (only `web_search`/`read_url` and `ingest_paper` — the
+  research tools on the ai-sdk path — are not wired up here yet; everything else
   `session.ts`'s freeform mode offers, including `write_page`/`link_pages`/`compile_source`, is
   available). Requires the same local `claude` (Claude Code) login as the other `claude-sdk:`
   routes above.

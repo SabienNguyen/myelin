@@ -32,10 +32,15 @@ describe('prompt assembly', () => {
     expect(ctx).toMatch(/Active goal: none/);
     expect(ctx).toMatch(/create_path/);
   });
-  it('cold start in a teaching mode tells the tutor it CANNOT build the curriculum here', () => {
+  it('cold start in a teaching mode says research IS available but building the curriculum is not', () => {
+    // An empty vault is the one case where a teaching mode gets web research (session.ts's
+    // researchUnlocked) — so this line has to grant the one and withhold the other, or the tutor
+    // either refuses a question it could have answered or tries to write pages it cannot write.
     const ctx = buildBootstrapContext({ ...base, mode: 'learn', emptyVault: true });
     expect(ctx).toMatch(/COLD START/);
-    expect(ctx).toMatch(/LEARN mode gives you no/);
+    expect(ctx).toMatch(/web research/);
+    expect(ctx).toMatch(/LEARN mode gives you web research/);
+    expect(ctx).toMatch(/NO page-writing or\s+ingest tools/);
     expect(ctx).toMatch(/switch to freeform/);
   });
   it('cold start in freeform tells it to research and build instead', () => {

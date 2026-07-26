@@ -95,6 +95,46 @@ describe('evidence guardrail', () => {
   }, 30_000);
 });
 
+describe('cold-start research unlock', () => {
+  // researchGate.test.ts covers the DECISION against a stubbed scorer. This covers the WIRING:
+  // that a teaching-mode turn actually hands the tutor the tools, and tells it they are there.
+  // Those are separable — the gate returning true is worthless if session.ts still builds `{}`.
+  const drive = async (text: string) => {
+    const calls: any[] = [];
+    const model = textOnly();
+    const orig = model.doStream.bind(model);
+    (model as any).doStream = async (o: any) => { calls.push(o); return orig(o); };
+    const session = createTutorSession(lw, {
+      student: 'kid', vault, models: {},
+      // A SearXNG that is never reached: the tool only has to EXIST for this test. The provider-
+      // executed Anthropic tool cannot be used here because the model is injected, which is
+      // exactly what session.ts's searchModelId is careful about.
+      search: { searxng: 'http://127.0.0.1:1' },
+    } as any, { model });
+    await (await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] as any, 'learn')).text();
+    return {
+      tools: (calls[0].tools ?? []).map((t: any) => t.name),
+      prompt: JSON.stringify(calls[0].prompt),
+    };
+  };
+
+  it('hands a learn-mode tutor web tools for a topic the vault has never heard of', async () => {
+    const { tools, prompt } = await drive('explain species counterpoint to me');
+    expect(tools).toContain('web_search');
+    expect(tools).toContain('read_url');
+    expect(prompt).toMatch(/no page covering what the student just asked/);
+    // The unlock must not quietly become a write unlock — that is the single-writer rule.
+    expect(tools).not.toContain('write_page');
+  }, 30_000);
+
+  it('withholds them when the vault already has the page — evidence and edges beat a blog post', async () => {
+    const { tools, prompt } = await drive('remind me how arithmetic works');
+    expect(tools).not.toContain('web_search');
+    expect(tools).not.toContain('read_url');
+    expect(prompt).not.toMatch(/no page covering what the student just asked/);
+  }, 30_000);
+});
+
 describe('grading round-trip (Bug 2)', () => {
   it('sends a tool-output-available chunk carrying the graded output for pending block outputs', async () => {
     // Design note: a `data-grading` data-part + client-side onData merge was tried first, but it

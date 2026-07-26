@@ -97,6 +97,82 @@ function blockTools(): ToolSet {
   })]));
 }
 
+/** Words that carry no topic, so a page whose body happens to contain them is not evidence that
+ *  the vault covers what the student just asked about. Loreweaver's `search` scores +1 per body
+ *  token, so without this every page in the vault matches "what is the derivative of x" via
+ *  "what"/"is"/"the" and the coverage test below would always say "covered". */
+const STOPWORDS = new Set([
+  'the', 'and', 'but', 'for', 'are', 'was', 'were', 'can', 'you', 'your', 'his', 'her', 'its',
+  'this', 'that', 'these', 'those', 'what', 'why', 'how', 'who', 'when', 'where', 'which',
+  'does', 'did', 'has', 'have', 'had', 'not', 'with', 'from', 'about', 'into', 'than', 'then',
+  'them', 'they', 'there', 'here', 'some', 'any', 'all', 'more', 'most', 'much', 'many',
+  'explain', 'tell', 'teach', 'show', 'help', 'want', 'like', 'know', 'learn', 'understand',
+  'please', 'thanks', 'okay', 'yes', 'sure', 'next', 'again', 'let', 'lets', 'get', 'got',
+]);
+
+/** A hit at this score means a TITLE or tag matched, or three separate content words did — either
+ *  way the vault has something genuinely on-topic. Body-only coincidences score below it. */
+const COVERED_SCORE = 3;
+
+/** The topic words in a student message: long enough to mean something, not a stopword. */
+export function topicTokens(text: string): string[] {
+  return [...new Set(text.toLowerCase().split(/[^a-z0-9]+/))]
+    .filter((t) => t.length > 2 && !STOPWORDS.has(t));
+}
+
+function lastUserText(messages: UIMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'user') continue;
+    return (messages[i].parts as any[])
+      .filter((p) => p?.type === 'text').map((p) => p.text).join(' ');
+  }
+  return '';
+}
+
+/**
+ * May the tutor research the web on this turn?
+ *
+ * Freeform: always, as before — that is where a subject gets researched, sourced and compiled.
+ *
+ * Teaching modes (`learn`/`review`/`quiz`): only when the VAULT CANNOT ANSWER. This is the
+ * cold-start unlock, and it exists because the previous freeform-only gate had a dead end in it: a
+ * student in `learn` mode who named a subject the vault had never heard of got a tutor with no
+ * search, no write_page and no ingest — so its only honest move was to refuse and ask them to
+ * switch modes. Meanwhile its only *tempting* move was to teach from model memory with no sources,
+ * which is exactly what the vault-grounded design is meant to prevent.
+ *
+ * The unlock is deliberately narrow. Research turns on when there is nothing to be grounded in,
+ * and turns off the moment there is: a vault page on the topic still wins, because a page carries
+ * the student's own evidence and edges and a search result carries neither. Writing stays freeform
+ * only — the single-writer rule is untouched, so a teaching-mode answer informed by research is
+ * transient until the student compiles it in freeform.
+ *
+ * `search` is injected so this is testable without a vault, and failures fail CLOSED: if the vault
+ * cannot be searched we do not know whether it covers the topic, and staying grounded is the safer
+ * of the two wrong answers.
+ */
+export async function researchUnlocked(
+  mode: Mode,
+  messages: UIMessage[],
+  slugs: string[],
+  search: (query: string) => Promise<{ slug: string; score: number }[]>,
+): Promise<boolean> {
+  if (mode === 'freeform') return true;
+  if (slugs.length === 0) return true; // nothing in the vault can ground anything
+
+  const tokens = topicTokens(lastUserText(messages));
+  // "ok", "next", "go on" — the student is continuing, not naming a new subject. Continuing a
+  // lesson the vault already holds is precisely the case that should stay grounded.
+  if (tokens.length === 0) return false;
+
+  try {
+    const hits = await search(tokens.join(' '));
+    return !hits.some((h) => h.score >= COVERED_SCORE);
+  } catch {
+    return false;
+  }
+}
+
 /** Find block-tool outputs in the tail of the incoming history (since the last user text turn). */
 function pendingBlockOutputs(messages: UIMessage[]) {
   const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
@@ -119,6 +195,13 @@ export function createTutorSession(
   opts: { model?: LanguageModel; now?: () => Date } = {},
 ) {
   const model = opts.model ?? modelFor('tutor', cfg);
+  // Which model id the WEB TOOLS should assume — deliberately not the same question as `model`
+  // above. A provider-executed search tool is a request-shape feature of Anthropic's API, so it
+  // only means anything on a real Anthropic route; an injected model (tests) or the scripted e2e
+  // model would carry the declaration to a provider that has never heard of it. `undefined` here
+  // makes buildWebTools fall back to SearXNG-or-nothing, which is the honest answer for those.
+  const searchModelId = opts.model || process.env.LW_MOCK_MODEL
+    ? undefined : cfg.models?.tutor?.model;
 
   async function bootstrap(mode: Mode, slugs: string[]): Promise<string> {
     const activeGoal = readGoal(cfg.vault);
@@ -201,9 +284,12 @@ export function createTutorSession(
         const activeMcp = Object.fromEntries(Object.entries(mcpTools)
           .filter(([n]) => mode === 'freeform' || TEACH_TOOLS.includes(n)));
 
-        // Research tools ride with the vault-writing tools: freeform only. A subject gets
-        // researched and compiled in freeform; teaching modes stay grounded in the vault.
-        const webTools = mode === 'freeform' ? buildWebTools(cfg) : {};
+        // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
+        // only when the vault has no page for what the student just asked about — see
+        // researchUnlocked above for why that exception exists and how narrow it is.
+        const canResearch = await researchUnlocked(mode, messages, slugs,
+          (query) => lw.call('search', { query }) as Promise<{ slug: string; score: number }[]>);
+        const webTools = canResearch ? buildWebTools(cfg, searchModelId) : {};
         // ingest_paper needs cfg (to queue) AND lw (to kick a background compile) — same
         // freeform-only gate as webTools: a subject gets researched, sourced, and compiled in
         // freeform; teaching modes stay grounded in the vault.
@@ -219,6 +305,17 @@ export function createTutorSession(
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
         const context: ModelMessage[] = [];
         if (isFirstTurn) context.push({ role: 'user', content: await bootstrap(mode, slugs) });
+        // The unlock is decided per turn, so it can happen mid-conversation — after the bootstrap
+        // has already been sent. Say it here or the tutor holds a tool it was told it does not have.
+        if (canResearch && mode !== 'freeform' && webTools.web_search) context.push({
+          role: 'user',
+          content: 'HARNESS: the vault has no page covering what the student just asked, so '
+            + 'web_search and read_url are unlocked for this turn. Research it, cite what you read '
+            + 'in your answer, and teach from that. You still have NO page-writing tools here, so '
+            + 'nothing you find is being saved: once the student has their answer, offer to switch '
+            + 'to freeform so the subject can be researched properly and compiled into pages that '
+            + 'track their progress.',
+        });
         if (grades.length) context.push({
           role: 'user',
           content: `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. ` +

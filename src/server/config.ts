@@ -15,8 +15,10 @@ const configSchema = z.object({
     args: z.array(z.string()),
     embeddings: z.enum(['ollama', 'fake', 'none']).default('ollama'),
   }),
-  // Optional research stack: a local SearXNG instance powering web_search/read_url tools
-  // (freeform mode only). Absent -> the tools simply aren't registered.
+  // Optional SEARCH FALLBACK for local models. An Anthropic-routed tutor gets research for free
+  // via Anthropic's server-side web search (webTools.ts), so this only matters for an `ollama:`
+  // tutor, which cannot use a provider-executed tool. Absent -> a local tutor has read_url but no
+  // search, and instruction 13 tells it to mark what it writes as unverified.
   search: z.object({ searxng: z.string() }).optional(),
   // Optional the-gap sidecar (code_exercise blocks — I2). Absent -> /api/gap/* routes aren't
   // registered and the status badge is omitted, same "feature off when absent" pattern as search.
