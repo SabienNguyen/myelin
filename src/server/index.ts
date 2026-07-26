@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { configSource, loadConfig } from './config.js';
 import { applyCredentials, credentialsPath } from './credentials.js';
 import { buildSetupRoutes, needsApiKey } from './setupRoutes.js';
+import { buildStaticRoutes } from './staticRoutes.js';
 import { Loreweaver } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
@@ -118,5 +119,11 @@ app.route('/', buildGapHelpRoute(lw, cfg));
 // First-run readiness + the one thing a first run must supply. Mounted last so it is reachable
 // even if a feature route above is disabled.
 app.route('/', buildSetupRoutes(cfg));
+// Built client last of all, because its SPA fallback answers everything that did not match an API
+// route above. Absent in dev (Vite owns the client then) — see staticRoutes.ts.
+const staticFiles = buildStaticRoutes();
+if (staticFiles.found) app.route('/', staticFiles.app);
 serve({ fetch: app.fetch, port: cfg.port });
-console.log(`loreweaver-harness on :${cfg.port}`);
+console.log(staticFiles.found
+  ? `Loreweaver is running — open http://localhost:${cfg.port}`
+  : `loreweaver-harness API on :${cfg.port} (no built client; run \`npm run dev:client\`)`);

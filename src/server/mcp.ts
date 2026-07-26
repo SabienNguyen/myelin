@@ -33,6 +33,11 @@ export class Loreweaver {
           ...process.env as Record<string, string>,
           LOREWEAVER_VAULT: cfg.vault,
           LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
+          // Inside the desktop app, `process.execPath` — which config.ts's runnerFor uses to run a
+          // compiled entry — is the Electron binary, and launching it plainly would open a second
+          // app window instead of a Node process. This makes it behave as Node. A no-op for a real
+          // node binary, so it costs nothing to set unconditionally.
+          ELECTRON_RUN_AS_NODE: '1',
         },
       }),
       onUncaughtError: (e) => console.error('[loreweaver-mcp]', e),

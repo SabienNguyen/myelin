@@ -139,6 +139,44 @@ How it bridges the Agent SDK's run-to-completion `query()` async generator to a 
   available). Requires the same local `claude` (Claude Code) login as the other `claude-sdk:`
   routes above.
 
+## Desktop app
+
+`npm run dist` produces a single downloadable file — an AppImage on Linux, a dmg on macOS, an NSIS
+installer on Windows — that a person can run with nothing installed and no config to write. It bundles
+both repos: the harness serves its own built client on one port (`src/server/staticRoutes.ts`), and
+Loreweaver rides along as an unpacked resource that the app spawns over stdio exactly as it does in
+development.
+
+```bash
+npm run dist            # build:all + bundle:loreweaver + electron-builder
+npm run desktop         # same shell against the dev tree, no packaging
+```
+
+Three things in this path are not obvious, and each was a bug before it was a comment:
+
+- **`ELECTRON_RUN_AS_NODE=1` on the Loreweaver child** (`src/server/mcp.ts`). Inside the packaged
+  app, `process.execPath` — which is what runs a compiled entry — is the Electron binary, so
+  spawning it plainly opens a second app window instead of a Node process.
+- **Loreweaver is copied in an `afterPack` hook**, not declared as an `extraResources` entry
+  (`electron/afterPack.mjs`). electron-builder strips `node_modules` out of extra resources, and the
+  shipped server imports `@modelcontextprotocol/sdk` at runtime — so the extraResources version
+  packaged cleanly, launched, and died with `ERR_MODULE_NOT_FOUND`. It also has to live outside the
+  asar archive, because Node cannot spawn a script from inside one.
+- **`scripts/bundle-loreweaver.mjs` installs runtime deps from the lockfile** rather than copying the
+  dev checkout's `node_modules`. Copy-then-prune was tried first and left typescript, vitest and
+  rollup in the download.
+
+The renderer is a plain web client — no preload, no node integration, `sandbox: true` — because it
+talks to the local server over HTTP like any other browser would, so there is no reason to give it
+privileges. External links open in the real browser.
+
+`tests/packaging.test.ts` pins these as static checks, so a config edit that would reintroduce one
+fails in seconds instead of at the end of a 230MB build.
+
+**Not yet done:** no application icon (the default Electron icon ships), no code signing or
+notarization, and no auto-update channel. Only the Linux AppImage has been built and launched here;
+the mac and win targets are configured but unverified.
+
 ## Running
 
 **Dev** (two processes, hot reload, Vite proxies `/api/*` to the Hono server):

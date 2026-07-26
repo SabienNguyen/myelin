@@ -15,3 +15,6 @@ playwright-report/
 blob-report/
 .uitour.mjs
 .sdk-live-probe.mjs
+dist-server/
+vendor/
+release/

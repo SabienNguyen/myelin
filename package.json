@@ -1,11 +1,8 @@
 {
   "name": "loreweaver-harness",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "description": "A localhost tutor with a teaching memory: it researches a subject, writes an Obsidian-compatible vault of pages, and grades your work against them.",
+  "main": "electron/main.mjs",
   "scripts": {
     "test": "vitest",
     "typecheck": "tsc --noEmit",
@@ -13,7 +10,12 @@
     "dev:client": "vite",
     "build": "vite build",
     "start": "tsx src/server/index.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "build:server": "tsc -p tsconfig.server.json && node scripts/copy-server-assets.mjs",
+    "build:all": "npm run build && npm run build:server",
+    "bundle:loreweaver": "node scripts/bundle-loreweaver.mjs",
+    "desktop": "npm run build:all && electron electron/main.mjs",
+    "dist": "npm run build:all && npm run bundle:loreweaver && electron-builder"
   },
   "keywords": [],
   "author": "",
@@ -71,10 +73,50 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "electron": "^40.10.6",
+    "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2",
     "vite": "^8.1.4",
     "vitest": "^4.1.10"
-  }
+  },
+  "build": {
+    "appId": "dev.loreweaver.app",
+    "productName": "Loreweaver",
+    "files": [
+      "dist/**",
+      "dist-server/**",
+      "electron/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Education",
+      "executableName": "loreweaver",
+      "syncDesktopName": true
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.education"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "publish": null,
+    "asarUnpack": [
+      "**/*.md"
+    ],
+    "afterPack": "electron/afterPack.mjs"
+  },
+  "desktopName": "loreweaver.desktop"
 }

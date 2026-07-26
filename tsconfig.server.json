@@ -1,0 +1,21 @@
+// Server build for packaging. The root tsconfig is `noEmit: true` and covers the client, tests and
+// scripts — this one emits just the server tree, so a packaged app can run on plain Node with no
+// tsx in the picture.
+//
+// Deliberately NOT extending the root config's `include`: the client is compiled by Vite (it needs
+// JSX, `vite/client` types and the whole plugin pipeline), and tests have no business in a shipped
+// build.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "dist-server",
+    "rootDir": "src",
+    "sourceMap": true,
+    "types": ["node"]
+  },
+  "include": ["src/server", "src/shared"]
+}

@@ -41,7 +41,14 @@ export function resolveLoreweaver(from = dirname(fileURLToPath(import.meta.url))
   const explicit = process.env.LOREWEAVER_ENTRY;
   if (explicit) return runnerFor(expand(explicit));
 
-  // Installed as a dependency — a packaged app, or `npm i file:../loreweaver` in a dev tree.
+  // Bundled by scripts/bundle-loreweaver.mjs. A packaged desktop app sets LOREWEAVER_ENTRY
+  // explicitly (electron/main.mjs), so this rung is for running the assembled tree locally.
+  for (const up of ['..', '../..']) {
+    const vendored = resolve(from, up, 'vendor/loreweaver/dist/server.js');
+    if (existsSync(vendored)) return runnerFor(vendored);
+  }
+
+  // Installed as a dependency, for a tree that chose `npm i file:../loreweaver` instead.
   try {
     return runnerFor(createRequire(import.meta.url).resolve('loreweaver/dist/server.js'));
   } catch { /* not installed; keep looking */ }
@@ -115,7 +122,9 @@ const configSchema = z.object({
     ankiSyncMinutes: z.number().int().positive().default(30),
     ankiBacklogNudgeDays: z.number().int().positive().default(3),
   }).prefault({}),
-  port: z.number().int().default(4820),
+  // HARNESS_PORT lets the desktop shell hand over a port it has already confirmed is free, without
+  // writing a config file to do it (electron/main.mjs).
+  port: z.number().int().default(Number(process.env.HARNESS_PORT) || 4820),
   // When true (default), newly-queued chapters/papers compile automatically in the background
   // (ensureCompileDrain) as soon as conversion finishes — no manual "Compile now" click needed.
   autoCompile: z.boolean().default(true),
