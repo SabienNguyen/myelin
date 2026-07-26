@@ -204,7 +204,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
 
   const finish = useCallback((
     completed: boolean, rungReached: TemplateKind, testsPassed: number, testsTotal: number, wroteCode: boolean,
-    extra: { unavailable?: boolean } = {},
+    extra: { unavailable?: boolean; failingTests?: string[] } = {},
   ) => {
     if (completedRef.current) return; // one result per block — guards a stray double-fire (e.g. a
     completedRef.current = true;       // pass event racing a "stop here" click).
@@ -218,16 +218,25 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     });
   }, [addResult]);
 
+  // WHICH cases failed, not just how many. Case names are requirement descriptions ("single event
+  // split across two chunks"), so the failing set is a diagnosis — the difference between
+  // "3/5 passed" and "passes whole-chunk cases, fails every split-boundary one" is the difference
+  // between a score and a misconception the tutor can name and record.
+  const failingNames = (rows: { name: string; pass: boolean }[]) =>
+    rows.filter((r) => !r.pass).map((r) => r.name);
+
   function advanceOrFinish(): void {
     if (stepIndex + 1 < sequence.length) {
       setStepIndex((i) => i + 1);
     } else {
-      finish(true, template, results.filter((r) => r.pass).length, results.length, false);
+      finish(true, template, results.filter((r) => r.pass).length, results.length, false,
+        { failingTests: failingNames(results) });
     }
   }
 
   function stopHere(): void {
-    finish(false, template, results.filter((r) => r.pass).length, results.length, false);
+    finish(false, template, results.filter((r) => r.pass).length, results.length, false,
+      { failingTests: failingNames(results) });
   }
 
   // P2 (editor polish): Run executes the tests and shows results/console — it never completes the
@@ -276,7 +285,8 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     setConfirmSubmit(false);
     const testsPassed = results.filter((r) => r.pass).length;
     const wroteCode = code !== initialScaffold;
-    finish(true, 'full_body', testsPassed, results.length, wroteCode);
+    finish(true, 'full_body', testsPassed, results.length, wroteCode,
+      { failingTests: failingNames(results) });
     if (fullBodyDraftKey) clearDraft(fullBodyDraftKey);
   }, [results, code, finish, fullBodyDraftKey, initialScaffold]);
 

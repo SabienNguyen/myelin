@@ -426,13 +426,22 @@ export async function gradeBlockOutput(
     const earned: EvidenceKind = !result.completed ? 'struggled'
       : result.wroteCode ? 'applied-correctly' : 'exposed';
     const kind: EvidenceKind = earned === 'applied-correctly' && revealed ? 'exposed' : earned;
+    // The failing-case names ride into the evidence note: "stopped at full_body" says the learner
+    // gave up; "…still failing: single event split across two chunks; multi-byte UTF-8 character
+    // split across chunks" says they can parse whole chunks and cannot buffer across reads — a
+    // misconception the tutor can name, probe and record. Capped at three so a wide miss stays a
+    // readable note rather than a dump.
+    const failing: string[] = Array.isArray(result.failingTests) ? result.failingTests : [];
+    const failingNote = failing.length > 0
+      ? ` — still failing: ${failing.slice(0, 3).join('; ')}${failing.length > 3 ? ` (+${failing.length - 3} more)` : ''}`
+      : '';
     const note = result.completed
       ? (result.wroteCode
         ? (revealed
           ? 'passed real tests with own code, but revealed expected values — capped at exposed'
           : 'passed real tests with own code')
         : `completed ${result.rungReached} (guided)`)
-      : `stopped at ${result.rungReached}`;
+      : `stopped at ${result.rungReached}${failingNote}`;
     // `detail` used to be `${testsPassed}/${testsTotal} tests`, which the graded card ALREADY
     // renders one line above — the same number twice, and no room left to say the thing neither
     // line said: which evidence this run actually minted. That mattered most in the reveal case,
@@ -440,7 +449,7 @@ export async function gradeBlockOutput(
     // reaches the tutor (session.ts appends every grade's verdict + detail to the thread), so the
     // tutor now knows the ceiling applied rather than inferring a clean pass from "5/5 tests".
     const detail = !result.completed
-      ? `recorded as struggled — stopped at ${result.rungReached}`
+      ? `recorded as struggled — stopped at ${result.rungReached}${failingNote}`
       : kind === 'applied-correctly'
         ? 'recorded as applied-correctly'
         : revealed

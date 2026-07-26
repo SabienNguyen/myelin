@@ -218,6 +218,27 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(g.detail).toBe('recorded as struggled — stopped at full_body');
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'struggled' });
   });
+
+  it('failing-case NAMES ride into the struggled note and detail — a diagnosis, not a score', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
+      {
+        completed: false, rungReached: 'full_body', testsPassed: 3, testsTotal: 5, wroteCode: true,
+        failingTests: ['single event split across two chunks', 'multi-byte UTF-8 character split across chunks'],
+      }, cfg);
+    expect(g.evidence[0].note).toContain('still failing: single event split across two chunks; multi-byte UTF-8 character split across chunks');
+    expect(g.detail).toContain('still failing:');
+  });
+
+  it('a wide miss stays a readable note: capped at three names plus a count', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
+      {
+        completed: false, rungReached: 'full_body', testsPassed: 0, testsTotal: 5, wroteCode: true,
+        failingTests: ['a', 'b', 'c', 'd', 'e'],
+      }, cfg);
+    expect(g.evidence[0].note).toContain('a; b; c (+2 more)');
+  });
 });
 
 describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {

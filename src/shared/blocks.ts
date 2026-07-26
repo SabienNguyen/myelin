@@ -80,6 +80,12 @@ const codeExercise = {
     // as the Anki ceiling — assistance that could substitute for understanding must not be able to
     // mint 'applied-correctly'. Recording it is what keeps the reveal honest rather than forbidden.
     revealedExpected: z.boolean().optional(),
+    // Names of the cases still failing at submit/stop time. Case names describe REQUIREMENTS
+    // ("single event split across two chunks"), so this set is a diagnosis, not a score — it is
+    // how grading's struggled note can say WHAT was missed, and how the tutor can infer and
+    // record the misconception behind a pattern of misses. Optional: older stored results and the
+    // external sidecar's producers never sent it.
+    failingTests: z.array(z.string()).optional(),
     // The exercise could not be loaded at all (the coding sandbox is down). This is an
     // INFRASTRUCTURE failure, not a learner outcome — without it the only way out of an unloadable
     // block is `completed: false`, which grading maps to 'struggled' and blames the learner for a
