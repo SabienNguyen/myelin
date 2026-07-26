@@ -614,15 +614,20 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border: 2px solid var(--accent); border-bottom-color: transparent;
 }
 
-/* ── Library (compile queue) ─────────────────────────── */
-.library-actions { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1rem; flex-wrap: wrap; }
-.library-actions .primary {
+/* The one filled, accent-colored button style — the screen's main action. Was scoped to
+   .library-actions, so the session plan's "Start today's session" silently rendered as a plain
+   bordered button while CLAIMING class="primary"; the audit's dark-mode screenshot caught it. */
+button.primary {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
   font-weight: 600;
 }
-.library-actions .primary:disabled { opacity: 0.5; cursor: default; }
+button.primary:hover { background: var(--accent); color: var(--accent-text); }
+button.primary:disabled { opacity: 0.5; cursor: default; }
+
+/* ── Library (compile queue) ─────────────────────────── */
+.library-actions { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .library-note { color: var(--text-muted); font-size: 0.85rem; }
 .library-book h3 { font-family: var(--font-serif); font-size: 1rem; margin: 0.9rem 0 0.3rem; }
 .library-book ul { list-style: none; margin: 0; padding: 0; }
