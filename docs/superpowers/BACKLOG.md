@@ -189,6 +189,31 @@ Still open, and deliberately so:
    the single-writer rule holds — but it means the learner has to switch modes to keep what they
    just learned. Whether that is the right trade is a product question, not a bug.
 
+## Setup and packaging: what shipped, and what is left
+
+Closed: the app starts with nothing but an API key, and `npm run dist` produces one downloadable
+file. Every config field now has a working default, the config file itself is optional, the vault is
+created at boot in `~/Documents/Loreweaver`, Loreweaver is found rather than configured, and the API
+key has a real first-run flow that probes Anthropic before saving and stores the key outside the
+vault. The desktop shell bundles both repos: the harness serves its own built client on one port and
+spawns the vendored Loreweaver over stdio exactly as in development.
+
+Still open:
+
+1. **No application icon** — the default Electron icon ships. Cosmetic, and the first thing anyone
+   will notice.
+2. **No code signing or notarization.** On macOS that means Gatekeeper blocks it; on Windows,
+   SmartScreen warns. Both need certificates, which is a purchasing decision, not a coding one.
+3. **Only the Linux AppImage has been built and launched.** The mac and win targets are configured
+   and unverified, and both need to run on their own OS to be built at all.
+4. **No auto-update.** `publish` is deliberately null. Adding an update channel means picking a place
+   to host releases.
+5. **230MB.** Electron is ~180MB of that and there is no cheap fix; the app's own asar is 131MB,
+   which is worth a look (mathlive, katex and codemirror are large and only some paths need them).
+6. **The gap sidecar is absent by default**, so a fresh install has no `code_exercise` block. That is
+   the correct default — it is a separate service — but it means the one subject with a mechanical
+   applied route out of the box is not programming. Worth revisiting alongside item 1 above.
+
 ## Closed by measuring — do not re-open
 
 - **Focus indicators.** All 16 tab stops with five blocks rendered, checking outline, box-shadow and
