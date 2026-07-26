@@ -184,8 +184,9 @@ Still open, and deliberately so:
    `web_search` that makes its own one-shot Anthropic call and returns the results — that would make
    research infra-free for *every* route, at one extra model call per search. Not built because it
    serves only the local-model path, which already requires configuration.
-2. **The `claude-sdk:` tutor route has no web tools at all** (README records this). Unchanged by
-   this rework.
+2. **The `claude-sdk:` tutor route** now gets the Agent SDK's own WebSearch/WebFetch, behind the
+   same vault-gap gate as the ai-sdk route — but still no `ingest_paper`, so "find the latest paper
+   and compile it" works on the API route only.
 3. **Not verified against the live API.** No `ANTHROPIC_API_KEY` was available, so what is proven is
    the request shape — a fake Anthropic endpoint records `type: web_search_20260209`,
    `max_uses: 8`, with `read_url` surviving the same tool-set merge (`tests/webtools.test.ts`). The
