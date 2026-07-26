@@ -25,4 +25,5 @@ declare module '@phosphor-icons/react' {
   export const ClockCounterClockwiseIcon: ComponentType<PhosphorIconProps>;
   export const PencilSimpleIcon: ComponentType<PhosphorIconProps>;
   export const CodeIcon: ComponentType<PhosphorIconProps>;
+  export const ClockCountdownIcon: ComponentType<PhosphorIconProps>;
 }

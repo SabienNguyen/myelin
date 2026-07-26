@@ -1852,3 +1852,21 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .practice-pending-note { margin: 0.25rem 0 0.45rem; font-size: 0.85rem; color: var(--text-muted); }
 .practice-pending-actions { display: flex; gap: 0.5rem; }
 .practice-pending-actions button { font-size: 0.85rem; padding: 0.25rem 0.7rem; }
+
+/* ── Review queue: what is about to slip, above everything else in the Library ─────────────── */
+.review-queue { margin-bottom: 1.1rem; padding-bottom: 0.9rem; border-bottom: 1px solid var(--border); }
+.review-queue h3 { font-family: var(--font-serif); font-size: 1rem; margin: 0 0 0.25rem; display: flex; align-items: center; gap: 0.4rem; }
+.review-queue-lede { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--text-muted); }
+.review-queue ul { list-style: none; margin: 0; padding: 0; }
+.review-queue li + li { margin-top: 0.3rem; }
+.review-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.4rem 0.7rem;
+}
+.review-when { font-size: 0.8rem; color: var(--warn); white-space: nowrap; }
+.review-when--slipped { color: var(--bad); font-weight: 600; }

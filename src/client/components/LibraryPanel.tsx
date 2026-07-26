@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 import { PracticePanel } from './PracticePanel.js';
+import { ReviewQueue } from './ReviewQueue.js';
 import { PathsSection } from './PathsSection.js';
 
 type Entry = {
@@ -232,6 +233,9 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   if (queue.length === 0) {
     return (
       <div className="library-panel">
+        {/* Review first in BOTH branches — what is about to slip outranks adding new material,
+            which is the whole argument of spaced repetition. */}
+        <ReviewQueue visible={visible} />
         {/* Paths belong in BOTH branches. This one — an empty compile queue — is the new learner's
             state, and it is exactly when a syllabus matters most: they may have a path and no books
             at all. Omitting it here hid the whole feature for the default case. */}
@@ -248,7 +252,8 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
 
   return (
     <div className="library-panel">
-      {/* Paths first — the syllabus is the frame the books and practice rows sit inside. */}
+      <ReviewQueue visible={visible} />
+      {/* Paths next — the syllabus is the frame the books and practice rows sit inside. */}
       <PathsSection visible={visible} />
       <AddRepoForm onQueued={() => setRefresh((r) => r + 1)} />
       <div className="library-actions">

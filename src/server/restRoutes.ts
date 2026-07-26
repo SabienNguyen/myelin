@@ -187,6 +187,43 @@ export function buildRestRoutes(
   });
   app.get('/api/student', async (c) =>
     c.json(await lw.call('get_student_state', { student: cfg.student })));
+
+  /**
+   * The review queue — what should be reinforced, most urgent first. The spacing loop's missing
+   * half: decay windows always ran, but the only way to notice one closing was to go LOOKING at a
+   * page or the graph. Optimal review is the system's job, not the learner's vigilance.
+   *
+   * Two tiers, both straight from loreweaver's own numbers (days_left/slipped are computed where
+   * the decay rules live): `slipped` pages already lost a rung and lead the list; `dueSoon` pages
+   * are within DUE_SOON_DAYS of losing one. Sorted most-urgent-first, capped — a wall of 40 due
+   * items teaches avoidance, not review.
+   */
+  app.get('/api/due', async (c) => {
+    const DUE_SOON_DAYS = 5;
+    const CAP = 12;
+    const state = await lw.call('get_student_state', { student: cfg.student }) as Record<string, any>;
+    const entries = Object.entries(state)
+      .filter(([, m]) => m && typeof m === 'object')
+      .map(([slug, m]) => ({
+        slug,
+        level: m.level as string,
+        effective: m.effective as string,
+        daysLeft: (m.days_left ?? null) as number | null,
+        slipped: m.slipped === true,
+      }))
+      .filter((e) => e.slipped || (e.daysLeft !== null && e.daysLeft <= DUE_SOON_DAYS))
+      .sort((a, b) => (a.slipped === b.slipped ? (a.daysLeft ?? 0) - (b.daysLeft ?? 0) : a.slipped ? -1 : 1))
+      .slice(0, CAP);
+    // Titles resolved per due page — bounded by the cap, and a page that fails to resolve keeps
+    // its slug rather than dropping off the review list.
+    const due = await Promise.all(entries.map(async (e) => ({
+      ...e,
+      title: await lw.call('read_page', { slug: e.slug })
+        .then((p: any) => p.page?.meta?.title ?? e.slug)
+        .catch(() => e.slug),
+    })));
+    return c.json({ due });
+  });
   app.get('/api/status', async (c) => {
     // Read the tutor model from cfg HERE, not from the snapshot passed in at boot. Signing in with a
     // Claude subscription rewrites it while the app is running (signin.ts's applyRoute), and a
