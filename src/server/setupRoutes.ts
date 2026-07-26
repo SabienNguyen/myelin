@@ -97,7 +97,14 @@ export function buildSetupRoutes(cfg: HarnessConfig) {
     const key = String(body?.key ?? '').trim();
     if (!key) return c.json({ error: 'Paste your key first.' }, 400);
     if (!looksLikeAnthropicKey(key)) {
-      return c.json({ error: 'That does not look like an Anthropic key — they start with “sk-ant-”.' }, 400);
+      // Two different failures deserve two different sentences: the audit pasted a key that DID
+      // start with sk-ant- and was told it didn't — the real problem was length, and a user whose
+      // paste truncated can SEE the prefix is right, so the old copy read as the app being wrong.
+      return c.json({
+        error: key.startsWith('sk-ant-')
+          ? 'That key looks truncated — Anthropic keys are much longer. Paste the whole key.'
+          : 'That does not look like an Anthropic key — they start with “sk-ant-”.',
+      }, 400);
     }
 
     // Probe before saving. A wrong key that gets stored looks exactly like a working one until the

@@ -55,9 +55,15 @@ export function TopbarStatus() {
       {/* 'down' is omitted, not shown greyed: on a first run nobody has Anki installed, and an
           amber badge for a feature the learner never asked for reads as "something is broken".
           A backlog IS worth flagging — that one is about work they have already done. */}
+      {/* role=status + aria-label, not title alone: a tooltip on an unfocusable span is invisible
+          to the keyboard and unreliable for screen readers, and the dot's COLOR was the only other
+          carrier of which state this is. */}
       {status.anki && status.anki !== 'down' && (
-        <span className={`badge anki-${status.anki}`} title={ANKI_LABEL[status.anki]}>
-          <span className="statusdot" /> anki
+        <span
+          className={`badge anki-${status.anki}`} title={ANKI_LABEL[status.anki]}
+          role="status" aria-label={ANKI_LABEL[status.anki]}
+        >
+          <span className="statusdot" aria-hidden="true" /> anki
         </span>
       )}
     </div>
