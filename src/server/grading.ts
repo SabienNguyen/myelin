@@ -129,7 +129,9 @@ interface StructuredGrade {
   allCorrect: boolean;
   anyCorrect: boolean;
   detail: string;
-  perItem?: { id: string; correct: boolean }[];
+  // `source` per item where a block mixes them (quiz): 'model' marks the items a model judged, so
+  // the UI can show WHICH answers were checked and which were believed. Absent = mechanical.
+  perItem?: { id: string; correct: boolean; source?: GradeSource }[];
 }
 
 export function gradeStructured(checker: any, values: string[]): StructuredGrade {
@@ -352,7 +354,7 @@ export async function gradeBlockOutput(
       // not a mechanically-verified quiz, however many multiple-choice items surround it.
       source: [...bySlug.values()].some((s) => s.source === 'model') ? 'model' : 'mechanical',
       detail: `${right}/${perItem.length}`,
-      perItem: perItem.map(({ id, correct }) => ({ id, correct })),
+      perItem, // sources included — the graded card shows which items were judged vs checked
       evidence: [...bySlug].map(([slug, s]) => ev(
         slug,
         s.right === s.total ? 'applied-correctly' : 'struggled',

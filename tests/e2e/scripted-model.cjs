@@ -45,7 +45,20 @@ function createScriptedModel(scriptPath) {
     supportedUrls: {},
 
     async doGenerate() {
-      throw new Error('scripted-model: doGenerate is not supported — the harness only ever calls doStream');
+      // The claim this used to throw with — "the harness only ever calls doStream" — stopped being
+      // true when quiz short answers went through gradeOpenAnswer's generateText. A doGenerate that
+      // pops a turn and returns its text lets scripted drives exercise MODEL-GRADED paths too.
+      const turn = loadTurns()[index];
+      index += 1;
+      return {
+        content: [{ type: 'text', text: (turn && turn.text) || 'CORRECT — scripted.' }],
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: {
+          inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+          outputTokens: { total: 1, text: 1, reasoning: undefined },
+        },
+        warnings: [],
+      };
     },
 
     async doStream() {

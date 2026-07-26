@@ -40,21 +40,25 @@ export function QuizInner({ args, addResult }: {
 
 export function Quiz(props: { args: any; result: any; addResult: (r: any) => void }) {
   if (props.result) {
-    const perItem: { id: string; correct: boolean }[] = props.result.grading?.perItem ?? [];
-    const byId = new Map(perItem.map((p) => [p.id, p.correct]));
+    const perItem: { id: string; correct: boolean; source?: string }[] = props.result.grading?.perItem ?? [];
+    const byId = new Map(perItem.map((p) => [p.id, p]));
     return (
       <div className="block quiz done">
-        <span className="graded-tag"><Check size={12} weight="bold" /> graded</span>
+        <span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
         <h3>{props.args.title}</h3>
         <ul>
           {props.args.items.map((item: any) => {
             const answer = props.result.answers.find((a: any) => a.id === item.id)?.answer;
-            const correct = byId.get(item.id);
+            const scored = byId.get(item.id);
             return (
               <li key={item.id}>
-                <BlockProse text={item.prompt} inline /> — {answer} {correct != null && (
-                  <span className={correct ? 'mark-ok' : 'mark-bad'}>{correct ? '✓' : '✗'}</span>
+                <BlockProse text={item.prompt} inline /> — {answer} {scored != null && (
+                  <span className={scored.correct ? 'mark-ok' : 'mark-bad'}>{scored.correct ? '✓' : '✗'}</span>
                 )}
+                {/* Which verdicts are a machine's and which are a model's opinion — the evidence
+                    note already said "(model-graded)", but the learner could not see WHICH items.
+                    Checked is the default and gets no badge; judged is the exception worth naming. */}
+                {scored?.source === 'model' && <span className="quiz-judged">judged</span>}
               </li>
             );
           })}

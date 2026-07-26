@@ -1803,3 +1803,15 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* Quiz items a MODEL judged (vs exact-checked) — the exception gets the badge. */
+.quiz-judged {
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  vertical-align: middle;
+}

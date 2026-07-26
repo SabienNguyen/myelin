@@ -40,7 +40,7 @@ export function LabelDiagram({ args, result, addResult }: {
     );
     return (
       <div className="block label-diagram done">
-        <span className="graded-tag"><Check size={12} weight="bold" /> graded</span>
+        <span className="graded-tag">{result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
         <BlockProse text={args.prompt} />
         <ul className="label-diagram-summary">
           {args.regions.map((r) => {

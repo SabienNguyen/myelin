@@ -194,6 +194,11 @@ describe('THE RULE: a model-graded verdict can never mint applied-correctly', ()
     expect(g.source).toBe('model');              // but not everything was checked
     expect(g.evidence.map((e) => e.kind)).toEqual(['explained-correctly']);
     expect(g.evidence[0].note).toContain('model-graded');
+    // Per-item sources survive into perItem, so the graded card can mark WHICH items were judged.
+    expect(g.perItem).toEqual([
+      { id: '1', source: 'mechanical', correct: true },
+      { id: '2', source: 'model', correct: true },
+    ]);
   });
 
   it('covers every block type the schema declares, so a new block cannot slip through', async () => {

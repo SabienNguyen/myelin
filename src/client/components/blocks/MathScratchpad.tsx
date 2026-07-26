@@ -45,7 +45,7 @@ export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput
 
 export function MathScratchpad(props: { args: any; result: any; addResult: (r: any) => void }) {
   if (props.result) {
-    return <div className="block done"><span className="graded-tag"><Check size={12} weight="bold" /> graded</span>
+    return <div className="block done"><span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
       Answer: <Latex tex={props.result.finalLatex} />
       {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}> — {props.result.grading.detail}</em>}</div>;
   }
