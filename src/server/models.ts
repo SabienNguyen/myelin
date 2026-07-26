@@ -4,7 +4,11 @@ import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { SystemModelMessage } from 'ai';
 import type { HarnessConfig, ModelRole } from './config.js';
 
-const anthropic = createAnthropic({ apiKey: process.env.ANTHROPIC_API_KEY ?? 'unset' });
+// No explicit apiKey: the provider resolves ANTHROPIC_API_KEY per request (its getHeaders is a
+// closure), so a key saved through the setup panel at runtime takes effect on the next turn with
+// no restart. Passing `process.env.ANTHROPIC_API_KEY ?? 'unset'` here — as this did — froze
+// whatever was set at module load, which made the first-run flow impossible to fix without one.
+const anthropic = createAnthropic({});
 
 const OLLAMA_PREFIX = 'ollama:';
 const ollama = createOpenAICompatible({

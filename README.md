@@ -12,24 +12,53 @@ exclusively over stdio MCP.
 
 1. **Node >= 22.**
 2. `npm i`
-3. Copy the example config and point it at your vault:
-   ```bash
-   cp harness.config.example.json harness.config.json
-   ```
-   Edit `harness.config.json`: `vault` (path to your Loreweaver vault), `student` (your student
-   id), the five `models.*.model` ids, and `loreweaver.args` (path to your Loreweaver checkout's
-   `src/server.ts`). `harness.config.json` is gitignored — it's local, developer-specific config.
-4. **`ANTHROPIC_API_KEY`** — export it in your shell for `npm run dev:server` / `npm start`, or
-   add it to a systemd user-service override (`systemctl --user edit loreweaver-harness`, then
-   `Environment=ANTHROPIC_API_KEY=...` under `[Service]`) if running via the unit below.
-5. **Anki desktop** — install it, then add the [AnkiConnect](https://ankiweb.net/shared/info/2055492159)
+3. `npm start`, open the app, and paste an Anthropic API key when it asks.
+
+That is the whole required setup. **There is no config file to write** — every field has a working
+default (`src/server/config.ts`):
+
+| | Default | Change it with |
+|---|---|---|
+| Vault | `~/Documents/Loreweaver`, or `~/loreweaver-vault` if you have no Documents folder. Created at boot. | `vault` |
+| Student id | your OS username | `student` |
+| Models | Sonnet for tutor/quiz/compile, Haiku for grader/card_gen | `models.*.model` |
+| Loreweaver MCP server | found automatically: installed dependency, then a sibling `loreweaver` checkout | `LOREWEAVER_ENTRY`, or `loreweaver.command`/`args` |
+| Port | 4820 | `port` |
+
+Anything you do want to change goes in `harness.config.json` — copy
+`harness.config.example.json` and delete everything you are not overriding; partial files are fine
+and untouched fields keep their defaults. `harness.config.json` is gitignored.
+
+The boot log names what it resolved, so a wrong path shows up immediately rather than as a broken
+feature later:
+
+```
+config: none found at ./harness.config.json — using defaults
+vault:  /home/you/Documents/Loreweaver
+memory: /usr/bin/node /home/you/loreweaver/dist/server.js
+```
+
+### The API key
+
+Anthropic-routed model roles need one. The app asks for it on first run, checks it against Anthropic
+before saving (so a wrong key fails at the prompt, not mid-lesson), and stores it in your OS config
+directory — `~/.config/loreweaver/credentials.json`, `~/Library/Application Support/Loreweaver/` on
+macOS, `%APPDATA%\Loreweaver\` on Windows — **not** in the vault, since vaults get synced and
+pushed. `ANTHROPIC_API_KEY` in the environment always wins over the saved key, so a systemd override
+(`systemctl --user edit loreweaver-harness`, then `Environment=ANTHROPIC_API_KEY=...` under
+`[Service]`) still works. A fully `ollama:` or `claude-sdk:` setup is never asked for a key.
+
+### Optional extras
+
+4. **Anki desktop** — install it, then add the [AnkiConnect](https://ankiweb.net/shared/info/2055492159)
    add-on (code `2055492159`) via Tools → Add-ons → Get Add-ons. Anki must be running (with
    AnkiConnect loaded) for the two-way sync to do anything; the harness treats "Anki closed" as a
    normal, non-error state and just skips sync until it's back.
-6. **Optional — real embeddings:** `ollama pull nomic-embed-text` and set
-   `loreweaver.embeddings: "ollama"` in your config (the default). Set it to `"fake"` for tests/E2E
-   or if you don't want to run Ollama.
-7. **Optional — local models (ollama):** any role's `models.*.model` id can be prefixed with
+5. **Better search (embeddings)** — on by default (`loreweaver.embeddings: "ollama"`) and it
+   degrades quietly: without Ollama, semantic search and `find_analogies` fall back to lexical
+   matching rather than failing. To get the real thing, `ollama pull nomic-embed-text`. Set it to
+   `"none"` to stop trying, or `"fake"` for tests/E2E.
+6. **Local models (ollama):** any role's `models.*.model` id can be prefixed with
    `ollama:` (e.g. `"grader": { "model": "ollama:qwen2.5-coder:14B" }`) to route that role through
    a local Ollama model instead of Anthropic, via Ollama's OpenAI-compatible endpoint. It defaults
    to `http://localhost:11434/v1`; override with `OLLAMA_BASE_URL` if Ollama runs elsewhere.

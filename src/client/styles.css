@@ -1539,3 +1539,68 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   font-size: 0.82rem;
   color: var(--bad);
 }
+
+/* ── First-run setup gate (FirstRun.tsx) ──────────────────────────────────────
+   A gate, not a banner: it replaces the app entirely, because without an API key
+   there is no tutor behind it. Sized to be read in one glance — the point is that
+   setup is one field, not a form. */
+.firstrun {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1.2rem;
+  background: var(--bg);
+}
+.firstrun-card {
+  width: 100%;
+  max-width: 34rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1.6rem 1.7rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.firstrun-card h1 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  font-size: 1.3rem;
+}
+.firstrun-card p { margin: 0; font-size: 0.92rem; line-height: 1.6; color: var(--text); }
+.firstrun-card label { font-size: 0.85rem; font-weight: 600; margin-top: 0.3rem; }
+.firstrun-card input {
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  background: var(--bg-inset);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.firstrun-card button {
+  align-self: flex-start;
+  margin-top: 0.2rem;
+  padding: 0.5rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.firstrun-card button:disabled { opacity: 0.55; cursor: default; }
+.firstrun-error { color: var(--bad); font-size: 0.9rem; }
+/* The reassurance paragraph — deliberately smaller and muted: it answers "where does my key go",
+   which matters, but only to someone who thought to ask. */
+.firstrun-note { font-size: 0.8rem !important; color: var(--text-muted) !important; line-height: 1.55 !important; }
+.firstrun-note code, .firstrun-card p code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.95em;
+  padding: 0.05rem 0.3rem;
+  background: var(--bg-inset);
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}

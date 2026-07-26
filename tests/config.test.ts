@@ -27,11 +27,26 @@ describe('loadConfig', () => {
     expect(cfg.models.tutor.model).toBe('claude-sonnet-5');
     expect(cfg.autoCompile).toBe(true); // defaults on when unset
   });
-  it('fails loud on missing role', () => {
+  it('fills in a role the file leaves out', () => {
+    // This test used to assert the opposite — that an omitted role was a boot error. That was the
+    // right rule when config was mandatory and every field had to be stated; it is the wrong rule
+    // now that the whole file is optional, because "omitted" and "absent file" have to mean the
+    // same thing or a partial config becomes a trap.
     const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
-    const p = join(dir, 'bad.json');
+    const p = join(dir, 'partial.json');
     const { grader: _drop, ...restModels } = valid.models;
     writeFileSync(p, JSON.stringify({ ...valid, models: restModels }));
+    expect(loadConfig(p).models.grader.model).toBe('claude-haiku-4-5');
+  });
+
+  it('still fails loud on a role that is present and wrong', () => {
+    // Defaulting an ABSENT field is help; guessing what a MALFORMED one meant is not. A file the
+    // user wrote themselves has to tell them when it is broken.
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'bad.json');
+    writeFileSync(p, JSON.stringify({
+      ...valid, models: { ...valid.models, grader: { model: 42 } },
+    }));
     expect(() => loadConfig(p)).toThrow(/grader/);
   });
   it('honors an explicit autoCompile: false', () => {

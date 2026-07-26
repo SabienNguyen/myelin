@@ -6,6 +6,7 @@ import { SidePanel } from './components/SidePanel.js';
 import { TopbarStatus } from './components/TopbarStatus.js';
 import { HistoryMenu } from './components/HistoryMenu.js';
 import { FocusRail } from './components/FocusRail.js';
+import { FirstRun } from './components/FirstRun.js';
 import { panelBus } from './lib/panelBus.js';
 import { parseHash, serializeHash } from './lib/urlState.js';
 
@@ -82,6 +83,9 @@ export function App() {
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
   return (
+    // Setup gate first: with no API key there is no tutor, so a Runtime that cannot answer must not
+    // mount and invite a question. Renders `children` untouched once the key is in place.
+    <FirstRun>
     <Runtime key={threadId} mode={mode} threadId={threadId}>
       <div className={appClass}>
         <header className="topbar">
@@ -108,5 +112,6 @@ export function App() {
         </main>
       </div>
     </Runtime>
+    </FirstRun>
   );
 }

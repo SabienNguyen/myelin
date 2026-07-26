@@ -3,7 +3,9 @@ import { Hono } from 'hono';
 import cron from 'node-cron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadConfig } from './config.js';
+import { configSource, loadConfig } from './config.js';
+import { applyCredentials, credentialsPath } from './credentials.js';
+import { buildSetupRoutes, needsApiKey } from './setupRoutes.js';
 import { Loreweaver } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
@@ -18,6 +20,43 @@ import { ensureCompileDrain, sweepInterruptedConversions } from './ingest.js';
 import { sendNotification } from './notify.js';
 
 const cfg = loadConfig();
+
+/**
+ * Boot preflight. Everything a first run needs that can be done without asking, done — and
+ * everything it needs that CANNOT be defaulted, said out loud before the server starts serving.
+ *
+ * The old first-run experience was a zod error listing fifteen missing config fields. This prints
+ * what it resolved and what is still missing, in the order a person would need to act on it.
+ */
+function preflight(): void {
+  const src = configSource();
+  console.log(src.found ? `config: ${src.path}` : `config: none found at ${src.path} — using defaults`);
+
+  mkdirSync(join(cfg.vault, 'pages'), { recursive: true }); // a fresh vault is just an empty dir
+  console.log(`vault:  ${cfg.vault}`);
+
+  // The MCP server is spawned lazily by Loreweaver.connect, and a missing entry point surfaces
+  // there as an opaque transport error, so name it here where the fix is obvious.
+  const entry = cfg.loreweaver.args[cfg.loreweaver.args.length - 1];
+  if (!entry || !existsSync(entry)) {
+    console.error(`\nCannot find the Loreweaver MCP server at:\n  ${entry}\n`
+      + 'Fix by any one of: installing it as a dependency, putting a `loreweaver` checkout beside '
+      + 'this one, setting LOREWEAVER_ENTRY, or setting `loreweaver.command`/`args` in '
+      + 'harness.config.json.\n');
+  } else {
+    console.log(`memory: ${cfg.loreweaver.command} ${cfg.loreweaver.args.join(' ')}`);
+  }
+
+  const roles = needsApiKey(cfg);
+  if (roles.length && !process.env.ANTHROPIC_API_KEY) {
+    console.error(`\nNo ANTHROPIC_API_KEY. These roles need one: ${roles.join(', ')}.\n`
+      + `Enter it in the app (it saves to ${credentialsPath()}) or export it before starting.\n`);
+  }
+}
+
+applyCredentials(); // saved key -> env, before anything constructs a model. The env always wins.
+preflight();
+
 const lw = await Loreweaver.connect(cfg);
 // I3: seed the-gap's ladder patterns as vault pages (idempotent, mechanical content — see
 // seedPatternPages.ts for the single-writer rationale). Gated on cfg.gap: no ladders, nothing to
@@ -76,5 +115,8 @@ app.route('/', buildIngestRoutes(lw, cfg));
 // No-op (empty Hono app, 404s) when cfg.gap is absent — see gapProxy.ts's buildGapRoutes doc.
 app.route('/', buildGapRoutes(cfg));
 app.route('/', buildGapHelpRoute(lw, cfg));
+// First-run readiness + the one thing a first run must supply. Mounted last so it is reachable
+// even if a feature route above is disabled.
+app.route('/', buildSetupRoutes(cfg));
 serve({ fetch: app.fetch, port: cfg.port });
 console.log(`loreweaver-harness on :${cfg.port}`);
