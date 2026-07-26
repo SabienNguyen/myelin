@@ -173,3 +173,134 @@ describe('generate -> review -> serve', () => {
     expect(listGenerated(vault)).toHaveLength(0);
   });
 });
+
+// ── the function family: any-domain computations, same defence ─────────────────────────────────
+//
+// A chemistry exercise, on purpose — the family exists so "practice this as code" works from any
+// page, and a non-programming domain is the proof. Molarity dilution: C1V1 = C2V2.
+
+const DILUTION = {
+  title: 'Dilution calculator',
+  entryPoint: 'dilutionVolume',
+  statement: 'Given stock concentration C1 (mol/L), target concentration C2, and target volume V2 (mL),\nreturn the stock volume V1 in mL, rounded to 2 decimal places.\nThrow if C2 > C1 — you cannot dilute upward.',
+  reference: `function dilutionVolume(c1, c2, v2) {
+  if (c2 > c1) throw new Error('cannot dilute upward');
+  return Math.round((c2 * v2 / c1) * 100) / 100;
+}`,
+  cases: [
+    { name: 'a simple tenfold dilution', args: [1.0, 0.1, 100], expect: 10 },
+    { name: 'rounds to 2 decimal places', args: [3, 0.7, 50], expect: 11.67 },
+    { name: 'target equals stock', args: [2, 2, 40], expect: 40 },
+    { name: 'fractional target volume', args: [0.5, 0.2, 25.5], expect: 10.2 },
+  ],
+  prose: { context_line: 'C1V1 = C2V2, earned.', hint: 'Solve for V1.', success_line: 'That is the lab math.' },
+};
+
+describe('the function family (any-domain exercises)', () => {
+  it('admits a real domain exercise through the same gates', async () => {
+    const report = await verifyExercise({ ...DILUTION, family: 'function' });
+    expect(report.gates.map((g) => `${g.ok ? '+' : '-'}${g.gate}`)).toEqual([
+      '+suite-size', '+reference-passes', '+rejects-empty-implementation',
+      '+scaffold-does-not-pass', '+names-do-not-leak-answers',
+    ]);
+    expect(report.ok).toBe(true);
+  });
+
+  it('REJECTS a vacuous function suite — undefined must not equal anything', async () => {
+    const vacuous = {
+      ...DILUTION,
+      family: 'function' as const,
+      reference: `function dilutionVolume() {}`,
+      cases: DILUTION.cases.slice(0, 3),
+    };
+    const report = await verifyExercise(vacuous);
+    expect(report.ok).toBe(false);
+    // The empty reference fails its own suite AND the vacuous gate would pass it — both gates
+    // report; reference-passes is the first to object.
+    expect(report.gates.find((g) => g.gate === 'reference-passes')?.ok).toBe(false);
+  });
+
+  it('rejects a function case whose NAME contains its answer', async () => {
+    const leaky = {
+      ...DILUTION,
+      family: 'function' as const,
+      cases: DILUTION.cases.map((c, i) => (i === 0 ? { ...c, name: 'returns 10 for tenfold' } : c)),
+    };
+    const report = await verifyExercise(leaky);
+    expect(report.ok).toBe(false);
+  });
+
+  it('generate -> approve -> ladder/run/predict, function family end to end', async () => {
+    await generateExercise(vault, 'dilution-calculator', 'chemistry: dilutions', { generate: stubModel(DILUTION) }, 'function');
+    setGeneratedStatus(vault, 'dilution-calculator', 'approved');
+    expect(builtinPatterns(vault)).toContain('dilution-calculator');
+
+    const app = buildBuiltinGapRoutes({ vault });
+    const ladder = await (await app.request('/api/gap/ladder?pattern=dilution-calculator')).json();
+    expect(ladder.rungs[0].reference_answer).toBe(''); // stripped for the function family too
+    // The predict question shows the CALL, not the answer.
+    expect(ladder.rungs[0].predict[0].inputPreview).toBe('dilutionVolume(1, 0.1, 100)');
+
+    const run = await (await app.request('/api/gap/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rungId: 'dilution-calculator:full_body', code: DILUTION.reference }),
+    })).json();
+    expect(run.pass).toBe(true);
+    expect(run.results).toHaveLength(4);
+
+    // A wrong implementation fails with expected/actual revealed only on the failing case.
+    const wrong = await (await app.request('/api/gap/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rungId: 'dilution-calculator:full_body', code: 'function dilutionVolume(c1, c2, v2) { return c2 * v2 / c1; }' }),
+    })).json();
+    expect(wrong.pass).toBe(false);
+    expect(wrong.results.find((r: any) => !r.pass).expected).toBeDefined();
+
+    // Predict accepts the value however the learner types it: bare or JSON.
+    const predict = await (await app.request('/api/gap/predict', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rungId: 'dilution-calculator:full_body', caseName: 'a simple tenfold dilution', prediction: ['10'] }),
+    })).json();
+    expect(predict.pass).toBe(true);
+
+    // Scratch run: learner-typed args as a JSON array, result back, nothing leaked.
+    const scratch = await (await app.request('/api/gap/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rungId: 'dilution-calculator:full_body', code: DILUTION.reference, input: '[2, 1, 30]' }),
+    })).json();
+    expect(scratch.scratch).toBe(true);
+    expect(scratch.actual).toBe('15');
+
+    // Stress is a stream idea; a function run must not pretend it stressed anything.
+    const stress = await (await app.request('/api/gap/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rungId: 'dilution-calculator:full_body', code: DILUTION.reference, stress: true }),
+    })).json();
+    expect(stress.pass).toBe(true);
+    expect(stress.stressed).toBeUndefined();
+  });
+
+  it('a throwing case reports "threw:" as the actual', async () => {
+    await generateExercise(vault, 'dilution-calculator', '', { generate: stubModel(DILUTION) }, 'function');
+    setGeneratedStatus(vault, 'dilution-calculator', 'approved');
+    const app = buildBuiltinGapRoutes({ vault });
+    const run = await (await app.request('/api/gap/run', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        rungId: 'dilution-calculator:full_body',
+        code: 'function dilutionVolume() { throw new Error("boom"); }',
+      }),
+    })).json();
+    expect(run.pass).toBe(false);
+    // Cross-realm quirk: an Error minted inside the vm context fails the child's `instanceof
+    // Error` check, so the whole String(e) lands here — 'threw: Error: boom'. Fine for a learner.
+    expect(run.results[0].actual).toContain('threw:');
+    expect(run.results[0].actual).toContain('boom');
+  });
+
+  it('stored stream exercises without a family field still verify as stream', async () => {
+    // Files written before the family existed have no `family` key — familyOf defaults them.
+    const report = await verifyExercise(NDJSON);
+    expect(report.ok).toBe(true);
+  });
+});

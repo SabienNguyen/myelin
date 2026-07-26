@@ -15,21 +15,35 @@
 import { Hono } from 'hono';
 import type { GapLadderPayload } from '../gapProxy.js';
 import {
-  approvedGenerated, generatedRungParts, generateExercise, listGenerated, setGeneratedStatus,
-  toSuiteCases, type GeneratedExercise,
+  approvedGenerated, familyOf, generatedRungParts, generateExercise, listGenerated,
+  setGeneratedStatus, toSuiteCases, type GeneratedExercise, type GeneratedFamily,
+  type StreamGeneratedCase,
 } from './generated.js';
-import { runInChild } from './runner.js';
+import { runInChild, type FnCase } from './runner.js';
 import {
   STREAM_CONSUMER_CASES, STREAM_CONSUMER_ENTRY, STREAM_CONSUMER_LADDER, STREAM_CONSUMER_RUNGS,
   runnableReference, stressCases, type BuiltinRung, type SuiteCase,
 } from './streamConsumer.js';
 
-export interface BuiltinExercise {
+export type BuiltinExercise = {
   ladder: typeof STREAM_CONSUMER_LADDER;
   rungs: BuiltinRung[];
-  cases: SuiteCase[];
   entryPoint: string;
+} & (
+  | { family: 'stream'; cases: SuiteCase[] }
+  | { family: 'function'; cases: FnCase[] }
+);
+
+/** One suite run, spelled per family so every call site dispatches identically. */
+function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?: SuiteCase[] | FnCase[]) {
+  return ex.family === 'function'
+    ? runInChild({ kind: 'suite', family: 'function', code, entryPoint, cases: (cases ?? ex.cases) as FnCase[] })
+    : runInChild({ kind: 'suite', code, entryPoint, cases: (cases ?? ex.cases) as SuiteCase[] });
 }
+
+/** How a function case reads when shown to a learner: the call they are predicting. */
+const callPreview = (entryPoint: string, c: FnCase) =>
+  `${entryPoint}(${c.args.map((a) => JSON.stringify(a)).join(', ')})`;
 
 /** One exercise today. Adding a pattern means adding an entry — the run route below derives the
  *  pattern from the posted rungId's `<pattern>:<template>` shape, so nothing else changes. */
@@ -37,6 +51,7 @@ const EXERCISES: Record<string, BuiltinExercise> = {
   'stream-consumer': {
     ladder: STREAM_CONSUMER_LADDER,
     rungs: STREAM_CONSUMER_RUNGS,
+    family: 'stream',
     cases: STREAM_CONSUMER_CASES,
     entryPoint: STREAM_CONSUMER_ENTRY,
   },
@@ -57,7 +72,10 @@ export function builtinPatterns(vault?: string): string[] {
  *  full_body rung, statement as the visible_pre comment, the harness's own hostile chunking. */
 function liftGenerated(g: GeneratedExercise): BuiltinExercise {
   const parts = generatedRungParts(g);
-  const cases = toSuiteCases(g.cases);
+  const family: GeneratedFamily = familyOf(g);
+  const cases = family === 'function'
+    ? (g.cases as FnCase[])
+    : toSuiteCases(g.cases as StreamGeneratedCase[]);
   return {
     ladder: { pattern: g.pattern, targetArtifactId: g.pattern, siblingArtifactId: g.pattern, rungs: [`${g.pattern}:full_body`] },
     rungs: [{
@@ -65,8 +83,8 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
       template: 'full_body',
       artifactId: g.pattern,
       entryPoint: g.entryPoint,
-      // Predictable cases: those whose input reads cleanly (they all do — inputs are authored as
-      // text) — offer the first as the comprehension gate, same as the hand-built ladder.
+      // Predictable cases: the first, same as the hand-built ladder — stream inputs are authored
+      // as text so they read cleanly; a function case reads as the call expression itself.
       predictCases: cases.length ? [cases[0].name] : [],
       visible_pre: parts.visible_pre,
       visible_post: parts.visible_post,
@@ -74,9 +92,10 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
       prose: g.prose,
       scaffold: parts.scaffold,
     }],
+    family,
     cases,
     entryPoint: g.entryPoint,
-  };
+  } as BuiltinExercise;
 }
 
 function lookupExercise(pattern: string, vault?: string): BuiltinExercise | undefined {
@@ -93,10 +112,14 @@ export function builtinLadderPayload(pattern = DEFAULT_PATTERN, vault?: string):
   const ex = lookupExercise(pattern, vault);
   if (!ex) throw new Error(`no built-in exercise for pattern "${pattern}"`);
   const preview = (name: string) => {
-    const c = ex.cases.find((k) => k.name === name);
+    const c = (ex.cases as (SuiteCase | FnCase)[]).find((k) => k.name === name);
     if (!c) return null;
-    // The case's bytes as readable text — predictCases are restricted to cases where this is clean.
-    return { caseName: name, inputPreview: new TextDecoder().decode(Uint8Array.from(c.chunks.flat())) };
+    // Stream: the case's bytes as readable text (predictCases are restricted to cases where this
+    // is clean). Function: the call expression — args ARE the input.
+    const inputPreview = ex.family === 'function'
+      ? callPreview(ex.entryPoint, c as FnCase)
+      : new TextDecoder().decode(Uint8Array.from((c as SuiteCase).chunks.flat()));
+    return { caseName: name, inputPreview };
   };
   return {
     ladder: ex.ladder,
@@ -107,6 +130,7 @@ export function builtinLadderPayload(pattern = DEFAULT_PATTERN, vault?: string):
       predict: r.predictCases.map(preview).filter(Boolean),
     })),
     mined: [],
+    family: ex.family,
   };
 }
 
@@ -155,7 +179,7 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
   /** The review gate's surface: everything generated, gates and status visible. */
   app.get('/api/gap/generated', (c) => c.json({
     exercises: listGenerated(vault ?? '').map((e) => ({
-      pattern: e.pattern, title: e.title, status: e.status,
+      pattern: e.pattern, title: e.title, family: familyOf(e), status: e.status,
       verification: e.verification, generatedAt: e.generatedAt, generatedBy: e.generatedBy,
       cases: e.cases.length,
     })),
@@ -185,10 +209,11 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     if (lookupExercise(pattern, vault) || listGenerated(vault).some((e) => e.pattern === pattern)) {
       return c.json({ error: `an exercise for "${pattern}" already exists` }, 409);
     }
+    const family: GeneratedFamily = body?.family === 'function' ? 'function' : 'stream';
     try {
       const ex = await generateExercise(vault, pattern, String(body?.description ?? ''), {
         generate: opts.generate, modelName: opts.modelName,
-      });
+      }, family);
       console.log(`[gap] generated "${pattern}" -> ${ex.status} (${ex.verification.gates.filter((g) => !g.ok).length} failed gates)`);
       return c.json(ex, ex.status === 'rejected' ? 422 : 200);
     } catch (e: any) {
@@ -213,25 +238,34 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     const ex = exerciseForRung(body?.rungId, vault);
     const rung = ex?.rungs.find((r) => r.id === body?.rungId);
     if (!ex || !rung) return c.json({ error: `no rung "${body?.rungId}"` }, 404);
-    const suiteCase = ex.cases.find((k) => k.name === body?.caseName && rung.predictCases.includes(k.name));
+    const suiteCase = (ex.cases as (SuiteCase | FnCase)[]).find((k) => k.name === body?.caseName && rung.predictCases.includes(k.name));
     if (!suiteCase) return c.json({ error: `no predictable case "${body?.caseName}" on this rung` }, 404);
     if (!Array.isArray(body.prediction)) return c.json({ error: 'prediction must be an array of strings' }, 400);
 
-    const run = await runInChild({
-      kind: 'suite',
-      code: runnableReference(rung),
-      entryPoint: rung.entryPoint,
-      cases: [suiteCase],
-    });
+    const run = await runSuite(ex, runnableReference(rung), rung.entryPoint, [suiteCase] as SuiteCase[] & FnCase[]);
     if (run.syntaxError || run.results.length === 0 || !run.results[0].pass) {
       // Degrade loudly: a reference that cannot pass its own case is a content bug, and grading a
       // learner's prediction against it would be grading against a lie.
       return c.json({ error: `reference failed its own case: ${run.syntaxError ?? run.results[0]?.actual ?? 'no result'}` }, 500);
     }
     // The reference just passed this exact case, so the case's `expect` IS the actual output.
-    const actual = suiteCase.expect;
-    const predicted = body.prediction.map((p: unknown) => String(p).trim()).filter((p: string) => p !== '');
-    const pass = JSON.stringify(predicted) === JSON.stringify(actual);
+    let actual: string[];
+    let pass: boolean;
+    if (ex.family === 'function') {
+      // One value, not a sequence. The learner types it as they'd write it — `6`, `"abc"`, or bare
+      // abc — so normalize through JSON-parse-or-string before deep-comparing; grading a correct
+      // prediction wrong on quoting would teach quoting, not the subject.
+      const expectVal = (suiteCase as FnCase).expect;
+      const typed = String(body.prediction[0] ?? '').trim();
+      let predictedVal: unknown = typed;
+      try { predictedVal = JSON.parse(typed); } catch { /* a bare string is a fine way to say a string */ }
+      pass = JSON.stringify(predictedVal) === JSON.stringify(expectVal);
+      actual = [JSON.stringify(expectVal)];
+    } else {
+      actual = (suiteCase as SuiteCase).expect;
+      const predicted = body.prediction.map((p: unknown) => String(p).trim()).filter((p: string) => p !== '');
+      pass = JSON.stringify(predicted) === JSON.stringify(actual);
+    }
     const attempt = Number(body.attempt ?? 1);
     console.log(`[gap] predict rung=${body.rungId} case="${body.caseName}" attempt=${attempt} pass=${pass}`);
     return c.json({
@@ -254,13 +288,15 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     // needs no change.
     if (typeof body.input === 'string') {
       console.log(`[gap] scratch rung=${body.rungId} inputBytes=${body.input.length}`);
-      return c.json(await runInChild({
-        kind: 'scratch', code: body.code, entryPoint: ex.entryPoint, input: body.input,
-      }));
+      return c.json(await runInChild(ex.family === 'function'
+        ? { kind: 'scratch', family: 'function', code: body.code, entryPoint: ex.entryPoint, input: body.input }
+        : { kind: 'scratch', code: body.code, entryPoint: ex.entryPoint, input: body.input }));
     }
 
-    // Stress: same assertions, same bytes, hostile read boundaries.
-    if (body.stress === true) {
+    // Stress: same assertions, same bytes, hostile read boundaries. Re-chunking is a STREAM idea —
+    // for a function suite there is nothing adversarial to vary, so the run comes back without
+    // `stressed` and the client reports stress as unsupported rather than pretending.
+    if (body.stress === true && ex.family !== 'function') {
       const cases = stressCases(ex.cases);
       console.log(`[gap] STRESS rung=${body.rungId} cases=${cases.length}`);
       const out = await runInChild({ kind: 'suite', code: body.code, entryPoint: ex.entryPoint, cases });
@@ -269,7 +305,7 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     }
 
     console.log(`[gap] run rung=${body.rungId} mode=${body.mode ?? '-'} bytes=${body.code.length}`);
-    const out = await runInChild({ kind: 'suite', code: body.code, entryPoint: ex.entryPoint, cases: ex.cases });
+    const out = await runSuite(ex, body.code, ex.entryPoint);
     console.log(`[gap]   -> pass=${out.pass} ${out.results.map((r) => (r.pass ? '+' : '-')).join('')}${out.syntaxError ? ' syntaxError' : ''}`);
     return c.json(out);
   });

@@ -6,23 +6,35 @@
 // emitter") dissolved when the sandbox moved into this repo: generated exercises feed the built-in
 // registry directly, in a format this file owns.
 //
-// Scope, stated plainly: generated exercises target the family the built-in runner actually
-// executes — async generators over byte chunks (SSE, NDJSON, line protocols, framing). That is one
-// family, not all of programming; it is also the family where the runner can enforce the gauntlet
-// property MECHANICALLY, because the model authors case INPUTS AS TEXT and never controls the
-// chunking. We slice the bytes adversarially ourselves, so a generated suite cannot be
-// chunk-aligned even if the model tried.
+// Two families:
+//
+//  - 'stream': async generators over byte chunks (SSE, NDJSON, line protocols, framing). The model
+//    authors case INPUTS AS TEXT and never controls the chunking — we slice the bytes adversarially
+//    ourselves, so a generated suite cannot be chunk-aligned even if the model tried.
+//  - 'function': one plain function, args in, value out, deep-compared. This is the family that
+//    makes "practice this as code" reachable from ANY page — statistics, chemistry, music theory,
+//    text processing — because nearly every domain has some computation worth earning, and a
+//    JSON-valued suite grades it mechanically with no model in the verdict.
+//
+// Both families keep the same defence: the model authors, the gates decide, the real suite in the
+// killable child stays the only grader.
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runInChild } from './runner.js';
+import { runInChild, type FnCase } from './runner.js';
 import { scaffoldFor, type SuiteCase } from './streamConsumer.js';
 
-export interface GeneratedCase { name: string; inputText: string; expect: string[] }
+export type GeneratedFamily = 'stream' | 'function';
+
+export interface StreamGeneratedCase { name: string; inputText: string; expect: string[] }
+export type GeneratedCase = StreamGeneratedCase | FnCase;
 
 export interface GeneratedExercise {
   pattern: string;
   title: string;
+  /** Absent in files stored before the function family existed — read through familyOf(), which
+   *  defaults it to 'stream', so no stored exercise needs migrating. */
+  family?: GeneratedFamily;
   entryPoint: string;
   /** The problem statement, emitted as comment lines above the scaffold. */
   statement: string;
@@ -40,9 +52,11 @@ export interface VerificationReport {
   gates: { gate: string; ok: boolean; detail: string }[];
 }
 
+export const familyOf = (ex: Pick<GeneratedExercise, 'family'>): GeneratedFamily => ex.family ?? 'stream';
+
 /** The model never chooses chunk boundaries: every case's bytes are sliced at a stride that does
  *  not align with lines, which is the entire point of the pattern family. */
-export function toSuiteCases(cases: GeneratedCase[]): SuiteCase[] {
+export function toSuiteCases(cases: StreamGeneratedCase[]): SuiteCase[] {
   return cases.map((c) => {
     const bytes = [...new TextEncoder().encode(c.inputText)];
     const chunks: number[][] = [];
@@ -67,10 +81,10 @@ export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'en
  * an unverified exercise is never surfaced.
  */
 export async function verifyExercise(
-  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases'>,
+  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases' | 'family'>,
 ): Promise<VerificationReport> {
   const gates: VerificationReport['gates'] = [];
-  const suite = toSuiteCases(ex.cases);
+  const family = familyOf(ex);
   const push = (gate: string, ok: boolean, detail: string) => gates.push({ gate, ok, detail });
 
   if (ex.cases.length < 3) {
@@ -79,30 +93,46 @@ export async function verifyExercise(
   }
   push('suite-size', true, `${ex.cases.length} cases`);
 
-  // Gate 1: the reference passes 100% of its own suite, under OUR chunking.
-  const refRun = await runInChild({ kind: 'suite', code: ex.reference, entryPoint: ex.entryPoint, cases: suite });
+  const run = (code: string) => (family === 'function'
+    ? runInChild({ kind: 'suite', family, code, entryPoint: ex.entryPoint, cases: ex.cases as FnCase[] })
+    : runInChild({ kind: 'suite', code, entryPoint: ex.entryPoint, cases: toSuiteCases(ex.cases as StreamGeneratedCase[]) }));
+
+  // Gate 1: the reference passes 100% of its own suite — under OUR chunking for streams, under
+  // plain deep-compare for functions.
+  const refRun = await run(ex.reference);
   push('reference-passes', refRun.pass,
     refRun.pass ? 'reference passes all cases'
       : `reference fails: ${refRun.syntaxError ?? refRun.results.filter((r) => !r.pass).map((r) => r.name).join('; ')}`);
 
   // Gate 2: a do-nothing implementation must FAIL. A suite that passes it grades nothing — this is
-  // the check that catches a vacuous suite before it can mint false mastery.
-  const vacuous = `async function* ${ex.entryPoint}(chunks) { for await (const c of chunks) { /* consume */ } }`;
-  const vacRun = await runInChild({ kind: 'suite', code: vacuous, entryPoint: ex.entryPoint, cases: suite });
+  // the check that catches a vacuous suite before it can mint false mastery. Per family because
+  // "do nothing" has a different spelling: yield nothing vs return undefined.
+  const vacuous = family === 'function'
+    ? `function ${ex.entryPoint}() {}`
+    : `async function* ${ex.entryPoint}(chunks) { for await (const c of chunks) { /* consume */ } }`;
+  const vacRun = await run(vacuous);
   push('rejects-empty-implementation', !vacRun.pass,
     vacRun.pass ? 'a do-nothing implementation PASSES this suite — it grades nothing'
       : 'the suite fails an empty implementation');
 
   // Gate 3: the answer-stripped scaffold must not pass either (otherwise the exercise ships solved).
   const { scaffold } = generatedRungParts(ex as GeneratedExercise);
-  const scafRun = await runInChild({ kind: 'suite', code: scaffold, entryPoint: ex.entryPoint, cases: suite });
+  const scafRun = await run(scaffold);
   push('scaffold-does-not-pass', !scafRun.pass,
     scafRun.pass ? 'the scaffold already passes — the exercise is pre-solved' : 'scaffold fails, as it should');
 
   // Gate 4: test names must be requirements, not answer keys. Mechanical: no case name contains
-  // one of its own expected values.
-  const leaks = ex.cases.filter((c) =>
-    c.expect.some((e) => e.length > 2 && c.name.toLowerCase().includes(e.toLowerCase())));
+  // one of its own expected values (stream: any yielded string; function: the JSON of the value).
+  // Function answers get word-boundary matching at length > 1 — they are often SHORT numbers
+  // ("10"), which the stream rule's length > 2 substring check would wave straight through, and
+  // which plain substring matching would false-flag inside "100".
+  const answersOf = (c: GeneratedCase): string[] => (family === 'function'
+    ? [JSON.stringify((c as FnCase).expect) ?? '']
+    : (c as StreamGeneratedCase).expect);
+  const leaksIn = (name: string, answer: string): boolean => (family === 'function'
+    ? answer.length > 1 && new RegExp(`(^|[^\\w.])${answer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w.])`, 'i').test(name)
+    : answer.length > 2 && name.toLowerCase().includes(answer.toLowerCase()));
+  const leaks = ex.cases.filter((c) => answersOf(c).some((e) => leaksIn(c.name, e)));
   push('names-do-not-leak-answers', leaks.length === 0,
     leaks.length ? `case name leaks its answer: ${leaks.map((l) => `"${l.name}"`).join(', ')}` : 'no expected value appears in a case name');
 
@@ -160,7 +190,7 @@ export interface GenerateDeps {
   modelName?: string;
 }
 
-const GENERATION_PROMPT = (pattern: string, description: string) => `Author a coding exercise for the pattern "${pattern}".
+const STREAM_PROMPT = (pattern: string, description: string) => `Author a coding exercise for the pattern "${pattern}".
 ${description ? `Context from the tutor: ${description}\n` : ''}
 The exercise family is: an async generator function over an async iterable of Uint8Array byte
 chunks, yielding strings. Chunk boundaries never align with logical boundaries — implementations
@@ -177,30 +207,62 @@ Respond with ONLY valid JSON, no fences:
   "prose": {"context_line": <one line of framing>, "hint": <one nudge>, "success_line": <one line for after>}
 }`;
 
+// The any-domain family. The constraints that make it gradeable are stated to the model as
+// constraints on the SUITE (JSON args, JSON expected value, deterministic), not on the subject —
+// the subject can be whatever the learner is studying.
+const FUNCTION_PROMPT = (pattern: string, description: string) => `Author a coding exercise for the pattern "${pattern}".
+${description ? `Context from the tutor: ${description}\n` : ''}
+The exercise family is: ONE plain JavaScript function. It takes JSON-representable arguments and
+returns a JSON-representable value (number, string, boolean, null, array, or object). It must be
+deterministic — no randomness, no Date, no I/O — and self-contained (standard built-ins like Math,
+JSON, Array and String are available; nothing else is). The point of the exercise is the DOMAIN
+computation named by the pattern and context, not JavaScript trivia: pick the computation a learner
+of that subject should be able to earn by writing it.
+
+Respond with ONLY valid JSON, no fences:
+{
+  "title": <short human title>,
+  "entryPoint": <camelCase function name>,
+  "statement": <3-6 line problem statement: what the function receives, what it returns, edge rules>,
+  "reference": <the complete correct implementation as one string of JavaScript, a function named exactly entryPoint>,
+  "cases": [4-6 of {"name": <what requirement this checks — never containing the answer>, "args": [<the arguments>], "expect": <the exact return value>}],
+  "prose": {"context_line": <one line of framing>, "hint": <one nudge>, "success_line": <one line for after>}
+}`;
+
 /**
  * Generate, verify, store as PENDING. The result is never servable from here: it takes a human
  * approval (setGeneratedStatus) AND passing gates to reach a learner, in that order of importance.
  */
 export async function generateExercise(
   vault: string, pattern: string, description: string, deps: GenerateDeps,
+  family: GeneratedFamily = 'stream',
 ): Promise<GeneratedExercise> {
-  const raw = await deps.generate(GENERATION_PROMPT(pattern, description));
+  const prompt = family === 'function' ? FUNCTION_PROMPT(pattern, description) : STREAM_PROMPT(pattern, description);
+  const raw = await deps.generate(prompt);
   let parsed: any;
   try {
     parsed = JSON.parse(raw.trim().replace(/^```json?\n?|```$/g, ''));
   } catch (e) {
     throw new Error(`the model did not return valid JSON: ${(e as Error).message}`);
   }
+  // Per-family case coercion. Function args/expect pass through as parsed JSON — coercing them to
+  // strings would silently change what the suite asserts.
+  const cases: GeneratedCase[] = Array.isArray(parsed.cases)
+    ? parsed.cases.map((c: any) => (family === 'function'
+      ? { name: String(c.name ?? ''), args: Array.isArray(c.args) ? c.args : [], expect: c.expect ?? null }
+      : {
+        name: String(c.name ?? ''), inputText: String(c.inputText ?? ''),
+        expect: Array.isArray(c.expect) ? c.expect.map(String) : [],
+      }))
+    : [];
   const ex: GeneratedExercise = {
     pattern,
     title: String(parsed.title ?? pattern),
+    family,
     entryPoint: String(parsed.entryPoint ?? 'parse'),
     statement: String(parsed.statement ?? ''),
     reference: String(parsed.reference ?? ''),
-    cases: Array.isArray(parsed.cases) ? parsed.cases.map((c: any) => ({
-      name: String(c.name ?? ''), inputText: String(c.inputText ?? ''),
-      expect: Array.isArray(c.expect) ? c.expect.map(String) : [],
-    })) : [],
+    cases,
     prose: {
       context_line: String(parsed.prose?.context_line ?? ''),
       hint: String(parsed.prose?.hint ?? ''),

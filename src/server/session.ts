@@ -375,15 +375,21 @@ export function createTutorSession(
         // review — the tutor must say so, not promise the exercise for this session.
         const generateTool: ToolSet = mode !== 'freeform' ? {} : {
           generate_exercise: tool({
-            description: 'Author a new coding exercise (async-generator-over-byte-chunks family: '
-              + 'SSE, NDJSON, line protocols, framing). It is verified mechanically and stored '
-              + 'PENDING HUMAN REVIEW — tell the student it will appear once approved, and do not '
-              + 'promise it for this session.',
+            description: 'Author a new coding exercise for ANY subject the student is studying. '
+              + 'Family "function" (the default): one plain function, JSON args in, JSON value out, '
+              + 'graded by deep comparison — use it to turn any domain computation (statistics, '
+              + 'stoichiometry, interval arithmetic, text processing) into runnable practice. '
+              + 'Family "stream": async-generator-over-byte-chunks (SSE, NDJSON, line protocols, '
+              + 'framing). The result is verified mechanically and stored PENDING REVIEW — tell the '
+              + 'student it is waiting in the Library\'s Practice section for their approval, and do '
+              + 'not promise it mid-conversation.',
             inputSchema: z.object({
-              pattern: z.string().describe('kebab-case pattern id, e.g. ndjson-parser'),
+              pattern: z.string().describe('kebab-case pattern id, e.g. dilution-calculator'),
               description: z.string().describe('what the exercise should teach, 1-3 sentences'),
+              family: z.enum(['function', 'stream']).optional()
+                .describe('function (default) for any-domain computations; stream only for byte-stream parsing'),
             }),
-            execute: async ({ pattern, description }: { pattern: string; description: string }) => {
+            execute: async ({ pattern, description, family }: { pattern: string; description: string; family?: 'function' | 'stream' }) => {
               const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
               if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
                 return { error: `an exercise for "${slug}" already exists` };
@@ -391,12 +397,12 @@ export function createTutorSession(
               try {
                 const ex = await generateExercise(cfg.vault, slug, description, {
                   generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
-                });
+                }, family ?? 'function');
                 return {
                   pattern: ex.pattern, status: ex.status,
                   gates: ex.verification.gates.map((g) => `${g.ok ? 'PASS' : 'FAIL'} ${g.gate}`),
                   note: ex.status === 'pending'
-                    ? 'verified mechanically; awaiting human review before any learner sees it'
+                    ? 'verified mechanically; waiting in the Library tab\'s Practice section for the student to approve it'
                     : 'rejected by the verification gates — do not retry with the same content',
                 };
               } catch (e: any) {

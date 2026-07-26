@@ -16,10 +16,14 @@ export interface ScratchPanelProps {
   rungId: string;
   /** The learner's whole current file, same value Run/Submit send. */
   code: string;
+  /** 'function' switches the input from stream text to a JSON argument list — the runner parses
+   *  the box's contents accordingly, so the label has to say which one it wants. */
+  family?: string;
 }
 
-export function ScratchPanel({ rungId, code }: ScratchPanelProps) {
-  const [input, setInput] = useState('data: alpha\ndata: beta\ndata: [DONE]\n');
+export function ScratchPanel({ rungId, code, family }: ScratchPanelProps) {
+  const isFn = family === 'function';
+  const [input, setInput] = useState(isFn ? '' : 'data: alpha\ndata: beta\ndata: [DONE]\n');
   const [out, setOut] = useState<string | null>(null);
   const [chunks, setChunks] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -51,14 +55,15 @@ export function ScratchPanel({ rungId, code }: ScratchPanelProps) {
       <p className="scratch-note">
         your own input, your own output — nothing is graded and nothing is revealed here.
       </p>
-      <label className="scratch-label" htmlFor="scratch-input">input</label>
+      <label className="scratch-label" htmlFor="scratch-input">{isFn ? 'arguments (a JSON array)' : 'input'}</label>
       <textarea
         id="scratch-input"
         className="scratch-input"
-        rows={4}
+        rows={isFn ? 2 : 4}
         spellCheck={false}
         value={input}
         onChange={(e) => setInput(e.target.value)}
+        placeholder={isFn ? '[2, 1, 30]' : undefined}
       />
       <div className="scratch-actions">
         <button type="button" className="ide-btn ide-btn--run" onClick={run} disabled={busy}>

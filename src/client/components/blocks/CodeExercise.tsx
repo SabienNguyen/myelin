@@ -89,6 +89,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   // alongside `rungs` (same fetch, same effect below) and used only for rung resolution.
   const [mined, setMined] = useState<MinedEntry[] | undefined>(undefined);
   const [ladderPattern, setLadderPattern] = useState<string | undefined>(undefined);
+  const [ladderFamily, setLadderFamily] = useState<string | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   // Bumped by the unavailable-state's Try again, so the ladder fetch below re-runs. A down
   // sandbox is usually transient (it is a separate service), so retrying in place beats
@@ -153,6 +154,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
         setRungs(payload.rungs);
         setMined(payload.mined);
         setLadderPattern(payload.ladder?.pattern);
+        setLadderFamily((payload as any).family);
       })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message); });
     return () => { cancelled = true; };
@@ -411,7 +413,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     key: 'scratch',
     label: 'Input',
     active: false,
-    content: <ScratchPanel rungId={currentRung.id} code={code} />,
+    content: <ScratchPanel rungId={currentRung.id} code={code} family={ladderFamily} />,
   };
 
   // Track A: always present, alongside the offer tabs (not gated by a detector) — draft/failures
@@ -486,6 +488,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
             rungId={currentRung.id}
             caseName={(currentRung as any).predict[0].caseName}
             inputPreview={(currentRung as any).predict[0].inputPreview}
+            family={ladderFamily}
             onDone={() => setPredicted((p) => ({ ...p, [currentRung.id]: true }))}
           />
         )}

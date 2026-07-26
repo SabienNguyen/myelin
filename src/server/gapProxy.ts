@@ -38,6 +38,10 @@ export interface GapLadderPayload {
   ladder: { pattern: string; targetArtifactId: string; siblingArtifactId: string; rungs: string[] };
   rungs: GapRung[];
   mined?: GapMinedEntry[];
+  /** Calling convention of the exercise ('stream' | 'function'). Optional because the external
+   *  sidecar predates it — absent means stream, the only family that existed. The client uses it
+   *  for COPY (a function returns one value; a stream yields a sequence), never for grading. */
+  family?: string;
 }
 
 /** Fetches the-gap sidecar's GET /api/ladder — the ONE endpoint the sidecar ever returns rung

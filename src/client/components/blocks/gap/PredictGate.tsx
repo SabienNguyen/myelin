@@ -10,12 +10,16 @@ import { useState } from 'react';
  * server sends the actual output as teaching material and the learner proceeds; and "skip" is
  * always available, because a gate that traps people teaches them to distrust gates.
  */
-export function PredictGate({ rungId, caseName, inputPreview, onDone }: {
+export function PredictGate({ rungId, caseName, inputPreview, family, onDone }: {
   rungId: string;
   caseName: string;
   inputPreview: string;
+  /** 'function' switches the copy from sequence language ("yields, one per line") to single-value
+   *  language ("returns") — the audit caught a chemistry function being asked stream questions. */
+  family?: string;
   onDone: () => void;
 }) {
+  const isFn = family === 'function';
   const [lines, setLines] = useState('');
   const [attempt, setAttempt] = useState(1);
   const [verdict, setVerdict] = useState<null | { pass: boolean; actual?: string[] }>(null);
@@ -51,15 +55,17 @@ export function PredictGate({ rungId, caseName, inputPreview, onDone }: {
     <div className="predict-gate">
       <h4>Before you write it — read it</h4>
       <p className="predict-lede">
-        The finished function receives this input. What does it yield, in order, one per line?
+        {isFn
+          ? 'The finished function gets called like this. What does it return?'
+          : 'The finished function receives this input. What does it yield, in order, one per line?'}
       </p>
       <pre className="predict-input">{inputPreview}</pre>
       <textarea
-        aria-label="predicted output, one per line"
-        rows={3}
+        aria-label={isFn ? 'predicted return value' : 'predicted output, one per line'}
+        rows={isFn ? 1 : 3}
         value={lines}
         onChange={(e) => setLines(e.target.value)}
-        placeholder={'first value\nsecond value'}
+        placeholder={isFn ? 'the return value' : 'first value\nsecond value'}
       />
       {verdict?.pass && (
         <p className="predict-verdict predict-ok" role="status">
@@ -68,13 +74,15 @@ export function PredictGate({ rungId, caseName, inputPreview, onDone }: {
       )}
       {verdict && !verdict.pass && !revealed && (
         <p className="predict-verdict predict-miss" role="status">
-          Not quite. Look again at where the line breaks fall — one more try.
+          {isFn
+            ? 'Not quite. Work it through once more — one more try.'
+            : 'Not quite. Look again at where the line breaks fall — one more try.'}
         </p>
       )}
       {revealed && (
         <p className="predict-verdict predict-miss" role="status">
-          It yields: {verdict!.actual!.map((a) => `“${a}”`).join(', ')}. Worth a moment before you
-          write — the gap between your prediction and this is the pattern.
+          It {isFn ? 'returns' : 'yields'}: {verdict!.actual!.map((a) => `“${a}”`).join(', ')}. Worth
+          a moment before you write — the gap between your prediction and this is the pattern.
         </p>
       )}
       {error && <p className="predict-verdict predict-miss" role="alert">{error}</p>}

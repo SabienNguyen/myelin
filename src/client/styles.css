@@ -1840,3 +1840,15 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 /* Same 10px swatch as the graph legend — it is the same mastery scale, read in a list. */
 .page-index .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+
+/* ── Practice review queue: tutor-authored exercises awaiting the learner's approval ─────────── */
+.practice-pending {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.7rem;
+  background: var(--bg-panel);
+}
+.practice-pending-head { display: flex; align-items: center; gap: 0.45rem; }
+.practice-pending-note { margin: 0.25rem 0 0.45rem; font-size: 0.85rem; color: var(--text-muted); }
+.practice-pending-actions { display: flex; gap: 0.5rem; }
+.practice-pending-actions button { font-size: 0.85rem; padding: 0.25rem 0.7rem; }

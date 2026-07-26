@@ -51,10 +51,44 @@ function minedRowsFrom(payload: any): MinedRow[] {
     .filter((row: MinedRow) => row.slug);
 }
 
+// A generated exercise the machine verified but nobody has accepted yet. The review gate existed
+// server-side from the start; what did NOT exist was any way to review from the app — approval
+// took curl, which for a desktop app means the pending list was a place exercises went to die.
+// In a single-user app the learner IS the reviewer, so the gate lives here, one click deep.
+interface PendingRow {
+  pattern: string;
+  title: string;
+  family: string;
+  gatesPassed: number;
+}
+
 export function PracticePanel({ visible = true }: { visible?: boolean }) {
   const [rows, setRows] = useState<Row[] | null>(null);
   const [mined, setMined] = useState<MinedRow[]>([]);
+  const [pending, setPending] = useState<PendingRow[]>([]);
+  const [deciding, setDeciding] = useState<string | null>(null);
+  const [refresh, setRefresh] = useState(0);
   const threadRuntime = useThreadRuntime();
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    (async () => {
+      // The review queue — a route only the built-in sandbox has; its absence (external sidecar)
+      // simply means no queue to show.
+      const genRes = await fetch('/api/gap/generated').catch(() => null);
+      if (genRes?.ok && !cancelled) {
+        const { exercises } = await genRes.json();
+        setPending((Array.isArray(exercises) ? exercises : [])
+          .filter((e: any) => e.status === 'pending' && e.verification?.ok)
+          .map((e: any): PendingRow => ({
+            pattern: e.pattern, title: e.title ?? e.pattern, family: e.family ?? 'stream',
+            gatesPassed: (e.verification?.gates ?? []).filter((g: any) => g.ok).length,
+          })));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [visible, refresh]);
 
   useEffect(() => {
     if (!visible) return;
@@ -84,10 +118,24 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
       setMined(minedRows);
     })();
     return () => { cancelled = true; };
-  }, [visible]);
+  }, [visible, refresh]);
+
+  const decide = async (pattern: string, status: 'approved' | 'rejected') => {
+    setDeciding(pattern);
+    try {
+      await fetch(`/api/gap/generated/${pattern}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+    } finally {
+      setDeciding(null);
+      setRefresh((n) => n + 1); // an approved pattern re-fetches into the Practice list itself
+    }
+  };
 
   if (rows === null) return null;
-  if (rows.length === 0 && mined.length === 0) return null;
+  if (rows.length === 0 && mined.length === 0 && pending.length === 0) return null;
 
   return (
     <section className="practice-panel">
@@ -109,6 +157,33 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
           </li>
         ))}
       </ul>
+      {pending.length > 0 && (
+        <>
+          <h4 className="practice-group-label">Waiting for your approval</h4>
+          <ul>
+            {pending.map((p) => (
+              <li key={p.pattern} className="practice-pending">
+                <div className="practice-pending-head">
+                  <Code size={14} weight="duotone" />
+                  <span className="practice-pattern">{p.title}</span>
+                  <span className="practice-tag practice-tag--new">{p.family}</span>
+                </div>
+                <p className="practice-pending-note">
+                  Authored by the tutor, passed {p.gatesPassed} mechanical checks. Look right?
+                </p>
+                <div className="practice-pending-actions">
+                  <button type="button" disabled={deciding === p.pattern} onClick={() => decide(p.pattern, 'approved')}>
+                    Approve — add to Practice
+                  </button>
+                  <button type="button" className="ghost-btn" disabled={deciding === p.pattern} onClick={() => decide(p.pattern, 'rejected')}>
+                    Reject
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {mined.length > 0 && (
         <>
           <h4 className="practice-group-label">From your repos</h4>

@@ -39,9 +39,19 @@ export interface RunnerResult {
   runtimeError?: string;
 }
 
+/** A function-family test case: plain values in, one value out. JSON-safe by construction — cases
+ *  cross the child-process boundary as JSON, so `undefined` can never be an EXPECTED value (an
+ *  implementation that returns undefined is exactly what the comparison must reject). */
+export interface FnCase { name: string; args: unknown[]; expect: unknown }
+
+/** `family` picks the calling convention: 'stream' (the default, and the only one that existed
+ *  before generated exercises went any-domain) drives an async generator over hostile byte chunks;
+ *  'function' calls `entryPoint(...args)` and deep-compares the (awaited) return value. */
 export type RunnerJob =
-  | { kind: 'suite'; code: string; entryPoint: string; cases: SuiteCase[] }
-  | { kind: 'scratch'; code: string; entryPoint: string; input: string };
+  | { kind: 'suite'; family?: 'stream'; code: string; entryPoint: string; cases: SuiteCase[] }
+  | { kind: 'suite'; family: 'function'; code: string; entryPoint: string; cases: FnCase[] }
+  | { kind: 'scratch'; family?: 'stream'; code: string; entryPoint: string; input: string }
+  | { kind: 'scratch'; family: 'function'; code: string; entryPoint: string; input: string };
 
 /**
  * The program the child runs, passed via `-e`. Self-contained on purpose: a separate script file
@@ -86,6 +96,51 @@ process.stdin.on('end', async () => {
     await Promise.race([collect, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000))]);
     return out;
   };
+  // ser, not JSON.stringify directly: stringify(undefined) is undefined-the-value, and undefined is
+  // precisely what a do-nothing implementation returns — it must compare UNEQUAL to every JSON
+  // expectation, not disappear into one.
+  const ser = (v) => JSON.stringify(v === undefined ? '\\u0000undefined' : v);
+  const raceCall = async (args) => {
+    const result = Promise.resolve(fn(...args));
+    return Promise.race([result, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000))]);
+  };
+
+  if (job.family === 'function') {
+    if (job.kind === 'scratch') {
+      let args;
+      try {
+        args = JSON.parse(String(job.input ?? ''));
+      } catch {
+        return done({ pass: false, results: [], scratch: true, runtimeError: 'write the arguments as a JSON array, e.g. [3, "abc"]' });
+      }
+      if (!Array.isArray(args)) args = [args];
+      try {
+        const out = await raceCall(args);
+        return done({ pass: true, results: [], scratch: true, actual: ser(out) });
+      } catch (e) {
+        return done({ pass: false, results: [], scratch: true, runtimeError: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    const results = [];
+    const fired = [];
+    for (const c of job.cases) {
+      let ok = false; let threw = null; let out;
+      try {
+        out = await raceCall(c.args);
+        ok = ser(out) === ser(c.expect);
+      } catch (e) {
+        threw = e instanceof Error ? e.message : String(e);
+      }
+      const row = { name: c.name, pass: ok };
+      if (!ok) {
+        row.expected = ser(c.expect);
+        row.actual = threw ? 'threw: ' + threw : ser(out);
+      }
+      results.push(row);
+      if (ok) fired.push(c.name);
+    }
+    return done({ pass: results.every((r) => r.pass), results, trace: { fired } });
+  }
 
   if (job.kind === 'scratch') {
     const bytes = [...new TextEncoder().encode(String(job.input ?? ''))];
