@@ -657,14 +657,20 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       <div className={`graph-controls${controlsHidden ? ' is-hidden' : ''}`} hidden={controlsHidden}>
         <div className="graph-row">
         <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope" onKeyDown={onScopeKeys}>
+          {/* Scope switches re-fit: the two scopes have wildly different extents, and the audit
+              found "Whole vault" leaving most of a 17-node vault outside the viewport until the
+              learner discovered the separate fit button. A short delay lets the reheated sim
+              spread before framing it. */}
           <button type="button" role="tab" aria-selected={mode === 'contextual'}
             tabIndex={mode === 'contextual' ? 0 : -1}
-            className={mode === 'contextual' ? 'on' : ''} onClick={() => setMode('contextual')}>
+            className={mode === 'contextual' ? 'on' : ''}
+            onClick={() => { setMode('contextual'); setTimeout(() => fitToNodes({ force: true }), 350); }}>
             This topic
           </button>
           <button type="button" role="tab" aria-selected={mode === 'full'}
             tabIndex={mode === 'full' ? 0 : -1}
-            className={mode === 'full' ? 'on' : ''} onClick={() => setMode('full')}>
+            className={mode === 'full' ? 'on' : ''}
+            onClick={() => { setMode('full'); setTimeout(() => fitToNodes({ force: true }), 350); }}>
             Whole vault
           </button>
         </div>
@@ -809,8 +815,15 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                       <g>
                         <title>{n.misconceptions.join('; ')}</title>
                         {/* Offsets divided too — a bare 6 here is 6 SIMULATION units, which at a
-                            fitted scale of 5 flung the marker 30px off its own node. */}
-                        <text x={r - 6 / zoomClamp} y={-r + 6 / zoomClamp} fontSize={12 / zoomScale}>⚠</text>
+                            fitted scale of 5 flung the marker 30px off its own node. Sized and
+                            colored to be SEEN: at 12px ink-on-parchment, overlapping the decay
+                            ring, the audit read it as ring texture while looking straight at it.
+                            The halo (paintOrder stroke) keeps it legible over any node color. */}
+                        <text
+                          x={r + 2 / zoomClamp} y={-r + 2 / zoomClamp} fontSize={16 / zoomScale}
+                          fill="var(--bad)" stroke="var(--bg-panel)" strokeWidth={3 / zoomScale}
+                          paintOrder="stroke" fontWeight="bold"
+                        >{'⚠︎'}{/* U+FE0E forces text presentation — as an emoji the glyph ignores fill */}</text>
                       </g>
                     )}
                     {showLabel && (
