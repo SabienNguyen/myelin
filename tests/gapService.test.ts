@@ -162,3 +162,72 @@ describe('the HTTP routes', () => {
     expect((await post({ rungId: 'quantum-flux:full_body', code: 'x' })).status).toBe(404);
   });
 });
+
+describe('predict-the-output — comprehension before production', () => {
+  const app = buildBuiltinGapRoutes();
+  const predict = (body: unknown) => app.request('/api/gap/predict', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+
+  it('a correct prediction passes, graded by actually running the reference server-side', async () => {
+    const res = await predict({
+      rungId: 'stream-consumer:inline_completion',
+      caseName: 'one event per chunk',
+      prediction: ['Hello', 'world'],
+    });
+    const body = await res.json();
+    expect(body.pass).toBe(true);
+  });
+
+  it('a wrong first attempt reveals NOTHING — the answer stays server-side', async () => {
+    const res = await predict({
+      rungId: 'stream-consumer:inline_completion',
+      caseName: 'one event per chunk',
+      prediction: ['data: Hello', 'data: world'], // the classic miss: forgetting the prefix strip
+      attempt: 1,
+    });
+    const body = await res.json();
+    expect(body.pass).toBe(false);
+    expect(body.actual).toBeUndefined();
+  });
+
+  it('a second miss earns the actual output as teaching material', async () => {
+    const res = await predict({
+      rungId: 'stream-consumer:inline_completion',
+      caseName: 'one event per chunk',
+      prediction: ['wrong'], attempt: 2,
+    });
+    const body = await res.json();
+    expect(body.pass).toBe(false);
+    expect(body.actual).toEqual(['Hello', 'world']);
+  });
+
+  it('refuses a case the rung does not offer for prediction', async () => {
+    const res = await predict({
+      rungId: 'stream-consumer:inline_completion',
+      caseName: 'multi-byte UTF-8 character split across chunks', // unreadable preview — not offered
+      prediction: ['café'],
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('the ladder carries the QUESTIONS (input previews) but never the answers', async () => {
+    const body = await (await app.request('/api/gap/ladder')).json();
+    const inline = body.rungs.find((r: any) => r.template === 'inline_completion');
+    expect(inline.predict.length).toBeGreaterThan(0);
+    expect(inline.predict[0].inputPreview).toContain('data:');
+    expect(JSON.stringify(inline.predict)).not.toContain('Hello","world'); // no expect arrays
+  });
+
+  it('the inline rung reference composes pre+answer+post and actually runs — the sibling-entry fix holds', async () => {
+    // This is the regression the backlog recorded: with one entry point per ladder, running the
+    // worked example's sibling reference produced "parseSSE is not defined". Per-rung entry points
+    // and runnableReference are the fix; a passing predict on the inline rung proves both.
+    const res = await predict({
+      rungId: 'stream-consumer:inline_completion',
+      caseName: 'stops at the [DONE] sentinel',
+      prediction: ['a'],
+    });
+    expect((await res.json()).pass).toBe(true);
+  });
+});

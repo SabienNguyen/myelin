@@ -6,6 +6,7 @@ import type { Loreweaver } from './mcp.js';
 import type { HarnessConfig } from './config.js';
 import { getGraphCached, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
+import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
 
 async function fetchGraph(lw: Loreweaver, cfg: HarnessConfig): Promise<GraphPayload> {
   const [slugs, student] = await Promise.all([
@@ -177,7 +178,12 @@ export function buildRestRoutes(
       resolveNeighbors(lw, cfg, page),
       readStanding(slug),
     ]);
-    return c.json({ ...page, neighbors, standing });
+    // Which applied blocks could confirm this page, derived from what exists (appliedRoutes.ts) —
+    // so the panel can name a route instead of leaving "no exercise has confirmed it" ambiguous
+    // between "not done" and "none exists".
+    const routes = appliedRoutesFor({ slug, body: page.page?.body ?? '' });
+    const noLadder = missingLadder({ slug, domain: page.page?.domain });
+    return c.json({ ...page, neighbors, standing, routes, noLadder });
   });
   app.get('/api/student', async (c) =>
     c.json(await lw.call('get_student_state', { student: cfg.student })));

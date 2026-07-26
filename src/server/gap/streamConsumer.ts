@@ -69,6 +69,15 @@ const scaffoldFor = (pre: string, post: string) => `${pre}\n  // YOUR TURN — i
 
 /** A rung as the exercise defines it — GapRung plus the prose/scaffold fields the client reads. */
 export interface BuiltinRung extends GapRung {
+  /** The function the RUNG's reference defines. Per-rung because the worked example is a SIBLING
+   *  artifact with a different entry point (parseFrames, not parseSSE) — the exact mismatch that
+   *  blocked predict-the-output when the runner assumed one entry per ladder: running the sibling
+   *  against the target's entry produced `ReferenceError: parseSSE is not defined`. */
+  entryPoint: string;
+  /** Which suite cases a learner can be asked to PREDICT before writing — derived from the suite
+   *  (no hand-authored content), restricted to cases whose bytes read cleanly as text so the
+   *  question is showable. */
+  predictCases: string[];
   prose: {
     context_line?: string;
     hint?: string;
@@ -78,11 +87,21 @@ export interface BuiltinRung extends GapRung {
   scaffold: string;
 }
 
+/** The COMPLETE runnable reference for a rung. full_body's reference stands alone; an
+ *  inline_completion's reference is only the hole's contents, so the visible pre/post frame it. */
+export function runnableReference(r: Pick<BuiltinRung, 'template' | 'visible_pre' | 'visible_post' | 'reference_answer'>): string {
+  return r.template === 'inline_completion'
+    ? `${r.visible_pre}\n${r.reference_answer}\n${r.visible_post}`
+    : r.reference_answer;
+}
+
 const bare: Omit<BuiltinRung, 'scaffold'>[] = [
   {
     id: 'stream-consumer:worked_example',
     template: 'worked_example',
     artifactId: 'frame-consumer',
+    entryPoint: 'parseFrames',
+    predictCases: [],
     visible_pre: SIBLING,
     visible_post: '',
     reference_answer: SIBLING,
@@ -130,6 +149,8 @@ const bare: Omit<BuiltinRung, 'scaffold'>[] = [
     id: 'stream-consumer:inline_completion',
     template: 'inline_completion',
     artifactId: 'stream-consumer',
+    entryPoint: 'parseSSE',
+    predictCases: ['one event per chunk', 'stops at the [DONE] sentinel'],
     visible_pre: `${PRE}\nasync function* parseSSE(chunks) {\n  const decoder = new TextDecoder();\n  let buf = '';\n  for await (const chunk of chunks) {`,
     visible_post: `  }\n}\n${POST}`,
     reference_answer: `    buf += decoder.decode(chunk, { stream: true });
@@ -152,6 +173,8 @@ const bare: Omit<BuiltinRung, 'scaffold'>[] = [
     id: 'stream-consumer:full_body',
     template: 'full_body',
     artifactId: 'stream-consumer',
+    entryPoint: 'parseSSE',
+    predictCases: ['stops at the [DONE] sentinel'],
     visible_pre: PRE,
     visible_post: POST,
     reference_answer: REFERENCE,

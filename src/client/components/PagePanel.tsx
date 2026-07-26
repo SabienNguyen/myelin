@@ -194,6 +194,17 @@ export function PagePanel({ slug }: { slug: string | null }) {
             )}
           </p>
           <p className="page-standing-why">{standingLine(standing)}</p>
+          {/* Backlog item 3: when nothing applied has confirmed the page, NAME the route that
+              could — "you have not done the exercise" and "no exercise exists" must stop sharing
+              one ambiguous sentence. Routes are derived server-side from what exists. */}
+          {standing.applied === 0 && page.routes?.length > 0 && (
+            <p className="page-standing-route">
+              {page.noLadder
+                ? 'No coding exercise has been written for this page yet — until one exists, ask your tutor for '
+                : 'To confirm it, ask your tutor for '}
+              <strong>{page.routes[0].ask}</strong> — {page.routes[0].why}.
+            </p>
+          )}
           {decayIn != null && (
             <p className="page-standing-decay">
               {decayIn === 0

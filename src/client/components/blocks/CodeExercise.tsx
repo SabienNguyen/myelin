@@ -36,6 +36,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CodeIcon as Code, CheckIcon as Check } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
+import { PredictGate } from './gap/PredictGate.js';
 import { getLadder, postRun } from './gap/api.js';
 import { RungEditor } from './gap/RungEditor.js';
 import { WorkedExample } from './gap/WorkedExample.js';
@@ -115,6 +116,8 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   // below) — `run()` only ever populates these two, never `finish()`.
   const [lastRunMs, setLastRunMs] = useState<number | undefined>(undefined);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  // Predict-before-write (backlog item 4): rung ids whose comprehension gate is done or skipped.
+  const [predicted, setPredicted] = useState<Record<string, boolean>>({});
   // Expert path: an adversarial re-run of the SAME suite (see gap/api.ts's `stress`). Exploratory
   // like Run and the scratch panel — it never calls finish() and carries no evidence consequence,
   // so passing it is a private satisfaction rather than a grade. `null` = not run this session.
@@ -474,11 +477,26 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
           <WorkedExample rung={currentRung} onContinue={advanceOrFinish} />
         )}
 
-        {template === 'inline_completion' && (
+        {/* The comprehension gate: production rungs with predictable cases open with "what does
+            the finished function yield?" — server-graded, no evidence, skippable. The rung's
+            editor renders only once the gate is cleared. */}
+        {(template === 'inline_completion' || template === 'full_body')
+          && (currentRung as any).predict?.length > 0 && !predicted[currentRung.id] && (
+          <PredictGate
+            rungId={currentRung.id}
+            caseName={(currentRung as any).predict[0].caseName}
+            inputPreview={(currentRung as any).predict[0].inputPreview}
+            onDone={() => setPredicted((p) => ({ ...p, [currentRung.id]: true }))}
+          />
+        )}
+
+        {template === 'inline_completion'
+          && !((currentRung as any).predict?.length > 0 && !predicted[currentRung.id]) && (
           <InlineCompletion rung={currentRung} onContinue={advanceOrFinish} detector={inlineDetector} />
         )}
 
-        {template === 'full_body' && (
+        {template === 'full_body'
+          && !((currentRung as any).predict?.length > 0 && !predicted[currentRung.id]) && (
           <div className="ide-editor-column">
             <div className="ide-header-strip">
               <ProximityHeader results={results} hasRun={hasRun} />
