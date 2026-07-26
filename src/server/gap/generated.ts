@@ -21,6 +21,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { environmentFor, environmentStatus, withEnvironment } from './environment.js';
 import { runProgram, runtimeFor, runtimeStatus, type ExecCase } from './exec.js';
 import { gradeManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
@@ -39,6 +40,9 @@ export interface GeneratedExercise {
   family?: GeneratedFamily;
   /** exec family only: which runtime runs the program ('node' | 'python3' | 'bash' | 'ruby'). */
   runtime?: string;
+  /** exec family only: a vetted service environment (gap/environment.ts registry) brought up for
+   *  each suite run — the program receives its connection string via env var. */
+  environment?: string;
   entryPoint: string;
   /** The problem statement, emitted as comment lines above the scaffold. */
   statement: string;
@@ -98,7 +102,7 @@ export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'en
  * an unverified exercise is never surfaced.
  */
 export async function verifyExercise(
-  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases' | 'family' | 'runtime'>,
+  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases' | 'family' | 'runtime' | 'environment'>,
 ): Promise<VerificationReport> {
   const gates: VerificationReport['gates'] = [];
   const family = familyOf(ex);
@@ -112,7 +116,13 @@ export async function verifyExercise(
 
   const run = (code: string) => {
     if (family === 'manifest') return Promise.resolve(gradeManifest(code, ex.cases as ManifestAssertion[]));
-    if (family === 'exec') return runProgram(ex.runtime ?? 'node', code, ex.cases as ExecCase[]);
+    if (family === 'exec') {
+      // A FRESH environment per gate run — the same lifecycle a learner's run gets, so a
+      // reference that leans on leftover state fails its own verification instead of shipping.
+      return ex.environment
+        ? withEnvironment(ex.environment, (envVars) => runProgram(ex.runtime ?? 'node', code, ex.cases as ExecCase[], envVars))
+        : runProgram(ex.runtime ?? 'node', code, ex.cases as ExecCase[]);
+    }
     return family === 'function'
       ? runInChild({ kind: 'suite', family, code, entryPoint: ex.entryPoint, cases: ex.cases as FnCase[] })
       : runInChild({ kind: 'suite', code, entryPoint: ex.entryPoint, cases: toSuiteCases(ex.cases as StreamGeneratedCase[]) });
@@ -243,13 +253,15 @@ Respond with ONLY valid JSON, no fences:
 // The generalist family: a whole program in a named runtime, judged on stdout. The prompt pins
 // the judge contract (stdin/args in, exact stdout out, deterministic) and leaves the subject and
 // language free.
-const EXEC_PROMPT = (pattern: string, description: string, runtime: string) => `Author a coding exercise for the pattern "${pattern}".
+const EXEC_PROMPT = (pattern: string, description: string, runtime: string, envBlurb?: string) => `Author a coding exercise for the pattern "${pattern}".
 ${description ? `Context from the tutor: ${description}\n` : ''}
 The exercise family is: the learner writes a COMPLETE PROGRAM for the ${runtime} runtime. Each test
 case runs the program as its own process with a given stdin and argv, and compares stdout exactly
-(trailing whitespace ignored). The program must be deterministic — no randomness, no clock, no
-network, no files beyond stdin/stdout — and must exit 0 on success. Pick a task worth earning in
-the subject named by the pattern and context, sized for one file.
+(trailing whitespace ignored). The program must be deterministic — no randomness, no clock${envBlurb
+  ? ` — and runs alongside ${envBlurb}. Every case gets a FRESH instance of that service, so the
+program must create whatever state it needs; expectations must not depend on prior runs`
+  : ', no network, no files beyond stdin/stdout'} — and must exit 0 on success. Pick a task worth
+earning in the subject named by the pattern and context, sized for one file.
 
 Respond with ONLY valid JSON, no fences:
 {
@@ -312,8 +324,9 @@ Respond with ONLY valid JSON, no fences:
  */
 export async function generateExercise(
   vault: string, pattern: string, description: string, deps: GenerateDeps,
-  family: GeneratedFamily = 'stream', runtime?: string,
+  family: GeneratedFamily = 'stream', runtime?: string, environment?: string,
 ): Promise<GeneratedExercise> {
+  if (environment && family !== 'exec') throw new Error('environments only apply to the exec family');
   if (family === 'exec') {
     const rt = runtime ?? 'node';
     if (!runtimeFor(rt)) throw new Error(`unknown runtime "${rt}"`);
@@ -322,8 +335,14 @@ export async function generateExercise(
     // docker pull the image), so the refusal teaches rather than stonewalls.
     const status = await runtimeStatus(rt);
     if (!status.available) throw new Error(status.reason ?? `${rt} is not available`);
+    if (environment) {
+      if (!environmentFor(environment)) throw new Error(`unknown environment "${environment}"`);
+      const envStatus = await environmentStatus(environment);
+      if (!envStatus.available) throw new Error(envStatus.reason ?? `${environment} environment unavailable`);
+    }
   }
-  const prompt = family === 'exec' ? EXEC_PROMPT(pattern, description, runtime ?? 'node')
+  const envBlurb = environment ? environmentFor(environment)?.blurb : undefined;
+  const prompt = family === 'exec' ? EXEC_PROMPT(pattern, description, runtime ?? 'node', envBlurb)
     : family === 'manifest' ? MANIFEST_PROMPT(pattern, description)
       : family === 'function' ? FUNCTION_PROMPT(pattern, description)
         : STREAM_PROMPT(pattern, description);
@@ -362,6 +381,7 @@ export async function generateExercise(
     title: String(parsed.title ?? pattern),
     family,
     ...(family === 'exec' ? { runtime: runtime ?? 'node' } : {}),
+    ...(environment ? { environment } : {}),
     entryPoint: String(parsed.entryPoint ?? (family === 'exec' ? 'main' : 'parse')),
     statement: String(parsed.statement ?? ''),
     reference: String(parsed.reference ?? ''),

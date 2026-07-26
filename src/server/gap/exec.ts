@@ -215,7 +215,7 @@ function compileOnce(rt: Runtime, dir: string): Promise<string | null> {
 
 const killAfterFor = (rt: Runtime) => (isContainerRuntime(rt) ? CONTAINER_KILL_AFTER_MS : KILL_AFTER_MS);
 
-function runOnce(rt: Runtime, dir: string, args: string[], stdin: string): Promise<ProgramRun> {
+function runOnce(rt: Runtime, dir: string, args: string[], stdin: string, envVars: Record<string, string> = {}): Promise<ProgramRun> {
   const argv = argvFor(rt, dir, args);
   return new Promise((resolve) => {
     const child = spawn(argv[0], argv.slice(1), {
@@ -226,6 +226,8 @@ function runOnce(rt: Runtime, dir: string, args: string[], stdin: string): Promi
         // second window instead of running the program. Keyed on the argv, not the runtime id —
         // the audit caught 'typescript' (also execPath) silently missing from an id check.
         ...(argv[0] === process.execPath ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
+        // Environment-tier connection strings (REDIS_URL, DATABASE_URL) — see gap/environment.ts.
+        ...envVars,
       },
     });
     let stdout = '';
@@ -258,7 +260,9 @@ function runOnce(rt: Runtime, dir: string, args: string[], stdin: string): Promi
  * already renders. A nonzero exit is a failure for that case with the exit named — a program that
  * crashes on an edge case should read as exactly that.
  */
-export async function runProgram(runtimeId: string, code: string, cases: ExecCase[]): Promise<RunnerResult> {
+export async function runProgram(
+  runtimeId: string, code: string, cases: ExecCase[], envVars: Record<string, string> = {},
+): Promise<RunnerResult> {
   const rt = runtimeFor(runtimeId);
   if (!rt) return { pass: false, results: [], syntaxError: `unknown runtime "${runtimeId}"` };
   const status = await runtimeStatus(runtimeId);
@@ -275,7 +279,7 @@ export async function runProgram(runtimeId: string, code: string, cases: ExecCas
     const results: RunnerResult['results'] = [];
     const fired: string[] = [];
     for (const c of cases) {
-      const run = await runOnce(rt, dir, c.args ?? [], c.stdin ?? '');
+      const run = await runOnce(rt, dir, c.args ?? [], c.stdin ?? '', envVars);
       if (run.spawnError) {
         return { pass: false, results: [], syntaxError: `could not start ${rt.id}: ${run.spawnError}` };
       }
@@ -301,7 +305,9 @@ export async function runProgram(runtimeId: string, code: string, cases: ExecCas
 }
 
 /** Scratch for programs: the learner's own stdin, their program's own stdout, nothing asserted. */
-export async function scratchProgram(runtimeId: string, code: string, stdin: string): Promise<RunnerResult> {
+export async function scratchProgram(
+  runtimeId: string, code: string, stdin: string, envVars: Record<string, string> = {},
+): Promise<RunnerResult> {
   const rt = runtimeFor(runtimeId);
   if (!rt) return { pass: false, results: [], scratch: true, runtimeError: `unknown runtime "${runtimeId}"` };
   const status = await runtimeStatus(runtimeId);
@@ -315,7 +321,7 @@ export async function scratchProgram(runtimeId: string, code: string, stdin: str
       const compileError = await compileOnce(rt, dir);
       if (compileError) return { pass: false, results: [], scratch: true, runtimeError: compileError };
     }
-    const run = await runOnce(rt, dir, [], stdin);
+    const run = await runOnce(rt, dir, [], stdin, envVars);
     if (run.spawnError) {
       return { pass: false, results: [], scratch: true, runtimeError: `could not start ${rt.id}: ${run.spawnError}` };
     }

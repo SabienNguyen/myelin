@@ -397,8 +397,10 @@ export function createTutorSession(
                 .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); exec for whole programs in a chosen language; stream only for byte-stream parsing'),
               runtime: z.enum(['python3', 'bash', 'ruby', 'node', 'typescript', 'c', 'rust', 'go', 'java']).optional()
                 .describe('exec family only: which runtime the program targets. node and typescript always work (the app itself runs them); python3/bash/ruby need a local install; c needs cc, rust needs rustc; go and java run in Docker containers and need Docker running with the image pulled. Generation fails loudly with the exact fix when something is missing.'),
+              environment: z.enum(['redis', 'postgres']).optional()
+                .describe('exec family only: a real service composed up fresh for every suite run — the program gets its connection string via REDIS_URL / DATABASE_URL. Needs Docker with the compose plugin and the image pulled; generation fails loudly with the exact fix when it is missing. Use for exercises about caching, queues, SQL — anything worth practicing against the real thing.'),
             }),
-            execute: async ({ pattern, description, family, runtime }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' | 'typescript' | 'c' | 'rust' | 'go' | 'java' }) => {
+            execute: async ({ pattern, description, family, runtime, environment }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' | 'typescript' | 'c' | 'rust' | 'go' | 'java'; environment?: 'redis' | 'postgres' }) => {
               const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
               if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
                 return { error: `an exercise for "${slug}" already exists` };
@@ -406,7 +408,7 @@ export function createTutorSession(
               try {
                 const ex = await generateExercise(cfg.vault, slug, description, {
                   generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
-                }, family ?? 'function', runtime);
+                }, family ?? 'function', runtime, environment);
                 return {
                   pattern: ex.pattern, status: ex.status,
                   gates: ex.verification.gates.map((g) => `${g.ok ? 'PASS' : 'FAIL'} ${g.gate}`),

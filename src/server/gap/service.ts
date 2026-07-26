@@ -19,6 +19,7 @@ import {
   setGeneratedStatus, toSuiteCases, type GeneratedExercise, type GeneratedFamily,
   type StreamGeneratedCase,
 } from './generated.js';
+import { environmentStatuses, withEnvironment } from './environment.js';
 import { availableRuntimes, runProgram, runtimeStatuses, scratchProgram, type ExecCase } from './exec.js';
 import { gradeManifest, scratchManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
@@ -35,14 +36,23 @@ export type BuiltinExercise = {
   | { family: 'stream'; cases: SuiteCase[] }
   | { family: 'function'; cases: FnCase[] }
   | { family: 'manifest'; cases: ManifestAssertion[] }
-  | { family: 'exec'; cases: ExecCase[]; runtime: string }
+  | { family: 'exec'; cases: ExecCase[]; runtime: string; environment?: string }
 );
 
 /** One suite run, spelled per family so every call site dispatches identically. Manifests never
- *  touch the child (data, not code); exec spawns the named runtime per case (exec.ts). */
+ *  touch the child (data, not code); exec spawns the named runtime per case (exec.ts), inside a
+ *  fresh composed environment when the exercise names one (environment.ts). */
 function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?: SuiteCase[] | FnCase[] | ManifestAssertion[] | ExecCase[]) {
   if (ex.family === 'manifest') return Promise.resolve(gradeManifest(code, (cases ?? ex.cases) as ManifestAssertion[]));
-  if (ex.family === 'exec') return runProgram(ex.runtime, code, (cases ?? ex.cases) as ExecCase[]);
+  if (ex.family === 'exec') {
+    const suite = (cases ?? ex.cases) as ExecCase[];
+    return ex.environment
+      ? withEnvironment(ex.environment, (envVars) => runProgram(ex.runtime, code, suite, envVars))
+        .catch((e): ReturnType<typeof runProgram> => Promise.resolve({
+          pass: false, results: [], syntaxError: e instanceof Error ? e.message : String(e),
+        }))
+      : runProgram(ex.runtime, code, suite);
+  }
   return ex.family === 'function'
     ? runInChild({ kind: 'suite', family: 'function', code, entryPoint, cases: (cases ?? ex.cases) as FnCase[] })
     : runInChild({ kind: 'suite', code, entryPoint, cases: (cases ?? ex.cases) as SuiteCase[] });
@@ -103,7 +113,7 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
       scaffold: parts.scaffold,
     }],
     family,
-    ...(family === 'exec' ? { runtime: g.runtime ?? 'node' } : {}),
+    ...(family === 'exec' ? { runtime: g.runtime ?? 'node', ...(g.environment ? { environment: g.environment } : {}) } : {}),
     cases,
     entryPoint: g.entryPoint,
   } as BuiltinExercise;
@@ -232,7 +242,8 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     try {
       const ex = await generateExercise(vault, pattern, String(body?.description ?? ''), {
         generate: opts.generate, modelName: opts.modelName,
-      }, family, typeof body?.runtime === 'string' ? body.runtime : undefined);
+      }, family, typeof body?.runtime === 'string' ? body.runtime : undefined,
+      typeof body?.environment === 'string' ? body.environment : undefined);
       console.log(`[gap] generated "${pattern}" -> ${ex.status} (${ex.verification.gates.filter((g) => !g.ok).length} failed gates)`);
       return c.json(ex, ex.status === 'rejected' ? 422 : 200);
     } catch (e: any) {
@@ -247,6 +258,9 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
   app.get('/api/gap/environments', async (c) => c.json({
     runtimes: await availableRuntimes(),
     statuses: await runtimeStatuses(),
+    // The service-environment registry (redis, postgres, …) with per-entry availability and the
+    // fix when unavailable — same shape of honesty as the runtime statuses above.
+    environments: await environmentStatuses(),
   }));
 
   /**
@@ -324,9 +338,18 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     if (typeof body.input === 'string') {
       console.log(`[gap] scratch rung=${body.rungId} inputBytes=${body.input.length}`);
       // Manifest scratch ignores `input`: the interesting question is "what does MY YAML parse
-      // to", and the YAML is the code itself. Exec scratch feeds the input as the program's stdin.
+      // to", and the YAML is the code itself. Exec scratch feeds the input as the program's stdin
+      // — inside the exercise's environment when it has one, because "poke my own program at the
+      // real service" is exactly what scratch exists for.
       if (ex.family === 'manifest') return c.json(scratchManifest(body.code));
-      if (ex.family === 'exec') return c.json(await scratchProgram(ex.runtime, body.code, body.input));
+      if (ex.family === 'exec') {
+        if (ex.environment) {
+          const out = await withEnvironment(ex.environment, (envVars) => scratchProgram(ex.runtime, body.code, body.input, envVars))
+            .catch((e) => ({ pass: false, results: [], scratch: true as const, runtimeError: e instanceof Error ? e.message : String(e) }));
+          return c.json(out);
+        }
+        return c.json(await scratchProgram(ex.runtime, body.code, body.input));
+      }
       return c.json(await runInChild(ex.family === 'function'
         ? { kind: 'scratch', family: 'function', code: body.code, entryPoint: ex.entryPoint, input: body.input }
         : { kind: 'scratch', code: body.code, entryPoint: ex.entryPoint, input: body.input }));
