@@ -205,15 +205,66 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
   return { allCorrect: ok, anyCorrect: ok, detail: ok ? 'exact match' : `expected "${checker.expected}"` };
 }
 
+/**
+ * WHERE THE VERDICT CAME FROM. This is the single place the distinction is named.
+ *
+ * 'mechanical' — a real test suite, numeric equivalence, an exact expected value, or one of
+ *   gradeStructured's checkers. Nothing here can be argued into agreeing.
+ * 'model'      — the grader model judged an open answer or a draft. Useful, and not verification.
+ *
+ * The rule below is the one that gives `applied-correctly` its meaning, and until this type existed
+ * it was not written down anywhere: it held only because six independent branches of
+ * gradeBlockOutput happened to agree, and TWO of them did not. `quiz` routed short-answer items
+ * through the grader model and then aggregated them into 'applied-correctly'; `writing_draft` is
+ * model-graded end to end and minted 'applied-correctly' whenever no skill came back weak. Both
+ * claimed mechanical verification for a judgement no mechanism made.
+ */
+export type GradeSource = 'mechanical' | 'model';
+
 export interface Grade {
   verdict: 'correct' | 'partial' | 'incorrect' | 'reviewed';
+  /** How the verdict was reached. Every return site declares it; see capApplied. */
+  source: GradeSource;
   detail: string;
   perItem?: { id: string; correct: boolean }[];
   annotations?: WritingAnnotations;
   evidence: { slug: string; kind: EvidenceKind; note: string }[];
 }
 
-const ev = (slug: string, kind: EvidenceKind, note: string) => ({ slug, kind, note });
+/**
+ * THE RULE: only mechanically-verified work may mint `applied-correctly`.
+ *
+ * A model-graded pass becomes `explained-correctly` instead — the learner did demonstrate
+ * something, and what they demonstrated is that they can articulate it, not that a machine
+ * confirmed it. Every other kind passes through untouched: a model is perfectly able to observe
+ * that an answer was wrong, so 'struggled' needs no ceiling, and neither does 'exposed'.
+ *
+ * Same shape as the two ceilings already in this file — the Anki-review ceiling and
+ * code_exercise's reveal ceiling. In each case the affordance stays available and the evidence
+ * stays honest.
+ *
+ * Note for whoever changes applyEvidence next: today this cap has NO effect on mastery, because
+ * loreweaver's student/model.ts puts 'explained-correctly' and 'applied-correctly' in the same
+ * branch — both step exactly one rung. So the two kinds currently differ in truthfulness and
+ * nothing else. That is a live design question (should applied work resist decay longer? should
+ * explaining alone be unable to reach 'mastered'?) and this is the seam where it would be answered.
+ */
+export function capApplied(kind: EvidenceKind, source: GradeSource): EvidenceKind {
+  if (source === 'model' && kind === 'applied-correctly') return 'explained-correctly';
+  return kind;
+}
+
+/**
+ * The ONLY constructor for an evidence entry, and the only place the cap is applied.
+ *
+ * `source` is required rather than defaulted, deliberately: a default would let a new block emit
+ * evidence without ever deciding how its verdict was reached, which is exactly the omission that
+ * let `quiz` and `writing_draft` drift. Routing every site through here also makes the rule
+ * structural instead of remembered — before this, capApplied was called at 3 of 8 sites, so
+ * over-applying or forgetting it was only partly detectable.
+ */
+const ev = (slug: string, kind: EvidenceKind, note: string, source: GradeSource) =>
+  ({ slug, kind: capApplied(kind, source), note });
 
 export async function gradeBlockOutput(
   tool: BlockToolName, input: any, result: any, cfg: HarnessConfig, deps: GradingDeps = {},
@@ -223,8 +274,9 @@ export async function gradeBlockOutput(
       const ok = result.answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
       return {
         verdict: ok ? 'correct' : 'incorrect',
+        source: 'mechanical',
         detail: ok ? 'exact match' : `expected "${input.expected}"`,
-        evidence: [ev(input.pageSlug, ok ? 'applied-correctly' : 'struggled', `quick_check: ${input.question}`)],
+        evidence: [ev(input.pageSlug, ok ? 'applied-correctly' : 'struggled', `quick_check: ${input.question}`, 'mechanical')],
       };
     }
     return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps);
@@ -240,33 +292,52 @@ export async function gradeBlockOutput(
       ? result.steps.findIndex((s: { latex: string }) => !latexParses(s.latex)) : -1;
     return {
       verdict: finalOk ? 'correct' : 'incorrect',
+      source: 'mechanical',
       detail: finalOk ? 'final answer numerically equivalent'
         : `final differs from expected${badStep >= 0 ? `; step ${badStep + 1} unparseable` : ''}`,
       evidence: [ev(input.pageSlug, finalOk ? 'applied-correctly' : 'struggled',
-        `math: ${input.problemLatex} → ${result.finalLatex}`)],
+        `math: ${input.problemLatex} → ${result.finalLatex}`, 'mechanical')],
     };
   }
 
   if (tool === 'quiz') {
+    // A quiz is the one block that mixes both sources: multiple-choice items with an `expected`
+    // are exact-matched, short-answer items go to the grader model. The per-ITEM source therefore
+    // has to be carried through the aggregation, because evidence is emitted per SLUG and one
+    // model-graded item is enough to make that slug's verdict a judgement rather than a check.
     const perItem = await Promise.all(input.items.map(async (item: any) => {
       const answer = result.answers.find((a: any) => a.id === item.id)?.answer ?? '';
-      if (item.type !== 'short' && item.expected != null)
-        return { id: item.id, correct: answer.trim().toLowerCase() === item.expected.trim().toLowerCase() };
+      if (item.type !== 'short' && item.expected != null) {
+        return {
+          id: item.id, source: 'mechanical' as GradeSource,
+          correct: answer.trim().toLowerCase() === item.expected.trim().toLowerCase(),
+        };
+      }
       const g = await gradeOpenAnswer(item.prompt, answer, item.pageSlug, cfg, deps);
-      return { id: item.id, correct: g.verdict === 'correct' };
+      return { id: item.id, source: 'model' as GradeSource, correct: g.verdict === 'correct' };
     }));
     const right = perItem.filter((p) => p.correct).length;
-    const bySlug = new Map<string, { right: number; total: number }>();
+    const bySlug = new Map<string, { right: number; total: number; source: GradeSource }>();
     for (const item of input.items) {
-      const s = bySlug.get(item.pageSlug) ?? { right: 0, total: 0 };
-      s.total++; if (perItem.find((p) => p.id === item.id)?.correct) s.right++;
+      const s = bySlug.get(item.pageSlug) ?? { right: 0, total: 0, source: 'mechanical' as GradeSource };
+      const scored = perItem.find((p) => p.id === item.id);
+      s.total++; if (scored?.correct) s.right++;
+      if (scored?.source === 'model') s.source = 'model';
       bySlug.set(item.pageSlug, s);
     }
     return {
       verdict: right === perItem.length ? 'correct' : right > 0 ? 'partial' : 'incorrect',
-      detail: `${right}/${perItem.length}`, perItem,
-      evidence: [...bySlug].map(([slug, s]) =>
-        ev(slug, s.right === s.total ? 'applied-correctly' : 'struggled', `quiz ${s.right}/${s.total}`)),
+      // The block's own source is the weakest of its items: a quiz containing one short answer is
+      // not a mechanically-verified quiz, however many multiple-choice items surround it.
+      source: [...bySlug.values()].some((s) => s.source === 'model') ? 'model' : 'mechanical',
+      detail: `${right}/${perItem.length}`,
+      perItem: perItem.map(({ id, correct }) => ({ id, correct })),
+      evidence: [...bySlug].map(([slug, s]) => ev(
+        slug,
+        s.right === s.total ? 'applied-correctly' : 'struggled',
+        `quiz ${s.right}/${s.total}${s.source === 'model' ? ' (model-graded)' : ''}`,
+        s.source,
+      )),
     };
   }
 
@@ -277,9 +348,10 @@ export async function gradeBlockOutput(
     const kind: EvidenceKind = g.allCorrect ? 'applied-correctly' : 'struggled';
     return {
       verdict: g.allCorrect ? 'correct' : g.anyCorrect ? 'partial' : 'incorrect',
+      source: 'mechanical',
       detail: g.detail,
       ...(g.perItem ? { perItem: g.perItem } : {}),
-      evidence: [ev(input.pageSlug, kind, `${input.checker.kind} check: ${input.prompt}`)],
+      evidence: [ev(input.pageSlug, kind, `${input.checker.kind} check: ${input.prompt}`, 'mechanical')],
     };
   }
 
@@ -290,6 +362,8 @@ export async function gradeBlockOutput(
     if (result.unavailable === true) {
       return {
         verdict: 'reviewed',
+        // Mechanical: no model was consulted, and no evidence is emitted either way.
+        source: 'mechanical',
         detail: 'exercise unavailable — the coding sandbox did not respond',
         evidence: [],
       };
@@ -329,8 +403,10 @@ export async function gradeBlockOutput(
           : 'recorded as exposed — guided rungs only, no code of your own was graded';
     return {
       verdict: result.completed ? 'correct' : 'incorrect',
+      // The artifact's real suite ran in the sandbox — the strongest mechanical grade in the app.
+      source: 'mechanical',
       detail,
-      evidence: [ev(input.pageSlug, kind, note)],
+      evidence: [ev(input.pageSlug, kind, note, 'mechanical')],
     };
   }
 
@@ -365,10 +441,13 @@ export async function gradeBlockOutput(
   }
   const weak = Object.values(ann.skillGrades).filter((g) => g === 'weak').length;
   return {
-    verdict: 'reviewed', detail: `${ann.annotations.length} annotations, ${weak} weak skills`,
+    verdict: 'reviewed', source: 'model',
+    detail: `${ann.annotations.length} annotations, ${weak} weak skills`,
     annotations: ann,
+    // The learner really did write something, so this is not a downgrade of what they did — it is
+    // an accurate label for how it was judged. Nothing but the grader model read this draft.
     evidence: [ev(input.pageSlug, weak === 0 ? 'applied-correctly' : 'struggled',
-      `writing round ${input.round}: skills ${JSON.stringify(ann.skillGrades)}`)],
+      `writing round ${input.round}: skills ${JSON.stringify(ann.skillGrades)}`, 'model')],
   };
 }
 
@@ -390,7 +469,9 @@ async function gradeOpenAnswer(
   }
   const ok = /^CORRECT/i.test(text.trim());
   return {
-    verdict: ok ? 'correct' : 'incorrect', detail: text.trim(),
-    evidence: [ev(slug, ok ? 'explained-correctly' : 'struggled', `open answer: ${question}`)],
+    verdict: ok ? 'correct' : 'incorrect', source: 'model', detail: text.trim(),
+    // Already 'explained-correctly' before capApplied existed — this path is where the convention
+    // the rest of the file only half-followed was originally right.
+    evidence: [ev(slug, ok ? 'applied-correctly' : 'struggled', `open answer: ${question}`, 'model')],
   };
 }
