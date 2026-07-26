@@ -60,19 +60,27 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
     if (!visible) return;
     let cancelled = false;
     (async () => {
-      // GET /api/gap/ladder 404s when cfg.gap is absent (see gapProxy.ts) — treat that the same
-      // as "no ladders", not an error worth surfacing in the Library tab.
       const ladderRes = await fetch('/api/gap/ladder').catch(() => null);
       if (!ladderRes?.ok) { if (!cancelled) { setRows([]); setMined([]); } return; }
       const payload = await ladderRes.json();
       const minedRows = minedRowsFrom(payload);
-      const pattern: string | undefined = payload?.ladder?.pattern;
-      if (!pattern) { if (!cancelled) { setRows([]); setMined(minedRows); } return; }
+
+      // The full pattern list — including approved GENERATED exercises, which the audit found
+      // invisible here: Practice showed only the default ladder's pattern while the sandbox was
+      // happily serving more. The external sidecar has no /patterns route; its 404 falls back to
+      // the one ladder-derived row, the exact old behaviour.
+      const patternsRes = await fetch('/api/gap/patterns').catch(() => null);
+      const patterns: { pattern: string }[] = patternsRes?.ok
+        ? (await patternsRes.json()).patterns ?? []
+        : (payload?.ladder?.pattern ? [{ pattern: payload.ladder.pattern }] : []);
+      if (patterns.length === 0) { if (!cancelled) { setRows([]); setMined(minedRows); } return; }
 
       const studentRes = await fetch('/api/student').catch(() => null);
       const student = studentRes?.ok ? await studentRes.json() : {};
       if (cancelled) return;
-      setRows([{ pattern, ownership: ownershipFor(student?.[pattern]?.effective) }]);
+      setRows(patterns.map(({ pattern }) => ({
+        pattern, ownership: ownershipFor(student?.[pattern]?.effective),
+      })));
       setMined(minedRows);
     })();
     return () => { cancelled = true; };

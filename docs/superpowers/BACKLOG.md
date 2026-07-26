@@ -198,8 +198,10 @@ Ranked, and honestly labelled: none of these move the goal.
 3a. ~~`structured_check` answer inputs are plain text.~~ **Closed**: answers preview as they type
    (`answerDisplay.ts` — H2O reads as H₂O, SO4^2- as SO₄²⁻, `$…$` through KaTeX) and the graded
    card shows the same form. Display only; grading still sees the raw string, pinned by test.
-4. **The unreproduced flaky test.** One run reported a single failure that never reproduced across
-   later full runs; the name was not captured. Unresolved, and recorded so it is not forgotten.
+4. **The flaky test, now named.** "CodeExercise — single-rung mined flow completes via Submit with
+   the pinned result contract" failed once in a full run (2026-07-26, audit loop iteration 2) and
+   passed twice in isolation immediately after, and the full suite passed on re-run. Timing-shaped,
+   full-suite-only. Next occurrence: capture the seed/order vitest used.
 5. **`structured_check` placement.** Renders inline; the other applied blocks use the Stage. Decide
    which, deliberately.
 

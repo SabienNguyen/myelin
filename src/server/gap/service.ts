@@ -142,6 +142,16 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     }
   });
 
+  /** Every pattern this sandbox can serve — what the Library's Practice section lists. The
+   *  external-sidecar proxy has no such route (its Practice fallback derives one row from the
+   *  ladder), so the client treats a 404 here as "single-pattern mode", not an error. */
+  app.get('/api/gap/patterns', (c) => c.json({
+    patterns: [
+      ...Object.keys(EXERCISES).map((p) => ({ pattern: p })),
+      ...(vault ? approvedGenerated(vault).map((g) => ({ pattern: g.pattern, title: g.title })) : []),
+    ],
+  }));
+
   /** The review gate's surface: everything generated, gates and status visible. */
   app.get('/api/gap/generated', (c) => c.json({
     exercises: listGenerated(vault ?? '').map((e) => ({

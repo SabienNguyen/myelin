@@ -155,6 +155,18 @@ describe('generate -> review -> serve', () => {
     expect(body.exercises[0].verification.gates.length).toBe(5);
   });
 
+  it('the pattern list includes approved generated exercises — Practice reads this', async () => {
+    await generateExercise(vault, 'ndjson-parser', '', { generate: stubModel(NDJSON) });
+    const app = buildBuiltinGapRoutes({ vault });
+    // Pending: not listed.
+    let body = await (await app.request('/api/gap/patterns')).json();
+    expect(body.patterns.map((p: any) => p.pattern)).toEqual(['stream-consumer']);
+    // Approved: listed after the builtin.
+    setGeneratedStatus(vault, 'ndjson-parser', 'approved');
+    body = await (await app.request('/api/gap/patterns')).json();
+    expect(body.patterns.map((p: any) => p.pattern)).toEqual(['stream-consumer', 'ndjson-parser']);
+  });
+
   it('a model returning garbage is an error, not a stored exercise', async () => {
     await expect(generateExercise(vault, 'x', '', { generate: async () => 'not json at all' }))
       .rejects.toThrow(/valid JSON/);
