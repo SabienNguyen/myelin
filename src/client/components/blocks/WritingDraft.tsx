@@ -93,6 +93,18 @@ export function WritingDraftInner({ args, result, addResult }: {
   return (
     <div className="block writing-draft">
       <BlockProse text={args.prompt} />
+      {/* The criteria the draft will be judged against, VISIBLE BEFORE WRITING. The whole design of
+          rubric-passed says "criteria the learner could read in advance" — and the audit screenshot
+          showed a tutor saying "the rubric is right there" above a block that never rendered it.
+          Being judged against criteria you never saw is the thing a rubric exists to prevent. */}
+      {Array.isArray(args.rubric) && args.rubric.length > 0 && (
+        <div className="rubric-upfront">
+          <p className="rubric-upfront-title">Judged against:</p>
+          <ul>
+            {args.rubric.map((r: string) => <li key={r}>{r}</li>)}
+          </ul>
+        </div>
+      )}
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
       <button onClick={() => addResult({ draft })}>Submit</button>
     </div>

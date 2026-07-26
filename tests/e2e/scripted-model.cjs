@@ -29,6 +29,18 @@ function createScriptedModel(scriptPath) {
   let turns = null;
   let index = 0;
 
+  // Because doStream and doGenerate share one turn counter, a mis-ordered script surfaces as a
+  // baffling wrong-verdict or parse failure far from here. LW_MOCK_TRACE=<path> appends one line
+  // per pop so a drive can SEE which call consumed which turn.
+  function trace(method, i, turn) {
+    const tracePath = process.env.LW_MOCK_TRACE;
+    if (!tracePath) return;
+    const summary = turn
+      ? `toolCalls=[${(turn.toolCalls || []).map((c) => c.toolName).join(',')}] text=${JSON.stringify((turn.text || '').slice(0, 60))}`
+      : 'PAST-END';
+    try { fs.appendFileSync(tracePath, `${method} turn[${i}] ${summary}\n`); } catch { /* trace is best-effort */ }
+  }
+
   function loadTurns() {
     if (turns === null) {
       const raw = fs.readFileSync(scriptPath, 'utf8');
@@ -49,6 +61,7 @@ function createScriptedModel(scriptPath) {
       // true when quiz short answers went through gradeOpenAnswer's generateText. A doGenerate that
       // pops a turn and returns its text lets scripted drives exercise MODEL-GRADED paths too.
       const turn = loadTurns()[index];
+      trace('doGenerate', index, turn);
       index += 1;
       return {
         content: [{ type: 'text', text: (turn && turn.text) || 'CORRECT — scripted.' }],
@@ -64,6 +77,7 @@ function createScriptedModel(scriptPath) {
     async doStream() {
       const allTurns = loadTurns();
       const turn = allTurns[index];
+      trace('doStream', index, turn);
       index += 1;
 
       const toolCalls = (turn && turn.toolCalls) || [];

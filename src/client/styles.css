@@ -1815,3 +1815,14 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border-radius: 999px;
   vertical-align: middle;
 }
+
+/* The rubric shown BEFORE writing (WritingDraft) — the contract the draft is judged against. */
+.rubric-upfront {
+  margin: 0.4rem 0 0.6rem;
+  padding: 0.5rem 0.8rem;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.88rem;
+}
+.rubric-upfront-title { margin: 0 0 0.2rem; font-weight: 600; font-size: 0.8rem; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-muted); }
+.rubric-upfront ul { margin: 0; padding-left: 1.1rem; }

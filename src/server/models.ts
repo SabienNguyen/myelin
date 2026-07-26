@@ -16,13 +16,23 @@ const ollama = createOpenAICompatible({
   baseURL: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1',
 });
 
+// One scripted instance per script path, so every role pops from the SAME turn sequence. Without
+// this, the tutor session (which holds its model) advances the counter while each grading call
+// (fresh modelFor per grade) restarts at turn 0 — and the grader replays the first tool-call turn
+// forever instead of reaching its scripted verdict.
+const scriptedCache = new Map<string, unknown>();
+
 export function modelFor(role: ModelRole, cfg: HarnessConfig) {
   if (process.env.LW_MOCK_MODEL) {
     // E2E hook: Task 12 provides createScriptedModel(); lazily imported to keep prod path clean.
     // createRequire because this package is ESM — bare `require` is undefined at runtime.
-    const require = createRequire(import.meta.url);
-    const { createScriptedModel } = require('../../tests/e2e/scripted-model.cjs');
-    return createScriptedModel(process.env.LW_MOCK_MODEL);
+    const scriptPath = process.env.LW_MOCK_MODEL;
+    if (!scriptedCache.has(scriptPath)) {
+      const require = createRequire(import.meta.url);
+      const { createScriptedModel } = require('../../tests/e2e/scripted-model.cjs');
+      scriptedCache.set(scriptPath, createScriptedModel(scriptPath));
+    }
+    return scriptedCache.get(scriptPath) as ReturnType<typeof anthropic>;
   }
   const modelId = cfg.models[role].model;
   if (modelId.startsWith(OLLAMA_PREFIX)) {
