@@ -9,6 +9,28 @@ const ANKI_LABEL: Record<string, string> = {
   backlog: 'Anki has a review backlog',
 };
 
+/**
+ * The tutor model, said in words rather than in a model id.
+ *
+ * The badge used to read `claude-sdk:sonnet`, which is an implementation detail of how the harness
+ * routes a request — and on a first run it is the second thing in the toolbar, next to the learner's
+ * own name. What they actually want to know is which model and whose bill.
+ */
+export function modelLabel(id: string): { name: string; how: string } {
+  const pretty = (m: string) => m
+    .replace(/^claude-/, '')
+    .replace(/-(\d)-(\d)$/, ' $1.$2')     // haiku-4-5 -> haiku 4.5
+    .replace(/-(\d+)$/, ' $1')             // sonnet-5   -> sonnet 5
+    .replace(/^(.)/, (c) => c.toUpperCase());
+  if (id.startsWith('claude-sdk:')) {
+    return { name: pretty(id.slice('claude-sdk:'.length)), how: 'Claude subscription' };
+  }
+  if (id.startsWith('ollama:')) {
+    return { name: id.slice('ollama:'.length), how: 'local model via Ollama' };
+  }
+  return { name: pretty(id), how: 'Anthropic API' };
+}
+
 export function TopbarStatus() {
   const [status, setStatus] = useState<Status>({});
   useEffect(() => {
@@ -22,8 +44,18 @@ export function TopbarStatus() {
   return (
     <div className="topbar-status">
       {status.student && <span className="badge"><UserCircle size={14} weight="duotone" /> {status.student}</span>}
-      {status.tutor && <span className="badge" title="tutor model"><Brain size={14} weight="duotone" /> {status.tutor.replace(/^ollama:/, '')}</span>}
-      {status.anki && (
+      {status.tutor && (() => {
+        const { name, how } = modelLabel(status.tutor);
+        return (
+          <span className="badge" title={`Tutor model: ${name}, via ${how} (${status.tutor})`}>
+            <Brain size={14} weight="duotone" /> {name}
+          </span>
+        );
+      })()}
+      {/* 'down' is omitted, not shown greyed: on a first run nobody has Anki installed, and an
+          amber badge for a feature the learner never asked for reads as "something is broken".
+          A backlog IS worth flagging — that one is about work they have already done. */}
+      {status.anki && status.anki !== 'down' && (
         <span className={`badge anki-${status.anki}`} title={ANKI_LABEL[status.anki]}>
           <span className="statusdot" /> anki
         </span>

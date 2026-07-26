@@ -69,6 +69,26 @@ describe('the server build', () => {
   });
 });
 
+describe('blocks the tutor is allowed to use', () => {
+  it('withholds code_exercise when no coding sandbox is configured', async () => {
+    // A fresh install has no the-gap sidecar — it is a separate service, absent by default. Without
+    // this gate the tutor opened a coding exercise anyway, the block fetched /api/gap/ladder against
+    // routes that were never registered, and the learner's first programming lesson ended in
+    // "This exercise can't start right now." Seen in a screenshot of the packaged app.
+    const { availableBlocks } = await import('../src/server/session.js');
+    expect(availableBlocks({} as any)).not.toContain('code_exercise');
+    expect(availableBlocks(undefined)).not.toContain('code_exercise');
+    // Everything else is unconditional, so withholding one must not withhold five.
+    expect(availableBlocks({} as any)).toContain('quiz');
+    expect(availableBlocks({} as any)).toContain('structured_check');
+  });
+
+  it('offers it once a sandbox is configured', async () => {
+    const { availableBlocks } = await import('../src/server/session.js');
+    expect(availableBlocks({ gap: { url: 'http://localhost:4930' } } as any)).toContain('code_exercise');
+  });
+});
+
 describe('spawning Loreweaver from inside Electron', () => {
   it('sets ELECTRON_RUN_AS_NODE on the child', () => {
     // config.ts's runnerFor uses process.execPath to run a compiled entry, and inside the packaged

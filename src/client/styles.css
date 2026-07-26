@@ -1501,13 +1501,28 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   flex-direction: column;
   gap: 0.4rem;
 }
-.thread-empty-examples li {
+.thread-empty-examples li { display: flex; }
+/* Real buttons now. They were styled exactly like this as inert <li>, which meant the first screen
+   of the app offered three things that looked clickable and were not. */
+.thread-empty-examples button {
+  flex: 1;
   font-family: var(--font-prose);
   font-size: 0.9rem;
   color: var(--text-muted);
-  padding: 0.35rem 0.7rem;
+  text-align: center;
+  padding: 0.4rem 0.7rem;
+  background: none;
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+.thread-empty-examples button:hover,
+.thread-empty-examples button:focus-visible {
+  color: var(--text);
+  background: var(--bg-panel);
+  border-color: var(--accent);
+  border-style: solid;
 }
 
 /* ── Your standing ────────────────────────────────────
@@ -1541,9 +1556,10 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 
 /* ── First-run setup gate (FirstRun.tsx) ──────────────────────────────────────
-   A gate, not a banner: it replaces the app entirely, because without an API key
-   there is no tutor behind it. Sized to be read in one glance — the point is that
-   setup is one field, not a form. */
+   A gate, not a banner: it replaces the app entirely, because without authorisation
+   there is no tutor behind it. Two paths, and the visual weight is the design — the
+   subscription button is the primary action when a login exists, and the key form
+   collapses behind a link so it is not competing for attention. */
 .firstrun {
   min-height: 100vh;
   display: grid;
@@ -1553,24 +1569,47 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 }
 .firstrun-card {
   width: 100%;
-  max-width: 34rem;
+  max-width: 32rem;
   display: flex;
   flex-direction: column;
-  gap: 0.7rem;
-  padding: 1.6rem 1.7rem;
+  gap: 0.9rem;
+  padding: 1.7rem 1.8rem;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 10px;
 }
-.firstrun-card h1 {
+.firstrun-mark {
   display: flex;
   align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.firstrun-card h1 { margin: -0.4rem 0 0; font-size: 1.35rem; }
+.firstrun-lede { margin: 0; font-size: 0.94rem; line-height: 1.6; color: var(--text); }
+.firstrun-option {
+  display: flex;
+  flex-direction: column;
   gap: 0.5rem;
   margin: 0;
-  font-size: 1.3rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
 }
-.firstrun-card p { margin: 0; font-size: 0.92rem; line-height: 1.6; color: var(--text); }
-.firstrun-card label { font-size: 0.85rem; font-weight: 600; margin-top: 0.3rem; }
+.firstrun-option label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+/* Input and its button on one line: the whole action reads as a single step. Wraps under
+   its own container width rather than a viewport query, since the card is what constrains it. */
+.firstrun-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.firstrun-row input { flex: 1 1 12rem; min-width: 0; }
 .firstrun-card input {
   font: inherit;
   padding: 0.55rem 0.7rem;
@@ -1580,23 +1619,46 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border-radius: 6px;
 }
 .firstrun-card button {
-  align-self: flex-start;
-  margin-top: 0.2rem;
-  padding: 0.5rem 1.1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.55rem 1.1rem;
   font: inherit;
   font-weight: 600;
-  color: var(--accent-text);
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
 }
+.firstrun-card button.firstrun-primary {
+  color: var(--accent-text);
+  background: var(--accent);
+  border-color: var(--accent);
+}
 .firstrun-card button:disabled { opacity: 0.55; cursor: default; }
-.firstrun-error { color: var(--bad); font-size: 0.9rem; }
-/* The reassurance paragraph — deliberately smaller and muted: it answers "where does my key go",
-   which matters, but only to someone who thought to ask. */
-.firstrun-note { font-size: 0.8rem !important; color: var(--text-muted) !important; line-height: 1.55 !important; }
-.firstrun-note code, .firstrun-card p code {
+/* The de-emphasised escape hatch to the other path. A button for keyboard and screen-reader
+   semantics, styled as a link because it is a change of mind, not an action. */
+.firstrun-link {
+  align-self: flex-start;
+  padding: 0 !important;
+  font-weight: 400 !important;
+  font-size: 0.88rem;
+  color: var(--accent) !important;
+  background: none !important;
+  border: none !important;
+  text-decoration: underline;
+}
+.firstrun-error { margin: 0; color: var(--bad); font-size: 0.9rem; line-height: 1.5; }
+/* The reassurance paragraph — smaller and muted: it answers "where does my key go", which
+   matters, but only to someone who thought to ask. */
+.firstrun-note { margin: 0; font-size: 0.81rem; color: var(--text-muted); line-height: 1.55; }
+.firstrun-hint { padding-top: 0.9rem; border-top: 1px solid var(--border); }
+.firstrun-getkey { margin: 0; font-size: 0.88rem; }
+/* Full-width, own line, muted: the "where things live" footer. */
+.firstrun-paths { padding-top: 0.9rem; border-top: 1px solid var(--border); }
+.firstrun-note code, .firstrun-lede code, .firstrun-hint code {
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 0.95em;
   padding: 0.05rem 0.3rem;

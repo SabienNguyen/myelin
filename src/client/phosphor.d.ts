@@ -14,6 +14,7 @@ declare module '@phosphor-icons/react' {
   }
   export const BookOpenTextIcon: ComponentType<PhosphorIconProps>;
   export const KeyIcon: ComponentType<PhosphorIconProps>;
+  export const SparkleIcon: ComponentType<PhosphorIconProps>;
   export const BrainIcon: ComponentType<PhosphorIconProps>;
   export const UserCircleIcon: ComponentType<PhosphorIconProps>;
   export const CheckIcon: ComponentType<PhosphorIconProps>;

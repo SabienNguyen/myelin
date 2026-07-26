@@ -6,6 +6,7 @@
 // which for a "name all of them" question is most of the question.
 
 import { useState } from 'react';
+import { BlockProse } from '../BlockProse.js';
 
 type Checker =
   | { kind: 'numeric'; expected: number; tolerance?: number; relative?: boolean; unit?: string }
@@ -45,7 +46,7 @@ export function StructuredCheck({ args, result, addResult }: {
     return (
       <div className="block structured-check done">
         <span className="graded-tag">graded</span>
-        <p className="structured-prompt">{args.prompt}</p>
+        <div className="structured-prompt"><BlockProse text={args.prompt} /></div>
         <p className="structured-answer">You: {result.values.join(', ') || '(blank)'}</p>
         {g && <em className={`verdict ${g.verdict}`}> — {g.detail}</em>}
       </div>
@@ -66,7 +67,7 @@ export function StructuredCheck({ args, result, addResult }: {
 
   return (
     <div className="block structured-check">
-      <p className="structured-prompt">{args.prompt}</p>
+      <div className="structured-prompt"><BlockProse text={args.prompt} /></div>
       {args.hint && <p className="structured-hint">{args.hint}</p>}
 
       {(checker.kind === 'numeric' || checker.kind === 'pattern') && (

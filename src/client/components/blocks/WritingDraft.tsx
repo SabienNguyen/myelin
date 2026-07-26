@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { PenNibIcon as PenNib } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
+import { BlockProse } from '../BlockProse.js';
 
 type Annotation = { span: string; category: string; note: string };
 type Segment = { text: string; category?: string; note?: string };
@@ -46,7 +47,7 @@ export function WritingDraftInner({ args, result, addResult }: {
     const notes: { n: number; category: string; note: string }[] = [];
     return (
       <div className="block writing-draft done">
-        <p>{args.prompt}</p>
+        <BlockProse text={args.prompt} />
         <p className="draft-text">
           {segments.map((seg, i) => {
             if (!seg.category) return <span key={i}>{seg.text}</span>;
@@ -80,7 +81,7 @@ export function WritingDraftInner({ args, result, addResult }: {
 
   return (
     <div className="block writing-draft">
-      <p>{args.prompt}</p>
+      <BlockProse text={args.prompt} />
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
       <button onClick={() => addResult({ draft })}>Submit</button>
     </div>

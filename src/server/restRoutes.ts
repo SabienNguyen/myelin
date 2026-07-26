@@ -170,14 +170,16 @@ export function buildRestRoutes(
   app.get('/api/student', async (c) =>
     c.json(await lw.call('get_student_state', { student: cfg.student })));
   app.get('/api/status', async (c) => {
-    const extra: Record<string, string> = {};
+    // Read the tutor model from cfg HERE, not from the snapshot passed in at boot. Signing in with a
+    // Claude subscription rewrites it while the app is running (signin.ts's applyRoute), and a
+    // captured string meant the status badge kept naming the model the app had stopped using.
+    const extra: Record<string, string> = { tutor: cfg.models.tutor.model };
     if (anki) {
       const up = await anki.isUp();
       const backlog = !up && backlogDays(cfg.vault) > cfg.schedule.ankiBacklogNudgeDays;
       extra.anki = up ? 'up' : backlog ? 'backlog' : 'down';
     }
     if (cfg.gap) extra.gap = (await isGapUp(cfg)) ? 'up' : 'down';
-    if (!anki && !cfg.gap) return c.json(status);
     return c.json({ ...status, ...extra });
   });
   return app;

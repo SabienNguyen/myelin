@@ -1,9 +1,24 @@
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { Hono } from 'hono';
-import { configSource, type HarnessConfig } from './config.js';
+import { configSource, explicitModelRoles, type HarnessConfig } from './config.js';
 import {
   applyCredentials, credentialsPath, looksLikeAnthropicKey, readCredentials, writeCredentials,
 } from './credentials.js';
+import { applyRoute, readRoute, subscriptionStatus, writeRoute } from './signin.js';
+
+/** A path as a person would say it. The absolute form of a vault path is four lines of monospace on
+ *  a first-run card and nobody reads it; `~/Documents/Loreweaver` is the same information in six
+ *  words. Shortening happens server-side because only the server knows the real home directory. */
+export function displayPath(path: string, home = homedir()): string {
+  if (!home) return path;
+  if (path === home) return '~';
+  // The separator check is the whole correctness of this: a bare startsWith turned
+  // '/home/sabienne/vault' into '~ne/vault' when home was '/home/sabien' — a different directory,
+  // rendered as if it were inside the user's own. Caught by the test, not by looking at it.
+  const sep = path[home.length];
+  return path.startsWith(home) && (sep === '/' || sep === '\\') ? `~${path.slice(home.length)}` : path;
+}
 
 /** Model ids that need an Anthropic API key: a plain id routes through the Anthropic API, while
  *  `ollama:` is local and `claude-sdk:` draws on the local `claude` CLI login instead. */
@@ -14,24 +29,31 @@ export function needsApiKey(cfg: HarnessConfig): string[] {
 }
 
 /**
- * First-run state, and the one thing a first run can fix from inside the app.
+ * First-run state, and the two things a first run can fix from inside the app.
  *
  * Everything else about setup now has a working default (see config.ts), which leaves exactly one
- * thing a new user must supply and cannot be defaulted: the API key. So this is the whole of setup —
- * a readiness report the UI can act on, and a single place to put the key.
+ * question a new user must answer and no defaulting can invent: how should this be paid for. There
+ * are two honest answers — an API key, or the Claude subscription they may already have — and the
+ * flow's job is to make the second one a single click when it is available, because pasting a key is
+ * the single most annoying step in setting up any local AI app.
  *
  * `blocked` is the question the client actually needs answered: can a lesson happen right now? It is
  * deliberately narrower than "is anything imperfect" — a missing Ollama or a missing gap sidecar
- * costs a feature, while a missing key costs everything.
+ * costs a feature, while missing authorisation costs everything.
  */
 export function buildSetupRoutes(cfg: HarnessConfig) {
   const app = new Hono();
 
-  const state = () => {
+  const state = async () => {
     const roles = needsApiKey(cfg);
     const fromEnv = Boolean(process.env.ANTHROPIC_API_KEY);
     const saved = Boolean(readCredentials().anthropicApiKey);
+    const subscription = await subscriptionStatus();
+    const route = readRoute();
+    // The subscription route needs no key, so a config already on `claude-sdk:` everywhere is ready.
+    const authorised = roles.length === 0 || fromEnv || saved;
     return {
+      route,
       apiKey: {
         // Which roles would break without a key, so the message can be specific: "the tutor needs
         // one" is actionable where "a key is missing" is not.
@@ -39,15 +61,36 @@ export function buildSetupRoutes(cfg: HarnessConfig) {
         present: fromEnv || saved,
         source: fromEnv ? 'environment' : saved ? 'saved' : null,
         // Named so a user who prefers to manage secrets themselves knows where to look.
-        savedAt: credentialsPath(),
+        savedAt: displayPath(credentialsPath()),
       },
-      vault: { path: cfg.vault, exists: existsSync(cfg.vault) },
+      subscription,
+      vault: { path: displayPath(cfg.vault), exists: existsSync(cfg.vault) },
       config: configSource(),
-      blocked: roles.length > 0 && !fromEnv && !saved,
+      blocked: !authorised,
     };
   };
 
-  app.get('/api/setup', (c) => c.json(state()));
+  app.get('/api/setup', async (c) => c.json(await state()));
+
+  /** Sign in with the Claude subscription already on this machine — no key, no paste, one click. */
+  app.put('/api/setup/subscription', async (c) => {
+    const status = await subscriptionStatus();
+    if (!status.cliFound) {
+      return c.json({
+        error: 'No `claude` command found on this machine. Install Claude Code first, or use an API key.',
+      }, 400);
+    }
+    if (!status.loggedIn) {
+      return c.json({
+        error: 'Claude Code is installed but not signed in. Run `claude` in a terminal once to sign in, then try again.',
+      }, 400);
+    }
+    writeRoute('subscription');
+    // In place, on the live config, so the next turn uses it — chatRoute.ts picks its tutor
+    // implementation per request precisely so no restart is needed here.
+    applyRoute(cfg, explicitModelRoles(), 'subscription');
+    return c.json(await state());
+  });
 
   app.put('/api/setup/api-key', async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -74,11 +117,11 @@ export function buildSetupRoutes(cfg: HarnessConfig) {
       return c.json({ error: why }, 400);
     }
 
-    writeCredentials({ ...readCredentials(), anthropicApiKey: key });
+    writeCredentials({ ...readCredentials(), anthropicApiKey: key, route: 'api-key' });
     // Straight into the environment, so the very next turn works without a restart.
     process.env.ANTHROPIC_API_KEY = key;
     applyCredentials();
-    return c.json(state());
+    return c.json(await state());
   });
 
   return app;

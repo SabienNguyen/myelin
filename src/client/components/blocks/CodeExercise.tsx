@@ -611,7 +611,14 @@ export function CodeExercise(props: { args: any; result: any; addResult: (r: any
       <div className="block code-exercise done">
         <span className="graded-tag"><Check size={12} weight="bold" /> graded</span>
         <p>{props.args.pattern} — {r.rungReached}{r.completed ? '' : ' (stopped early)'}</p>
-        <p>{r.testsPassed}/{r.testsTotal} tests{r.wroteCode ? ', own code' : ''}</p>
+        {/* Only when a run actually happened. An exercise abandoned before its first run has no
+            counts, and the unguarded version printed a bare "/ tests" — a fraction with no numbers
+            in it, which reads as a rendering fault rather than as "you never ran it". */}
+        {r.testsTotal ? (
+          <p>{r.testsPassed ?? 0}/{r.testsTotal} tests{r.wroteCode ? ', own code' : ''}</p>
+        ) : (
+          <p>No test run{r.wroteCode ? ', own code written' : ''}.</p>
+        )}
         {r.grading && <em className={`verdict ${r.grading.verdict}`}> — {r.grading.detail}</em>}
       </div>
     );

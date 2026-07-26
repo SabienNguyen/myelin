@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { CheckIcon as Check, ListChecksIcon as ListChecks } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
+import { BlockProse } from '../BlockProse.js';
 
 export function QuizInner({ args, addResult }: {
   args: any; addResult: (r: any) => void;
@@ -13,7 +14,7 @@ export function QuizInner({ args, addResult }: {
       <h3>{args.title}</h3>
       {args.items.map((item: any) => (
         <div className="quiz-item" key={item.id}>
-          <p>{item.prompt}</p>
+          <BlockProse text={item.prompt} />
           {item.type === 'choice'
             ? item.choices?.map((ch: string) => (
                 <button
@@ -51,7 +52,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
             const correct = byId.get(item.id);
             return (
               <li key={item.id}>
-                {item.prompt} — {answer} {correct != null && (
+                <BlockProse text={item.prompt} inline /> — {answer} {correct != null && (
                   <span className={correct ? 'mark-ok' : 'mark-bad'}>{correct ? '✓' : '✗'}</span>
                 )}
               </li>

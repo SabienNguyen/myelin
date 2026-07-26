@@ -158,6 +158,9 @@ Ranked, and honestly labelled: none of these move the goal.
    now; loading is still ad hoc ("Loading…", "laying out the graph…").
 3. **`quiz` per-item source in the UI.** The evidence note says `(model-graded)` and the graded card
    does not. A learner cannot see which items were checked and which were judged.
+3a. **`structured_check` prompts now render maths** (BlockProse) — but the block's own ANSWER inputs
+   are plain text, so a learner answering a chemistry question types `H2O` rather than seeing H₂O.
+   Rendering the answer as they type is the natural next step and was not done.
 4. **The unreproduced flaky test.** One run reported a single failure that never reproduced across
    later full runs; the name was not captured. Unresolved, and recorded so it is not forgotten.
 5. **`structured_check` placement.** Renders inline; the other applied blocks use the Stage. Decide
@@ -211,8 +214,10 @@ Still open:
 5. **230MB.** Electron is ~180MB of that and there is no cheap fix; the app's own asar is 131MB,
    which is worth a look (mathlive, katex and codemirror are large and only some paths need them).
 6. **The gap sidecar is absent by default**, so a fresh install has no `code_exercise` block. That is
-   the correct default — it is a separate service — but it means the one subject with a mechanical
-   applied route out of the box is not programming. Worth revisiting alongside item 1 above.
+   the correct default — it is a separate service — and the tutor is no longer offered the tool when
+   no sandbox is configured, so a learner never meets "This exercise can't start right now." on a
+   fresh install. But it does mean the one subject with a mechanical applied route out of the box is
+   not programming, which is a reason to want item 1 above rather than a reason to bundle a sandbox.
 
 ## Closed by measuring — do not re-open
 

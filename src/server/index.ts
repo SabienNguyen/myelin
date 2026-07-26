@@ -3,8 +3,9 @@ import { Hono } from 'hono';
 import cron from 'node-cron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { configSource, loadConfig } from './config.js';
+import { configSource, explicitModelRoles, loadConfig } from './config.js';
 import { applyCredentials, credentialsPath } from './credentials.js';
+import { applyRoute, readRoute } from './signin.js';
 import { buildSetupRoutes, needsApiKey } from './setupRoutes.js';
 import { buildStaticRoutes } from './staticRoutes.js';
 import { Loreweaver } from './mcp.js';
@@ -48,6 +49,9 @@ function preflight(): void {
     console.log(`memory: ${cfg.loreweaver.command} ${cfg.loreweaver.args.join(' ')}`);
   }
 
+  const route = readRoute();
+  if (route) console.log(`auth:   ${route === 'subscription' ? 'Claude subscription (local claude login)' : 'Anthropic API key'}`);
+
   const roles = needsApiKey(cfg);
   if (roles.length && !process.env.ANTHROPIC_API_KEY) {
     console.error(`\nNo ANTHROPIC_API_KEY. These roles need one: ${roles.join(', ')}.\n`
@@ -56,6 +60,9 @@ function preflight(): void {
 }
 
 applyCredentials(); // saved key -> env, before anything constructs a model. The env always wins.
+// A learner who signed in with their Claude subscription chose model ids too — apply that before
+// anything reads cfg.models, and before the preflight decides whether to nag about a missing key.
+applyRoute(cfg, explicitModelRoles(), readRoute());
 preflight();
 
 const lw = await Loreweaver.connect(cfg);
@@ -108,8 +115,10 @@ cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => ankiTick(), { n
 ankiTick().catch(console.error); // once at boot
 
 const app = new Hono();
+// `tutor` is deliberately NOT in this snapshot — restRoutes reads it from cfg per request, because
+// signing in with a Claude subscription changes it while the app is running.
 app.route('/', buildRestRoutes(lw, cfg, {
-  student: cfg.student, tutor: cfg.models.tutor.model, autoCompile: cfg.autoCompile,
+  student: cfg.student, autoCompile: cfg.autoCompile,
 }, anki));
 app.route('/', buildChatRoute(lw, cfg));
 app.route('/', buildIngestRoutes(lw, cfg));

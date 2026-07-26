@@ -87,11 +87,26 @@ function guardMcpTools(tools: ToolSet, student: string, knownSlugs: string[]): T
   }])) as ToolSet;
 }
 
-function blockTools(): ToolSet {
-  // Frontend tools: no execute — the loop pauses; the browser supplies output via addToolOutput.
-  // (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats
-  // tool()'s generic overload inference, which otherwise falls back to Tool<never, never, ...>.)
-  return Object.fromEntries(BLOCK_TOOL_NAMES.map((name) => [name, tool({
+/**
+ * Which block tools the tutor may actually use.
+ *
+ * `code_exercise` is withheld unless a the-gap sidecar is configured, and that is not a detail. The
+ * sidecar is a separate service, absent by default — so on a fresh install the tutor would cheerfully
+ * open a coding exercise, the block would fetch `/api/gap/ladder` against routes that were never
+ * registered, and the learner's first programming lesson would end in "This exercise can't start
+ * right now." The block handles that state honestly (CodeExercise.tsx) and it should still never be
+ * reached: a tool whose backend cannot exist is not a tool.
+ *
+ * Frontend tools: no execute — the loop pauses; the browser supplies output via addToolOutput.
+ * (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats tool()'s
+ * generic overload inference, which otherwise falls back to Tool<never, never, ...>.)
+ */
+export function availableBlocks(cfg?: Pick<HarnessConfig, 'gap'>): BlockToolName[] {
+  return BLOCK_TOOL_NAMES.filter((name) => name !== 'code_exercise' || Boolean(cfg?.gap));
+}
+
+export function blockTools(cfg?: Pick<HarnessConfig, 'gap'>): ToolSet {
+  return Object.fromEntries(availableBlocks(cfg).map((name) => [name, tool({
     description: `Present a ${name} block to the student and wait for their work.`,
     inputSchema: BLOCK_TOOLS[name].input as z.ZodTypeAny,
   })]));
@@ -129,47 +144,103 @@ function lastUserText(messages: UIMessage[]): string {
   return '';
 }
 
+/** A page this short is a placeholder, whatever its frontmatter claims. Loreweaver's own auto-stub
+ *  body is one sentence; a real page that teaches something is not 400 characters long. */
+const THIN_BODY_CHARS = 400;
+
+/** Why the tutor is allowed to research this turn. Each kind is a different KIND of gap, and the
+ *  tutor is told which — "there is no page" and "the page is guesswork" call for different work. */
+export type GapReason =
+  | 'empty-vault'      // nothing in the vault at all
+  | 'no-page'          // pages exist, none on this topic
+  | 'stub'             // the on-topic page is a stub (usually auto-created from a dangling link)
+  | 'unsourced'        // the page exists but cites nothing — written from model memory
+  | 'thin'             // the page exists and says almost nothing
+  | 'freeform';        // not a gap: freeform mode researches by design
+
+export interface VaultGap { reason: GapReason; slug?: string; detail: string }
+
+interface GapDeps {
+  search: (query: string) => Promise<{ slug: string; score: number; status?: string }[]>;
+  /** Only called for the single best-matching page, so this costs one file read per turn. */
+  readPage: (slug: string) => Promise<{ meta: { sources?: string[]; status?: string }; body: string }>;
+}
+
 /**
- * May the tutor research the web on this turn?
+ * Where the tutor's memory falls short of what the student just asked — and therefore when it may
+ * go and research.
  *
- * Freeform: always, as before — that is where a subject gets researched, sourced and compiled.
+ * Freeform: always, as before. That is where a subject gets researched, sourced and compiled.
  *
- * Teaching modes (`learn`/`review`/`quiz`): only when the VAULT CANNOT ANSWER. This is the
- * cold-start unlock, and it exists because the previous freeform-only gate had a dead end in it: a
- * student in `learn` mode who named a subject the vault had never heard of got a tutor with no
- * search, no write_page and no ingest — so its only honest move was to refuse and ask them to
- * switch modes. Meanwhile its only *tempting* move was to teach from model memory with no sources,
- * which is exactly what the vault-grounded design is meant to prevent.
+ * Teaching modes (`learn`/`review`/`quiz`): whenever there is a real GAP. That word is doing work.
+ * The first version of this only unlocked when the vault had no page at all, which missed the more
+ * common and more damaging case — a page that EXISTS but is not worth being grounded in:
  *
- * The unlock is deliberately narrow. Research turns on when there is nothing to be grounded in,
- * and turns off the moment there is: a vault page on the topic still wins, because a page carries
- * the student's own evidence and edges and a search result carries neither. Writing stays freeform
- * only — the single-writer rule is untouched, so a teaching-mode answer informed by research is
- * transient until the student compiles it in freeform.
+ *   * a `stub`, which Loreweaver creates automatically for any prereq nobody has written yet, so
+ *     "the vault has a page on it" can mean "the vault has a sentence saying it should have one";
+ *   * a page with an empty `sources` list, which is the vault's own record that it was written from
+ *     model memory and never verified — exactly the thing research exists to fix;
+ *   * a page too short to teach from.
  *
- * `search` is injected so this is testable without a vault, and failures fail CLOSED: if the vault
- * cannot be searched we do not know whether it covers the topic, and staying grounded is the safer
- * of the two wrong answers.
+ * In all three the tutor previously had to either teach from a placeholder or improvise, with no way
+ * to go and find out. Now it researches and says which of the three it hit.
+ *
+ * Still deliberately narrow. A solid, sourced, substantial page wins over any search result, because
+ * a page carries the student's own evidence and edges and a search result carries neither. Writing
+ * stays freeform-only, so the single-writer rule is untouched.
+ *
+ * Failures fail CLOSED: if the vault cannot be read we do not know whether it covers the topic, and
+ * staying grounded is the safer of the two wrong answers.
  */
-export async function researchUnlocked(
+export async function vaultGap(
   mode: Mode,
   messages: UIMessage[],
   slugs: string[],
-  search: (query: string) => Promise<{ slug: string; score: number }[]>,
-): Promise<boolean> {
-  if (mode === 'freeform') return true;
-  if (slugs.length === 0) return true; // nothing in the vault can ground anything
+  deps: GapDeps,
+): Promise<VaultGap | null> {
+  if (mode === 'freeform') return { reason: 'freeform', detail: 'freeform mode researches by design' };
+  if (slugs.length === 0) {
+    return { reason: 'empty-vault', detail: 'the vault has no pages at all' };
+  }
 
   const tokens = topicTokens(lastUserText(messages));
-  // "ok", "next", "go on" — the student is continuing, not naming a new subject. Continuing a
-  // lesson the vault already holds is precisely the case that should stay grounded.
-  if (tokens.length === 0) return false;
+  // "ok", "next", "go on" — the student is continuing, not naming a subject. Continuing a lesson the
+  // vault already holds is precisely the case that should stay grounded.
+  if (tokens.length === 0) return null;
 
   try {
-    const hits = await search(tokens.join(' '));
-    return !hits.some((h) => h.score >= COVERED_SCORE);
+    const hits = await deps.search(tokens.join(' '));
+    const best = hits.find((h) => h.score >= COVERED_SCORE);
+    if (!best) {
+      return { reason: 'no-page', detail: 'no page covers what the student just asked about' };
+    }
+
+    // There IS an on-topic page. Whether it is worth teaching from is a different question.
+    const page = await deps.readPage(best.slug);
+    const status = page.meta?.status ?? best.status;
+    const sources = page.meta?.sources ?? [];
+    const body = (page.body ?? '').trim();
+
+    if (status === 'stub') {
+      return { reason: 'stub', slug: best.slug, detail: `“${best.slug}” is only a stub` };
+    }
+    if (sources.length === 0) {
+      return {
+        reason: 'unsourced',
+        slug: best.slug,
+        detail: `“${best.slug}” cites no sources — it was written from memory, not checked`,
+      };
+    }
+    if (body.length < THIN_BODY_CHARS) {
+      return {
+        reason: 'thin',
+        slug: best.slug,
+        detail: `“${best.slug}” is too thin to teach from (${body.length} characters)`,
+      };
+    }
+    return null; // a real page on the topic. Teach from it.
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -285,11 +356,13 @@ export function createTutorSession(
           .filter(([n]) => mode === 'freeform' || TEACH_TOOLS.includes(n)));
 
         // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
-        // only when the vault has no page for what the student just asked about — see
-        // researchUnlocked above for why that exception exists and how narrow it is.
-        const canResearch = await researchUnlocked(mode, messages, slugs,
-          (query) => lw.call('search', { query }) as Promise<{ slug: string; score: number }[]>);
-        const webTools = canResearch ? buildWebTools(cfg, searchModelId) : {};
+        // wherever the vault has a GAP — no page, a stub, an unsourced page, a page too thin to
+        // teach from. See vaultGap above for why each of those counts.
+        const gap = await vaultGap(mode, messages, slugs, {
+          search: (query) => lw.call('search', { query }) as Promise<any>,
+          readPage: async (slug) => (await lw.call('read_page', { slug })).page,
+        });
+        const webTools = gap ? buildWebTools(cfg, searchModelId) : {};
         // ingest_paper needs cfg (to queue) AND lw (to kick a background compile) — same
         // freeform-only gate as webTools: a subject gets researched, sourced, and compiled in
         // freeform; teaching modes stay grounded in the vault.
@@ -298,7 +371,7 @@ export function createTutorSession(
         const agent = new ToolLoopAgent({
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
-          tools: { ...activeMcp, ...webTools, ...ingestTools, ...blockTools() },
+          tools: { ...activeMcp, ...webTools, ...ingestTools, ...blockTools(cfg) },
           stopWhen: isStepCount(24),
         });
 
@@ -307,14 +380,17 @@ export function createTutorSession(
         if (isFirstTurn) context.push({ role: 'user', content: await bootstrap(mode, slugs) });
         // The unlock is decided per turn, so it can happen mid-conversation — after the bootstrap
         // has already been sent. Say it here or the tutor holds a tool it was told it does not have.
-        if (canResearch && mode !== 'freeform' && webTools.web_search) context.push({
+        // The REASON goes in too: "there is no page" and "the page is unsourced guesswork" call for
+        // visibly different work, and the second one should not be taught from as if it were fine.
+        if (gap && gap.reason !== 'freeform' && webTools.web_search) context.push({
           role: 'user',
-          content: 'HARNESS: the vault has no page covering what the student just asked, so '
+          content: `HARNESS: your memory has a gap here — ${gap.detail}. `
             + 'web_search and read_url are unlocked for this turn. Research it, cite what you read '
-            + 'in your answer, and teach from that. You still have NO page-writing tools here, so '
-            + 'nothing you find is being saved: once the student has their answer, offer to switch '
-            + 'to freeform so the subject can be researched properly and compiled into pages that '
-            + 'track their progress.',
+            + 'in your answer, and teach from that rather than from '
+            + `${gap.slug ? 'the existing page' : 'memory'}. You still have NO page-writing tools `
+            + 'here, so nothing you find is being saved: once the student has their answer, offer to '
+            + `switch to freeform so ${gap.slug ? `“${gap.slug}” can be rewritten properly` : 'the subject can be researched and compiled'} `
+            + 'into pages that track their progress.',
         });
         if (grades.length) context.push({
           role: 'user',

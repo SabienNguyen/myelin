@@ -1,10 +1,11 @@
+import { BlockProse } from '../BlockProse.js';
 export function QuickCheck({ args, result, addResult }: {
   args: any; result: any; addResult: (r: any) => void;
 }) {
   if (result) {
     return (
       <div className="block quick-check done">
-        <p>{args.question}</p>
+        <BlockProse text={args.question} />
         {/* QuickText submits whatever is in the field, empty string included, so a learner who
             presses Enter on a blank input got a graded card reading "You:" and nothing else. That
             is reachable in real use, not a scripted-model artifact. Blank is left submittable on
@@ -17,7 +18,7 @@ export function QuickCheck({ args, result, addResult }: {
   }
   return (
     <div className="block quick-check">
-      <p>{args.question}</p>
+      <BlockProse text={args.question} />
       {args.mode === 'choice'
         ? args.choices?.map((ch: string) => (
             <button key={ch} onClick={() => addResult({ answer: ch })}>{ch}</button>

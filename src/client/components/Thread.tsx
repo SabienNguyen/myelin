@@ -1,4 +1,4 @@
-import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive } from '@assistant-ui/react';
+import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime } from '@assistant-ui/react';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 
@@ -41,6 +41,40 @@ function AssistantMessage() {
   );
 }
 
+/**
+ * The three example asks on the empty thread.
+ *
+ * They were `<li>` elements, styled as bordered boxes — so on the very first screen of the app they
+ * looked exactly like buttons and did nothing when clicked. Now they are buttons that fill the
+ * composer and send, which is what they always looked like they would do.
+ *
+ * They stay across three unrelated SUBJECTS on purpose: the most valuable thing to convey in the
+ * first three seconds is that this is not a programming tutor, it is a tutor.
+ */
+const EXAMPLES = [
+  'Teach me how derivatives work',
+  'I want to understand counterpoint',
+  'Walk me through consideration in contract law',
+];
+
+function ExampleAsks() {
+  const composer = useComposerRuntime();
+  return (
+    <ul className="thread-empty-examples">
+      {EXAMPLES.map((text) => (
+        <li key={text}>
+          <button
+            type="button"
+            onClick={() => { composer.setText(text); composer.send(); }}
+          >
+            “{text}”
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function Thread() {
   return (
     <ThreadPrimitive.Root className="thread">
@@ -56,11 +90,7 @@ export function Thread() {
               Ask for anything — a topic, a paper, a book you are stuck in. Your tutor writes pages
               as you go, links them into a graph, and tracks what you have actually shown you know.
             </p>
-            <ul className="thread-empty-examples">
-              <li>“Teach me how derivatives work”</li>
-              <li>“I want to understand counterpoint”</li>
-              <li>“Walk me through consideration in contract law”</li>
-            </ul>
+            <ExampleAsks />
           </div>
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />

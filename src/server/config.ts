@@ -138,6 +138,12 @@ export interface ConfigSource { path: string; found: boolean }
 let lastSource: ConfigSource = { path: '', found: false };
 export const configSource = (): ConfigSource => lastSource;
 
+/** Which model roles the config file named EXPLICITLY, as opposed to inheriting a default.
+ *  signin.ts's applyRoute needs the distinction: switching to the subscription route may rewrite a
+ *  defaulted role, and must never rewrite one someone deliberately set to `ollama:qwen`. */
+let lastExplicitRoles = new Set<string>();
+export const explicitModelRoles = (): Set<string> => new Set(lastExplicitRoles);
+
 export function loadConfig(path = process.env.HARNESS_CONFIG ?? './harness.config.json'): HarnessConfig {
   const file = expand(path);
   const found = existsSync(file);
@@ -146,6 +152,9 @@ export function loadConfig(path = process.env.HARNESS_CONFIG ?? './harness.confi
   // malformed still throws a precise zod/JSON error at boot, by design: the user wrote it, so they
   // want to know it is wrong rather than have it quietly ignored.
   const raw = found ? JSON.parse(readFileSync(file, 'utf8')) : {};
+  lastExplicitRoles = new Set(Object.entries(raw?.models ?? {})
+    .filter(([, v]) => typeof (v as any)?.model === 'string')
+    .map(([role]) => role));
   const cfg = configSchema.parse({
     ...raw,
     // Resolved here rather than as a schema default so the filesystem probe only runs when it is

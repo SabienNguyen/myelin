@@ -15,9 +15,23 @@ type Respond = (messages: UIMessage[], mode: Mode, threadId: string) => Promise<
 
 export function buildChatRoute(lw: Loreweaver, cfg: HarnessConfig) {
   const app = new Hono();
-  const respond: Respond = isClaudeSdkModel(cfg.models.tutor.model)
-    ? createClaudeSdkTutorSession(lw, cfg).respond
-    : createTutorSession(lw, cfg).respond;
+
+  // Chosen PER REQUEST, not once at boot, and memoised per tutor model id. The route depends on
+  // cfg.models.tutor.model, and that can change while the app is running: signing in with a Claude
+  // subscription rewrites it (signin.ts's applyRoute). Deciding once meant the learner had to
+  // restart the app to finish signing in, which is exactly the friction the setup flow removes.
+  const sessions = new Map<string, Respond>();
+  const respond: Respond = (messages, mode, threadId) => {
+    const id = cfg.models.tutor.model;
+    let existing = sessions.get(id);
+    if (!existing) {
+      existing = isClaudeSdkModel(id)
+        ? createClaudeSdkTutorSession(lw, cfg).respond
+        : createTutorSession(lw, cfg).respond;
+      sessions.set(id, existing);
+    }
+    return existing(messages, mode, threadId);
+  };
 
   app.post('/api/chat', async (c) => {
     const body = await c.req.json() as { messages: UIMessage[]; mode?: Mode; threadId?: string };

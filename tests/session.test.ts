@@ -33,7 +33,17 @@ const textOnly = () => new MockLanguageModelV3({
 beforeAll(async () => {
   vault = mkdtempSync(join(tmpdir(), 'lwh-vault-'));
   mkdirSync(join(vault, 'pages'), { recursive: true });
-  writeFileSync(join(vault, 'pages', 'arith.md'), '---\ntitle: Arithmetic\ndifficulty: 1\nstatus: solid\n---\nnumbers');
+  // Two pages, and the difference between them is the point. `arith` is a page worth teaching from:
+  // solid, sourced, and long enough to say something. `photosynthesis` is the shape a vault fills up
+  // with if nobody checks — confident, on-topic, and citing nothing. session.ts's vaultGap treats the
+  // second as a knowledge gap, so a one-line "status: solid" fixture would have made the
+  // research-withheld test below pass for the wrong reason.
+  writeFileSync(join(vault, 'pages', 'arith.md'),
+    '---\ntitle: Arithmetic\ndifficulty: 1\nstatus: solid\nsources: ["https://example.edu/arithmetic"]\n---\n'
+    + `Addition, subtraction, multiplication and division over the integers. ${'Detail. '.repeat(80)}`);
+  writeFileSync(join(vault, 'pages', 'photosynthesis.md'),
+    '---\ntitle: Photosynthesis\ndifficulty: 2\nstatus: solid\n---\n'
+    + `Plants convert light into chemical energy. ${'Confident unsourced prose. '.repeat(40)}`);
   lw = await Loreweaver.connect({
     vault, student: 'kid',
     loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
@@ -114,7 +124,11 @@ describe('cold-start research unlock', () => {
     await (await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] as any, 'learn')).text();
     return {
       tools: (calls[0].tools ?? []).map((t: any) => t.name),
-      prompt: JSON.stringify(calls[0].prompt),
+      // USER messages only, deliberately. The whole serialized prompt includes the system prompt,
+      // which now documents the gap-unlock line verbatim — so a whole-prompt regex matched the
+      // documentation and the withheld-research assertion below passed and failed for the same
+      // reason. What is under test is what the HARNESS injected this turn.
+      prompt: JSON.stringify((calls[0].prompt ?? []).filter((m: any) => m.role === 'user')),
     };
   };
 
@@ -122,16 +136,30 @@ describe('cold-start research unlock', () => {
     const { tools, prompt } = await drive('explain species counterpoint to me');
     expect(tools).toContain('web_search');
     expect(tools).toContain('read_url');
-    expect(prompt).toMatch(/no page covering what the student just asked/);
+    expect(prompt).toMatch(/your memory has a gap here/);
+    expect(prompt).toMatch(/no page covers what the student just asked/);
     // The unlock must not quietly become a write unlock — that is the single-writer rule.
     expect(tools).not.toContain('write_page');
   }, 30_000);
 
-  it('withholds them when the vault already has the page — evidence and edges beat a blog post', async () => {
+  it('unlocks for a page that EXISTS but cites nothing, and says which page', async () => {
+    // The case the first version of this gate missed entirely. An unsourced page is the vault's own
+    // record that it was written from memory and never checked; teaching from it as though it were
+    // verified is the exact failure the vault-grounded design exists to prevent.
+    const { tools, prompt } = await drive('tell me about photosynthesis');
+    expect(tools).toContain('web_search');
+    expect(prompt).toMatch(/cites no sources/);
+    expect(prompt).toMatch(/photosynthesis/);
+    // And it must point at rewriting THAT page, not at researching the subject from scratch.
+    expect(prompt).toMatch(/can be rewritten properly/);
+    expect(tools).not.toContain('write_page');
+  }, 30_000);
+
+  it('withholds them when a solid sourced page covers it — evidence and edges beat a blog post', async () => {
     const { tools, prompt } = await drive('remind me how arithmetic works');
     expect(tools).not.toContain('web_search');
     expect(tools).not.toContain('read_url');
-    expect(prompt).not.toMatch(/no page covering what the student just asked/);
+    expect(prompt).not.toMatch(/your memory has a gap here/);
   }, 30_000);
 });
 

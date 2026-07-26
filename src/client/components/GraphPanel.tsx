@@ -3,7 +3,7 @@ import {
 } from 'react';
 import { useThreadRuntime } from '@assistant-ui/react';
 import {
-  forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation,
+  forceCenter, forceCollide, forceLink, forceManyBody, forceSimulation, forceX, forceY,
   type Simulation, type SimulationLinkDatum, type SimulationNodeDatum,
 } from 'd3-force';
 import { drag, type D3DragEvent } from 'd3-drag';
@@ -194,6 +194,13 @@ function makeSimulation(): Simulation<SimNode, SimLink> {
       .distance(LINK_DISTANCE).strength(0.5))
     .force('charge', forceManyBody<SimNode>().strength((d) => -90 - 14 * d.degree))
     .force('center', forceCenter(0, 0))
+    // forceCenter only TRANSLATES the whole system; it exerts no pull between separate components.
+    // So a vault with two unconnected clusters (a maths one and a programming one, say) had nothing
+    // opposing charge repulsion between them, and they drifted to opposite corners with the middle
+    // of the canvas empty — measured at 20% fill on an 8-node vault. These are weak enough not to
+    // distort the link layout within a cluster and strong enough to keep the clusters on screen.
+    .force('x', forceX<SimNode>(0).strength(0.045))
+    .force('y', forceY<SimNode>(0).strength(0.045))
     .force('collide', forceCollide<SimNode>((d) => Math.max(
       radiusForDegree(d.degree) + COLLIDE_PAD,
       (labelWidthPx(d) / 2) * LABEL_COLLIDE_FACTOR,
@@ -330,6 +337,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
   // Held so fitToNodes can measure the viewport and apply a transform outside the ref callback.
   const svgElRef = useRef<SVGSVGElement | null>(null);
+  const [svgEl, setSvgEl] = useState<SVGSVGElement | null>(null);
   // Set by a user gesture (see the zoom handler); cleared when membership changes, because a
   // different node set is a new picture the learner has not positioned yet.
   const userAdjustedRef = useRef(false);
@@ -355,6 +363,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     const vh = rect.height || 400;
     let minX = Infinity; let maxX = -Infinity; let minY = Infinity; let maxY = -Infinity;
     let rMaxPx = 0;
+    let labelHalfPx = 0;
     for (const n of nodes) {
       minX = Math.min(minX, n.x!); maxX = Math.max(maxX, n.x!);
       minY = Math.min(minY, n.y!); maxY = Math.max(maxY, n.y!);
@@ -362,7 +371,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       // pixels at any zoom — reserving it can over-reserve slightly but can never let the outermost
       // circle, or its decay ring (hence the +6), clip at the canvas edge.
       rMaxPx = Math.max(rMaxPx, radiusForDegree(n.degree) + 6);
+      // A label is centred on its node, so it hangs half its width past the node CENTRE — and this
+      // box is a box of centres. Reserving only the node radius let the widest label run off the
+      // right edge: a screenshot of an 8-node vault had "Stream Consumer" clipped by the canvas,
+      // because 45px of label overhang was being covered by ~26px of radius allowance.
+      labelHalfPx = Math.max(labelHalfPx, labelWidthPx(n) / 2);
     }
+    // max, not sum: both are measured outward from the same node centre.
+    const sideMaxPx = Math.max(rMaxPx, labelHalfPx);
     // Box of node CENTRES. A single node (or a perfectly vertical/horizontal pair) gives a
     // zero-width or zero-height box; max(1, ...) keeps the divisions below finite either way.
     const bw = Math.max(1, maxX - minX);
@@ -371,7 +387,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     // allowance costs a fixed number of real pixels instead of one that grows with the zoom level.
     // The old code added its padding to the content box in SIMULATION units, which is why an
     // 8-node graph ended up with over 100px of margin per side and filled 7% of its canvas.
-    const usableW = Math.max(1, vw - FIT_PAD_PX * 2 - rMaxPx * 2);
+    const usableW = Math.max(1, vw - FIT_PAD_PX * 2 - sideMaxPx * 2);
     const usableH = Math.max(1, vh - FIT_PAD_PX * 2 - rMaxPx * 2 - FIT_LABEL_PX);
     const scale = Math.max(
       FIT_MIN_SCALE,
@@ -396,7 +412,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
    * yank the view away from someone who has panned to a corner.
    */
   useEffect(() => {
-    const el = svgElRef.current;
+    const el = svgEl;
     if (!el || typeof ResizeObserver === 'undefined') return;
     let raf = 0;
     let last = '';
@@ -414,7 +430,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     });
     ro.observe(el);
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };
-  }, [fitToNodes, visible]);
+    // `svgEl` — the element in STATE, not svgElRef.current — is what makes this effect correct.
+    // The <svg> is conditionally rendered (empty vault / load error / canvas), so on the panel's
+    // first commit there is no element at all: reading the ref gave null, the effect returned before
+    // observing, and nothing in its deps ever changed again once the canvas did mount. Measured:
+    // `__roAttached` was undefined after two real resizes, while the fit itself had run 47 times
+    // from the simulation tick. The visible symptom was a graph fitted to a viewport that no longer
+    // existed — labels clipped off the canvas edge at every size but the first.
+  }, [fitToNodes, svgEl]);
 
   // The tick handler above is installed once and must not re-subscribe on every render, so it
   // reaches the current fitToNodes through this ref rather than closing over one.
@@ -431,6 +454,9 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
   const svgRefCallback = useCallback((el: SVGSVGElement | null) => {
     svgElRef.current = el;
+    // Mirrored into state as well as the ref, so effects can depend on the element ARRIVING. See
+    // the ResizeObserver effect above for why that distinction was load-bearing.
+    setSvgEl(el);
     if (!el || !zoomBehaviorRef.current) return;
     // d3-zoom's default extent() reads the <svg>'s viewBox/width/height SVGAnimatedLength
     // attributes — this svg has neither (it's sized via CSS 100%/100%, see .graph-svg), so that

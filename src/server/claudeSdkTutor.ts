@@ -10,7 +10,7 @@ import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput } from './grading.js';
 import type { Loreweaver } from './mcp.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
-import { sanitizeToolArgs } from './session.js';
+import { availableBlocks, sanitizeToolArgs, vaultGap, type VaultGap } from './session.js';
 import { loadSdkSession, logGuardrail, saveSdkSession } from './sessionStore.js';
 
 /**
@@ -70,8 +70,10 @@ function lastUserText(messages: UIMessage[]): string {
  * sentinel telling the model to stop talking — the student's answer arrives as the NEXT message
  * (there is no HITL pause primitive in the Agent SDK's query() loop, so the sentinel + system
  * prompt instruction together stand in for one). */
-function blockMcpTools() {
-  return BLOCK_TOOL_NAMES.map((name) => tool(
+/** Same gate as the ai-sdk route's blockTools: no the-gap sidecar configured means no
+ *  `code_exercise`, because a coding exercise with no sandbox behind it can only ever fail. */
+function blockMcpTools(cfg: Pick<HarnessConfig, 'gap'>) {
+  return availableBlocks(cfg).map((name) => tool(
     name,
     `Present a ${name} block to the student and wait for their work.`,
     BLOCK_TOOLS[name].input.shape,
@@ -118,11 +120,22 @@ export function createClaudeSdkTutorSession(
     ].join('\n\n');
   }
 
-  function buildOptions(mode: Mode, slugs: string[], resumeId: string | undefined): Options {
+  /** The Agent SDK's own built-in research tools. This route has no ai-sdk tool set to hand
+   *  webTools.ts's `web_search`/`read_url` to — but it does not need one: WebSearch and WebFetch
+   *  ship with the SDK. Naming them here is what makes the subscription route able to research at
+   *  all, and therefore what makes "sign in with your Claude subscription" an honest offer rather
+   *  than a quietly worse product. */
+  const SDK_RESEARCH_TOOLS = ['WebSearch', 'WebFetch'];
+
+  function buildOptions(
+    mode: Mode, slugs: string[], resumeId: string | undefined, gap: VaultGap | null,
+  ): Options {
     const activeLoreweaverTools = mode === 'freeform' ? [...TEACH_TOOLS, ...FREEFORM_EXTRA_TOOLS] : TEACH_TOOLS;
     const allowedTools = [
       ...activeLoreweaverTools.map((n) => `${LOREWEAVER_PREFIX}${n}`),
-      ...BLOCK_TOOL_NAMES.map((n) => `${BLOCKS_PREFIX}${n}`),
+      ...availableBlocks(cfg).map((n) => `${BLOCKS_PREFIX}${n}`),
+      // Same gate as the ai-sdk route: research when the vault has a gap, never otherwise.
+      ...(gap ? SDK_RESEARCH_TOOLS : []),
     ];
     const options: Options = {
       model: stripClaudeSdkPrefix(cfg.models.tutor.model),
@@ -143,7 +156,7 @@ export function createClaudeSdkTutorSession(
             LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
           },
         },
-        blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools() }),
+        blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools(cfg) }),
       },
       // Block/loreweaver tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK
       // executes them itself, not us). canUseTool would be the natural rewrite seam, but it is
@@ -200,9 +213,19 @@ export function createClaudeSdkTutorSession(
 
         const slugs = await lw.listSlugs();
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
+        const gap = await vaultGap(mode, messages, slugs, {
+          search: (query) => lw.call('search', { query }) as Promise<any>,
+          readPage: async (slug) => (await lw.call('read_page', { slug })).page,
+        });
 
         const promptParts: string[] = [];
         if (isFirstTurn) promptParts.push(await bootstrap(mode, slugs));
+        if (gap && gap.reason !== 'freeform') {
+          promptParts.push(`HARNESS: your memory has a gap here — ${gap.detail}. WebSearch and `
+            + 'WebFetch are unlocked for this turn. Research it, cite what you read, and teach from '
+            + `that rather than from ${gap.slug ? 'the existing page' : 'memory'}. You have NO `
+            + 'page-writing tools here, so nothing you find is saved — offer freeform afterwards.');
+        }
         if (grades.length) {
           promptParts.push(
             `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
@@ -220,7 +243,7 @@ export function createClaudeSdkTutorSession(
         // itself throws (a resume against a stale/pruned session id is expected to surface this
         // way — the caller decides whether to catch-and-fall-back or let it propagate).
         const runQuery = async (prompt: string, resumeId: string | undefined) => {
-          const options = buildOptions(mode, slugs, resumeId);
+          const options = buildOptions(mode, slugs, resumeId, gap);
           let capturedSessionId: string | undefined;
           let sawRecordEvidence = false;
           // Per-message-batch state: index -> what content_block_start told us about that index.
