@@ -151,8 +151,12 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     const unitOk = !checker.unit
       || normKey(clean[0] ?? '').replace(/[\s^]/g, '').includes(normKey(checker.unit).replace(/[\s^]/g, ''));
     const ok = numOk && unitOk;
+    // "value and unit match" only when a unit was actually asked for — the audit caught a unitless
+    // numeric check congratulating a unit that never existed, which is a small lie in the one
+    // place the app must never lie.
     const detail = numOk
-      ? (unitOk ? 'value and unit match' : `value matches but the unit should be ${checker.unit}`)
+      ? (!checker.unit ? 'correct'
+        : unitOk ? 'value and unit match' : `value matches but the unit should be ${checker.unit}`)
       : `expected ${checker.expected}${checker.unit ? ` ${checker.unit}` : ''}`;
     return { allCorrect: ok, anyCorrect: numOk, detail };
   }

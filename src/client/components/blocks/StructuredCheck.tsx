@@ -86,7 +86,9 @@ export function StructuredCheck({ args, result, addResult }: {
               <span key={i}>{i > 0 && ', '}<AnswerText value={v} /></span>
             ))}
         </p>
-        {g && <em className={`verdict ${g.verdict}`}> — {g.detail}</em>}
+        {/* No leading dash: the verdict wraps onto its own line below the answer, where an
+            orphaned "— " read as a typo in the audit screenshot. */}
+        {g && <em className={`verdict ${g.verdict}`}>{g.detail}</em>}
       </div>
     );
   }
