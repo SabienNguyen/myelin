@@ -384,8 +384,10 @@ math-field { display: block; width: 100%; margin: 0.5rem 0; border-radius: var(-
 
 .writing-draft textarea { width: 100%; min-height: 7rem; resize: vertical; margin: 0.4rem 0; }
 
-/* grader annotations */
-mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
+/* grader annotations. color: inherit overrides the UA's marktext default (near-black), which
+   survived the background override and rendered annotated spans DARKER than the prose around
+   them in dark mode — a highlight that reads as a redaction. */
+mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .ann-strong { background: color-mix(in srgb, var(--good) 22%, transparent); }
 .ann-wordy, .ann-vague { background: color-mix(in srgb, var(--warn) 25%, transparent); }
 .ann-structure, .ann-grammar { background: color-mix(in srgb, var(--bad) 20%, transparent); }
