@@ -19,7 +19,7 @@ import {
   setGeneratedStatus, toSuiteCases, type GeneratedExercise, type GeneratedFamily,
   type StreamGeneratedCase,
 } from './generated.js';
-import { availableRuntimes, runProgram, scratchProgram, type ExecCase } from './exec.js';
+import { availableRuntimes, runProgram, runtimeStatuses, scratchProgram, type ExecCase } from './exec.js';
 import { gradeManifest, scratchManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
 import {
@@ -241,8 +241,13 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
   });
 
   /** Which runtimes the exec family can serve on THIS machine — what a tutor (or the UI) should
-   *  consult before offering "practice this in Python". node is always present (it is the app). */
-  app.get('/api/gap/environments', async (c) => c.json({ runtimes: await availableRuntimes() }));
+   *  consult before offering "practice this in Python". node is always present (it is the app).
+   *  `statuses` carries the reason-plus-fix for everything unavailable (daemon down, image not
+   *  pulled), so an integration can SAY what to do instead of hiding the runtime. */
+  app.get('/api/gap/environments', async (c) => c.json({
+    runtimes: await availableRuntimes(),
+    statuses: await runtimeStatuses(),
+  }));
 
   /**
    * Predict-the-output, graded server-side — comprehension before production.

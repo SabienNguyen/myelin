@@ -185,3 +185,52 @@ describe('python3 runtime (when installed)', () => {
     expect(out.pass).toBe(true);
   });
 });
+
+// ── the container tier: go/java via Docker ──────────────────────────────────────────────────────
+//
+// This dev environment has the docker CLI but no reachable daemon, which makes the FAILURE paths —
+// the ones a learner actually hits — the naturally testable ones here. The happy path (a real
+// containerized go run) needs a machine with a live daemon; the argv builder below is pure and
+// pins the sandboxing flags so that path is at least specified, not improvised.
+
+import { dockerArgs, runtimeFor, runtimeStatus } from '../src/server/gap/exec.js';
+
+describe('container runtimes', () => {
+  it('dockerArgs pins the sandbox flags: no network, capped memory/pids, read-only mount', () => {
+    const go = runtimeFor('go')!;
+    const args = dockerArgs(go, '/tmp/xyz', ['a', 'b']);
+    expect(args).toEqual([
+      'run', '--rm', '-i',
+      '--network', 'none',
+      '--memory', '512m',
+      '--cpus', '1',
+      '--pids-limit', '128',
+      '-v', '/tmp/xyz:/work:ro',
+      '-w', '/work',
+      'golang:1.24-alpine',
+      'go', 'run', '/work/main.go',
+      'a', 'b',
+    ]);
+  });
+
+  it('an unavailable container runtime says WHY, with the fix where there is one', async () => {
+    const status = await runtimeStatus('go');
+    if (status.available) return; // a machine with live Docker + image: nothing to assert here
+    expect(status.reason).toMatch(/Docker is not installed|daemon is not running|docker pull/);
+  });
+
+  it('runProgram surfaces the container status reason instead of a generic error', async () => {
+    const status = await runtimeStatus('java');
+    if (status.available) return;
+    const out = await runProgram('java', 'class Main { public static void main(String[] a) {} }', [
+      { name: 'x', stdin: '', expect: '' },
+    ]);
+    expect(out.syntaxError).toBe(status.reason);
+  });
+
+  it('go and java carry their language comment prefix for scaffolds', () => {
+    expect(runtimeFor('go')?.comment).toBe('//');
+    expect(runtimeFor('java')?.comment).toBe('//');
+    expect(runtimeFor('java')?.file).toBe('Main.java'); // the single-file source launcher cares
+  });
+});

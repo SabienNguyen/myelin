@@ -21,7 +21,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { runProgram, runtimeAvailable, runtimeFor, type ExecCase } from './exec.js';
+import { runProgram, runtimeFor, runtimeStatus, type ExecCase } from './exec.js';
 import { gradeManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
 import { scaffoldFor, type SuiteCase } from './streamConsumer.js';
@@ -318,8 +318,10 @@ export async function generateExercise(
     const rt = runtime ?? 'node';
     if (!runtimeFor(rt)) throw new Error(`unknown runtime "${rt}"`);
     // Degrade loudly at authoring time: an exercise for a runtime this machine lacks would pass
-    // no gate and confuse everyone downstream.
-    if (!(await runtimeAvailable(rt))) throw new Error(`${rt} is not installed on this machine`);
+    // no gate and confuse everyone downstream. The status carries the FIX (start the daemon,
+    // docker pull the image), so the refusal teaches rather than stonewalls.
+    const status = await runtimeStatus(rt);
+    if (!status.available) throw new Error(status.reason ?? `${rt} is not available`);
   }
   const prompt = family === 'exec' ? EXEC_PROMPT(pattern, description, runtime ?? 'node')
     : family === 'manifest' ? MANIFEST_PROMPT(pattern, description)
