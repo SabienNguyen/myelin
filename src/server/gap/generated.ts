@@ -21,13 +21,14 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gradeManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
 import { scaffoldFor, type SuiteCase } from './streamConsumer.js';
 
-export type GeneratedFamily = 'stream' | 'function';
+export type GeneratedFamily = 'stream' | 'function' | 'manifest';
 
 export interface StreamGeneratedCase { name: string; inputText: string; expect: string[] }
-export type GeneratedCase = StreamGeneratedCase | FnCase;
+export type GeneratedCase = StreamGeneratedCase | FnCase | ManifestAssertion;
 
 export interface GeneratedExercise {
   pattern: string;
@@ -65,13 +66,18 @@ export function toSuiteCases(cases: StreamGeneratedCase[]): SuiteCase[] {
   });
 }
 
-const statementComment = (statement: string) =>
-  statement.split('\n').map((l) => `// ${l}`.trimEnd()).join('\n');
+// Comment syntax follows the language the learner writes in: JS families get //, manifests get #.
+const statementComment = (statement: string, family: GeneratedFamily) =>
+  statement.split('\n').map((l) => `${family === 'manifest' ? '#' : '//'} ${l}`.trimEnd()).join('\n');
 
-export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'entryPoint'>) {
-  const visible_pre = statementComment(ex.statement);
+export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'entryPoint' | 'family'>) {
+  const family = familyOf(ex);
+  const visible_pre = statementComment(ex.statement, family);
   const visible_post = '';
-  return { visible_pre, visible_post, scaffold: scaffoldFor(visible_pre, visible_post) };
+  const scaffold = family === 'manifest'
+    ? `${visible_pre}\n# YOUR TURN — write the manifest below.\n`
+    : scaffoldFor(visible_pre, visible_post);
+  return { visible_pre, visible_post, scaffold };
 }
 
 /**
@@ -93,9 +99,12 @@ export async function verifyExercise(
   }
   push('suite-size', true, `${ex.cases.length} cases`);
 
-  const run = (code: string) => (family === 'function'
-    ? runInChild({ kind: 'suite', family, code, entryPoint: ex.entryPoint, cases: ex.cases as FnCase[] })
-    : runInChild({ kind: 'suite', code, entryPoint: ex.entryPoint, cases: toSuiteCases(ex.cases as StreamGeneratedCase[]) }));
+  const run = (code: string) => {
+    if (family === 'manifest') return Promise.resolve(gradeManifest(code, ex.cases as ManifestAssertion[]));
+    return family === 'function'
+      ? runInChild({ kind: 'suite', family, code, entryPoint: ex.entryPoint, cases: ex.cases as FnCase[] })
+      : runInChild({ kind: 'suite', code, entryPoint: ex.entryPoint, cases: toSuiteCases(ex.cases as StreamGeneratedCase[]) });
+  };
 
   // Gate 1: the reference passes 100% of its own suite — under OUR chunking for streams, under
   // plain deep-compare for functions.
@@ -106,10 +115,12 @@ export async function verifyExercise(
 
   // Gate 2: a do-nothing implementation must FAIL. A suite that passes it grades nothing — this is
   // the check that catches a vacuous suite before it can mint false mastery. Per family because
-  // "do nothing" has a different spelling: yield nothing vs return undefined.
-  const vacuous = family === 'function'
-    ? `function ${ex.entryPoint}() {}`
-    : `async function* ${ex.entryPoint}(chunks) { for await (const c of chunks) { /* consume */ } }`;
+  // "do nothing" has a different spelling: yield nothing, return undefined, or an empty file (a
+  // manifest suite of only `absent` assertions passes an empty file — exactly what this catches).
+  const vacuous = family === 'manifest' ? ''
+    : family === 'function'
+      ? `function ${ex.entryPoint}() {}`
+      : `async function* ${ex.entryPoint}(chunks) { for await (const c of chunks) { /* consume */ } }`;
   const vacRun = await run(vacuous);
   push('rejects-empty-implementation', !vacRun.pass,
     vacRun.pass ? 'a do-nothing implementation PASSES this suite — it grades nothing'
@@ -126,9 +137,18 @@ export async function verifyExercise(
   // Function answers get word-boundary matching at length > 1 — they are often SHORT numbers
   // ("10"), which the stream rule's length > 2 substring check would wave straight through, and
   // which plain substring matching would false-flag inside "100".
-  const answersOf = (c: GeneratedCase): string[] => (family === 'function'
-    ? [JSON.stringify((c as FnCase).expect) ?? '']
-    : (c as StreamGeneratedCase).expect);
+  // Manifests are write-from-spec: the STATEMENT legitimately names every value ("3 replicas of
+  // nginx:1.25"), because the skill graded is expressing the spec in correct YAML structure, not
+  // recalling values. A leak gate would reject exactly the good exercises — so no answers to
+  // check, and the gate passes vacuously for this family.
+  const answersOf = (c: GeneratedCase): string[] => {
+    if (family === 'manifest') return [];
+    return family === 'function'
+      ? [JSON.stringify((c as FnCase).expect) ?? '']
+      : (c as StreamGeneratedCase).expect;
+  };
+  // Function answers are often SHORT scalars — word-boundary matching at length > 1; streams keep
+  // the substring rule their tests pin.
   const leaksIn = (name: string, answer: string): boolean => (family === 'function'
     ? answer.length > 1 && new RegExp(`(^|[^\\w.])${answer.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^\\w.])`, 'i').test(name)
     : answer.length > 2 && name.toLowerCase().includes(answer.toLowerCase()));
@@ -182,6 +202,28 @@ export function setGeneratedStatus(
 }
 
 // ── generation: the model authors, the gates decide ────────────────────────────────────────────
+
+// The manifest family: certification-style "write the resource this task describes". The prompt
+// constrains the ASSERTIONS (dot paths into parsed YAML, mechanical ops) — the subject can be any
+// system configured by structured documents, Kubernetes being the motivating one.
+const MANIFEST_PROMPT = (pattern: string, description: string) => `Author a manifest-writing exercise for the pattern "${pattern}".
+${description ? `Context from the tutor: ${description}\n` : ''}
+The exercise family is: the learner is given an imperative task (the style of a CKA/CKAD exam
+task) and writes a YAML manifest from scratch. Grading is mechanical: assertions resolve dot-paths
+into the parsed YAML (arrays as [n], multi-document files as docs[n].path) and check them with one
+of four operations: "eq" (deep equality against a JSON value), "exists", "absent", "matches" (a
+regex against the string at the path). Include enough assertions to pin the task's real
+requirements — kind, names, labels/selectors agreeing, the fields the task demands — and nothing
+stylistic.
+
+Respond with ONLY valid JSON, no fences:
+{
+  "title": <short human title>,
+  "statement": <the task, 3-6 imperative lines, exam style: exactly what to create and with what properties>,
+  "reference": <a complete correct YAML manifest as one string — it must satisfy every assertion>,
+  "cases": [4-8 of {"name": <the requirement checked>, "path": <dot path>, "op": "eq"|"exists"|"absent"|"matches", "value": <JSON value or regex source, omit for exists/absent>}],
+  "prose": {"context_line": <one line of framing>, "hint": <one nudge>, "success_line": <one line for after>}
+}`;
 
 export interface GenerateDeps {
   /** Injectable model call, same seam as grading.ts's GradingDeps — testable with a stub. */
@@ -237,7 +279,9 @@ export async function generateExercise(
   vault: string, pattern: string, description: string, deps: GenerateDeps,
   family: GeneratedFamily = 'stream',
 ): Promise<GeneratedExercise> {
-  const prompt = family === 'function' ? FUNCTION_PROMPT(pattern, description) : STREAM_PROMPT(pattern, description);
+  const prompt = family === 'manifest' ? MANIFEST_PROMPT(pattern, description)
+    : family === 'function' ? FUNCTION_PROMPT(pattern, description)
+      : STREAM_PROMPT(pattern, description);
   const raw = await deps.generate(prompt);
   let parsed: any;
   try {
@@ -248,12 +292,19 @@ export async function generateExercise(
   // Per-family case coercion. Function args/expect pass through as parsed JSON — coercing them to
   // strings would silently change what the suite asserts.
   const cases: GeneratedCase[] = Array.isArray(parsed.cases)
-    ? parsed.cases.map((c: any) => (family === 'function'
-      ? { name: String(c.name ?? ''), args: Array.isArray(c.args) ? c.args : [], expect: c.expect ?? null }
-      : {
+    ? parsed.cases.map((c: any): GeneratedCase => {
+      if (family === 'manifest') {
+        const op = ['eq', 'exists', 'absent', 'matches'].includes(c.op) ? c.op : 'eq';
+        return { name: String(c.name ?? ''), path: String(c.path ?? ''), op, ...(c.value === undefined ? {} : { value: c.value }) };
+      }
+      if (family === 'function') {
+        return { name: String(c.name ?? ''), args: Array.isArray(c.args) ? c.args : [], expect: c.expect ?? null };
+      }
+      return {
         name: String(c.name ?? ''), inputText: String(c.inputText ?? ''),
         expect: Array.isArray(c.expect) ? c.expect.map(String) : [],
-      }))
+      };
+    })
     : [];
   const ex: GeneratedExercise = {
     pattern,

@@ -23,7 +23,11 @@ export interface ScratchPanelProps {
 
 export function ScratchPanel({ rungId, code, family }: ScratchPanelProps) {
   const isFn = family === 'function';
-  const [input, setInput] = useState(isFn ? '' : 'data: alpha\ndata: beta\ndata: [DONE]\n');
+  // Manifests have no separate input — the YAML in the editor IS the thing to inspect, and the
+  // server's scratch run answers "what does my YAML parse to". The box is hidden; `input` still
+  // posts (empty) because the route dispatches scratch-vs-suite on the field's presence.
+  const isManifest = family === 'manifest';
+  const [input, setInput] = useState(isFn || isManifest ? '' : 'data: alpha\ndata: beta\ndata: [DONE]\n');
   const [out, setOut] = useState<string | null>(null);
   const [chunks, setChunks] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -53,21 +57,27 @@ export function ScratchPanel({ rungId, code, family }: ScratchPanelProps) {
   return (
     <div className="scratch-panel">
       <p className="scratch-note">
-        your own input, your own output — nothing is graded and nothing is revealed here.
+        {isManifest
+          ? 'see what your YAML parses to — nothing is graded and nothing is revealed here.'
+          : 'your own input, your own output — nothing is graded and nothing is revealed here.'}
       </p>
-      <label className="scratch-label" htmlFor="scratch-input">{isFn ? 'arguments (a JSON array)' : 'input'}</label>
-      <textarea
-        id="scratch-input"
-        className="scratch-input"
-        rows={isFn ? 2 : 4}
-        spellCheck={false}
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder={isFn ? '[2, 1, 30]' : undefined}
-      />
+      {!isManifest && (
+        <>
+          <label className="scratch-label" htmlFor="scratch-input">{isFn ? 'arguments (a JSON array)' : 'input'}</label>
+          <textarea
+            id="scratch-input"
+            className="scratch-input"
+            rows={isFn ? 2 : 4}
+            spellCheck={false}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder={isFn ? '[2, 1, 30]' : undefined}
+          />
+        </>
+      )}
       <div className="scratch-actions">
         <button type="button" className="ide-btn ide-btn--run" onClick={run} disabled={busy}>
-          {busy ? 'running…' : 'run on this input'}
+          {busy ? 'running…' : isManifest ? 'parse my manifest' : 'run on this input'}
         </button>
         {busy && <span className="ide-spinner" role="status" aria-label="running scratch input" />}
       </div>
@@ -80,7 +90,7 @@ export function ScratchPanel({ rungId, code, family }: ScratchPanelProps) {
       {error && <p className="scratch-error" role="status">{error}</p>}
       {out !== null && (
         <dl className="scratch-output">
-          <dt>your output</dt>
+          <dt>{isManifest ? 'parsed' : 'your output'}</dt>
           <dd><code>{out}</code></dd>
           {chunks !== undefined && (
             <>

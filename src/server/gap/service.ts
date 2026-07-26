@@ -19,6 +19,7 @@ import {
   setGeneratedStatus, toSuiteCases, type GeneratedExercise, type GeneratedFamily,
   type StreamGeneratedCase,
 } from './generated.js';
+import { gradeManifest, scratchManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase } from './runner.js';
 import {
   STREAM_CONSUMER_CASES, STREAM_CONSUMER_ENTRY, STREAM_CONSUMER_LADDER, STREAM_CONSUMER_RUNGS,
@@ -32,10 +33,13 @@ export type BuiltinExercise = {
 } & (
   | { family: 'stream'; cases: SuiteCase[] }
   | { family: 'function'; cases: FnCase[] }
+  | { family: 'manifest'; cases: ManifestAssertion[] }
 );
 
-/** One suite run, spelled per family so every call site dispatches identically. */
-function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?: SuiteCase[] | FnCase[]) {
+/** One suite run, spelled per family so every call site dispatches identically. Manifests never
+ *  touch the child: they are data, graded by parse-and-assert in this process (manifest.ts). */
+function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?: SuiteCase[] | FnCase[] | ManifestAssertion[]) {
+  if (ex.family === 'manifest') return Promise.resolve(gradeManifest(code, (cases ?? ex.cases) as ManifestAssertion[]));
   return ex.family === 'function'
     ? runInChild({ kind: 'suite', family: 'function', code, entryPoint, cases: (cases ?? ex.cases) as FnCase[] })
     : runInChild({ kind: 'suite', code, entryPoint, cases: (cases ?? ex.cases) as SuiteCase[] });
@@ -73,9 +77,9 @@ export function builtinPatterns(vault?: string): string[] {
 function liftGenerated(g: GeneratedExercise): BuiltinExercise {
   const parts = generatedRungParts(g);
   const family: GeneratedFamily = familyOf(g);
-  const cases = family === 'function'
-    ? (g.cases as FnCase[])
-    : toSuiteCases(g.cases as StreamGeneratedCase[]);
+  const cases = family === 'manifest' ? (g.cases as ManifestAssertion[])
+    : family === 'function' ? (g.cases as FnCase[])
+      : toSuiteCases(g.cases as StreamGeneratedCase[]);
   return {
     ladder: { pattern: g.pattern, targetArtifactId: g.pattern, siblingArtifactId: g.pattern, rungs: [`${g.pattern}:full_body`] },
     rungs: [{
@@ -84,8 +88,9 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
       artifactId: g.pattern,
       entryPoint: g.entryPoint,
       // Predictable cases: the first, same as the hand-built ladder — stream inputs are authored
-      // as text so they read cleanly; a function case reads as the call expression itself.
-      predictCases: cases.length ? [cases[0].name] : [],
+      // as text so they read cleanly; a function case reads as the call expression itself. A
+      // manifest has no output to predict (assertions are the whole grade), so no gate.
+      predictCases: family !== 'manifest' && cases.length ? [cases[0].name] : [],
       visible_pre: parts.visible_pre,
       visible_post: parts.visible_post,
       reference_answer: g.reference,
@@ -209,7 +214,8 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     if (lookupExercise(pattern, vault) || listGenerated(vault).some((e) => e.pattern === pattern)) {
       return c.json({ error: `an exercise for "${pattern}" already exists` }, 409);
     }
-    const family: GeneratedFamily = body?.family === 'function' ? 'function' : 'stream';
+    const family: GeneratedFamily = body?.family === 'function' ? 'function'
+      : body?.family === 'manifest' ? 'manifest' : 'stream';
     try {
       const ex = await generateExercise(vault, pattern, String(body?.description ?? ''), {
         generate: opts.generate, modelName: opts.modelName,
@@ -288,15 +294,18 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     // needs no change.
     if (typeof body.input === 'string') {
       console.log(`[gap] scratch rung=${body.rungId} inputBytes=${body.input.length}`);
+      // Manifest scratch ignores `input`: the interesting question is "what does MY YAML parse
+      // to", and the YAML is the code itself.
+      if (ex.family === 'manifest') return c.json(scratchManifest(body.code));
       return c.json(await runInChild(ex.family === 'function'
         ? { kind: 'scratch', family: 'function', code: body.code, entryPoint: ex.entryPoint, input: body.input }
         : { kind: 'scratch', code: body.code, entryPoint: ex.entryPoint, input: body.input }));
     }
 
     // Stress: same assertions, same bytes, hostile read boundaries. Re-chunking is a STREAM idea —
-    // for a function suite there is nothing adversarial to vary, so the run comes back without
-    // `stressed` and the client reports stress as unsupported rather than pretending.
-    if (body.stress === true && ex.family !== 'function') {
+    // for a function or manifest suite there is nothing adversarial to vary, so the run comes back
+    // without `stressed` and the client reports stress as unsupported rather than pretending.
+    if (body.stress === true && ex.family === 'stream') {
       const cases = stressCases(ex.cases);
       console.log(`[gap] STRESS rung=${body.rungId} cases=${cases.length}`);
       const out = await runInChild({ kind: 'suite', code: body.code, entryPoint: ex.entryPoint, cases });

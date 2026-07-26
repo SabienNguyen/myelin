@@ -379,6 +379,9 @@ export function createTutorSession(
               + 'Family "function" (the default): one plain function, JSON args in, JSON value out, '
               + 'graded by deep comparison — use it to turn any domain computation (statistics, '
               + 'stoichiometry, interval arithmetic, text processing) into runnable practice. '
+              + 'Family "manifest": the student writes a YAML manifest from an exam-style task '
+              + '(Kubernetes/CKA prep, CI configs, any YAML-configured system), graded by '
+              + 'mechanical assertions over the parsed document. '
               + 'Family "stream": async-generator-over-byte-chunks (SSE, NDJSON, line protocols, '
               + 'framing). The result is verified mechanically and stored PENDING REVIEW — tell the '
               + 'student it is waiting in the Library\'s Practice section for their approval, and do '
@@ -386,10 +389,10 @@ export function createTutorSession(
             inputSchema: z.object({
               pattern: z.string().describe('kebab-case pattern id, e.g. dilution-calculator'),
               description: z.string().describe('what the exercise should teach, 1-3 sentences'),
-              family: z.enum(['function', 'stream']).optional()
-                .describe('function (default) for any-domain computations; stream only for byte-stream parsing'),
+              family: z.enum(['function', 'manifest', 'stream']).optional()
+                .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); stream only for byte-stream parsing'),
             }),
-            execute: async ({ pattern, description, family }: { pattern: string; description: string; family?: 'function' | 'stream' }) => {
+            execute: async ({ pattern, description, family }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'stream' }) => {
               const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
               if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
                 return { error: `an exercise for "${slug}" already exists` };
