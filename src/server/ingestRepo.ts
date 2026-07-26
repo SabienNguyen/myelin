@@ -28,6 +28,8 @@ import {
 import { pingGapOnce } from './gapProxy.js';
 import type { HarnessConfig } from './config.js';
 import { splitChapters } from './convert.js';
+import { compileGenerate } from './gap/generateSeam.js';
+import { mineRepoBuiltin, type RepoMineReport } from './gap/mineRepo.js';
 import { ensureCompileDrain, slugify } from './ingest.js';
 import type { Loreweaver } from './mcp.js';
 import { readQueue, updateQueue, writeQueue, type QueueEntry } from './queueStore.js';
@@ -341,6 +343,9 @@ export interface IngestRepoDeps {
   clone?: (source: string, destDir: string) => Promise<void>;
   reingest?: (source: string, destDir: string) => Promise<void>;
   miner?: (repoPath: string, outDir: string) => Promise<MineReport>;
+  /** The built-in mining pass (gap/mineRepo.ts) — used when no the-gap checkout exists. Injectable
+   *  so tests don't need a model. */
+  builtinMiner?: (repoName: string, repoPath: string) => Promise<RepoMineReport>;
   restartSidecar?: () => Promise<void>;
   pingGap?: () => Promise<boolean>;
   gapRestartTimeoutMs?: number;
@@ -461,7 +466,32 @@ export function ingestRepo(
       await setPhase(docFiles.length > 0 ? `docs: ${queuedChapters} queued` : 'docs: 0 queued (no markdown files found)');
       if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg);
 
-      // ── mining pass (contract point 4): flat --out, JSON report, phase updates ──────────
+      // ── mining pass (contract point 4) ──────────────────────────────────────────────────
+      // Two miners, one decision: the external the-gap CLI when its checkout exists (the original
+      // integration), otherwise the BUILT-IN pass — repo functions become the hidden references of
+      // function-family exercises, verified by the standard gates, landing in the Library's review
+      // queue. Before the built-in pass existed, a shipped app hit this branch and the whole
+      // ingest ended in "mining failed: miner CLI failed", docs pass and all.
+      const useExternal = deps.miner !== undefined || existsSync(THE_GAP_ROOT);
+      if (!useExternal) {
+        await setPhase('authoring exercises from the code…');
+        try {
+          const mined = await (deps.builtinMiner
+            ?? ((rn: string, rp: string) => mineRepoBuiltin(cfg.vault, rn, rp, {
+              generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
+            })))(name, repoPath);
+          const summary = mined.pending.length > 0
+            ? `${mined.pending.length} exercise(s) waiting for your approval in the Library`
+            : `no exercises authored (${mined.qualified}/${mined.candidates} candidate functions qualified)`;
+          await finish('done', `docs: ${queuedChapters} queued — ${summary}${mined.rejected.length ? ` — ${mined.rejected.length} rejected by the gates` : ''}`);
+        } catch (e: any) {
+          const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+          // The docs pass already succeeded; say so rather than branding the whole ingest failed.
+          await finish('done', `docs: ${queuedChapters} queued — exercise authoring failed: ${msg}`);
+        }
+        return;
+      }
+
       await setPhase('mining…');
       const mineOutDir = join(cfg.vault, '.harness', 'mined');
       mkdirSync(mineOutDir, { recursive: true });
