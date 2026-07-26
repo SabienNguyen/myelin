@@ -14,6 +14,10 @@
 
 import { Hono } from 'hono';
 import type { GapLadderPayload } from '../gapProxy.js';
+import {
+  approvedGenerated, generatedRungParts, generateExercise, listGenerated, setGeneratedStatus,
+  toSuiteCases, type GeneratedExercise,
+} from './generated.js';
 import { runInChild } from './runner.js';
 import {
   STREAM_CONSUMER_CASES, STREAM_CONSUMER_ENTRY, STREAM_CONSUMER_LADDER, STREAM_CONSUMER_RUNGS,
@@ -40,17 +44,53 @@ const EXERCISES: Record<string, BuiltinExercise> = {
 
 const DEFAULT_PATTERN = 'stream-consumer';
 
-/** Which patterns have a real ladder here — the derivable signal appliedRoutes.ts uses to say a
- *  coding exercise EXISTS for a page, as opposed to being merely conceivable. */
-export function builtinPatterns(): string[] {
-  return Object.keys(EXERCISES);
+/** Which patterns have a real ladder here — the derivable signal appliedRoutes.ts and
+ *  seedPatternPages use to say a coding exercise EXISTS for a page. Approved generated exercises
+ *  count exactly like the hand-built one: to everything downstream they ARE exercises, the
+ *  review gate having already done its work. */
+export function builtinPatterns(vault?: string): string[] {
+  const generated = vault ? approvedGenerated(vault).map((e) => e.pattern) : [];
+  return [...Object.keys(EXERCISES), ...generated];
+}
+
+/** An approved generated exercise, lifted into the same shape the hand-built registry uses: one
+ *  full_body rung, statement as the visible_pre comment, the harness's own hostile chunking. */
+function liftGenerated(g: GeneratedExercise): BuiltinExercise {
+  const parts = generatedRungParts(g);
+  const cases = toSuiteCases(g.cases);
+  return {
+    ladder: { pattern: g.pattern, targetArtifactId: g.pattern, siblingArtifactId: g.pattern, rungs: [`${g.pattern}:full_body`] },
+    rungs: [{
+      id: `${g.pattern}:full_body`,
+      template: 'full_body',
+      artifactId: g.pattern,
+      entryPoint: g.entryPoint,
+      // Predictable cases: those whose input reads cleanly (they all do — inputs are authored as
+      // text) — offer the first as the comprehension gate, same as the hand-built ladder.
+      predictCases: cases.length ? [cases[0].name] : [],
+      visible_pre: parts.visible_pre,
+      visible_post: parts.visible_post,
+      reference_answer: g.reference,
+      prose: g.prose,
+      scaffold: parts.scaffold,
+    }],
+    cases,
+    entryPoint: g.entryPoint,
+  };
+}
+
+function lookupExercise(pattern: string, vault?: string): BuiltinExercise | undefined {
+  if (EXERCISES[pattern]) return EXERCISES[pattern];
+  if (!vault) return undefined;
+  const g = approvedGenerated(vault).find((e) => e.pattern === pattern);
+  return g ? liftGenerated(g) : undefined;
 }
 
 /** The GET /api/gap/ladder payload — with the answer stripped where it must be. Also consumed
  *  directly by gapHelp.ts via gapProxy.fetchLadderPayload's builtin fallback, so the help route
  *  reads rung data through the same stripped shape as the browser. */
-export function builtinLadderPayload(pattern = DEFAULT_PATTERN): GapLadderPayload {
-  const ex = EXERCISES[pattern];
+export function builtinLadderPayload(pattern = DEFAULT_PATTERN, vault?: string): GapLadderPayload {
+  const ex = lookupExercise(pattern, vault);
   if (!ex) throw new Error(`no built-in exercise for pattern "${pattern}"`);
   const preview = (name: string) => {
     const c = ex.cases.find((k) => k.name === name);
@@ -70,17 +110,81 @@ export function builtinLadderPayload(pattern = DEFAULT_PATTERN): GapLadderPayloa
   };
 }
 
-function exerciseForRung(rungId: unknown): BuiltinExercise | undefined {
+function exerciseForRung(rungId: unknown, vault?: string): BuiltinExercise | undefined {
   const pattern = typeof rungId === 'string' && rungId.includes(':')
     ? rungId.slice(0, rungId.indexOf(':'))
     : DEFAULT_PATTERN;
-  return EXERCISES[pattern];
+  return lookupExercise(pattern, vault);
 }
 
-export function buildBuiltinGapRoutes() {
-  const app = new Hono();
+export interface BuiltinGapOpts {
+  /** Where generated exercises live (vault/.harness/generated-exercises). Absent -> only the
+   *  hand-built exercise exists, which is how the unit tests run vault-less. */
+  vault?: string;
+  /** The model seam for POST /api/gap/generate — injectable so tests use a stub and production
+   *  wires the compile role. Absent -> the generate route answers 501 rather than pretending. */
+  generate?: (prompt: string) => Promise<string>;
+  modelName?: string;
+}
 
-  app.get('/api/gap/ladder', (c) => c.json(builtinLadderPayload()));
+export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
+  const app = new Hono();
+  const { vault } = opts;
+
+  app.get('/api/gap/ladder', (c) => {
+    const pattern = c.req.query('pattern');
+    // Unknown or absent pattern falls back to the default ladder — the shape the external
+    // sidecar's pattern-less /api/ladder has always had.
+    try {
+      return c.json(builtinLadderPayload(pattern && lookupExercise(pattern, vault) ? pattern : DEFAULT_PATTERN, vault));
+    } catch {
+      return c.json(builtinLadderPayload(DEFAULT_PATTERN, vault));
+    }
+  });
+
+  /** The review gate's surface: everything generated, gates and status visible. */
+  app.get('/api/gap/generated', (c) => c.json({
+    exercises: listGenerated(vault ?? '').map((e) => ({
+      pattern: e.pattern, title: e.title, status: e.status,
+      verification: e.verification, generatedAt: e.generatedAt, generatedBy: e.generatedBy,
+      cases: e.cases.length,
+    })),
+  }));
+
+  app.put('/api/gap/generated/:pattern', async (c) => {
+    if (!vault) return c.json({ error: 'no vault configured' }, 500);
+    const body = await c.req.json().catch(() => ({}));
+    if (body?.status !== 'approved' && body?.status !== 'rejected') {
+      return c.json({ error: 'status must be approved or rejected' }, 400);
+    }
+    const updated = setGeneratedStatus(vault, c.req.param('pattern'), body.status);
+    if (!updated) return c.json({ error: `no generated exercise "${c.req.param('pattern')}"` }, 404);
+    if (body.status === 'approved' && !updated.verification.ok) {
+      // Approval recorded, service still refuses: verification is not a formality a human can wave.
+      return c.json({ ...updated, warning: 'approved, but verification gates failed — it will NOT be served' });
+    }
+    return c.json(updated);
+  });
+
+  app.post('/api/gap/generate', async (c) => {
+    if (!vault) return c.json({ error: 'no vault configured' }, 500);
+    if (!opts.generate) return c.json({ error: 'no generation model configured on this route' }, 501);
+    const body = await c.req.json().catch(() => ({}));
+    const pattern = String(body?.pattern ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    if (!pattern) return c.json({ error: 'pattern is required' }, 400);
+    if (lookupExercise(pattern, vault) || listGenerated(vault).some((e) => e.pattern === pattern)) {
+      return c.json({ error: `an exercise for "${pattern}" already exists` }, 409);
+    }
+    try {
+      const ex = await generateExercise(vault, pattern, String(body?.description ?? ''), {
+        generate: opts.generate, modelName: opts.modelName,
+      });
+      console.log(`[gap] generated "${pattern}" -> ${ex.status} (${ex.verification.gates.filter((g) => !g.ok).length} failed gates)`);
+      return c.json(ex, ex.status === 'rejected' ? 422 : 200);
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 500);
+    }
+  });
 
   /**
    * Predict-the-output, graded server-side — comprehension before production.
@@ -96,7 +200,7 @@ export function buildBuiltinGapRoutes() {
    */
   app.post('/api/gap/predict', async (c) => {
     const body = await c.req.json().catch(() => null);
-    const ex = exerciseForRung(body?.rungId);
+    const ex = exerciseForRung(body?.rungId, vault);
     const rung = ex?.rungs.find((r) => r.id === body?.rungId);
     if (!ex || !rung) return c.json({ error: `no rung "${body?.rungId}"` }, 404);
     const suiteCase = ex.cases.find((k) => k.name === body?.caseName && rung.predictCases.includes(k.name));
@@ -132,7 +236,7 @@ export function buildBuiltinGapRoutes() {
     if (!body || typeof body.code !== 'string') {
       return c.json({ error: 'code must be a string' }, 400);
     }
-    const ex = exerciseForRung(body.rungId);
+    const ex = exerciseForRung(body.rungId, vault);
     if (!ex) return c.json({ error: `no built-in exercise for rung "${body.rungId}"` }, 404);
 
     // Scratch run: the learner's own input, their own output, NO expected value anywhere — leaks

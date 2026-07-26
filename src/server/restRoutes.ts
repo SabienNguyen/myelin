@@ -181,8 +181,8 @@ export function buildRestRoutes(
     // Which applied blocks could confirm this page, derived from what exists (appliedRoutes.ts) —
     // so the panel can name a route instead of leaving "no exercise has confirmed it" ambiguous
     // between "not done" and "none exists".
-    const routes = appliedRoutesFor({ slug, body: page.page?.body ?? '' });
-    const noLadder = missingLadder({ slug, domain: page.page?.domain });
+    const routes = appliedRoutesFor({ slug, body: page.page?.body ?? '' }, undefined, cfg.vault);
+    const noLadder = missingLadder({ slug, domain: page.page?.domain }, undefined, cfg.vault);
     return c.json({ ...page, neighbors, standing, routes, noLadder });
   });
   app.get('/api/student', async (c) =>

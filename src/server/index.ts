@@ -14,6 +14,7 @@ import { buildChatRoute } from './chatRoute.js';
 import { buildIngestRoutes } from './ingestRoutes.js';
 import { buildGapRoutes } from './gapProxy.js';
 import { buildBuiltinGapRoutes } from './gap/service.js';
+import { compileGenerate } from './gap/generateSeam.js';
 import { buildGapHelpRoute } from './gapHelp.js';
 import { seedPatternPages } from './seedPatternPages.js';
 import { startScheduler } from './scheduler.js';
@@ -125,7 +126,11 @@ app.route('/', buildChatRoute(lw, cfg));
 app.route('/', buildIngestRoutes(lw, cfg));
 // The coding sandbox: the built-in service (gap/service.ts) unless an external the-gap sidecar
 // is configured, in which case the proxy to it wins — see gapProxy.ts's buildGapRoutes doc.
-app.route('/', buildGapRoutes(cfg, buildBuiltinGapRoutes));
+app.route('/', buildGapRoutes(cfg, () => buildBuiltinGapRoutes({
+  vault: cfg.vault,
+  generate: compileGenerate(cfg),
+  modelName: cfg.models.compile.model,
+})));
 app.route('/', buildGapHelpRoute(lw, cfg));
 // First-run readiness + the one thing a first run must supply. Mounted last so it is reachable
 // even if a feature route above is disabled.

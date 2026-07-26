@@ -34,8 +34,11 @@ export interface RunResponse {
   stressed?: boolean;
 }
 
-export async function getLadder(): Promise<LadderPayload> {
-  const response = await fetch('/api/gap/ladder');
+export async function getLadder(pattern?: string): Promise<LadderPayload> {
+  // The pattern travels as a query so a GENERATED exercise's ladder can be served for it — the
+  // server falls back to its default ladder when the pattern is unknown or absent, which keeps the
+  // external-sidecar proxy (whose /api/ladder takes no pattern) behaving exactly as before.
+  const response = await fetch(`/api/gap/ladder${pattern ? `?pattern=${encodeURIComponent(pattern)}` : ''}`);
   if (!response.ok) throw new Error(`GET /api/gap/ladder failed: ${response.status}`);
   return response.json();
 }

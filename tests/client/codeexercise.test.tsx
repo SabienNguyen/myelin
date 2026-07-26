@@ -60,7 +60,9 @@ function mockFetch(
   mined: any[] = [],
 ) {
   return vi.fn(async (url: string, init?: any) => {
-    if (url === '/api/gap/ladder') {
+    // getLadder now appends ?pattern=<args.pattern> so generated ladders resolve; the mock serves
+    // the same fixture for any pattern, which is exactly what the pattern-less sidecar proxy does.
+    if (url === '/api/gap/ladder' || url.startsWith('/api/gap/ladder?')) {
       return {
         ok: true,
         json: async () => ({
@@ -449,7 +451,7 @@ describe('CodeExercise — Help tab (Track A, docs/superpowers/plans/2026-07-21-
   it('the transcript accumulates across exchanges and survives switching tabs away and back', async () => {
     let call = 0;
     (globalThis as any).fetch = vi.fn(async (url: string, init?: any) => {
-      if (url === '/api/gap/ladder') {
+      if (url === '/api/gap/ladder' || url.startsWith('/api/gap/ladder?')) {
         return {
           ok: true,
           json: async () => ({

@@ -65,7 +65,7 @@ async function* parseFrames(chunks) {
 /** scaffold = visible_pre + an indented YOUR TURN marker + visible_post, per the contract in
  *  src/client/components/blocks/gap/types.ts. Nothing else — the pre/post fragments already carry
  *  whatever structure the rung needs; the scaffold's only job is to mark the hole between them. */
-const scaffoldFor = (pre: string, post: string) => `${pre}\n  // YOUR TURN — implement this.\n${post}`;
+export const scaffoldFor = (pre: string, post: string) => `${pre}\n  // YOUR TURN — implement this.\n${post}`;
 
 /** A rung as the exercise defines it — GapRung plus the prose/scaffold fields the client reads. */
 export interface BuiltinRung extends GapRung {

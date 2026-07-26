@@ -33,6 +33,11 @@ Do not weaken either without deciding to:
 
 ## 1. Mechanical checkers for two more subjects
 
+**CLOSED** (structuredCheckers.ts): `unit` (real unit algebra — 72 km/h satisfies 20 m/s),
+`chem_equation` (conservation per element and charge, reaction pinned by species), `notes`
+(semitone arithmetic, enharmonic-aware). All three both-directions tested; a chemistry or music
+learner can now reach `mastered`. What remains of this item: more checkers as subjects demand them.
+
 **Why first:** this is the only item that moves the goal rather than polishing around it. Every
 other applied block is domain-locked; `structured_check` is not, and its five checkers
 (numeric/set/sequence/matching/pattern) already prove the pattern generalises. Each new checker
@@ -61,6 +66,16 @@ in any subject outside the three.
 
 ## 2. Generated exercises where a real suite already exists
 
+**CLOSED, with a stated scope** (gap/generated.ts): a model authors a NEW exercise in the
+async-generator-over-byte-chunks family (SSE, NDJSON, line protocols, framing — the family the
+built-in runner executes); the harness slices case inputs into hostile chunks ITSELF so a suite can
+never be chunk-aligned; the B2 gates run mechanically (reference passes, empty implementation
+fails, scaffold fails, names leak nothing) and a failed gate auto-rejects; everything else lands
+PENDING HUMAN REVIEW and only approved+verified exercises are served, seeded as pages, and counted
+by the routes probe. The tutor can commission one in freeform (`generate_exercise`). NOT covered:
+other exercise families, ladder rungs beyond full_body, and the client prose maps (plan/docs
+offers) — a generated exercise gets the derived scaffolding only.
+
 **Why second:** it unlocks breadth *inside* programming at near-zero content cost, and it is the
 only place generated content is already safe, because the artifact's own test suite does the
 grading. A model writes the prose; the sandbox decides correctness.
@@ -84,6 +99,11 @@ should widen it without saying so.
 
 ## 3. Say when a subject has no applied route
 
+**CLOSED** (appliedRoutes.ts): the Page panel names the route that could confirm a page, derived
+from what exists (ladder → code exercise; LaTeX in the body → scratchpad; structured_check always;
+rubric last, labelled as capping below mastered) — and says outright when a programming page has no
+ladder yet. No subject registry, as this item's own trap-warning demanded.
+
 **Why third:** it is the honest completion of the ceiling I just shipped, and without it the ceiling
 is quietly unfair. A learner studying contract law will now watch every page cap at `practicing`
 forever, and the Page panel says "No exercise has confirmed it" — true, and impossible to act on,
@@ -99,6 +119,11 @@ bottleneck this whole backlog is about. Derive it from which checkers exist, not
 ---
 
 ## 4. Comprehension before production
+
+**CLOSED** (PredictGate + /api/gap/predict): production rungs open with "what does the finished
+function yield for this input?", graded by running the rung's reference server-side. The sibling-
+artifact blocker died with per-rung entry points. First miss reveals nothing; second miss teaches;
+skip always available; no evidence recorded.
 
 **Why here and not higher:** it is the top *beginner* gap — nothing asks "what does this code do?"
 before asking the learner to write it — but I attempted it and it is blocked on the sidecar.
@@ -120,6 +145,11 @@ hand-authored per artifact.
 
 ## 5. Visual and diagram modality
 
+**CLOSED** (Mermaid.tsx + LabelDiagram.tsx): ```mermaid fences render as diagrams (correction to
+this item's own claim: mermaid was NOT already a dependency here — it is now, lazy-loaded), and
+`label_diagram` is the seventh block — tutor-drawn SVG rendered inert, click-click label placement,
+region-membership grading, real applied-correctly for picture subjects.
+
 **Why it matters to the goal:** several subjects are not primarily verbal. Anatomy, circuits, graph
 theory, chord voicings, chemical structures. Today the app can only ever *describe* them. This is a
 whole class of subject the system cannot currently teach well, not merely one it cannot grade.
@@ -133,6 +163,11 @@ picture.
 ---
 
 ## 6. Decide the rubric question, with the mechanism now in place
+
+**DECIDED AND CLOSED** (user said build it): `rubric-passed` is the third evidence kind — minted by
+`writing_draft` with an explicit rubric where the rubric's list is authoritative over the model's,
+capped at practicing, decaying on its own 14-day window, named separately everywhere the learner
+looks. It can never launder into `applied-correctly`.
 
 **Why last, and why not "never":** for history, law, literature and philosophy there is no
 mechanical check and there will not be one. Either those subjects never get applied evidence, or

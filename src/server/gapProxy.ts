@@ -54,7 +54,7 @@ export async function fetchLadderPayload(cfg: HarnessConfig): Promise<GapLadderP
   // and ingestRepo also pull in) does not eagerly load the exercise content it usually won't need.
   if (!cfg.gap) {
     const { builtinLadderPayload } = await import('./gap/service.js');
-    return builtinLadderPayload();
+    return builtinLadderPayload(undefined, cfg.vault);
   }
   const base = cfg.gap.url.replace(/\/$/, '');
   const res = await fetch(`${base}/api/ladder`, { signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) });

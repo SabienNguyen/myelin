@@ -2,7 +2,7 @@ import {
   ToolLoopAgent, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse,
   isStepCount, toUIMessageStream, tool, type LanguageModel, type ModelMessage, type ToolSet, type UIMessage,
 } from 'ai';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
@@ -14,6 +14,9 @@ import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { logGuardrail } from './sessionStore.js';
 import { buildWebTools } from './webTools.js';
+import { generateExercise, listGenerated } from './gap/generated.js';
+import { builtinPatterns } from './gap/service.js';
+import { compileGenerate } from './gap/generateSeam.js';
 
 // Tools the tutor may use per mode; write/link/compile only in freeform (spec §5).
 const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidence',
@@ -367,11 +370,46 @@ export function createTutorSession(
         // freeform-only gate as webTools: a subject gets researched, sourced, and compiled in
         // freeform; teaching modes stay grounded in the vault.
         const ingestTools = mode === 'freeform' ? buildIngestTools(lw, cfg) : {};
+        // Freeform-only, like every other content-creating tool: the tutor can commission a NEW
+        // coding exercise when a learner wants practice no ladder covers. The result is pending
+        // review — the tutor must say so, not promise the exercise for this session.
+        const generateTool: ToolSet = mode !== 'freeform' ? {} : {
+          generate_exercise: tool({
+            description: 'Author a new coding exercise (async-generator-over-byte-chunks family: '
+              + 'SSE, NDJSON, line protocols, framing). It is verified mechanically and stored '
+              + 'PENDING HUMAN REVIEW — tell the student it will appear once approved, and do not '
+              + 'promise it for this session.',
+            inputSchema: z.object({
+              pattern: z.string().describe('kebab-case pattern id, e.g. ndjson-parser'),
+              description: z.string().describe('what the exercise should teach, 1-3 sentences'),
+            }),
+            execute: async ({ pattern, description }: { pattern: string; description: string }) => {
+              const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+              if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
+                return { error: `an exercise for "${slug}" already exists` };
+              }
+              try {
+                const ex = await generateExercise(cfg.vault, slug, description, {
+                  generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
+                });
+                return {
+                  pattern: ex.pattern, status: ex.status,
+                  gates: ex.verification.gates.map((g) => `${g.ok ? 'PASS' : 'FAIL'} ${g.gate}`),
+                  note: ex.status === 'pending'
+                    ? 'verified mechanically; awaiting human review before any learner sees it'
+                    : 'rejected by the verification gates — do not retry with the same content',
+                };
+              } catch (e: any) {
+                return { error: e?.message ?? String(e) };
+              }
+            },
+          }),
+        };
 
         const agent = new ToolLoopAgent({
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
-          tools: { ...activeMcp, ...webTools, ...ingestTools, ...blockTools() },
+          tools: { ...activeMcp, ...webTools, ...ingestTools, ...generateTool, ...blockTools() },
           stopWhen: isStepCount(24),
         });
 

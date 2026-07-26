@@ -147,7 +147,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
 
   useEffect(() => {
     let cancelled = false;
-    getLadder()
+    getLadder(args.pattern)
       .then((payload) => {
         if (cancelled) return;
         setRungs(payload.rungs);

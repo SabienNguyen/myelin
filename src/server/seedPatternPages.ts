@@ -13,6 +13,7 @@
 // (the idempotence check below) is sufficient; no review/approval step is needed the way a
 // tutor's freeform-mode write would need one.
 import type { HarnessConfig } from './config.js';
+import { approvedGenerated } from './gap/generated.js';
 import type { Loreweaver } from './mcp.js';
 
 interface PatternPageSeed {
@@ -60,7 +61,22 @@ const PATTERN_PAGES: PatternPageSeed[] = [
  * there is ALWAYS at least the stream-consumer ladder to seed a page for. */
 export async function seedPatternPages(lw: Loreweaver, cfg: HarnessConfig): Promise<void> {
   const existing = new Set(await lw.listSlugs());
-  for (const page of PATTERN_PAGES) {
+  // Approved GENERATED exercises seed pages too — derived from what is on disk, not from widening
+  // the hardcoded list below (which the backlog's own self-criticism warns against). Same
+  // idempotence, same single-writer route.
+  const generated: PatternPageSeed[] = approvedGenerated(cfg.vault).map((ex) => ({
+    slug: ex.pattern,
+    title: ex.title,
+    domain: 'programming',
+    body: [
+      `# ${ex.title}`, '',
+      'Stub page, seeded at boot for a generated coding exercise (reviewed and approved). '
+        + 'Practice it with a real code exercise — ask the tutor.', '',
+      ex.statement,
+    ].join('\n'),
+    sources: [`generated exercise ${ex.pattern} (${ex.generatedBy})`],
+  }));
+  for (const page of [...PATTERN_PAGES, ...generated]) {
     if (existing.has(page.slug)) continue;
     await lw.call('write_page', {
       slug: page.slug,

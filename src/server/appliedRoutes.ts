@@ -26,8 +26,10 @@ function bodyHasMath(body: string): boolean {
 
 export function appliedRoutesFor(
   page: { slug: string; body: string },
-  patterns: string[] = builtinPatterns(),
+  patterns?: string[],
+  vault?: string,
 ): AppliedRoute[] {
+  patterns ??= builtinPatterns(vault);
   const routes: AppliedRoute[] = [];
 
   if (patterns.includes(page.slug)) {
@@ -70,7 +72,9 @@ export function appliedRoutesFor(
  *  so beats letting the learner think they skipped an exercise that was never written. */
 export function missingLadder(
   page: { slug: string; domain?: string },
-  patterns: string[] = builtinPatterns(),
+  patterns?: string[],
+  vault?: string,
 ): boolean {
+  patterns ??= builtinPatterns(vault);
   return (page.domain ?? '') === 'programming' && !patterns.includes(page.slug);
 }
