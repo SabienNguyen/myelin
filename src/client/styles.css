@@ -1509,3 +1509,33 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
 }
+
+/* ── Your standing ────────────────────────────────────
+   Answers the question a mastery level provokes and the app never answered: why is this only
+   practising, and how did it get there. Inset rather than bordered so it reads as a readout about
+   the learner, distinct from the page's own authored content below it. */
+.page-standing {
+  margin: 0 0 1.2rem;
+  padding: 0.7rem 0.9rem;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+}
+.page-standing h3 {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 0.45rem;
+}
+.page-standing p { margin: 0 0 0.25rem; font-size: 0.85rem; line-height: 1.5; }
+.page-standing-level { display: flex; align-items: baseline; gap: 0.4rem; font-weight: 600; }
+.page-standing-decayed { font-weight: 400; font-style: normal; color: var(--warn); }
+.page-standing-why, .page-standing-decay { color: var(--text-muted); }
+.page-standing-misconceptions {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--bad);
+}

@@ -248,7 +248,10 @@ describe('GET /api/page/:slug neighbours', () => {
     });
     await buildRestRoutes(lw, cfg).request('/api/page/chain-rule');
     expect(readPageCalls()).toBe(2); // the page itself + one neighbour
-    expect(studentCalls()).toBe(1);
+    // Two student calls, both bounded and independent of edge count: one BULK call for every
+    // neighbour's mastery, and one PER-SLUG call for this page's own standing (which needs the
+    // evidence log, and the bulk response does not carry it).
+    expect(studentCalls()).toBe(2);
   });
 
   it('skips the whole resolution for a page with no edges', async () => {
@@ -258,7 +261,9 @@ describe('GET /api/page/:slug neighbours', () => {
     const body = await (await buildRestRoutes(lw, cfg).request('/api/page/chain-rule')).json();
     expect(body.neighbors).toEqual({});
     expect(readPageCalls()).toBe(1);
-    expect(studentCalls()).toBe(0); // no neighbours -> no reason to ask about the student at all
+    // No neighbours means no BULK mastery lookup, but the page's own standing is still fetched —
+    // a page with no edges is exactly as entitled to "how did I earn this level" as any other.
+    expect(studentCalls()).toBe(1);
   });
 
   it('does not resolve the page as its own neighbour', async () => {

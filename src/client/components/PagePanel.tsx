@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { getPage } from '../lib/api.js';
 import { WikiLink } from './MarkdownText.js';
 import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
+import { DECAY } from '../../shared/loreweaver.js';
 
 // The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
 // system whose whole thesis is a JUSTIFIED TYPED GRAPH — every edge carries a rationale someone had
@@ -27,6 +28,46 @@ const GROUPS: { dir: Dir; type: LinkType; heading: string; blurb: string }[] = [
   { dir: 'out', type: 'related', heading: 'Mentions', blurb: '' },
   { dir: 'in', type: 'related', heading: 'Mentioned by', blurb: '' },
 ];
+
+/**
+ * How this page's level was earned, in one sentence.
+ *
+ * The panel has always been able to show a LEVEL and never how it was reached, so the question a
+ * level provokes — "why is this only practising?" — had no answer anywhere in the app. Since
+ * grading.ts's capApplied the two passing kinds mean different things: 'applied-correctly' is a
+ * machine confirming it, 'explained-correctly' is a model judging it. That distinction is the
+ * answer, so this is where it gets said.
+ *
+ * Deliberately not scolding. "You have explained this but never applied it" is a fact about the
+ * evidence, not a verdict on the learner — and in a subject with no applied exercise available it is
+ * not even something they could act on, which is why the copy says what is missing rather than what
+ * they should have done.
+ */
+function standingLine(st: { applied: number; explained: number; struggled: number }): string {
+  if (st.applied > 0 && st.explained > 0) {
+    return `Earned by ${st.applied} verified exercise${st.applied === 1 ? '' : 's'} `
+      + `and ${st.explained} explanation${st.explained === 1 ? '' : 's'}.`;
+  }
+  if (st.applied > 0) {
+    return `Earned by ${st.applied} verified exercise${st.applied === 1 ? '' : 's'} — `
+      + 'checked mechanically, not judged.';
+  }
+  if (st.explained > 0) {
+    return `Earned by ${st.explained} explanation${st.explained === 1 ? '' : 's'}, judged by the tutor. `
+      + 'No exercise has confirmed it.';
+  }
+  if (st.struggled > 0) return 'You have attempted this and not landed it yet.';
+  return 'Seen, but nothing recorded yet.';
+}
+
+/** Days until this level decays, using the same windows the graph's rings use. */
+function daysUntilDecay(effective: string, lastReinforced: string, now = new Date()): number | null {
+  const window = effective === 'mastered' ? DECAY.masteredDays
+    : effective === 'practicing' ? DECAY.practicingDays : null;
+  if (window == null) return null;
+  const elapsed = Math.floor((now.getTime() - new Date(lastReinforced).getTime()) / 86_400_000);
+  return Math.max(0, window - elapsed);
+}
 
 const MASTERY_LABEL: Record<string, string> = {
   unseen: 'not started',
@@ -111,6 +152,8 @@ export function PagePanel({ slug }: { slug: string | null }) {
   const edges = page.edges ?? {};
   const neighbors = page.neighbors ?? {};
   const warnings: string[] = page.page.warnings ?? [];
+  const standing = page.standing ?? null;
+  const decayIn = standing ? daysUntilDecay(standing.effective, standing.lastReinforced) : null;
   const groups = GROUPS
     .map((g) => ({ g, edges: (edges[g.dir] ?? []).filter((e: any) => e.type === g.type) }))
     .filter(({ edges: es }) => es.length > 0);
@@ -127,6 +170,36 @@ export function PagePanel({ slug }: { slug: string | null }) {
         {page.page.domain && <span className="page-chip">{page.page.domain}</span>}
         {(meta.tags ?? []).map((t: string) => <span key={t} className="page-chip page-tag">#{t}</span>)}
       </div>
+
+      {standing && (
+        <section className="page-standing">
+          <h3>Your standing</h3>
+          <p className="page-standing-level">
+            <MasteryDot level={standing.effective} />
+            <span>{MASTERY_LABEL[standing.effective] ?? standing.effective}</span>
+            {/* Only shown when the stored level and the decay-adjusted one disagree: that gap is
+                the single most confusing thing the mastery model does, and it is invisible today. */}
+            {standing.effective !== standing.level && (
+              <em className="page-standing-decayed">
+                — was {MASTERY_LABEL[standing.level] ?? standing.level}, decayed since {standing.lastReinforced}
+              </em>
+            )}
+          </p>
+          <p className="page-standing-why">{standingLine(standing)}</p>
+          {decayIn != null && (
+            <p className="page-standing-decay">
+              {decayIn === 0
+                ? 'Due for review now.'
+                : `Holds for ${decayIn} more day${decayIn === 1 ? '' : 's'} without practice.`}
+            </p>
+          )}
+          {standing.misconceptions.length > 0 && (
+            <ul className="page-standing-misconceptions">
+              {standing.misconceptions.map((m: string, i: number) => <li key={i}>{m}</li>)}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Vault-authored warnings (e.g. a body that outgrew its `stub` status). Previously visible
           only to someone reading the markdown by hand. */}

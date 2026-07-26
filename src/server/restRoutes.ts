@@ -119,6 +119,34 @@ export function buildRestRoutes(
     }
   });
 
+  /**
+   * The learner's own standing on this page, plus HOW it was earned.
+   *
+   * The app has always shown a mastery LEVEL and never how the level was reached, so the one
+   * question a level provokes — "why is this only practising?" — had no answer anywhere in the UI.
+   * The data was always there: every evidence entry records its kind, and since grading.ts's
+   * capApplied, 'applied-correctly' means a machine confirmed it while 'explained-correctly' means
+   * a model judged it. Counting them is the whole feature.
+   */
+  async function readStanding(slug: string) {
+    const state = await lw.call('get_student_state', { student: cfg.student, slug }).catch(() => null);
+    const d = (state as any)?.detail;
+    if (!d) return null;
+    const evidence: { kind: string }[] = d.evidence ?? [];
+    const count = (kind: string) => evidence.filter((e) => e.kind === kind).length;
+    return {
+      level: d.level as string,
+      // `effective` is decay-adjusted — the number every query and the graph act on. Showing the
+      // stored level instead would tell the learner they are mastered while the tutor reteaches it.
+      effective: d.effective as string,
+      lastReinforced: d.last_reinforced as string,
+      applied: count('applied-correctly'),
+      explained: count('explained-correctly'),
+      struggled: count('struggled'),
+      misconceptions: (d.misconceptions ?? []) as string[],
+    };
+  }
+
   app.get('/api/page/:slug', async (c) => {
     const slug = c.req.param('slug');
     let page: any;
@@ -133,7 +161,11 @@ export function buildRestRoutes(
       if (/page not found/i.test(message)) return c.json({ error: `no page for “${slug}” yet` }, 404);
       throw e;
     }
-    return c.json({ ...page, neighbors: await resolveNeighbors(lw, cfg, page) });
+    const [neighbors, standing] = await Promise.all([
+      resolveNeighbors(lw, cfg, page),
+      readStanding(slug),
+    ]);
+    return c.json({ ...page, neighbors, standing });
   });
   app.get('/api/student', async (c) =>
     c.json(await lw.call('get_student_state', { student: cfg.student })));
