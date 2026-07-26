@@ -1694,13 +1694,18 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
   font: inherit;
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--text);
-  background: var(--bg);
-  border: 1.5px dashed var(--accent);
+  /* FIXED colours, not theme tokens, deliberately: pins float over the tutor's SVG, which has its
+     own (typically light) palette regardless of app theme — dark-mode tokens turned them into
+     unreadable black blobs over a pale diagram in the audit screenshot. Light paper chip + dark
+     text reads on the diagram in both themes; the shadow separates it from busy artwork. */
+  color: #26241f;
+  background: #fdfbf6;
+  border: 1.5px dashed #3b5b8c;
   border-radius: 999px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
-.label-pin.is-placed { border-style: solid; background: var(--accent-soft); }
+.label-pin.is-placed { border-style: solid; background: #e7ecf4; }
 /* While a label is selected, every pin is a live target — make that legible. */
 .label-pin.is-target { box-shadow: 0 0 0 3px var(--accent-soft); }
 .label-tray { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 0.2rem; }

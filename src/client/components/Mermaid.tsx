@@ -24,7 +24,10 @@ export function Mermaid({ chart }: { chart: string }) {
       try {
         const mermaid = (await import('mermaid')).default;
         // securityLevel 'strict' is mermaid's own sanitizer: no script, no foreign HTML.
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'neutral' });
+        // Theme follows the app's: 'neutral' renders white boxes, which glared out of a dark chat
+        // in the audit screenshot.
+        const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'neutral' });
         const { svg: rendered } = await mermaid.render(idRef.current, chart);
         if (!cancelled) setSvg(rendered);
       } catch {
