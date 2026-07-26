@@ -70,10 +70,8 @@ function lastUserText(messages: UIMessage[]): string {
  * sentinel telling the model to stop talking — the student's answer arrives as the NEXT message
  * (there is no HITL pause primitive in the Agent SDK's query() loop, so the sentinel + system
  * prompt instruction together stand in for one). */
-/** Same gate as the ai-sdk route's blockTools: no the-gap sidecar configured means no
- *  `code_exercise`, because a coding exercise with no sandbox behind it can only ever fail. */
-function blockMcpTools(cfg: Pick<HarnessConfig, 'gap'>) {
-  return availableBlocks(cfg).map((name) => tool(
+function blockMcpTools() {
+  return availableBlocks().map((name) => tool(
     name,
     `Present a ${name} block to the student and wait for their work.`,
     BLOCK_TOOLS[name].input.shape,
@@ -133,7 +131,7 @@ export function createClaudeSdkTutorSession(
     const activeLoreweaverTools = mode === 'freeform' ? [...TEACH_TOOLS, ...FREEFORM_EXTRA_TOOLS] : TEACH_TOOLS;
     const allowedTools = [
       ...activeLoreweaverTools.map((n) => `${LOREWEAVER_PREFIX}${n}`),
-      ...availableBlocks(cfg).map((n) => `${BLOCKS_PREFIX}${n}`),
+      ...availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`),
       // Same gate as the ai-sdk route: research when the vault has a gap, never otherwise.
       ...(gap ? SDK_RESEARCH_TOOLS : []),
     ];
@@ -156,7 +154,7 @@ export function createClaudeSdkTutorSession(
             LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
           },
         },
-        blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools(cfg) }),
+        blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools() }),
       },
       // Block/loreweaver tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK
       // executes them itself, not us). canUseTool would be the natural rewrite seam, but it is

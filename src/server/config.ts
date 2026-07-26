@@ -113,8 +113,9 @@ const configSchema = z.object({
   // tutor, which cannot use a provider-executed tool. Absent -> a local tutor has read_url but no
   // search, and instruction 13 tells it to mark what it writes as unverified.
   search: z.object({ searxng: z.string() }).optional(),
-  // Optional the-gap sidecar (code_exercise blocks — I2). Absent -> /api/gap/* routes aren't
-  // registered and the status badge is omitted, same "feature off when absent" pattern as search.
+  // Optional EXTERNAL the-gap sidecar for code_exercise blocks. Absent -> the built-in sandbox
+  // (src/server/gap/) serves /api/gap/* from this process, so code exercises work out of the box;
+  // set a url to route to the full sidecar instead (mined artifacts, more patterns).
   gap: z.object({ url: z.string() }).optional(),
   schedule: z.object({
     digestHour: z.number().int().min(0).max(23).default(9),

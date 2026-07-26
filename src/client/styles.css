@@ -1367,6 +1367,13 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; }
 .structured-left { flex: 1; min-width: 0; }
 .structured-check button { margin-top: 0.6rem; }
 .structured-answer { margin: 0.3rem 0 0; }
+/* The as-you-type rendering of the answer (AnswerPreview). Quiet on purpose: it confirms, it does
+   not compete with the input. Appears only when the display form differs from the raw characters. */
+.structured-preview {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
 
 /* ── Paths (syllabus) ────────────────────────────────── */
 .paths-section { margin-bottom: 1rem; }

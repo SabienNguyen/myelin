@@ -70,22 +70,17 @@ describe('the server build', () => {
 });
 
 describe('blocks the tutor is allowed to use', () => {
-  it('withholds code_exercise when no coding sandbox is configured', async () => {
-    // A fresh install has no the-gap sidecar — it is a separate service, absent by default. Without
-    // this gate the tutor opened a coding exercise anyway, the block fetched /api/gap/ladder against
-    // routes that were never registered, and the learner's first programming lesson ended in
-    // "This exercise can't start right now." Seen in a screenshot of the packaged app.
+  it('offers code_exercise unconditionally, because the sandbox ships built-in', async () => {
+    // History, briefly: this test used to assert the OPPOSITE — code_exercise withheld when no
+    // the-gap sidecar was configured, because a tool whose backend cannot exist is not a tool.
+    // The backend now always exists: src/server/gap/ serves the ladder and runs code in a
+    // killable child process, in this very server. The withholding gate would only ever be
+    // reintroduced deliberately, and this test is here to make that a decision, not an accident.
     const { availableBlocks } = await import('../src/server/session.js');
-    expect(availableBlocks({} as any)).not.toContain('code_exercise');
-    expect(availableBlocks(undefined)).not.toContain('code_exercise');
-    // Everything else is unconditional, so withholding one must not withhold five.
-    expect(availableBlocks({} as any)).toContain('quiz');
-    expect(availableBlocks({} as any)).toContain('structured_check');
-  });
-
-  it('offers it once a sandbox is configured', async () => {
-    const { availableBlocks } = await import('../src/server/session.js');
-    expect(availableBlocks({ gap: { url: 'http://localhost:4930' } } as any)).toContain('code_exercise');
+    const blocks = availableBlocks();
+    expect(blocks).toContain('code_exercise');
+    expect(blocks).toContain('quiz');
+    expect(blocks).toContain('structured_check');
   });
 });
 

@@ -205,11 +205,16 @@ systemctl --user daemon-reload
 systemctl --user enable --now loreweaver-harness
 ```
 
-**Optional: the Gap sidecar (code-exercise blocks).** [The Gap](~/Dev/personal/the-gap) is a
-separate repo providing gauntlet-graded coding ladders on `:4930` (+ its own dev UI on `:4931`,
-unused by the harness until the code_exercise block ports it in a later task). If installed,
-point `harness.config.json`'s `gap.url` at it (default `http://localhost:4930`) — absent, the
-`/api/gap/*` proxy routes and the `gap` status badge simply don't register.
+**Code exercises work out of the box.** The harness ships a built-in coding sandbox
+(`src/server/gap/`): the stream-consumer ladder plus a grader that runs submissions in a spawned
+child process with a hard wall-clock kill — so an unbounded loop in learner code dies at 6s instead
+of hanging the tutor. Nothing to install, nothing to configure; `/api/gap/*` serves from the app's
+own process and the `stream-consumer` pattern page is seeded at boot.
+
+**Optional: the external Gap sidecar (more patterns).** [The Gap](~/Dev/personal/the-gap) is a
+separate repo providing the fuller ladder stack on `:4930` (mined artifacts, additional patterns,
+its own dev UI on `:4931`). If installed, point `harness.config.json`'s `gap.url` at it (default
+`http://localhost:4930`) — a configured url takes precedence over the built-in sandbox.
 ```bash
 cp systemd/the-gap.service ~/.config/systemd/user/
 systemctl --user daemon-reload
@@ -223,9 +228,9 @@ once it's up.
 
 **One place to learn:** the tutor UI on `:4173` is the product surface — code exercises render as
 blocks in its Stage, pattern pages live in its vault/graph, and evidence lands in the same student
-model as every other subject. The gap sidecar (`:4930`, plus its dev UI on `:4931`) is
+model as every other subject. The sandbox — built-in or the `:4930` sidecar — is
 infrastructure: don't open it to learn; it only serves ladders and runs tests for the harness.
-With the sidecar configured, the harness also seeds a stub vault page per ladder pattern at boot
+The harness also seeds a stub vault page per ladder pattern at boot
 (`src/server/seedPatternPages.ts`) and the Library tab grows a "Practice" section listing each
 pattern with an owned/rented/new badge derived from the student model (effective practicing or
 better → owned; exposed → rented; no record → new); clicking a row simply asks the tutor to run a

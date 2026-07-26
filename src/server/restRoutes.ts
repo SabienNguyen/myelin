@@ -179,7 +179,9 @@ export function buildRestRoutes(
       const backlog = !up && backlogDays(cfg.vault) > cfg.schedule.ankiBacklogNudgeDays;
       extra.anki = up ? 'up' : backlog ? 'backlog' : 'down';
     }
-    if (cfg.gap) extra.gap = (await isGapUp(cfg)) ? 'up' : 'down';
+    // Unconditional: with no external sidecar configured, isGapUp reports the built-in
+    // sandbox — in-process, so up iff this server is.
+    extra.gap = (await isGapUp(cfg)) ? 'up' : 'down';
     return c.json({ ...status, ...extra });
   });
   return app;

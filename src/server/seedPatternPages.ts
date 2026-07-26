@@ -56,10 +56,9 @@ const PATTERN_PAGES: PatternPageSeed[] = [
  * if) that slug doesn't already exist. Never overwrites — a page that has grown past the stub
  * (the tutor filled it in, or it earned a 'draft'/'solid' status some other way) is left alone,
  * so re-running this on every boot is safe and cheap (one `listSlugs()` glob plus zero or more
- * `write_page` calls). No-ops entirely when `cfg.gap` is absent — same "feature off when config
- * absent" pattern as gapProxy.ts's buildGapRoutes, since there's no ladder to seed a page for. */
+ * `write_page` calls). No gate on cfg.gap any more: the built-in sandbox (gap/service.ts) means
+ * there is ALWAYS at least the stream-consumer ladder to seed a page for. */
 export async function seedPatternPages(lw: Loreweaver, cfg: HarnessConfig): Promise<void> {
-  if (!cfg.gap) return;
   const existing = new Set(await lw.listSlugs());
   for (const page of PATTERN_PAGES) {
     if (existing.has(page.slug)) continue;

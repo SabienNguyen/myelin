@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { buildGapRoutes, isGapUp } from '../src/server/gapProxy.js';
+import { buildBuiltinGapRoutes } from '../src/server/gap/service.js';
 
 let server: Server;
 let base: string;
@@ -44,15 +45,35 @@ afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
 const cfg = (url?: string) => ({ gap: url ? { url } : undefined }) as any;
 
+const routes = (c: any) => buildGapRoutes(c, buildBuiltinGapRoutes);
+
 describe('gap proxy', () => {
-  it('config absent -> routes absent (404)', async () => {
-    const app = buildGapRoutes(cfg());
+  it('config absent -> the BUILT-IN sandbox answers, not a 404', async () => {
+    // The semantics this line used to assert — "no config, no code exercises" — is the fresh-install
+    // dead end the built-in service exists to remove.
+    const app = routes(cfg());
     const res = await app.request('/api/gap/ladder');
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ladder.pattern).toBe('stream-consumer');
+    // The answer-integrity invariant holds for the builtin exactly as for the sidecar: stripped
+    // for the learner's own rungs, present only on the read-only worked example.
+    for (const r of body.rungs) {
+      if (r.template === 'worked_example') expect(r.reference_answer).not.toBe('');
+      else expect(r.reference_answer).toBe('');
+    }
+  });
+
+  it('a configured external sidecar takes precedence over the builtin', async () => {
+    // base's fixture ladder has a DIFFERENT sibling than the builtin — seeing it proves the proxy
+    // won, not the builtin.
+    const app = routes(cfg(base));
+    const body = await (await app.request('/api/gap/ladder')).json();
+    expect(body.ladder.siblingArtifactId).toBe('paginated-fetcher');
   });
 
   it('passes through GET /api/gap/ladder, preserving reference_answer stripping', async () => {
-    const app = buildGapRoutes(cfg(base));
+    const app = routes(cfg(base));
     const res = await app.request('/api/gap/ladder');
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -61,7 +82,7 @@ describe('gap proxy', () => {
   });
 
   it('passes through POST /api/gap/run body (incl. trace)', async () => {
-    const app = buildGapRoutes(cfg(base));
+    const app = routes(cfg(base));
     const res = await app.request('/api/gap/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -75,7 +96,7 @@ describe('gap proxy', () => {
   });
 
   it('sidecar down -> structured 502', async () => {
-    const app = buildGapRoutes(cfg('http://127.0.0.1:1'));
+    const app = routes(cfg('http://127.0.0.1:1'));
     const res = await app.request('/api/gap/ladder');
     expect(res.status).toBe(502);
     const body = await res.json();
@@ -84,8 +105,8 @@ describe('gap proxy', () => {
 });
 
 describe('isGapUp status ping', () => {
-  it('false when gap config absent', async () => {
-    expect(await isGapUp(cfg())).toBe(false);
+  it('true when gap config absent — the built-in sandbox is in-process', async () => {
+    expect(await isGapUp(cfg())).toBe(true);
   });
 
   it('true when sidecar answers /api/ladder', async () => {

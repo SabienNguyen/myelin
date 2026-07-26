@@ -13,6 +13,7 @@ import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
 import { buildIngestRoutes } from './ingestRoutes.js';
 import { buildGapRoutes } from './gapProxy.js';
+import { buildBuiltinGapRoutes } from './gap/service.js';
 import { buildGapHelpRoute } from './gapHelp.js';
 import { seedPatternPages } from './seedPatternPages.js';
 import { startScheduler } from './scheduler.js';
@@ -66,10 +67,10 @@ applyRoute(cfg, explicitModelRoles(), readRoute());
 preflight();
 
 const lw = await Loreweaver.connect(cfg);
-// I3: seed the-gap's ladder patterns as vault pages (idempotent, mechanical content — see
-// seedPatternPages.ts for the single-writer rationale). Gated on cfg.gap: no ladders, nothing to
-// seed.
-if (cfg.gap) await seedPatternPages(lw, cfg);
+// I3: seed the sandbox's ladder patterns as vault pages (idempotent, mechanical content — see
+// seedPatternPages.ts for the single-writer rationale). Unconditional now that the sandbox ships
+// built-in: there is always at least one ladder to give a page to.
+await seedPatternPages(lw, cfg);
 const anki = new AnkiClient();
 startScheduler(lw, cfg);
 sweepInterruptedConversions(cfg.vault); // restarts orphan in-flight conversions — mark them honestly
@@ -122,8 +123,9 @@ app.route('/', buildRestRoutes(lw, cfg, {
 }, anki));
 app.route('/', buildChatRoute(lw, cfg));
 app.route('/', buildIngestRoutes(lw, cfg));
-// No-op (empty Hono app, 404s) when cfg.gap is absent — see gapProxy.ts's buildGapRoutes doc.
-app.route('/', buildGapRoutes(cfg));
+// The coding sandbox: the built-in service (gap/service.ts) unless an external the-gap sidecar
+// is configured, in which case the proxy to it wins — see gapProxy.ts's buildGapRoutes doc.
+app.route('/', buildGapRoutes(cfg, buildBuiltinGapRoutes));
 app.route('/', buildGapHelpRoute(lw, cfg));
 // First-run readiness + the one thing a first run must supply. Mounted last so it is reachable
 // even if a feature route above is disabled.

@@ -70,7 +70,7 @@ function validate(body: HelpRequestBody): { pattern: string; rung: string; quest
 
 export function buildGapHelpRoute(lw: Loreweaver, cfg: HarnessConfig, deps: GapHelpDeps = {}) {
   const app = new Hono();
-  if (!cfg.gap) return app;
+  // No gate: with the built-in sandbox there is always a ladder to explain.
 
   app.post('/api/gap/help', async (c) => {
     const raw = await c.req.json().catch(() => ({})) as HelpRequestBody;

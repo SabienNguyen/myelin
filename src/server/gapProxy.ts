@@ -49,7 +49,13 @@ export interface GapLadderPayload {
  * endpoint for either caller to reach instead. Throws on a down/non-OK sidecar; callers translate
  * that into their own error shape. */
 export async function fetchLadderPayload(cfg: HarnessConfig): Promise<GapLadderPayload> {
-  if (!cfg.gap) throw new Error('gap sidecar not configured');
+  // No external sidecar -> the built-in sandbox's ladder, through the same stripped payload
+  // builder its own HTTP route serializes. Lazy import so gapProxy (which the client help route
+  // and ingestRepo also pull in) does not eagerly load the exercise content it usually won't need.
+  if (!cfg.gap) {
+    const { builtinLadderPayload } = await import('./gap/service.js');
+    return builtinLadderPayload();
+  }
   const base = cfg.gap.url.replace(/\/$/, '');
   const res = await fetch(`${base}/api/ladder`, { signal: AbortSignal.timeout(PROXY_TIMEOUT_MS) });
   const data = await res.json();
@@ -63,12 +69,15 @@ export async function fetchLadderPayload(cfg: HarnessConfig): Promise<GapLadderP
  * this proxy ever sees the payload, so there is nothing to strip or re-add here — this proxy
  * must not touch response bodies beyond re-serializing them as JSON. Degrades LOUDLY: a
  * sidecar-down response is a structured 502 { error }, never a swallowed empty result, because
- * a code exercise silently failing to load looks like a harness bug, not "sidecar's off". When
- * cfg.gap is absent the returned app has no routes registered at all — /api/gap/* 404s upstream,
- * same "feature off when config absent" pattern as buildWebTools. */
-export function buildGapRoutes(cfg: HarnessConfig) {
+ * a code exercise silently failing to load looks like a harness bug, not "sidecar's off".
+ *
+ * When cfg.gap is absent this returns the BUILT-IN sandbox's routes instead (gap/service.ts) —
+ * the sandbox stopped being an optional extra when it started shipping inside the harness. A
+ * configured gap.url still wins, because the external sidecar is the fuller thing (mined
+ * artifacts, more patterns). */
+export function buildGapRoutes(cfg: HarnessConfig, builtin: () => Hono) {
+  if (!cfg.gap) return builtin();
   const app = new Hono();
-  if (!cfg.gap) return app;
 
   const base = cfg.gap.url.replace(/\/$/, '');
 
@@ -113,7 +122,7 @@ const statusCache = new WeakMap<object, { at: number; up: boolean }>();
  * make a 30s poll loop built on it nearly useless. Returns false (never throws) when cfg.gap is
  * absent or the sidecar is unreachable, same contract as isGapUp. */
 export async function pingGapOnce(cfg: HarnessConfig): Promise<boolean> {
-  if (!cfg.gap) return false;
+  if (!cfg.gap) return true; // the built-in sandbox is in-process — it is up iff we are
   try {
     const res = await fetch(`${cfg.gap.url.replace(/\/$/, '')}/api/ladder`, {
       signal: AbortSignal.timeout(STATUS_PING_TIMEOUT_MS),
@@ -128,7 +137,7 @@ export async function pingGapOnce(cfg: HarnessConfig): Promise<boolean> {
  * stays cheap under repeated polling. Returns false (not a thrown error) when cfg.gap is absent
  * or the sidecar is unreachable — status checks never throw. */
 export async function isGapUp(cfg: HarnessConfig): Promise<boolean> {
-  if (!cfg.gap) return false;
+  if (!cfg.gap) return true; // built-in, in-process
   const now = Date.now();
   const cached = statusCache.get(cfg);
   if (cached && now - cached.at < STATUS_CACHE_MS) return cached.up;

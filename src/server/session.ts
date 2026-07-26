@@ -88,25 +88,25 @@ function guardMcpTools(tools: ToolSet, student: string, knownSlugs: string[]): T
 }
 
 /**
- * Which block tools the tutor may actually use.
+ * Which block tools the tutor may use: all of them, including `code_exercise`.
  *
- * `code_exercise` is withheld unless a the-gap sidecar is configured, and that is not a detail. The
- * sidecar is a separate service, absent by default — so on a fresh install the tutor would cheerfully
- * open a coding exercise, the block would fetch `/api/gap/ladder` against routes that were never
- * registered, and the learner's first programming lesson would end in "This exercise can't start
- * right now." The block handles that state honestly (CodeExercise.tsx) and it should still never be
- * reached: a tool whose backend cannot exist is not a tool.
- *
- * Frontend tools: no execute — the loop pauses; the browser supplies output via addToolOutput.
- * (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats tool()'s
- * generic overload inference, which otherwise falls back to Tool<never, never, ...>.)
+ * That last one was briefly withheld when no the-gap sidecar was configured, because a tool whose
+ * backend cannot exist is not a tool — a fresh install's first programming lesson ended in "This
+ * exercise can't start right now." The right fix turned out to be one level down: the sandbox now
+ * ships INSIDE the harness (gap/service.ts, child-process runner and all), so the backend always
+ * exists and the gate came back out. Kept as a named function because claudeSdkTutor builds its
+ * allowlist from the same answer, and because the next conditional block (if one ever appears)
+ * belongs here, not scattered across two tutors.
  */
-export function availableBlocks(cfg?: Pick<HarnessConfig, 'gap'>): BlockToolName[] {
-  return BLOCK_TOOL_NAMES.filter((name) => name !== 'code_exercise' || Boolean(cfg?.gap));
+export function availableBlocks(): BlockToolName[] {
+  return [...BLOCK_TOOL_NAMES];
 }
 
-export function blockTools(cfg?: Pick<HarnessConfig, 'gap'>): ToolSet {
-  return Object.fromEntries(availableBlocks(cfg).map((name) => [name, tool({
+/** Frontend tools: no execute — the loop pauses; the browser supplies output via addToolOutput.
+ *  (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats
+ *  tool()'s generic overload inference, which otherwise falls back to Tool<never, never, ...>.) */
+export function blockTools(): ToolSet {
+  return Object.fromEntries(availableBlocks().map((name) => [name, tool({
     description: `Present a ${name} block to the student and wait for their work.`,
     inputSchema: BLOCK_TOOLS[name].input as z.ZodTypeAny,
   })]));
@@ -371,7 +371,7 @@ export function createTutorSession(
         const agent = new ToolLoopAgent({
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
-          tools: { ...activeMcp, ...webTools, ...ingestTools, ...blockTools(cfg) },
+          tools: { ...activeMcp, ...webTools, ...ingestTools, ...blockTools() },
           stopWhen: isStepCount(24),
         });
 

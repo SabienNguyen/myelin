@@ -49,7 +49,10 @@ describe('seedPatternPages', () => {
     expect(page.meta.status).toBe('solid');
   });
 
-  it('no-ops entirely when cfg.gap is absent', async () => {
+  it('seeds even when cfg.gap is absent — the built-in sandbox always has a ladder', async () => {
+    // Inverted from "no-ops entirely when cfg.gap is absent": with the sandbox shipping inside the
+    // harness, a fresh install with zero config still gets the stream-consumer pattern page, which
+    // is what gives code_exercise's pageSlug and record_evidence something real to target.
     const vault2 = mkdtempSync(join(tmpdir(), 'lwh-seed-vault2-'));
     mkdirSync(join(vault2, 'pages'), { recursive: true });
     const cfgNoGap = {
@@ -59,7 +62,7 @@ describe('seedPatternPages', () => {
     const lw2 = await Loreweaver.connect(cfgNoGap);
     try {
       await seedPatternPages(lw2, cfgNoGap);
-      expect(await lw2.listSlugs()).toEqual([]);
+      expect(await lw2.listSlugs()).toContain('stream-consumer');
     } finally {
       await lw2.close();
     }

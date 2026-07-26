@@ -93,12 +93,15 @@ const validBody = {
 };
 
 describe('POST /api/gap/help', () => {
-  it('config absent -> route absent (404)', async () => {
-    const app = buildGapHelpRoute(fakeLw(), cfgFor(undefined, 'ollama:x'));
+  it('config absent -> answers from the BUILT-IN ladder, not a 404', async () => {
+    // This asserted a 404 when the sandbox was an optional external service. It ships built-in
+    // now, so a learner with no config at all still gets help grounded in real rung data.
+    const app = buildGapHelpRoute(fakeLw(), cfgFor(undefined, 'ollama:x'), { model: mockModel('try the buffer') });
     const res = await app.request('/api/gap/help', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(validBody),
     });
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    expect((await res.json()).hint).toBe('try the buffer');
   });
 
   it('validates required fields (400 on missing/malformed body)', async () => {
