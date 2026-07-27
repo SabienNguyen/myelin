@@ -9,6 +9,8 @@ import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { findCanonicalPapers, findRecentPapers } from './frontierResearch.js';
+import { extractReferences } from './references.js';
+import { readQueue } from './queueStore.js';
 import { gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Loreweaver } from './mcp.js';
@@ -322,7 +324,7 @@ export function buildCourseTools(vault: string): ToolSet {
  * about. Every mode gets it: asking about the frontier is a reading activity, not a vault write.
  * `fetchImpl` injected for tests. Exported for claudeSdkTutor.ts's SDK wrappers.
  */
-export function buildFrontierTools(fetchImpl: typeof fetch = fetch): ToolSet {
+export function buildFrontierTools(vault?: string, fetchImpl: typeof fetch = fetch): ToolSet {
   return {
     find_recent_papers: tool({
       description: 'Search the live literature indices (arXiv preprints + Crossref published '
@@ -342,6 +344,33 @@ export function buildFrontierTools(fetchImpl: typeof fetch = fetch): ToolSet {
           };
         } catch (e: any) {
           return { error: `could not reach the literature indices: ${e?.message ?? e}` };
+        }
+      },
+    }),
+    paper_references: tool({
+      description: 'The references of an INGESTED paper or book chapter, parsed from the source '
+        + 'itself — citation chasing. Use when the student wants to go deeper than the current '
+        + 'paper: present the actionable ones (those with a url) as next reads and offer '
+        + 'ingest_url (pdfUrl when present, else url). Entries without an id are listed for '
+        + 'manual searching — say so.',
+      inputSchema: z.object({
+        title: z.string().describe('the source title as the Library shows it'),
+      }),
+      execute: async ({ title }: { title: string }) => {
+        if (!vault) return { error: 'no vault configured for reference lookup' };
+        const want = title.trim().toLowerCase();
+        const entry = readQueue(vault).find((e) => e.chapter?.startsWith('raw/')
+          && (e.title?.toLowerCase().includes(want) || e.book?.toLowerCase().includes(want)));
+        if (!entry) return { error: `no ingested source matches "${title}"` };
+        try {
+          const { readFileSync } = await import('node:fs');
+          const { join } = await import('node:path');
+          const refs = extractReferences(readFileSync(join(vault, entry.chapter), 'utf8'));
+          return refs.length
+            ? { source: entry.title, references: refs }
+            : { source: entry.title, references: [], note: 'no references section found in this source' };
+        } catch (e: any) {
+          return { error: `could not read the source: ${e?.message ?? e}` };
         }
       },
     }),
@@ -549,7 +578,7 @@ export function createTutorSession(
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
           tools: {
-            ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(), ...webTools, ...ingestTools,
+            ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(cfg.vault), ...webTools, ...ingestTools,
             ...generateTool, ...blockTools(),
           },
           stopWhen: isStepCount(24),
