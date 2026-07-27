@@ -84,6 +84,17 @@ export function sanitizeToolArgs(args: any, toolName: string, student: string, k
     && out.misconception == null && typeof out.note === 'string' && out.note) {
     out.misconception = out.note;
   }
+  // Models sometimes double-escape newlines in block-tool JSON, and the learner then reads a
+  // literal "\n\n" mid-question (seen live in a structured_check prompt). Only the two-newline
+  // signature is unescaped: a lone "\n" is ambiguous with LaTeX commands a prose prompt can
+  // legitimately embed ("$\nu$"), but backslash-n-backslash-n collides with nothing.
+  if ((BLOCK_TOOL_NAMES as readonly string[]).includes(toolName)) {
+    for (const f of ['prompt', 'question', 'title'] as const) {
+      if (typeof out[f] === 'string' && (out[f] as string).includes('\\n\\n')) {
+        out[f] = (out[f] as string).replaceAll('\\n\\n', '\n\n');
+      }
+    }
+  }
   return out;
 }
 

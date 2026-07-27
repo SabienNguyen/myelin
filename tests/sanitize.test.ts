@@ -63,3 +63,29 @@ describe('sanitizeToolArgs (MCP tool guard)', () => {
     ).misconception).toBeUndefined();
   });
 });
+
+// Models sometimes double-escape newlines in block-tool JSON — the learner then reads a literal
+// "\n\n" mid-question (seen live in a structured_check prompt during the KV-cache sitting).
+describe('sanitizeToolArgs — double-escaped newlines in block prose', () => {
+  it('unescapes the \\n\\n signature in a block prompt', () => {
+    const clean = sanitizeToolArgs(
+      { prompt: 'A request uses 32K tokens.\\n\\nHow many GiB?', pageSlug: 'kv-cache', checker: { kind: 'numeric', expected: 4 } },
+      'structured_check', 'sabien',
+    );
+    expect(clean.prompt).toBe('A request uses 32K tokens.\n\nHow many GiB?');
+  });
+  it('leaves lone \\n alone — it is ambiguous with LaTeX commands in prose ($\\nu$)', () => {
+    const clean = sanitizeToolArgs(
+      { question: 'The frequency $\\nu$ is 5 Hz.\\nCompute the period.', pageSlug: 'waves' },
+      'quick_check', 'sabien',
+    );
+    expect(clean.question).toBe('The frequency $\\nu$ is 5 Hz.\\nCompute the period.');
+  });
+  it('does not touch non-block tools', () => {
+    const clean = sanitizeToolArgs(
+      { note: 'literal\\n\\nstays', slug: 's', kind: 'exposed' },
+      'record_evidence', 'sabien',
+    );
+    expect(clean.note).toBe('literal\\n\\nstays');
+  });
+});
