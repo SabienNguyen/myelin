@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  fetchVideoTranscript, isVideoUrl, parseVtt, transcriptMarkdown, type ExecLike,
+  fetchVideoTranscript, isVideoUrl, linkifyTimestamps, parseVtt, transcriptMarkdown, type ExecLike,
 } from '../src/server/videoIngest.js';
 
 describe('isVideoUrl — conservative YouTube-shape detection', () => {
@@ -90,6 +90,31 @@ describe('transcriptMarkdown', () => {
   it('deep links append with & when the URL already carries a query', () => {
     const md = transcriptMarkdown({ ...meta, url: 'https://www.youtube.com/watch?v=abc' }, parseVtt(VTT));
     expect(md).toContain('(https://www.youtube.com/watch?v=abc&t=1s)');
+  });
+});
+
+describe('linkifyTimestamps — compiled-page stamps become deep links', () => {
+  const URL = 'https://www.youtube.com/watch?v=abc';
+
+  it('links plain stamps, parenthesized or bare, minute and hour forms', () => {
+    const out = linkifyTimestamps('slice the disk ([1:05]) and see [1:02:03] for the theorem', URL);
+    expect(out).toContain('([\\[1:05\\]](https://www.youtube.com/watch?v=abc&t=65s))');
+    expect(out).toContain('[\\[1:02:03\\]](https://www.youtube.com/watch?v=abc&t=3723s)');
+  });
+
+  it('leaves stamps that are already links untouched', () => {
+    const already = 'see [\\[0:12\\]](https://youtu.be/x?t=12s) and [2:40](https://youtu.be/x?t=160s)';
+    expect(linkifyTimestamps(already, URL)).toBe(already);
+  });
+
+  it('idempotent: a second pass changes nothing', () => {
+    const once = linkifyTimestamps('the rings appear at [2:40].', URL);
+    expect(linkifyTimestamps(once, URL)).toBe(once);
+  });
+
+  it('does not invent links from non-time bracket text', () => {
+    const text = 'a citation [12] and a matrix [1,2] and prose [see below]';
+    expect(linkifyTimestamps(text, URL)).toBe(text);
   });
 });
 

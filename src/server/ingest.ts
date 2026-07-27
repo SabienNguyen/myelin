@@ -17,6 +17,7 @@ import {
   readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
 import { sanitizeToolArgs } from './session.js';
+import { isVideoUrl, linkifyTimestamps } from './videoIngest.js';
 
 /** Injectable seam for tests — see claudeSdk.ts. */
 export interface CompileDeps {
@@ -448,15 +449,20 @@ export async function compileOne(
     // Citation is a MECHANICAL guarantee on the ai-sdk path, not a prompt hope: every write_page
     // during this compile gets the canonical source merged into its sources array, whether or not
     // the model remembered. Papers cite their fetch URL; book chapters cite book + chapter.
+    // Video-sourced compiles get one more mechanical pass: plain [M:SS] stamps the model kept as
+    // citation anchors become deep links into the video, so the COMPILED page can jump to the
+    // exact second the way the raw transcript already does.
     const citation = entry.sourceUrl
       ? `${entry.book} (${entry.sourceUrl})`
       : `${entry.book} — ${entry.title}`;
+    const videoUrl = entry.sourceUrl && isVideoUrl(entry.sourceUrl) ? entry.sourceUrl : null;
     const withCitation = (tools: ToolSet): ToolSet =>
       Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, name !== 'write_page' ? t : {
         ...t,
         execute: t.execute
           ? (args: any, execOpts: any) => t.execute({
             ...args,
+            ...(videoUrl && typeof args?.body === 'string' ? { body: linkifyTimestamps(args.body, videoUrl) } : {}),
             sources: [...new Set([...(Array.isArray(args?.sources) ? args.sources : []), citation])],
           }, execOpts)
           : t.execute,

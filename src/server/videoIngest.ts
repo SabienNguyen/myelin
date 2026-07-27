@@ -92,6 +92,27 @@ export function atTime(url: string, seconds: number): string {
   return `${url}${url.includes('?') ? '&' : '?'}t=${Math.floor(seconds)}s`;
 }
 
+/**
+ * Turn plain [M:SS] / [H:MM:SS] references into deep links to those seconds of the video.
+ *
+ * Compiled pages cite transcript moments as "([2:40])" — the compile model keeps the stamps as
+ * citation anchors, but as dead text. This runs mechanically over write_page bodies during a
+ * video-sourced compile (the same seam that guarantees citations — ingest.ts's withCitation), so
+ * a learner reading the COMPILED page can jump into the video exactly like a learner reading the
+ * raw transcript. Stamps that are already link text (\[0:12\]) or link labels stay untouched.
+ */
+export function linkifyTimestamps(markdown: string, videoUrl: string): string {
+  return markdown.replace(
+    /(\\?)\[(\d{1,2}):(\d{2})(?::(\d{2}))?\](\]\(|\()?/g,
+    (whole, escaped, a, b, c, tail) => {
+      if (escaped || tail === '](' || tail === '(') return whole; // already a link, or link syntax
+      const seconds = c ? Number(a) * 3600 + Number(b) * 60 + Number(c) : Number(a) * 60 + Number(b);
+      const label = c ? `${a}:${b}:${c}` : `${a}:${b}`;
+      return `[\\[${label}\\]](${atTime(videoUrl, seconds)})`;
+    },
+  );
+}
+
 /** Cues grouped into readable timestamped paragraphs. One [M:SS] per ~500 characters of speech —
  *  dense enough to find a moment in the video, sparse enough to read as prose. Each stamp is a
  *  DEEP LINK to that second of the video (Electron routes external links to the system browser),

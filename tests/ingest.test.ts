@@ -502,6 +502,53 @@ describe('mechanical citation on write_page', async () => {
     expect(seen[0].sources).toContain('model-added');
     expect(seen[0].sources).toContain('Attention Is All You Need (https://arxiv.org/pdf/1706.03762)');
   });
+
+  it('a video-sourced compile also linkifies plain [M:SS] stamps in the body', async () => {
+    const vault = mkTmp(j(tmpD(), 'lwh-vstamp-'));
+    mkDir(j(vault, 'raw', 'uploads', 'v'), { recursive: true });
+    writeF(j(vault, 'raw', 'uploads', 'v', 'paper.md'), '# V\ntranscript');
+    mkDir(j(vault, '.harness'), { recursive: true });
+    writeF(j(vault, '.harness', 'compile-queue.json'), JSON.stringify([{
+      book: 'The essence of calculus', chapter: 'raw/uploads/v/paper.md', title: 'The essence of calculus',
+      status: 'pending', sourceUrl: 'https://www.youtube.com/watch?v=WUvTyaaNkzM',
+    }]));
+
+    const stampModel = new MockLanguageModelV3({
+      doGenerate: [
+        {
+          content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'write_page',
+            input: JSON.stringify({ slug: 'rings', title: 'Rings', body: 'slice the disk ([2:40])', sources: [] }) }],
+          finishReason: { unified: 'tool-calls', raw: 'tool_use' },
+          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined } },
+          warnings: [],
+        },
+        {
+          content: [{ type: 'text', text: 'done' }],
+          finishReason: { unified: 'stop', raw: 'end_turn' },
+          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined } },
+          warnings: [],
+        },
+      ],
+    });
+
+    const seen: any[] = [];
+    const fakeLw = {
+      listSlugs: async () => [],
+      tools: async () => ({
+        write_page: tool({
+          description: 'w', inputSchema: z.object({}).passthrough() as any,
+          execute: async (args: any) => { seen.push(args); return { ok: true }; },
+        }),
+      }),
+    } as any;
+
+    const res = await compileNext(fakeLw, { vault, student: 'kid', models: {} } as any, 1,
+      { model: stampModel as any });
+    expect(res).toEqual({ compiled: 1, failed: 0 });
+    expect(seen[0].body).toBe('slice the disk ([\\[2:40\\]](https://www.youtube.com/watch?v=WUvTyaaNkzM&t=160s))');
+  });
 });
 
 describe('sweepInterruptedConversions', async () => {
