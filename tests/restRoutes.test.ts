@@ -510,6 +510,16 @@ describe('GET /api/source — the reader is served only vault raw files', () => 
   it('a missing file is a 404, not a crash', async () => {
     expect((await app().request('/api/source?path=raw%2Fuploads%2Fnope.md')).status).toBe(404);
   });
+
+  it('a symlink inside raw/ pointing outside the vault does not win', async () => {
+    // The prefix check passes (the PATH is inside raw/) — only the realpath re-check catches
+    // this. The route's own comment promises it; this is the promise, held.
+    const { symlinkSync } = require('node:fs') as typeof import('node:fs');
+    symlinkSync(join(vault, 'secret.md'), join(vault, 'raw', 'uploads', 'sneaky.md'));
+    const res = await app().request('/api/source?path=raw%2Fuploads%2Fsneaky.md');
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/escapes the vault/);
+  });
 });
 
 describe('student profiles — one vault, several learners', () => {

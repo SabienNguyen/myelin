@@ -138,3 +138,14 @@ Written after the sprint that followed the original verdict; each line names its
   server on a free port (API answering over HTTP), and rendered the first-run key screen with
   the correct fallback copy for "Claude Code installed but not signed in" — the honest no-key
   state, screenshotted. The packaging pipeline produces a runnable product, not just a file.
+- **Hardening sweep (post-smoke).** An axe-core scan of all four tabs plus the open history menu
+  found one violation kind in the entire app (Library heading levels) — fixed, re-scanned to
+  zero. Markdown rendering proven inert against injected content by pinned tests: raw HTML
+  escapes to text, javascript: hrefs are defanged, KaTeX input stays escaped — vault pages come
+  from ingested material, so this is a real boundary, not paranoia. The /api/source symlink
+  escape (promised in a comment, previously untested) now has the test that holds the promise.
+  Two live-audit finds fixed the same day: a config with explicitly pinned API models made
+  "Use my Claude subscription" a silent no-op (route now reroutes explicit plain models through
+  the login, keeping the exact model), and the suite's last unnamed transient failure was
+  root-caused to a test-double fidelity gap in codeexercise (passive-effect mount report
+  clobbering a typed edit) — fixed, 8/8 consecutive green.
