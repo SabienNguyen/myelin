@@ -476,3 +476,72 @@ describe('step boundary — a grade turn must not re-trigger the client auto-res
     expect(stepAt).toBeGreaterThan(gradedAt);
   }, 30_000);
 });
+
+describe('freeform research grant', () => {
+  // The cold-start sitting that motivated this: freeform always spreads WebSearch/WebFetch into
+  // allowedTools, but the system prompt said they arrive only with a HARNESS gap line — which
+  // freeform never sends. The model obeyed and compiled a brand-new subject from memory. The
+  // prompt and the grant must agree, and a research call must be visible in the stream.
+  it('tells the model its web tools are live, allows create_path, and streams the WebSearch call', async () => {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-ff');
+      yield assistantMsg('sess-ff', [
+        { type: 'tool_use', id: 'tc-ws', name: 'WebSearch', input: { query: 'music harmony basics' } },
+      ]);
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tc-ws', content: [{ type: 'text', text: 'results' }] }] },
+        parent_tool_use_id: null, uuid: 'u-user-ws', session_id: 'sess-ff',
+      } as any;
+      yield assistantMsg('sess-ff', [
+        { type: 'tool_use', id: 'tc-wf', name: 'WebFetch', input: { url: 'https://example.org', prompt: 'read it' } },
+      ]);
+      yield {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tc-wf', is_error: true, content: [{ type: 'text', text: 'Socket is closed' }] }] },
+        parent_tool_use_id: null, uuid: 'u-user-wf', session_id: 'sess-ff',
+      } as any;
+      yield assistantMsg('sess-ff', [{ type: 'text', text: 'Here is what I found.' }]);
+      yield resultMsg('sess-ff');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    const chunks = chunksOf(await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me harmony' }] }] as any,
+      'freeform', 'thread-ff',
+    )));
+
+    expect(calls[0].options.allowedTools).toContain('WebSearch');
+    expect(calls[0].options.allowedTools).toContain('WebFetch');
+    expect(calls[0].options.allowedTools).toContain('mcp__loreweaver__create_path');
+    expect(calls[0].options.systemPrompt).toMatch(/available on every turn in this mode/);
+    expect(calls[0].options.systemPrompt).not.toMatch(/HARNESS gap line/);
+
+    const call = chunks.find((c) => c.type === 'tool-input-available' && c.toolCallId === 'tc-ws');
+    expect(call?.toolName).toBe('WebSearch');
+    expect(chunks.some((c) => c.type === 'tool-output-available' && c.toolCallId === 'tc-ws')).toBe(true);
+
+    // The failed WebFetch must reach the chip AS a failure: the tool_result block's is_error is
+    // the only signal, and dropping it showed "read a web page" over a dead socket.
+    const failed = chunks.find((c) => c.type === 'tool-output-available' && c.toolCallId === 'tc-wf');
+    expect(failed?.output?.isError).toBe(true);
+  }, 30_000);
+
+  it('keeps the gap-line wording outside freeform', async () => {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-ln');
+      yield assistantMsg('sess-ln', [{ type: 'text', text: 'hi' }]);
+      yield resultMsg('sess-ln');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any,
+      'learn', 'thread-ln',
+    ));
+    expect(calls[0].options.systemPrompt).toMatch(/HARNESS gap line/);
+    expect(calls[0].options.systemPrompt).not.toMatch(/available on every turn in this mode/);
+  }, 30_000);
+});

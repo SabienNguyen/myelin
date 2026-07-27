@@ -31,7 +31,10 @@ import { loadSdkSession, logGuardrail, saveSdkSession } from './sessionStore.js'
 // keep in sync by hand; a divergence here means the two tutor routes disagree on tool access.
 const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidence',
   'next_lessons', 'find_analogies', 'list_paths', 'read_path'];
-const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'compile_source'];
+// create_path is here because the bootstrap prompt orders it in freeform (goal line + cold start);
+// before it was listed, the call only ever succeeded by accident of bypassPermissions ignoring
+// allowedTools for auto-approval.
+const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'compile_source', 'create_path'];
 
 const LOREWEAVER_PREFIX = 'mcp__loreweaver__';
 const BLOCKS_PREFIX = 'mcp__blocks__';
@@ -196,10 +199,21 @@ export function createClaudeSdkTutorSession(
       // script to follow — and a live sitting caught the model inventing one: it answered "what's
       // the newest research on spaced repetition?" from recall while claiming "I read the FSRS
       // wiki page and the LECTOR paper directly", with zero tool calls in the turn.
+      // The availability clause is mode-split because a cold-start sitting hit the OPPOSITE
+      // failure: freeform always holds WebSearch/WebFetch (vaultGap returns 'freeform'
+      // unconditionally, so buildOptions always spreads SDK_RESEARCH_TOOLS in), but no HARNESS gap
+      // line is ever sent in this mode — so the model, obeying the gap-line rule, refused to
+      // research a subject the vault had never seen and compiled six pages of unsourced training
+      // knowledge instead.
       'On this route the research tools named above (`find_recent_papers`, `find_canonical_sources`, '
         + '`web_search`, `read_url`, `paper_references`, `ingest_url`) DO NOT EXIST. Your only '
-        + 'research tools are WebSearch and WebFetch, and only on turns where the harness grants '
-        + 'them (it says so in a HARNESS gap line). When the student asks what is new, recent, or '
+        + 'research tools are WebSearch and WebFetch, '
+        + (mode === 'freeform'
+          ? 'available on every turn in this mode — freeform is where a subject gets researched and '
+            + 'compiled, so search before writing pages on a subject the vault lacks, and list in a '
+            + 'page\'s `sources` only what you actually searched or fetched. '
+          : 'and only on turns where the harness grants them (it says so in a HARNESS gap line). ')
+        + 'When the student asks what is new, recent, or '
         + 'frontier and you cannot call WebSearch this turn — or the call fails — say plainly that '
         + 'you could not reach the live indices, and label anything you offer instead as unverified '
         + 'model memory with its training cutoff. NEVER claim to have read, fetched, or checked a '
@@ -474,6 +488,14 @@ export function createClaudeSdkTutorSession(
                       type: 'tool-input-available', toolCallId: block.id,
                       toolName: name.slice(LOREWEAVER_PREFIX.length), input: block.input,
                     });
+                  } else if (SDK_RESEARCH_TOOLS.includes(name)) {
+                    // Research must be visible: the sourcing honesty story rests on the learner
+                    // seeing "searched the web" in the transcript when (and only when) it happened.
+                    pendingLoreweaverCalls.add(block.id);
+                    writer.write({
+                      type: 'tool-input-available', toolCallId: block.id,
+                      toolName: name, input: block.input,
+                    });
                   }
                 }
               });
@@ -488,8 +510,15 @@ export function createClaudeSdkTutorSession(
                 for (const block of content) {
                   if (block.type === 'tool_result' && pendingLoreweaverCalls.has(block.tool_use_id)) {
                     pendingLoreweaverCalls.delete(block.tool_use_id);
-                    const output = (message as any).tool_use_result
+                    let output = (message as any).tool_use_result
                       ?? (Array.isArray(block.content) ? block.content.map((c: any) => c?.text ?? '').join(' ') : { ok: true });
+                    // A failed built-in tool (WebFetch dying on restricted egress) marks the
+                    // tool_result BLOCK is_error without any isError field on the payload — the
+                    // chip's only failure signal. Dropping it rendered "read a web page" over a
+                    // fetch that returned "Socket is closed", caught on a live cold-start sitting.
+                    if (block.is_error && !(output && typeof output === 'object' && (output as any).isError)) {
+                      output = { isError: true, content: output };
+                    }
                     writer.write({ type: 'tool-output-available', toolCallId: block.tool_use_id, output });
                   }
                 }

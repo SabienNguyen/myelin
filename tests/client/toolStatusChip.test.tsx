@@ -22,6 +22,16 @@ describe('ToolStatusChip', () => {
     expect(container.querySelector('.tool-note.failed')).toBeTruthy();
   });
 
+  it('labels create_path — a cold-start sitting watched it leak as raw "CREATE_PATH"', () => {
+    const { container } = render(<ToolStatusChip toolName="create_path" result={{ ok: true }} />);
+    expect(container.textContent).toBe('created a path');
+  });
+
+  it('labels the Agent SDK web tools under their unstripped names', () => {
+    const { container } = render(<ToolStatusChip toolName="WebSearch" result={{ ok: true }} />);
+    expect(container.textContent).toBe('searched the web');
+  });
+
   it('falls back honestly for a tool with no label entry', () => {
     const { container } = render(
       <ToolStatusChip toolName="mystery_tool" result={{ isError: true }} />,
