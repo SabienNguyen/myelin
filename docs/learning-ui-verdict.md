@@ -370,3 +370,11 @@ Written after the sprint that followed the original verdict; each line names its
   distinguished from the sitting's GQA example). Sources are listed on the page; their content
   could not be re-fetched from this container (egress), which matches the tutor's own disclosure
   at teaching time. Frontmatter is sound: prereq chain intact, difficulty set, status solid.
+- **A second domain opened (RLHF) with the research-honesty contract holding.** Asked for reward
+  models, the KL penalty, and the DPO framing, the tutor OPENED by disclosing it had no research
+  grant this turn and that the material was trained knowledge, not freshly verified — then wrote
+  the rlhf-reward-model page flagged that way and offered the freeform research path for doing
+  it properly. The Bradley-Terry teaching was correct (pairwise → sigmoid of reward difference),
+  and its shift-invariance transfer question ("+50 per prompt — does the loss change?") graded
+  the learner's cancellation answer correct with evidence recorded. The graph now grows a second
+  domain from a live sitting.
