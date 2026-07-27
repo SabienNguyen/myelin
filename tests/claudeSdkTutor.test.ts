@@ -441,3 +441,38 @@ describe('structural rule 1a — grading turns withhold the block tools', () => 
     expect(user).toContain('mcp__blocks__open_source');
   });
 });
+
+describe('step boundary — a grade turn must not re-trigger the client auto-resubmit', () => {
+  // ai@7 APPENDS a sendAutomaticallyWhen-triggered response onto the existing assistant message.
+  // Without a start-step chunk after the graded output, the block part stays inside the last step
+  // and runtime.tsx's blockOutputsComplete resubmits forever (live probe: the resumed session
+  // received the stale user text ~40 times). streamText emits this boundary on the ai-sdk route;
+  // this route's hand-rolled stream must too.
+  it('emits start-step AFTER the graded tool-output-available, so the block leaves the last step', async () => {
+    saveSdkSession(vault, 'thread-step', 'sess-step');
+    async function* fakeQuery() {
+      yield initMsg('sess-step');
+      yield assistantMsg('sess-step', [
+        { type: 'text', text: 'Graded.' },
+        { type: 'tool_use', id: 'tc-ev2', name: 'mcp__loreweaver__record_evidence', input: { student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'x' } },
+      ]);
+      yield resultMsg('sess-step');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [{
+          type: 'tool-quick_check', toolCallId: 'tc-step', state: 'output-available',
+          input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+          output: { answer: '4' },
+        }],
+      },
+    ] as any[];
+    const chunks = chunksOf(await drain(await session.respond(history, 'learn', 'thread-step')));
+    const gradedAt = chunks.findIndex((c) => c.type === 'tool-output-available' && c.toolCallId === 'tc-step');
+    const stepAt = chunks.findIndex((c) => c.type === 'start-step');
+    expect(gradedAt).toBeGreaterThanOrEqual(0);
+    expect(stepAt).toBeGreaterThan(gradedAt);
+  }, 30_000);
+});

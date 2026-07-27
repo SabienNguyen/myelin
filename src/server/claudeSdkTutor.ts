@@ -318,6 +318,14 @@ export function createClaudeSdkTutorSession(
         for (const p of pending) {
           writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
         }
+        // Step boundary before this turn's own content. streamText gives the ai-sdk route one of
+        // these per step; this hand-rolled stream never did, so on a grade turn (which ai@7
+        // APPENDS to the existing assistant message) the graded block stayed inside the "last
+        // step" and runtime.tsx's blockOutputsComplete auto-resubmitted forever — a live probe
+        // watched the resumed session receive the stale user text ~40 times. Rule 1a's structural
+        // withhold exposed this: previously the model staging a fresh block over the win
+        // falsified the predicate by accident.
+        writer.write({ type: 'start-step' });
 
         const slugs = await lw.listSlugs();
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
