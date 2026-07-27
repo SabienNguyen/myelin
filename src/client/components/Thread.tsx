@@ -110,7 +110,7 @@ function SessionPlanCta() {
   return (
     <div className="session-plan">
       <button type="button" className="primary session-plan-start" onClick={start}>
-        Start today’s session ({plan.length} items)
+        Start today’s session ({plan.length} {plan.length === 1 ? 'item' : 'items'})
       </button>
       <ol className="session-plan-preview">
         {plan.map((p) => (

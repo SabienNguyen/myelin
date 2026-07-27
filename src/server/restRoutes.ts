@@ -231,12 +231,28 @@ export function buildRestRoutes(
     const lessons = await lw.call('next_lessons', { student: cfg.student, k: CAP })
       .then((r: any) => (Array.isArray(r?.lessons) ? r.lessons : []))
       .catch(() => []);
-    const fresh = lessons
+    const freshAll = lessons
       .filter((l: any) => l?.slug && !taken.has(l.slug))
       .map((l: any) => ({
         kind: 'new' as const, slug: l.slug as string,
         why: l.reason === 'unmet-prereq' ? (l.detail ?? 'a prerequisite on your path') : 'next on your frontier',
       }));
+    // Boot-seeded pattern stubs are practice INVENTORY, not the learner's frontier. Without this
+    // filter every plan — including a brand-new install's — opened with "Consuming SSE token
+    // streams" as "next on your frontier", whatever the learner was actually studying (the
+    // cold-start audit caught it). Once evidence exists on a seeded page it reaches the plan the
+    // honest way, through the review/misconception queues above; only the 'new' door is closed.
+    const freshMeta = await Promise.all(freshAll.map((f: { slug: string }) =>
+      lw.call('read_page', { slug: f.slug })
+        .then((pg: any) => pg.page?.meta ?? null).catch(() => null)));
+    const fresh = freshAll.filter((_: unknown, i: number) => {
+      const meta = freshMeta[i];
+      if (!meta) return true;
+      const seeded = meta.status === 'stub'
+        && (Array.isArray(meta.sources) ? meta.sources : [])
+          .some((s: unknown) => /^(the-gap artifact|generated exercise) /.test(String(s)));
+      return !seeded;
+    });
 
     // Rotate the queues; whichever still has items feeds the next slot. Review leads — the most
     // urgent item should be the first thing in the sitting.

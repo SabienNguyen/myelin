@@ -372,4 +372,29 @@ describe('GET /api/due and /api/session-plan', () => {
     ]);
     expect(plan.find((p: any) => p.kind === 'misconception').why).toContain('mixes up X with Y');
   });
+
+  it('/api/session-plan never offers an untouched boot-seeded stub as "new"', async () => {
+    // The cold-start audit: a fresh install's plan opened with "Consuming SSE token streams" —
+    // the pattern-page seed — as "next on your frontier". Seeded stubs are practice inventory;
+    // they enter the plan only after evidence exists on them (via review/misconception).
+    const lw = {
+      listSlugs: async () => [],
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') return {}; // brand-new learner, no evidence at all
+        if (name === 'next_lessons') {
+          return { lessons: [{ slug: 'stream-consumer', reason: 'frontier' }, { slug: 'chosen-topic', reason: 'frontier' }] };
+        }
+        if (name === 'read_page') {
+          if (args.slug === 'stream-consumer') {
+            return { page: { meta: { title: 'Consuming SSE token streams', status: 'stub', sources: ['the-gap artifact stream-consumer'] } } };
+          }
+          // A learner-driven stub (e.g. planned by a path) keeps its place in the plan.
+          return { page: { meta: { title: 'Chosen Topic', status: 'stub', sources: ['tutor'] } } };
+        }
+        throw new Error(`unexpected call ${name}`);
+      },
+    } as any;
+    const { plan } = await (await buildRestRoutes(lw, cfg).request('/api/session-plan')).json();
+    expect(plan.map((p: any) => p.slug)).toEqual(['chosen-topic']);
+  });
 });
