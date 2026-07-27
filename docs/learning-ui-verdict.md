@@ -363,3 +363,10 @@ Written after the sprint that followed the original verdict; each line names its
   the originally-taught concept — the trophy/suitcase asymmetry. The correct answer graded,
   recorded, restored the level to practicing, and emptied the due queue. Spaced repetition,
   teach-to-re-proof, end to end under a real model on real material.
+- **Compiled-page quality — close-read, arithmetic re-verified.** The kv-cache page the sitting
+  produced was read line by line: the causal-mask fixity argument is correct, the memory formula
+  is right, and its worked example is internally consistent at every step (16 KiB/token/layer →
+  512 KiB/token → 2 GiB at 4096 tokens → 4 GiB at batch 2 — a full-MHA 7B shape, correctly
+  distinguished from the sitting's GQA example). Sources are listed on the page; their content
+  could not be re-fetched from this container (egress), which matches the tutor's own disclosure
+  at teaching time. Frontmatter is sound: prereq chain intact, difficulty set, status solid.
