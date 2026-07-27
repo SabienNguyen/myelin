@@ -109,5 +109,17 @@
     ],
     "misconceptions": [],
     "last_reinforced": "2026-07-27"
+  },
+  "quantization-int4-outliers": {
+    "level": "exposed",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: A colleague says \"int4 quantization is uniformly bad for transformers because 4 bits just isn't enough precision.\" Based on what the outlier-feature numbers actually show, what's wrong with that framing \u2014 what's the *real* reason naive int4 quantization degrades perplexity so badly?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
   }
 }
