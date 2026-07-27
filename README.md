@@ -267,10 +267,11 @@ npm run e2e                        # Playwright: full tutor loop against a scrip
 The e2e suite spins up the real Hono backend and a real Loreweaver server (fake embeddings,
 disposable fixture vaults) with the tutor model replaced by `tests/e2e/scripted-model.cjs` (via the
 `LW_MOCK_MODEL` env hook in `src/server/models.ts`), then drives the built SPA with a real browser.
-Five specs: the full tutor loop (quick_check → grade → evidence on disk), the whole coding flow
+Six specs: the full tutor loop (quick_check → grade → evidence on disk), the whole coding flow
 against the built-in sandbox (predict gate → CM6 editor → real tests → evidence), the exercise Help
-tab, the contextual graph, and the video ingest happy path (a fake yt-dlp on the server's PATH
-serves captions with no network). On a machine that ships a pinned Chromium the config can't download
+tab, the contextual graph, conversation history (restore, switch, APG keyboard menu — threads
+seeded straight into the session store so no scripted turn is consumed), and the video ingest happy
+path (a fake yt-dlp on the server's PATH serves captions with no network). On a machine that ships a pinned Chromium the config can't download
 (e.g. a sandboxed CI image), point it at the one that exists:
 `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
 
