@@ -5,6 +5,7 @@ import {
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
 import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
+import { UI_TOOLS } from '../shared/uiTools.js';
 import { recentLapses } from './anki/inbound.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { stripClaudeSdkPrefix } from './claudeSdk.js';
@@ -75,7 +76,9 @@ function lastUserText(messages: UIMessage[]): string {
  * (there is no HITL pause primitive in the Agent SDK's query() loop, so the sentinel + system
  * prompt instruction together stand in for one). */
 function blockMcpTools() {
-  return availableBlocks().map((name) => tool(
+  // Heterogeneous schemas (blocks union vs open_source) — collected as an array literal so the
+  // element type unions instead of pinning to the first map's generic.
+  const blocks: ReturnType<typeof tool<any>>[] = availableBlocks().map((name) => tool(
     name,
     `Present a ${name} block to the student and wait for their work.`,
     BLOCK_TOOLS[name].input.shape,
@@ -83,6 +86,19 @@ function blockMcpTools() {
       content: [{ type: 'text' as const, text: 'Displayed to the student. End your turn now; their answer arrives next message.' }],
     }),
   ));
+  // open_source rides the same bridge but is NAVIGATION, not graded work: the client opens the
+  // reader and the tutor keeps teaching — its sentinel says so instead of ending the turn.
+  blocks.push(tool(
+    'open_source',
+    'Open an ingested source (book chapter, paper, notes) in the reading surface beside the '
+      + 'conversation — bring the student to the artifact. Pass the source title as the Library '
+      + 'shows it.',
+    UI_TOOLS.open_source.input.shape,
+    async () => ({
+      content: [{ type: 'text' as const, text: 'Opening beside the conversation. Continue teaching — direct their reading.' }],
+    }),
+  ));
+  return blocks;
 }
 
 /** The course bank's tools on the SDK route — same behavior as session.ts's buildCourseTools,
@@ -182,6 +198,7 @@ export function createClaudeSdkTutorSession(
     const allowedTools = [
       ...activeLoreweaverTools.map((n) => `${LOREWEAVER_PREFIX}${n}`),
       ...availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`),
+      `${BLOCKS_PREFIX}open_source`,
       // Every mode, matching session.ts: drilling a banked problem is a teaching activity.
       `${COURSE_PREFIX}course_problems`, `${COURSE_PREFIX}mark_course_problem`,
       // Same gate as the ai-sdk route: research when the vault has a gap, never otherwise.
