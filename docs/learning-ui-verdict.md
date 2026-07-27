@@ -201,7 +201,11 @@ Written after the sprint that followed the original verdict; each line names its
   fallback to the old path for older bundled loreweavers. The client side holds up too: the
   contextual default renders 35 nodes instantly, the Whole-vault toggle renders all 501 in
   250ms with responsive zoom, and the session plan interleaves review/new correctly across the
-  whole fixture. "Learn anything" implies years of accumulation; the app no longer punishes it.
+  whole fixture. Probed further at 2,000 pages (1,200 with mastery): server still linear (127ms
+  graph, 752ms due), contextual default still instant, and the opt-in whole-vault view renders
+  2,001 nodes in ~1s with sluggish-but-usable zoom — the first thing that would degrade beyond
+  this scale, and it is the one view that exists as a map rather than a workspace. "Learn
+  anything" implies years of accumulation; the app no longer punishes it.
 - **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
   the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
   first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored
