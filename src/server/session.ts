@@ -7,6 +7,7 @@ import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blo
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
+import { findRecentPapers } from './frontierResearch.js';
 import { gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Loreweaver } from './mcp.js';
@@ -304,6 +305,38 @@ export function buildCourseTools(vault: string): ToolSet {
   };
 }
 
+/**
+ * Frontier research: "what is the newest work on X" answered by LOOKING — arXiv + Crossref,
+ * sorted by recency — never from training memory, whose cutoff is exactly what the question is
+ * about. Every mode gets it: asking about the frontier is a reading activity, not a vault write.
+ * `fetchImpl` injected for tests. Exported for claudeSdkTutor.ts's SDK wrappers.
+ */
+export function buildFrontierTools(fetchImpl: typeof fetch = fetch): ToolSet {
+  return {
+    find_recent_papers: tool({
+      description: 'Search the live literature indices (arXiv preprints + Crossref published '
+        + 'work) for the NEWEST papers on a topic, sorted by date. Use this whenever the student '
+        + 'asks what is new, recent, state-of-the-art, or frontier in any field — your training '
+        + 'knowledge has a cutoff and this tool does not. Present results with their dates and '
+        + 'offer to ingest any of them (ingest_url with the pdfUrl) as course pages.',
+      inputSchema: z.object({
+        topic: z.string().describe('the research topic, e.g. "KV cache compression"'),
+      }),
+      execute: async ({ topic }: { topic: string }) => {
+        try {
+          const { papers, sourceErrors } = await findRecentPapers(topic, fetchImpl);
+          return {
+            papers,
+            ...(sourceErrors.length ? { note: `partial results — ${sourceErrors.join('; ')}` } : {}),
+          };
+        } catch (e: any) {
+          return { error: `could not reach the literature indices: ${e?.message ?? e}` };
+        }
+      },
+    }),
+  };
+}
+
 /** Find block-tool outputs in the tail of the incoming history (since the last user text turn). */
 function pendingBlockOutputs(messages: UIMessage[]) {
   const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
@@ -487,7 +520,7 @@ export function createTutorSession(
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
           tools: {
-            ...activeMcp, ...buildCourseTools(cfg.vault), ...webTools, ...ingestTools,
+            ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(), ...webTools, ...ingestTools,
             ...generateTool, ...blockTools(),
           },
           stopWhen: isStepCount(24),
