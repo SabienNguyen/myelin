@@ -51,7 +51,10 @@ export function buildSetupRoutes(cfg: HarnessConfig) {
     const subscription = await subscriptionStatus();
     const route = readRoute();
     // The subscription route needs no key, so a config already on `claude-sdk:` everywhere is ready.
-    const authorised = roles.length === 0 || fromEnv || saved;
+    // A scripted model (LW_MOCK_MODEL, the e2e hook) needs no authorisation at all — every model
+    // call is intercepted before any provider is reached. Without this the first-run gate blocked
+    // the whole e2e suite at "Ready when you are", a screen no scripted run can click through.
+    const authorised = roles.length === 0 || fromEnv || saved || Boolean(process.env.LW_MOCK_MODEL);
     return {
       route,
       apiKey: {

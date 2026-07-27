@@ -1,31 +1,47 @@
 {
-  "turns": [
+ "turns": [
+  {
+   "toolCalls": [
     {
-      "toolCalls": [
-        {
-          "toolName": "code_exercise",
-          "input": {
-            "pattern": "stream-consumer",
-            "rung": "full_body",
-            "pageSlug": "stream-consumer"
-          }
-        }
-      ],
-      "text": "Let's practice the stream consumer pattern for real — full body this time."
-    },
-    {
-      "toolCalls": [
-        {
-          "toolName": "record_evidence",
-          "input": {
-            "student": "e2e",
-            "slug": "stream-consumer",
-            "kind": "applied-correctly",
-            "note": "code exercise: full_body, own code, tests passing"
-          }
-        }
-      ],
-      "text": "Nice — your own code passed the real tests."
+     "toolName": "code_exercise",
+     "input": {
+      "pattern": "stream-consumer",
+      "rung": "full_body",
+      "pageSlug": "stream-consumer"
+     }
     }
-  ]
+   ],
+   "text": "Let's practice the stream consumer pattern for real — full body this time."
+  },
+  {
+   "toolCalls": [
+    {
+     "toolName": "record_evidence",
+     "input": {
+      "student": "e2e",
+      "slug": "stream-consumer",
+      "kind": "applied-correctly",
+      "note": "code exercise: full_body, own code, tests passing"
+     }
+    }
+   ],
+   "text": "Nice — your own code passed the real tests."
+  },
+  {
+   "text": ""
+  },
+  {
+   "toolCalls": [
+    {
+     "toolName": "code_exercise",
+     "input": {
+      "pattern": "stream-consumer",
+      "rung": "full_body",
+      "pageSlug": "stream-consumer"
+     }
+    }
+   ],
+   "text": "Same exercise again — this time use the Help tab if you get stuck."
+  }
+ ]
 }

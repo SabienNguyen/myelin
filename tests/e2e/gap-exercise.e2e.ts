@@ -1,44 +1,23 @@
 import { test, expect } from '@playwright/test';
-import { execFile } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
-const GAP_REPO = join(homedir(), 'Dev/personal/the-gap');
+import { STREAM_CONSUMER_RUNGS, runnableReference } from '../../src/server/gap/streamConsumer.js';
 
 /**
- * Fetches the REAL reference answer for stream-consumer's full_body rung, test-side, straight
- * from the-gap's masker CLI — never through the UI payload (the whole point of I2's
- * reference_answer-stripping proxy is that the browser never receives this string). Command per
- * the-gap's packages/masker/src/cli.ts doc: `pnpm --filter masker mask <artifactId> <template>
- * '<selectorJSON>'` prints the Rung as JSON to stdout, exit 0 — `--silent` suppresses pnpm's own
- * command echo, which would otherwise precede the JSON on stdout and break JSON.parse.
- *
- * RungEditor v2 (docs/superpowers/plans/2026-07-21-coding-stage.md, "whole-file IDE"): the editor
- * now loads and grades the rung's WHOLE file, not a gap fragment, so this returns the complete
- * correct file — visible_pre + reference_answer + visible_post, the same splice the old gap-mode
- * grading always did server-side, just assembled test-side now since there's no separate gap
- * region left in the UI to paste just the answer into.
+ * The REAL reference answer for stream-consumer's full_body rung, test-side, straight from the
+ * built-in sandbox's own artifact module — never through the UI payload (the whole point of the
+ * reference_answer-stripping invariant is that the browser never receives this string; service.ts
+ * strips it before serialization, so reading it here from source is the only honest way to get
+ * it). This replaced a shell-out to the external the-gap repo's masker CLI when the built-in
+ * sandbox (src/server/gap/) became the default: the artifact and its reference now live in THIS
+ * repo, so the test runs anywhere the repo does.
  */
-async function fetchCompleteReferenceFile(): Promise<string> {
-  const { stdout } = await execFileAsync(
-    'npm',
-    [
-      'exec', '--yes', 'pnpm@latest', '--', '--filter', 'masker', '--silent', 'mask',
-      'stream-consumer', 'full_body', '{"kind":"function_body","name":"consumeStream"}',
-    ],
-    { cwd: GAP_REPO, timeout: 60_000 },
-  );
-  const rung = JSON.parse(stdout.trim());
-  if (typeof rung.reference_answer !== 'string' || !rung.reference_answer.trim()) {
-    throw new Error(`masker returned no reference_answer: ${stdout.slice(0, 200)}`);
-  }
-  if (typeof rung.visible_pre !== 'string' || typeof rung.visible_post !== 'string') {
-    throw new Error(`masker returned no visible_pre/visible_post: ${stdout.slice(0, 200)}`);
-  }
-  return `${rung.visible_pre}${rung.reference_answer}${rung.visible_post}`;
+function completeReferenceFile(): string {
+  const rung = STREAM_CONSUMER_RUNGS.find((r) => r.template === 'full_body');
+  if (!rung) throw new Error('built-in ladder has no full_body rung');
+  const file = runnableReference(rung);
+  if (!file.trim()) throw new Error('built-in full_body rung has an empty reference');
+  return file;
 }
 
 // This file's dedicated backend+frontend pair (playwright.config.ts) serves on :4174/:4821 —
@@ -46,19 +25,14 @@ async function fetchCompleteReferenceFile(): Promise<string> {
 // :4173/:4820 pair.
 test.use({ baseURL: 'http://localhost:4174' });
 
-test('code_exercise: real gap sidecar renders the full_body editor, the reference answer passes '
-  + 'real tests, and applied-correctly evidence lands in the vault', async ({ page }) => {
-  // I3 (docs/superpowers/plans/2026-07-20-gap-integration.md): "prefer REAL sidecar ... if
-  // unavailable, skip with a clear message rather than mock" — global-setup.ts pings :4930 once
-  // for the whole run.
-  test.skip(
-    !process.env.E2E_GAP_SIDECAR_UP,
-    'the-gap sidecar not reachable on :4930 (systemd --user the-gap.service) — skipping rather '
-      + 'than mocking the real service; start it and re-run to exercise this test.',
-  );
+test('code_exercise: the built-in sandbox renders the full_body editor, the reference answer '
+  + 'passes real tests, and applied-correctly evidence lands in the vault', async ({ page }) => {
+  // No skip: the built-in sandbox serves /api/gap/* from the backend process itself. The original
+  // external-sidecar version of this test could only run on a machine with the-gap checked out
+  // and its systemd service up; the artifact now lives in this repo.
   test.setTimeout(90_000);
 
-  const completeFile = await fetchCompleteReferenceFile();
+  const completeFile = completeReferenceFile();
 
   const firstChat = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.goto('/');
@@ -72,9 +46,23 @@ test('code_exercise: real gap sidecar renders the full_body editor, the referenc
   await expect(chip).toBeVisible();
   await page.screenshot({ path: '/tmp/i3-1.png', fullPage: true });
 
+  // Predict-before-write gate (backlog item 4, added after this test was written): the editor
+  // does not mount until the learner predicts the finished function's output — or skips. Answer
+  // it FOR REAL: the gate's fixture input is `data: a` / `data: [DONE]` / `data: never`, and the
+  // whole point of the pattern is that nothing after the sentinel is emitted — so the honest
+  // prediction is exactly one line, "a". This drives the server-graded /api/gap/predict path
+  // through a real browser rather than clicking skip past it.
+  const prediction = page.getByRole('textbox', { name: 'predicted output, one per line' });
+  await expect(prediction).toBeVisible();
+  await prediction.fill('a');
+  await page.getByRole('button', { name: 'check my prediction' }).click();
+  // A correct prediction shows its verdict and hands control back explicitly — the learner
+  // clicks through when they're ready, the editor doesn't jump-scare in mid-read.
+  await page.getByRole('button', { name: 'continue to the editor' }).click();
+
   // (2) Stage proof: full_body is a single rung (not 'ladder'), so the real CM6 whole-file editor
-  // (RungEditor v2, docs/superpowers/plans/2026-07-21-coding-stage.md) — fed by the REAL sidecar's
-  // rung data (its `scaffold` field) through the harness proxy — mounts directly, no ladder nav.
+  // (RungEditor v2, docs/superpowers/plans/2026-07-21-coding-stage.md) — fed by the built-in
+  // sandbox's rung data (its `scaffold` field) — mounts once the gate clears, no ladder nav.
   const gapEditor = page.getByTestId('gap-editor').locator('.cm-content');
   await expect(gapEditor).toBeVisible();
   await page.screenshot({ path: '/tmp/i3-2.png', fullPage: true });

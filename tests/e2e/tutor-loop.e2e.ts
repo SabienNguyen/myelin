@@ -53,8 +53,12 @@ test('full loop: bootstrap → quick_check → answer → auto-resubmit → evid
   // (a) Turn-2 text from the harness's graded follow-up turn appears in the DOM — and exactly
   // once: turn-1's own text ("Let's warm up.") must also not be duplicated (the T12 "duplicated
   // message content" bug — see Bug 1's note above).
-  await expect(page.getByText('Correct! Recorded — nice.')).toBeVisible();
-  await expect(page.getByText("Let's warm up.")).toBeVisible();
+  // exact:true both times: the focus rail (a later feature) mirrors the tutor's last line into a
+  // hidden .focus-rail-lastline whose text CONTAINS both strings — substring matching now resolves
+  // to two elements and trips strict mode. The real message paragraphs match exactly; the rail's
+  // concatenated mirror does not.
+  await expect(page.getByText('Correct! Recorded — nice.', { exact: true })).toBeVisible();
+  await expect(page.getByText("Let's warm up.", { exact: true })).toBeVisible();
 
   // (c) QuickCheck renders the graded verdict it received back over the tool-output-available
   // chunk (Bug 2 fix) — confirms the round-trip actually reached the component, not just the log.

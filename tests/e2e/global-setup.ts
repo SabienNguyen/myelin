@@ -22,22 +22,6 @@ const VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-va
 // writes mkdir recursively (~/Dev/personal/loreweaver/src/vault/vaultStore.ts dir()).
 const GAP_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-gap');
 
-// I3 (docs/superpowers/plans/2026-07-20-gap-integration.md): "prefer REAL sidecar ... if
-// unavailable, skip with a clear message rather than mock". global-setup pings the real the-gap
-// systemd sidecar once and leaves the verdict in an env var Playwright test workers inherit;
-// gap-exercise.e2e.ts reads it and test.skip()s with an explicit reason instead of faking a
-// response — a code exercise's whole point (I2) is that reference_answer stripping and grading are
-// enforced by the REAL service, so this test must never run against a mock.
-const GAP_SIDECAR_URL = 'http://localhost:4930/api/ladder';
-
-async function isGapSidecarUp(): Promise<boolean> {
-  try {
-    const res = await fetch(GAP_SIDECAR_URL, { signal: AbortSignal.timeout(3_000) });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
 
 export default async function globalSetup() {
   rmSync(VAULT, { recursive: true, force: true }); // idempotent across repeated `npm run e2e` runs
@@ -58,8 +42,33 @@ export default async function globalSetup() {
   rmSync(join(GAP_VAULT, '.harness', 'sessions'), { recursive: true, force: true });
   mkdirSync(join(GAP_VAULT, 'pages'), { recursive: true });
 
+  // graph-contextual.e2e.ts's 1-hop/2-hop neighborhood around the boot-seeded 'stream-consumer'
+  // stub. Written HERE, not in that file's beforeAll, because the backend's /api/graph payload is
+  // TTL-cached (src/server/graphCache.ts): when the gap tests run first, their chat turns warm
+  // the cache, and fixture pages written after that warm were invisible to the graph test's
+  // fresh-by-TTL read. global-setup runs before any test can warm anything. Slugs come from the
+  // file's BASENAME alone (loreweaver's loadPages()), the directory nesting is cosmetic.
+  const fixtureDir = join(GAP_VAULT, 'pages', 'programming');
+  mkdirSync(fixtureDir, { recursive: true });
+  const GAP_FIXTURE_PAGES: Record<string, string> = {
+    'decoder.md':
+      '---\ntitle: Stream Decoding\nprereqs: [stream-consumer]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
+      + 'Fixture page for the contextual-graph e2e test (1 hop from stream-consumer).\n',
+    'backpressure.md':
+      '---\ntitle: Backpressure Handling\nprereqs: [stream-consumer]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
+      + 'Fixture page for the contextual-graph e2e test (1 hop from stream-consumer).\n',
+    'reconnect-strategy.md':
+      '---\ntitle: Reconnect Strategy\nprereqs: [decoder]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
+      + 'Fixture page for the contextual-graph e2e test (2 hops from stream-consumer, via decoder).\n',
+    'unrelated-topic.md':
+      '---\ntitle: Totally Unrelated Topic\nprereqs: []\ndeepens: []\ndifficulty: 1\nstatus: stub\n---\n'
+      + 'Deliberately disconnected from stream-consumer — proves contextual scope excludes it.\n',
+  };
+  for (const [name, content] of Object.entries(GAP_FIXTURE_PAGES)) {
+    writeFileSync(join(fixtureDir, name), content);
+  }
+
   // Forked Playwright test workers inherit process.env from this (the main runner) process.
   process.env.E2E_VAULT = VAULT;
   process.env.E2E_GAP_VAULT = GAP_VAULT;
-  process.env.E2E_GAP_SIDECAR_UP = (await isGapSidecarUp()) ? '1' : '';
 }

@@ -17,11 +17,8 @@ import { test, expect } from '@playwright/test';
 test.use({ baseURL: 'http://localhost:4174' });
 
 test('Help tab: composer submits, a hint exchange renders in the transcript inside focus mode', async ({ page }) => {
-  test.skip(
-    !process.env.E2E_GAP_SIDECAR_UP,
-    'the-gap sidecar not reachable on :4930 (systemd --user the-gap.service) — skipping rather '
-      + 'than mocking the real service; start it and re-run to exercise this test.',
-  );
+  // No skip: the built-in sandbox (src/server/gap/) serves /api/gap/* from the backend process
+  // itself — there is no external sidecar to be down.
   test.setTimeout(60_000);
 
   const STUBBED_HINT = 'Name what should happen when `response.body` is null before anything '
@@ -39,13 +36,19 @@ test('Help tab: composer submits, a hint exchange renders in the transcript insi
   });
 
   const firstChat = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
-  await page.goto('/');
+  // Own thread, deliberately: gap-exercise.e2e.ts runs first against the SAME backend and leaves
+  // its finished conversation in the default thread. The scripted model pops turns off one global
+  // counter (scripted-model.cjs), so this test's one chat turn consumes script turn 3 — the
+  // staging turn added for it — and a fresh thread keeps that staging the only thing on stage.
+  await page.goto('/#/t/e2e-gap-help');
   await page.getByPlaceholder('Ask your tutor…').fill('Practice stream-consumer with a code exercise');
   await page.keyboard.press('Enter');
   await firstChat;
 
-  // Same real full_body screen gap-exercise.e2e.ts asserts against — proof this is the real
-  // sidecar-backed ladder, not a mock.
+  // Same real full_body screen gap-exercise.e2e.ts asserts against. The predict-before-write
+  // gate stands between staging and the editor; this test's subject is the Help tab, and
+  // gap-exercise already answers the gate for real, so skipping is the honest shortcut here.
+  await page.getByRole('button', { name: 'skip', exact: true }).click();
   const gapEditor = page.getByTestId('gap-editor').locator('.cm-content');
   await expect(gapEditor).toBeVisible();
 
