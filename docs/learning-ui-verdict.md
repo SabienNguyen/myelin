@@ -140,7 +140,8 @@ Written after the sprint that followed the original verdict; each line names its
   state, screenshotted. The packaging pipeline produces a runnable product, not just a file.
 - **Hardening sweep (post-smoke).** An axe-core scan of all four tabs plus the open history menu
   found one violation kind in the entire app (Library heading levels) — fixed, re-scanned to
-  zero. Markdown rendering proven inert against injected content by pinned tests: raw HTML
+  zero. A later dark-mode pass (all four tabs, 1360px and 900px, including a thread carrying a
+  malformed-block note) also came back zero — contrast holds in both themes. Markdown rendering proven inert against injected content by pinned tests: raw HTML
   escapes to text, javascript: hrefs are defanged, KaTeX input stays escaped — vault pages come
   from ingested material, so this is a real boundary, not paranoia. The /api/source symlink
   escape (promised in a comment, previously untested) now has the test that holds the promise.
