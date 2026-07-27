@@ -183,7 +183,14 @@ export function createClaudeSdkTutorSession(
   function turnError(e: unknown): string {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[claude-sdk-turn-error]', msg);
-    return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}`;
+    // Raw stderr is honest but not always actionable. The one failure a learner can actually fix
+    // themselves gets a plain-language line: Linux users DO launch AppImages with sudo, the SDK
+    // refuses to run that way, and "--dangerously-skip-permissions cannot be used with root/sudo
+    // privileges" reads as our bug rather than their shell.
+    const hint = msg.includes('root/sudo privileges')
+      ? ' — the subscription route cannot run as root. Start the app as your normal user (no sudo) and try again.'
+      : '';
+    return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}${hint}`;
   }
 
   function buildSystemPrompt(mode: Mode): string {
