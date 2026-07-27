@@ -194,6 +194,12 @@ Written after the sprint that followed the original verdict; each line names its
   exercise with its predict gate — re-earning applied-correctly through the same mechanical
   route that minted it, which is what "re-prove" means. Twelve seconds to staging, zero errors.
   All four modes now hold their contracts under a live model.
+- **The graph scales now.** A synthetic 500-page vault (300 with mastery) put the first graph
+  build at 10.9 SECONDS — fetchGraph made 1+2N stdio roundtrips, two per page. loreweaver grew a
+  list_pages bulk tool and the whole-map student call already carried every field the graph
+  reads, so the build is two calls total: 16ms cold on the same fixture, ~680× faster, with a
+  fallback to the old path for older bundled loreweavers. "Learn anything" implies years of
+  accumulation; the graph no longer punishes it.
 - **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
   the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
   first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored

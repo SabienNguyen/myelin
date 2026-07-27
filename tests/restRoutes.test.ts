@@ -21,28 +21,35 @@ async function tick(times = 20) {
 // GET /api/graph is already covered by tests/mcp.test.ts.
 function fakeLw(opts: { slugs?: string[]; fail?: () => boolean } = {}) {
   const { slugs = ['a'], fail = () => false } = opts;
-  let listSlugsCalls = 0;
+  // The fetch counter keys off the whole-map get_student_state call — the one call EVERY
+  // fetchGraph path makes, and makes first. (It used to key off listSlugs, which the
+  // list_pages fast path no longer touches.)
+  let fetchCalls = 0;
   const lw = {
     listSlugs: async () => {
-      listSlugsCalls++;
       if (fail()) throw new Error('lw down');
       return slugs;
     },
     call: async (name: string, args: any) => {
-      if (fail()) throw new Error('lw down');
-      // Tag the top-level (no-slug) get_student_state response with the current fetch number so
-      // tests can tell a fresh fetch's payload apart from a stale one without inspecting mocks.
       if (name === 'get_student_state' && args.slug === undefined) {
-        return { detail: null, fetchNum: listSlugsCalls };
+        fetchCalls++;
+        if (fail()) throw new Error('lw down');
+        // Tag the response with the fetch number so tests can tell a fresh fetch's payload
+        // apart from a stale one without inspecting mocks.
+        return { detail: null, fetchNum: fetchCalls };
       }
+      if (fail()) throw new Error('lw down');
       if (name === 'get_student_state') return { detail: null };
+      if (name === 'list_pages') {
+        return { pages: slugs.map((slug) => ({ slug, title: slug, difficulty: 1, status: 'stub', prereqs: [], deepens: [] })) };
+      }
       if (name === 'read_page') {
         return { page: { meta: { title: args.slug, difficulty: 1, status: 'stub', prereqs: [], deepens: [] } } };
       }
       throw new Error(`fakeLw: unexpected call ${name}`);
     },
   } as any;
-  return { lw, listSlugsCalls: () => listSlugsCalls };
+  return { lw, listSlugsCalls: () => fetchCalls };
 }
 
 const cfg = { student: 'kid' } as HarnessConfig;
