@@ -38,19 +38,37 @@ export function SourceReader({ path, title, onClose }: {
     return () => { cancelled = true; };
   }, [path]);
 
-  // Selection -> a floating "ask" affordance near the pointer. Recomputed on every mouseup in
-  // the body; cleared when the selection collapses or the passage is sent.
-  const onMouseUp = (e: React.MouseEvent) => {
-    const sel = window.getSelection();
-    const text = sel?.toString().trim() ?? '';
-    if (!text || !bodyRef.current?.contains(sel!.anchorNode)) { setAsk(null); return; }
-    const rect = bodyRef.current.getBoundingClientRect();
-    setAsk({
-      text: text.length > MAX_PASSAGE ? `${text.slice(0, MAX_PASSAGE)}…` : text,
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-    });
-  };
+  // Selection -> a floating "ask" affordance at the selection's end. Driven by the document's
+  // selectionchange event, NOT mouseup: mouseup only exists for pointers, and this surface's
+  // whole point is that ANY selection is an invitation — a screen reader's text-selection
+  // commands and caret browsing fire selectionchange without ever producing a mouse event.
+  // (Debounced: selectionchange fires per character while a selection grows.)
+  // Positioned from the range's own rect plus the body's scroll offsets — the old pointer-based
+  // math ignored scrollTop, so in a scrolled transcript the button floated over the wrong line.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onSelectionChange = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const body = bodyRef.current;
+        const sel = window.getSelection();
+        const text = sel?.toString().trim() ?? '';
+        if (!body || !sel || sel.isCollapsed || !text || !body.contains(sel.anchorNode)) {
+          setAsk(null);
+          return;
+        }
+        const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
+        const bodyRect = body.getBoundingClientRect();
+        setAsk({
+          text: text.length > MAX_PASSAGE ? `${text.slice(0, MAX_PASSAGE)}…` : text,
+          x: Math.max(0, rangeRect.left - bodyRect.left + body.scrollLeft),
+          y: rangeRect.bottom - bodyRect.top + body.scrollTop,
+        });
+      }, 180);
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => { clearTimeout(timer); document.removeEventListener('selectionchange', onSelectionChange); };
+  }, []);
 
   const sendPassage = () => {
     if (!ask) return;
@@ -73,7 +91,7 @@ export function SourceReader({ path, title, onClose }: {
       {error && <p className="source-reader-error">{error}</p>}
       {markdown === null && !error && <p className="source-reader-loading">opening the source…</p>}
       {markdown !== null && (
-        <div className="source-reader-body" ref={bodyRef} onMouseUp={onMouseUp}>
+        <div className="source-reader-body" ref={bodyRef}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
           {ask && (
             <button
