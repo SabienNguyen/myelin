@@ -349,7 +349,15 @@ export async function gradeBlockOutput(
           correct: answer.trim().toLowerCase() === item.expected.trim().toLowerCase(),
         };
       }
-      const g = await gradeOpenAnswer(item.prompt, answer, item.pageSlug, cfg, deps);
+      // Short items follow the quick_check discipline: an exact match on `expected` is
+      // mechanically correct and never consults a model — the audit caught a short answer that
+      // WAS the expected string verbatim marked ✗ by the judge. Only a miss goes to the model,
+      // with `expected` as context so right-but-rephrased still earns credit.
+      if (item.expected != null
+        && answer.trim().toLowerCase() === item.expected.trim().toLowerCase()) {
+        return { id: item.id, source: 'mechanical' as GradeSource, correct: true };
+      }
+      const g = await gradeOpenAnswer(item.prompt, answer, item.pageSlug, cfg, deps, item.expected ?? undefined);
       return { id: item.id, source: 'model' as GradeSource, correct: g.verdict === 'correct' };
     }));
     const right = perItem.filter((p) => p.correct).length;

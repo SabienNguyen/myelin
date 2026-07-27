@@ -42,13 +42,18 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
   if (props.result) {
     const perItem: { id: string; correct: boolean; source?: string }[] = props.result.grading?.perItem ?? [];
     const byId = new Map(perItem.map((p) => [p.id, p]));
+    // A tool call the server REJECTED (bad input from the model) still reaches this branch, with
+    // an output that is not the result contract. Reading .answers off it unmounted the entire
+    // React root — one malformed quiz blanked the whole app in the audit. Guard, render what
+    // exists, and the rest of the session survives the model's mistake.
+    const answers: { id: string; answer: string }[] = Array.isArray(props.result.answers) ? props.result.answers : [];
     return (
       <div className="block quiz done">
         <span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
         <h3>{props.args.title}</h3>
         <ul>
           {props.args.items.map((item: any) => {
-            const answer = props.result.answers.find((a: any) => a.id === item.id)?.answer;
+            const answer = answers.find((a) => a.id === item.id)?.answer;
             const scored = byId.get(item.id);
             return (
               <li key={item.id}>
@@ -63,7 +68,9 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
             );
           })}
         </ul>
-        {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}> — {props.result.grading.detail}</em>}
+        {/* No leading dash — the verdict wraps onto its own line, where "— 2/3" read as a typo
+            in the audit screenshot (same fix as StructuredCheck). */}
+        {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}>{props.result.grading.detail}</em>}
       </div>
     );
   }

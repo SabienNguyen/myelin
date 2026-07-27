@@ -229,3 +229,31 @@ describe('capApplied', () => {
     }
   });
 });
+
+describe('quiz short items with an expected answer (audit 27)', () => {
+  // The audit drove a quiz whose short answer WAS the expected string verbatim — and the judge
+  // marked it ✗. Short items must follow the quick_check discipline: exact match is mechanically
+  // correct and never consults a model; only a miss goes to the judge, with `expected` as context.
+  const item = { id: 's1', type: 'short', prompt: 'which option?', expected: 'stream: true', pageSlug: 'p' };
+  const input = { items: [item] };
+
+  it('an exact match is mechanically correct — the model is never consulted', async () => {
+    const angryGrader = {
+      sdkGenerate: async () => { throw new Error('the model must not be consulted for an exact match'); },
+    };
+    const g = await gradeBlockOutput('quiz', input, { answers: [{ id: 's1', answer: ' Stream: TRUE ' }] }, cfg, angryGrader as any);
+    expect(g.verdict).toBe('correct');
+    expect(g.source).toBe('mechanical');
+    expect(g.perItem).toEqual([{ id: 's1', source: 'mechanical', correct: true }]);
+  });
+
+  it('a miss goes to the judge WITH the expected answer as context', async () => {
+    const prompts: string[] = [];
+    const spyGrader = {
+      sdkGenerate: async ({ prompt }: { prompt: string }) => { prompts.push(prompt); return { text: 'CORRECT — same thing.' }; },
+    };
+    const g = await gradeBlockOutput('quiz', input, { answers: [{ id: 's1', answer: 'the streaming flag' }] }, cfg, spyGrader as any);
+    expect(g.perItem).toEqual([{ id: 's1', source: 'model', correct: true }]);
+    expect(prompts.join('\n')).toContain('stream: true');
+  });
+});

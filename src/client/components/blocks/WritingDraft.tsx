@@ -40,7 +40,9 @@ export function WritingDraftInner({ args, result, addResult }: {
   if (result) {
     const grading = result.grading;
     const annotations: Annotation[] = grading?.annotations?.annotations ?? [];
-    const segments = annotateDraft(result.draft, annotations);
+    // (?? ''): a server-rejected tool call reaches here with a non-contract output, and
+    // undefined.indexOf inside annotateDraft unmounted the app root (see Quiz for the incident).
+    const segments = annotateDraft(result.draft ?? '', annotations);
     // Tufte-style footnotes: each annotated span gets a superscript number after the mark
     // (outside it — tests match the mark's exact text), with the grader's notes listed below.
     let n = 0;

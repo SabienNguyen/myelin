@@ -81,8 +81,10 @@ export function StructuredCheck({ args, result, addResult }: {
         <span className="graded-tag">{g ? 'graded' : 'submitted'}</span>
         <div className="structured-prompt"><BlockProse text={args.prompt} /></div>
         <p className="structured-answer">
-          You: {result.values.length === 0 ? '(blank)'
-            : result.values.map((v: string, i: number) => (
+          {/* (result.values ?? []): a server-rejected tool call reaches here with a non-contract
+              output, and .length on undefined unmounted the app root (see Quiz for the incident). */}
+          You: {(result.values ?? []).length === 0 ? '(blank)'
+            : (result.values as string[]).map((v: string, i: number) => (
               <span key={i}>{i > 0 && ', '}<AnswerText value={v} /></span>
             ))}
         </p>
