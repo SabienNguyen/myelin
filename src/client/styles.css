@@ -401,7 +401,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .quiz-item p { margin: 0 0 0.35rem; }
 /* Direct children only — the step rows carry their own small edit/remove buttons, and an
    unscoped :last-child dressed every row's remove button as the Submit button. */
-.quiz > button:last-child, .math-scratchpad > button:last-child, .writing-draft button {
+/* Writing-draft scoped to the pre-submit card only: the DONE card grew its own buttons (.cite-link,
+   .revise-btn) that a bare `.writing-draft button` dressed as solid-accent primaries — the exact
+   over-broad-selector bug the note above warns about. */
+.quiz > button:last-child, .math-scratchpad > button:last-child, .writing-draft:not(.done) > button {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
@@ -2103,7 +2106,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .student-badge { cursor: pointer; }
 .student-menu {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 30;
-  display: flex; flex-direction: column; gap: 0.25rem; min-width: 11rem;
+  /* 16rem, not 11: the teaching-style placeholder is the field's only description, and at 11rem
+     it clipped mid-word ("e.g. hig"). 16rem is the narrowest that shows all of it. */
+  display: flex; flex-direction: column; gap: 0.25rem; min-width: 16rem;
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); padding: 0.5rem;
 }
@@ -2127,4 +2132,5 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: var(--accent); cursor: pointer; text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
-.cite-link.on { text-decoration-style: solid; }
+/* `lit`, not `on` — the house `.block button.on` selected-answer pill would swallow it. */
+.cite-link.lit { text-decoration-style: solid; }

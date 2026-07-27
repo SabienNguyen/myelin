@@ -103,7 +103,10 @@ export function WritingDraftInner({ args, result, addResult }: {
                     <em> — {pre}
                       <button
                         type="button"
-                        className={`cite-link${cite === quoted ? ' on' : ''}`}
+                        // `lit`, not the house `on`: `.block button.on` is the selected-answer
+                        // pill (accent background), and this toggle is an underline change on an
+                        // inline quote — the shared class dressed it as a chip.
+                        className={`cite-link${cite === quoted ? ' lit' : ''}`}
                         aria-pressed={cite === quoted}
                         title="highlight this passage in the draft"
                         onClick={() => setCite((c) => (c === quoted ? null : quoted))}

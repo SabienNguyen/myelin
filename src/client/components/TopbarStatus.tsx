@@ -84,6 +84,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
   const [voice, setVoice] = useState('');
   const [note, setNote] = useState('');
   const rootRef = useRef<HTMLSpanElement>(null);
+  const badgeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -93,8 +94,17 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
+    // Dismissal mirrors AddMaterial and HistoryMenu: Escape closes and returns focus to the
+    // trigger — this was the one topbar popup where Escape did nothing.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); badgeRef.current?.focus(); }
+    };
     document.addEventListener('mousedown', onDoc);
-    return () => document.removeEventListener('mousedown', onDoc);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('keydown', onKey);
+    };
   }, [open]);
 
   const switchTo = async (name: string) => {
@@ -112,6 +122,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
   return (
     <span className="student-switcher" ref={rootRef}>
       <button
+        ref={badgeRef}
         type="button" className="badge student-badge"
         aria-haspopup="menu" aria-expanded={open}
         aria-label={`student: ${current} — switch student`}
@@ -131,7 +142,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
               honors in HOW it teaches — never in what counts as evidence. */}
           <input
             aria-label="teaching style"
-            placeholder="teaching style — e.g. high school, no jargon"
+            placeholder="teaching style — e.g. no jargon"
             value={voice}
             onChange={(e) => setVoice(e.target.value)}
             onBlur={() => { void fetch('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice }) }); }}
@@ -139,7 +150,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
           />
           <input
             aria-label="new student name"
-            placeholder="new student\u2026"
+            placeholder="new student…"
             value={fresh}
             onChange={(e) => setFresh(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && fresh.trim()) void switchTo(fresh.trim()); }}

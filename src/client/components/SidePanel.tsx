@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { panelBus, type PanelTab } from '../lib/panelBus.js';
 import { parseHash, serializeHash } from '../lib/urlState.js';
 import { GraphPanel } from './GraphPanel.js';
@@ -50,10 +50,19 @@ export function SidePanel() {
     if (nextHash !== location.hash) history.replaceState(null, '', nextHash);
   }, [tab, pageSlug]);
 
+  // Mirror of pageSlug for the hashchange handler below, which mounts once and would otherwise
+  // close over the first render's value.
+  const slugRef = useRef(pageSlug);
+  useEffect(() => { slugRef.current = pageSlug; }, [pageSlug]);
+
   useEffect(() => {
     const onHashChange = () => {
       const parsed = parseHash(location.hash);
       setTab(parsed.tab);
+      // A hash that names a NEW page is an explicit navigation to the compiled page — deep links
+      // and browser back both arrive here, and with the reader open they landed behind it: the
+      // hash said dilution-calculator while the panel still showed the raw source.
+      if (parsed.pageSlug && parsed.pageSlug !== slugRef.current) setSource(null);
       setPageSlug(parsed.pageSlug);
     };
     window.addEventListener('hashchange', onHashChange);
