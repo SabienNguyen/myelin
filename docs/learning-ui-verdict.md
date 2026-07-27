@@ -435,3 +435,8 @@ Written after the sprint that followed the original verdict; each line names its
   1/6 with a proportional bar (exactly one page at practicing), "resume at attention-scaling"
   names the genuinely-next unproven page, and set-as-goal is offered. Progress arithmetic,
   resume logic, and layout all verified against earned — not fixture — state.
+- **Page tab with the sourced page — the standing box tells the exact truth.** The
+  quantization page renders with its solid chip, tags, sources, and zero overflow; the YOUR
+  STANDING box reads "seen once — earned by 1 explanation, judged by the tutor. No exercise has
+  confirmed it" and names the structured check as the way to confirm — the applied-route
+  honesty surface verified against genuinely earned (not fixture) state. No action.
