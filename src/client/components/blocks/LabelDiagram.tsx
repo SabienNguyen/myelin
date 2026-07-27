@@ -51,6 +51,10 @@ export function LabelDiagram({ args, result, addResult }: {
                 {got ?? '(left blank)'} {ok != null && (
                   <span className={ok ? 'mark-ok' : 'mark-bad'}>{ok ? '✓' : '✗'}</span>
                 )}
+                {/* A miss shows what the region actually was — an ✗ alone tells the learner they
+                    were wrong but not the anatomy. Same honesty as the pattern checker naming its
+                    expected value. Only after grading, so it never pre-reveals the answer. */}
+                {ok === false && <span className="label-correct">should be “{r.label}”</span>}
               </li>
             );
           })}

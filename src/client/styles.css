@@ -1789,6 +1789,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 .label-diagram-submit:disabled { opacity: 0.5; cursor: default; }
 .label-diagram-summary { margin: 0.4rem 0; padding-left: 1.1rem; }
+.label-correct { margin-left: 0.4rem; font-size: 0.82rem; color: var(--text-muted); }
 
 /* Mermaid diagrams in chat prose (Mermaid.tsx). The svg scales to the message column. */
 .mermaid-diagram { margin: 0.6rem 0; overflow-x: auto; }
