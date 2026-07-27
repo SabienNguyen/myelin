@@ -258,3 +258,8 @@ Written after the sprint that followed the original verdict; each line names its
   color correctly darker in light theme and lighter in dark. The two honesty edges were already
   unit-tested: a fresh install (never synced) hides the badge rather than flagging work that
   never existed, and a genuinely stale cursor still flags.
+- **This session's new surfaces re-swept**: 600 seeded equation-biased fuzz inputs through the
+  math grader's new equation branches (no throws, invariants held — now a permanent suite
+  member), and a 900px dark-mode pass over the quiz done card and history dropdown: single
+  column stacks correctly, the menu anchors inside the viewport, and no horizontal scroll with
+  or without the menu open.
