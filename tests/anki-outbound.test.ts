@@ -85,10 +85,10 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
     const generateCards = async () => [{ front: 'Q1', back: 'A1' }, { front: 'Q2', back: 'A2' }];
 
     const first = await syncOutbound(lw, anki, cfg, { generateCards });
-    expect(first).toEqual({ pushed: 2, updated: 0, skipped: 0 });
+    expect(first).toEqual({ pushed: 2, updated: 0, skipped: 0, failed: 0 });
 
     const second = await syncOutbound(lw, anki, cfg, { generateCards });
-    expect(second).toEqual({ pushed: 0, updated: 0, skipped: 2 });
+    expect(second).toEqual({ pushed: 0, updated: 0, skipped: 2, failed: 0 });
 
     const ledgerPath = join(vault, '.harness', 'anki-map.json');
     expect(existsSync(ledgerPath)).toBe(true);
@@ -107,12 +107,12 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
     const first = await syncOutbound(lw, anki, cfg, {
       generateCards: async () => [{ front: 'Q1', back: 'A1' }],
     });
-    expect(first).toEqual({ pushed: 1, updated: 0, skipped: 0 });
+    expect(first).toEqual({ pushed: 1, updated: 0, skipped: 0, failed: 0 });
 
     const second = await syncOutbound(lw, anki, cfg, {
       generateCards: async () => [{ front: 'Q1', back: 'A1 revised' }],
     });
-    expect(second).toEqual({ pushed: 0, updated: 1, skipped: 0 });
+    expect(second).toEqual({ pushed: 0, updated: 1, skipped: 0, failed: 0 });
 
     await lw.close();
   }, 30_000);
@@ -140,7 +140,7 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
       generateCards: async () => { called = true; return [{ front: 'Q', back: 'A' }]; },
     });
     expect(called).toBe(false);
-    expect(result).toEqual({ pushed: 0, updated: 0, skipped: 0 });
+    expect(result).toEqual({ pushed: 0, updated: 0, skipped: 0, failed: 0 });
 
     await lw.close();
   }, 30_000);
@@ -160,7 +160,7 @@ describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
     const sdkCfg = { ...cfg, models: { card_gen: { model: 'claude-sdk:sonnet' } } } as HarnessConfig;
 
     const result = await syncOutbound(lw, anki, sdkCfg, { deps: { sdkGenerate } });
-    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0 });
+    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0, failed: 0 });
     expect(calls).toHaveLength(1);
     expect(calls[0].model).toBe('sonnet');
     expect(calls[0].prompt).toContain('Integrals');
@@ -184,6 +184,29 @@ describe('syncOutbound — Anki offline', () => {
     const result = await syncOutbound(fakeLw as unknown as Loreweaver, anki,
       { vault: mkdtempSync(join(tmpdir(), 'lwh-vault-')), student: 'x' } as HarnessConfig,
       { generateCards: async () => [{ front: 'x', back: 'y' }] });
-    expect(result).toEqual({ pushed: 0, updated: 0, skipped: 0 });
+    expect(result).toEqual({ pushed: 0, updated: 0, skipped: 0, failed: 0 });
   });
+});
+
+// A live probe saw the sdk card_gen emit unparseable JSON for one math-heavy page — and the
+// whole sync die with it. One page's bad generation must not abort every other page's cards.
+describe('syncOutbound — one page failing generation does not abort the run', () => {
+  it('counts the failure and still pushes the other page', async () => {
+    const { vault, cfg, lw } = await makeVaultLoreweaver('kid6', 'good-page', 'Good Page');
+    writeFileSync(join(vault, 'pages', 'bad-page.md'),
+      '---\ntitle: Bad Page\ndifficulty: 1\nstatus: solid\n---\nmath-heavy content');
+    await bringToPracticing(lw, 'kid6', 'good-page');
+    await bringToPracticing(lw, 'kid6', 'bad-page');
+    const anki = new AnkiClient(url);
+
+    const result = await syncOutbound(lw, anki, cfg, {
+      generateCards: async (slug) => {
+        if (slug === 'bad-page') throw new Error('claude-sdk card_gen returned invalid JSON');
+        return [{ front: `q-${slug}`, back: `a-${slug}` }];
+      },
+    });
+    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0, failed: 1 });
+
+    await lw.close();
+  }, 30_000);
 });

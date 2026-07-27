@@ -24,6 +24,9 @@ export interface SyncOutboundResult {
   pushed: number;
   updated: number;
   skipped: number;
+  /** Pages whose card GENERATION failed (model returned unparseable JSON, network error) — the
+   * sync carries on with the other pages instead of aborting the whole run. */
+  failed: number;
 }
 
 interface LedgerEntry {
@@ -110,7 +113,7 @@ export async function syncOutbound(
   cfg: HarnessConfig,
   opts: { generateCards?: GenerateCards; deps?: OutboundDeps } = {},
 ): Promise<SyncOutboundResult> {
-  const result: SyncOutboundResult = { pushed: 0, updated: 0, skipped: 0 };
+  const result: SyncOutboundResult = { pushed: 0, updated: 0, skipped: 0, failed: 0 };
   if (!(await anki.isUp())) return result; // Anki closed / connection refused — skip silently
 
   const generateCards: GenerateCards = opts.generateCards
@@ -128,7 +131,16 @@ export async function syncOutbound(
   for (const slug of slugs) {
     const { page } = await lw.call('read_page', { slug });
     const misconceptions = state[slug]?.misconceptions ?? [];
-    const cards = (await generateCards(slug, page, misconceptions)).slice(0, 4);
+    // One page's bad generation must not abort the run for every other page — a live probe saw
+    // the sdk card_gen emit unparseable JSON for one math-heavy page and the whole sync die.
+    let cards: { front: string; back: string }[];
+    try {
+      cards = (await generateCards(slug, page, misconceptions)).slice(0, 4);
+    } catch (e) {
+      console.error(`[anki] card generation failed for ${slug}: ${(e as Error).message}`);
+      result.failed++;
+      continue;
+    }
     if (cards.length === 0) continue;
 
     const domain = page.domain || 'general';

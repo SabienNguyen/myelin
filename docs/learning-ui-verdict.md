@@ -391,3 +391,11 @@ Written after the sprint that followed the original verdict; each line names its
   callback: cross-prompt reward comparison, previously asserted as a category error, now derived
   from the un-canceled Z(x) — graded correct, dpo promoted to practicing. The vault now carries
   two live-taught domains; the gauge-freedom thread ran coherently across three separate lessons.
+- **Live card generation probed against the taught vault — and it found the sync's blast-radius
+  bug.** With a capturing fake AnkiClient and the live claude-sdk card_gen, the first real
+  generation attempt over the sitting's pages died mid-run: the model emitted unparseable JSON
+  for one math-heavy page (an unescaped character ~1KB in), and the throw aborted the ENTIRE
+  outbound sync — no page after it got cards. That's a when-not-if failure for math-heavy vaults.
+  syncOutbound now contains a generation failure to its page: logged loudly, counted in a new
+  honest `failed` field, and the run carries on. Pinned by a unit test using the suite's real
+  loreweaver fixture.
