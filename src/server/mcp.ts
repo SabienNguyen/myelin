@@ -85,7 +85,12 @@ export class Loreweaver {
   // the vault. External vault edits (e.g. a user editing Obsidian directly) aren't covered here
   // and fall through to the cache's own TTL — see graphCache.ts.
   private static invalidateIfWrite(name: string): void {
-    if (name === 'write_page') invalidateGraphCache();
+    // record_evidence invalidates too: graph nodes carry mastery (color, decay ring, ⚠
+    // misconception marker) baked into the cached payload, so with write_page-only invalidation a
+    // freshly recorded or freshly resolved misconception kept the stale marker for up to a TTL
+    // plus a client poll (~90s measured in the lifecycle audit) — long enough for a learner to
+    // repair a confusion and watch the graph keep accusing them of it.
+    if (name === 'write_page' || name === 'record_evidence') invalidateGraphCache();
   }
 
   private execTool(name: string, args: any, opts: any): Promise<any> {

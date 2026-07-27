@@ -68,6 +68,18 @@ export function sanitizeToolArgs(args: any, toolName: string, student: string, k
   if (STUDENT_TOOLS.includes(toolName)) out.student = student;
   if (SLUG_TOOLS.includes(toolName) && typeof out.slug === 'string' && knownSlugs.length)
     out.slug = repairSlug(out.slug, knownSlugs);
+  // record_evidence's `misconception` param is the only input that reaches the standing
+  // `misconceptions[]` array — the array the graph ⚠ marker, the session plan's repair queue, and
+  // the page panel all read; `kind: 'misconception'` alone merely tags the evidence log. The tutor
+  // prompt teaches "kind misconception, the confusion verbatim in the note", and a tutor following
+  // that convention recorded evidence NO surface could ever show (the T43 lifecycle audit watched
+  // every surface stay blank). Both tutor paths pass through here — guardMcpTools on the ai-sdk
+  // loop, the PreToolUse hook on the Agent SDK — so defaulting the param from the note makes the
+  // documented convention work everywhere; an explicit `misconception` still wins.
+  if (toolName === 'record_evidence' && out.kind === 'misconception'
+    && out.misconception == null && typeof out.note === 'string' && out.note) {
+    out.misconception = out.note;
+  }
   return out;
 }
 

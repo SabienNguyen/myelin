@@ -90,7 +90,7 @@ export function SidePanel() {
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage" />
       <div hidden={tab !== 'graph'} id="panel-graph" className="tab-body" role="tabpanel" aria-labelledby="tab-graph"><GraphPanel visible={tab === 'graph'} /></div>
-      <div hidden={tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page"><PagePanel slug={pageSlug} /></div>
+      <div hidden={tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page"><PagePanel slug={pageSlug} visible={tab === 'page'} /></div>
       <div hidden={tab !== 'library'} id="panel-library" className="tab-body" role="tabpanel" aria-labelledby="tab-library"><LibraryPanel visible={tab === 'library'} /></div>
     </aside>
   );

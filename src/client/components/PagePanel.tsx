@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getGraph, getPage } from '../lib/api.js';
+import { POLL_MS } from './GraphPanel.js';
 import { WikiLink } from './MarkdownText.js';
 import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
 import { DECAY } from '../../shared/loreweaver.js';
@@ -175,20 +176,32 @@ function VaultIndex() {
   );
 }
 
-export function PagePanel({ slug }: { slug: string | null }) {
+export function PagePanel({ slug, visible = true }: { slug: string | null; visible?: boolean }) {
   const [page, setPage] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   // The un-caught version left the panel on "Loading…" forever whenever the fetch rejected (backend
   // down, proxy 502, non-JSON body) — indistinguishable from a slow load. Reset both on slug change
-  // so switching pages after a failure retries instead of showing the stale error.
+  // so switching pages after a failure retries instead of showing the stale error. Its own effect,
+  // NOT part of the load effect below: the load effect also re-runs on `visible`, and resetting
+  // there would flash "Loading…" on every tab switch back to a page already on screen.
+  useEffect(() => { setPage(null); setError(null); }, [slug]);
+  // Fetch + poll while visible, same POLL_MS cadence as the graph. A one-shot fetch left the
+  // standing stale for as long as the panel stayed open: the T43 lifecycle audit repaired a
+  // misconception in the thread and watched this panel keep accusing the learner of it. As in
+  // GraphPanel, a failed background poll never replaces a working view — only the first load may
+  // surface an error, and any later success clears one.
   useEffect(() => {
-    if (!slug) return;
-    setPage(null);
-    setError(null);
-    getPage(slug)
-      .then(setPage)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [slug]);
+    if (!slug || !visible) return;
+    let cancelled = false;
+    let firstLoad = true;
+    const load = () => getPage(slug)
+      .then((p) => { if (!cancelled) { setPage(p); setError(null); } })
+      .catch((e) => { if (!cancelled && firstLoad) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { firstLoad = false; });
+    load();
+    const id = setInterval(load, POLL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [slug, visible]);
   if (!slug) return <VaultIndex />;
   // getPage names the slug in the message itself, so no prefix here — see PathsSection.
   if (error) return <p className="panel-error" role="status">{error}</p>;
@@ -258,9 +271,19 @@ export function PagePanel({ slug }: { slug: string | null }) {
             </p>
           )}
           {standing.misconceptions.length > 0 && (
-            <ul className="page-standing-misconceptions">
-              {standing.misconceptions.map((m: string, i: number) => <li key={i}>{m}</li>)}
-            </ul>
+            <>
+              {/* Named, not just colored: without this line the list rendered as bare red bullets,
+                  and the one place a learner could READ their own recorded misconception never said
+                  what it was looking at (the graph carries it only in an aria-label/tooltip, the
+                  plan only as a truncated chip). */}
+              <p className="page-standing-misconceptions-label">
+                recorded misconception{standing.misconceptions.length === 1 ? '' : 's'} — the tutor
+                will re-test {standing.misconceptions.length === 1 ? 'it' : 'them'}
+              </p>
+              <ul className="page-standing-misconceptions">
+                {standing.misconceptions.map((m: string, i: number) => <li key={i}>{m}</li>)}
+              </ul>
+            </>
           )}
         </section>
       )}

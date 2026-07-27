@@ -90,3 +90,33 @@ it('GET /api/graph returns nodes with mastery', async () => {
   expect(body.nodes[0].slug).toBe('derivatives');
   expect(body.nodes[0].mastery).toBeNull(); // no evidence yet
 });
+
+// T43 (misconception lifecycle audit): graph nodes carry mastery — color, decay ring, and the ⚠
+// misconception marker — baked into the cached /api/graph payload, so with write_page-only
+// invalidation a freshly recorded or freshly resolved misconception kept a stale marker for up to
+// a TTL plus a client poll (~90s measured live). This drives the REAL loreweaver through the same
+// wrapper the harness uses and asserts the payload is fresh with no TTL wait on either side of
+// the lifecycle.
+describe('record_evidence graph-cache invalidation (T43)', () => {
+  it('a recorded then resolved misconception is fresh in /api/graph with no TTL wait', async () => {
+    const { buildRestRoutes } = await import('../src/server/restRoutes.js');
+    const { invalidateGraphCache } = await import('../src/server/graphCache.js');
+    const app = buildRestRoutes(lw, { student: 'misckid' } as any);
+    invalidateGraphCache(); // the earlier /api/graph test primed the cache for a different student
+    const clean = await (await app.request('/api/graph')).json();
+    expect(clean.nodes[0].mastery).toBeNull(); // cache now warm (TTL 60s) with no misconception
+    await lw.call('record_evidence', {
+      student: 'misckid', slug: 'derivatives', kind: 'misconception',
+      note: 'thinks dx is a multiplicative factor', misconception: 'thinks dx is a multiplicative factor',
+    });
+    const recorded = await (await app.request('/api/graph')).json();
+    expect(recorded.nodes[0].mastery.misconceptions).toContain('thinks dx is a multiplicative factor');
+    await lw.call('record_evidence', {
+      student: 'misckid', slug: 'derivatives', kind: 'explained-correctly',
+      note: 'explained dx as limit notation', resolves: 'dx is a multiplicative factor',
+    });
+    const resolved = await (await app.request('/api/graph')).json();
+    expect(resolved.nodes[0].mastery.misconceptions).not.toContain('thinks dx is a multiplicative factor');
+    invalidateGraphCache(); // leave nothing warm for tests that run after this file
+  });
+});

@@ -1659,8 +1659,15 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .page-standing-level { display: flex; align-items: baseline; gap: 0.4rem; font-weight: 600; }
 .page-standing-decayed { font-weight: 400; font-style: normal; color: var(--warn); }
 .page-standing-why, .page-standing-decay { color: var(--text-muted); }
-.page-standing-misconceptions {
+.page-standing-misconceptions-label {
   margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--bad);
+}
+
+.page-standing-misconceptions {
+  margin: 0.15rem 0 0;
   padding-left: 1.1rem;
   font-size: 0.82rem;
   color: var(--bad);

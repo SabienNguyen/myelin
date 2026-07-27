@@ -36,4 +36,30 @@ describe('sanitizeToolArgs (MCP tool guard)', () => {
     expect(sanitizeToolArgs({ slug: 'x' }, 'read_page', 'sabien')).toEqual({ slug: 'x' });
     expect(sanitizeToolArgs(undefined, 'read_page', 'sabien')).toBeUndefined();
   });
+
+  // T43: the standing `misconceptions[]` array — what the graph ⚠ marker, session-plan repair
+  // queue, and page panel read — is populated only by record_evidence's `misconception` param,
+  // while the tutor prompt teaches "kind misconception, the confusion verbatim in the note".
+  // Without this defaulting, a tutor following its own instructions records evidence no surface
+  // can show.
+  it('defaults misconception from the note when kind is misconception', () => {
+    const clean = sanitizeToolArgs(
+      { slug: 'derivatives', kind: 'misconception', note: 'thinks dx is a factor' },
+      'record_evidence', 'sabien',
+    );
+    expect(clean.misconception).toBe('thinks dx is a factor');
+  });
+  it('an explicit misconception param wins over the note', () => {
+    const clean = sanitizeToolArgs(
+      { slug: 'derivatives', kind: 'misconception', note: 'quiz 0/3', misconception: 'reads d/dx as a fraction' },
+      'record_evidence', 'sabien',
+    );
+    expect(clean.misconception).toBe('reads d/dx as a fraction');
+  });
+  it('never invents a misconception for other kinds', () => {
+    expect(sanitizeToolArgs(
+      { slug: 'derivatives', kind: 'struggled', note: 'quiz 0/3' },
+      'record_evidence', 'sabien',
+    ).misconception).toBeUndefined();
+  });
 });
