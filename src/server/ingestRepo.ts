@@ -487,7 +487,9 @@ export function ingestRepo(
           const summary = mined.pending.length > 0
             ? `${mined.pending.length} exercise(s) waiting for your approval in the Library`
             : `no exercises authored (${mined.qualified}/${mined.candidates} candidate functions qualified)`;
-          await finish('done', `${notePrefix}docs: ${queuedChapters} queued — ${summary}${mined.rejected.length ? ` — ${mined.rejected.length} rejected by the gates` : ''}`);
+          // mined.note names a skipped language (e.g. python3 missing) — without it, a Python
+          // repo's "0 candidates" reads as a miner fault instead of a missing runtime.
+          await finish('done', `${notePrefix}docs: ${queuedChapters} queued — ${summary}${mined.rejected.length ? ` — ${mined.rejected.length} rejected by the gates` : ''}${mined.note ? ` — ${mined.note}` : ''}`);
         } catch (e: any) {
           const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
           // The docs pass already succeeded; say so rather than branding the whole ingest failed.
