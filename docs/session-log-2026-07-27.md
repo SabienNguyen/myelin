@@ -77,3 +77,26 @@ Harness: 951 unit tests + 6 runtime-availability skips, 5/5 e2e, everything gree
 Loreweaver: 81/81. Parked with reasons (verdict doc): real screen-reader speech, audio-in,
 Whisper for caption-less videos, CUDA against real hardware, and a linter (typescript-eslint
 does not support TS 7 yet).
+
+## The evening arc (after the prompt caps)
+
+- **The last undriven UI states fell, and two were hiding real bugs.** Thread history proved
+  clean end to end (restore, both switch directions, APG keyboard menu — then pinned as an e2e
+  spec, taking the suite to 7). The math scratchpad drive caught the grader calling an ordinary
+  equation step "unparseable": mathjs reads '=' as assignment, so the exact shape students write
+  algebra in failed to parse. Equations are now first-class — split on the top-level '=', an
+  isolating equation means its other side, and two equations are the same statement when their
+  residuals are proportional (e03a084). Quiz multi-item and the Anki backlog badge drove clean.
+- **The axe sweep generalized into "every new state gets scanned" and found three fixes across
+  two commits**: a heading-level skip in chat block titles, an active-history-row timestamp that
+  failed dark-theme contrast, and the FirstRun card sitting outside any landmark (d3daad9,
+  ebcfbbf). Every enumerable UI state has now been scanned in both themes.
+- **Error paths got their own drive** (49c448d): with yt-dlp deliberately absent, the install
+  hint — the one message telling a user how to fix their setup — rendered as an unwrapped topbar
+  line running off the window. Ingest failures now report inside the Add-material panel where
+  text wraps; the repo-failure path was already exemplary (exact git command in the Library card).
+- **You asked whether to go public, and the repos are now ready**: both READMEs rebuilt (hero
+  line, CI badge, real screenshots, the six-kind evidence model verified against source — the
+  old summary had silently dropped rubric-passed), the example config's personal student id
+  neutralized, package metadata added, no secrets in tracked files (grep-verified). Waiting on
+  two decisions only you can make: a license, and flipping both repos public together.
