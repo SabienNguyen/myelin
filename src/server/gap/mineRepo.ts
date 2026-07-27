@@ -289,7 +289,10 @@ export async function mineRepoBuiltin(
       },
       status: 'pending',
       verification: { ok: false, gates: [] },
-      generatedBy: deps.modelName ?? 'repo-miner',
+      // The repo-miner prefix is provenance the review card renders: a MINED exercise's reference
+      // is the repo's own code, and "authored by the tutor" would be the wrong claim to review it
+      // under. (seedPatternPages embeds this string in page sources too — same honesty.)
+      generatedBy: `repo-miner (${deps.modelName ?? 'model'})`,
       generatedAt: (deps.now?.() ?? new Date()).toISOString(),
     };
     ex.verification = await verifyExercise(ex);

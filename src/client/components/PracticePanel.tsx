@@ -60,6 +60,9 @@ interface PendingRow {
   title: string;
   family: string;
   gatesPassed: number;
+  /** True when the hidden reference is the learner's own repo's code (repo-miner provenance) —
+   *  the review card must not claim the tutor authored what the repo wrote. */
+  mined: boolean;
 }
 
 export function PracticePanel({ visible = true }: { visible?: boolean }) {
@@ -84,6 +87,7 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
           .map((e: any): PendingRow => ({
             pattern: e.pattern, title: e.title ?? e.pattern, family: e.family ?? 'stream',
             gatesPassed: (e.verification?.gates ?? []).filter((g: any) => g.ok).length,
+            mined: /^repo-miner/.test(String(e.generatedBy ?? '')),
           })));
       }
     })();
@@ -169,7 +173,9 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
                   <span className="practice-tag practice-tag--new">{p.family}</span>
                 </div>
                 <p className="practice-pending-note">
-                  Authored by the tutor, passed {p.gatesPassed} mechanical checks. Look right?
+                  {p.mined
+                    ? <>Mined from your repo — the hidden reference is the repo's own code, and the suite passed {p.gatesPassed} mechanical checks against it. Look right?</>
+                    : <>Authored by the tutor, passed {p.gatesPassed} mechanical checks. Look right?</>}
                 </p>
                 <div className="practice-pending-actions">
                   <button type="button" disabled={deciding === p.pattern} onClick={() => decide(p.pattern, 'approved')}>

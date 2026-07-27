@@ -188,6 +188,8 @@ describe('mineRepoBuiltin', () => {
     expect(ex.verification.ok).toBe(true);
     // Cases were rebuilt server-side: stdin is our serialization of args, expect is pyJson'd.
     expect((ex.cases[0] as any).stdin).toBe('[[10,20],0.1]');
+    // Mined provenance travels: the review card keys "mined from your repo" copy off this prefix.
+    expect(ex.generatedBy.startsWith('repo-miner (')).toBe(true);
   });
 
   it('a model that returns garbage for one candidate does not sink the pass', async () => {
