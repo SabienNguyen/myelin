@@ -25,3 +25,8 @@ Hard rules:
   thin on a topic, keep the page short rather than filling gaps from outside knowledge.
 - Every page's `sources` frontmatter must name the book title and chapter.
 - Only use slugs that are real: ones you've just written, or ones in the existing vault slugs list.
+- **Timestamped material keeps its timestamps.** If the content is a video/lecture transcript
+  (its passages carry `**[M:SS]**` stamps), anchor each concept in the page body to where the
+  video teaches it — e.g. "the ring-unrolling argument ([2:40])". The stamps are how a tutor can
+  later send the student back to the exact moment; a summary that drops them severs the page
+  from its video. Never invent a stamp — only reuse ones present in the transcript.

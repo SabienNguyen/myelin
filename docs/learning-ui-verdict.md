@@ -149,6 +149,17 @@ Written after the sprint that followed the original verdict; each line names its
   the login, keeping the exact model), and the suite's last unnamed transient failure was
   root-caused to a test-double fidelity gap in codeexercise (passive-effect mount report
   clobbering a typed edit) — fixed, 8/8 consecutive green.
+- **Fourth live sitting (video-transcript teaching).** A real Sonnet tutor taught from an
+  ingested lecture transcript (the new YouTube path, fixture captions). It found the crash of
+  the session: a malformed math_scratchpad call — SDK-rejected, bridged anyway — unmounted the
+  entire app via a KaTeX throw. Fixed structurally (schema validation at block render + an error
+  boundary; the crashed thread itself now renders the honest malformed note beside the corrected
+  twin block). The sitting also produced the strongest honesty evidence yet: asked for video
+  minute-marks it could not see, the tutor REFUSED to invent them, said exactly why, and opened
+  the transcript in the reader instead. That exposed the real gap — compiled pages dropped the
+  transcript's timestamps — fixed in the compile prompt; with anchored pages the tutor cites all
+  the real stamps as a rewatch map, opens the source beside the conversation, and probes
+  socratically instead of re-lecturing. Verified live end to end, zero page errors.
 - **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
   the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
   first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored
