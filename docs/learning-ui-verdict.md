@@ -330,3 +330,12 @@ Written after the sprint that followed the original verdict; each line names its
   unrelated project task list…)" — the SDK session picked up the host's Claude Code task-list
   reminders. Gracefully ignored, environment-specific (a user's machine has no such reminders),
   but noted as an isolation surface for the claude-sdk route.
+- **The LLM sitting continued into multi-head attention — the adversarial-learner test.** Asked
+  point-blank whether "heads specialize" is real or folklore, the live tutor produced the two
+  actual papers that complicate the story in opposite directions — Voita et al. 2019 (a minority
+  of heads take genuinely interpretable roles: positional, syntactic, rare-word) and Michel et
+  al. 2019 (most heads are prunable with no loss) — and taught the honest synthesis instead of
+  the pop-sci blanket claim. The free-text check on that synthesis graded correct through the
+  live SDK grader. The student model now reads exactly as the evidence discipline demands:
+  applied-correctly for the two machine-graded computations, explained-correctly (not applied)
+  for the model-judged explanation — three pages at exposed, no level inflation anywhere.
