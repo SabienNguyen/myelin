@@ -451,7 +451,14 @@ export async function gradeBlockOutput(
     // applied to a different shortcut: the affordance stays available, the evidence stays honest.
     // 'struggled' is left alone; a reveal is not evidence of struggling.
     const revealed = result.revealedExpected === true;
-    const earned: EvidenceKind = !result.completed ? 'struggled'
+    // "submit anyway": the block lets a learner commit a run whose suite is still red (completed:
+    // true, testsPassed < testsTotal) — and wroteCode is the client's "edited the scaffold" diff,
+    // not "passed with own code" (CodeExercise.tsx computes it off the doc, never the results). So
+    // completed && wroteCode alone minted 'applied-correctly' with the note "passed real tests"
+    // for a 1/4 submission — observed live in audit 45. A red suite is a diagnosis, not a pass:
+    // it earns 'struggled', same as stopping.
+    const suiteGreen = result.testsPassed === result.testsTotal;
+    const earned: EvidenceKind = !result.completed || !suiteGreen ? 'struggled'
       : result.wroteCode ? 'applied-correctly' : 'exposed';
     const kind: EvidenceKind = earned === 'applied-correctly' && revealed ? 'exposed' : earned;
     // The failing-case names ride into the evidence note: "stopped at full_body" says the learner
@@ -463,13 +470,15 @@ export async function gradeBlockOutput(
     const failingNote = failing.length > 0
       ? ` — still failing: ${failing.slice(0, 3).join('; ')}${failing.length > 3 ? ` (+${failing.length - 3} more)` : ''}`
       : '';
-    const note = result.completed
-      ? (result.wroteCode
-        ? (revealed
-          ? 'passed real tests with own code, but revealed expected values — capped at exposed'
-          : 'passed real tests with own code')
-        : `completed ${result.rungReached} (guided)`)
-      : `stopped at ${result.rungReached}${failingNote}`;
+    const note = !result.completed
+      ? `stopped at ${result.rungReached}${failingNote}`
+      : !suiteGreen
+        ? `submitted with ${result.testsPassed}/${result.testsTotal} passing${failingNote}`
+        : result.wroteCode
+          ? (revealed
+            ? 'passed real tests with own code, but revealed expected values — capped at exposed'
+            : 'passed real tests with own code')
+          : `completed ${result.rungReached} (guided)`;
     // `detail` used to be `${testsPassed}/${testsTotal} tests`, which the graded card ALREADY
     // renders one line above — the same number twice, and no room left to say the thing neither
     // line said: which evidence this run actually minted. That mattered most in the reveal case,
@@ -478,13 +487,15 @@ export async function gradeBlockOutput(
     // tutor now knows the ceiling applied rather than inferring a clean pass from "5/5 tests".
     const detail = !result.completed
       ? `recorded as struggled — stopped at ${result.rungReached}${failingNote}`
-      : kind === 'applied-correctly'
-        ? 'recorded as applied-correctly'
-        : revealed
-          ? 'recorded as exposed — expected values were revealed, so this cannot count as applying the pattern'
-          : 'recorded as exposed — guided rungs only, no code of your own was graded';
+      : !suiteGreen
+        ? `recorded as struggled — submitted with a failing suite${failingNote}`
+        : kind === 'applied-correctly'
+          ? 'recorded as applied-correctly'
+          : revealed
+            ? 'recorded as exposed — expected values were revealed, so this cannot count as applying the pattern'
+            : 'recorded as exposed — guided rungs only, no code of your own was graded';
     return {
-      verdict: result.completed ? 'correct' : 'incorrect',
+      verdict: result.completed && suiteGreen ? 'correct' : 'incorrect',
       // The artifact's real suite ran in the sandbox — the strongest mechanical grade in the app.
       source: 'mechanical',
       detail,

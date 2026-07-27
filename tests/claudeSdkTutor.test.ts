@@ -3,7 +3,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Loreweaver } from '../src/server/mcp.js';
-import { createClaudeSdkTutorSession } from '../src/server/claudeSdkTutor.js';
+import { courseMcpTools, createClaudeSdkTutorSession } from '../src/server/claudeSdkTutor.js';
+import { getGraphCached, invalidateGraphCache } from '../src/server/graphCache.js';
 import { loadSdkSession, saveSdkSession } from '../src/server/sessionStore.js';
 
 const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
@@ -123,7 +124,12 @@ describe('follow-up turn with a completed block output', () => {
 
     expect(calls.length).toBe(1); // record_evidence was called — no guardrail nudge
     expect(calls[0].options.resume).toBe('sess-stored');
-    expect(calls[0].prompt).toMatch(/HARNESS: graded block results attached above/);
+    expect(calls[0].prompt).toMatch(/HARNESS: the student answered the block\(s\) you displayed/);
+    // The submission itself must ride along: the resumed SDK session only holds the block-display
+    // sentinel, so a verdict without the work reads as unverifiable (audit 45: model refused to
+    // record_evidence over exactly this).
+    expect(calls[0].prompt).toContain('"answer":"4"');
+    expect(calls[0].prompt).toMatch(/Graded mechanically\/by the grader as: correct/);
     expect(calls[0].prompt).not.toMatch(/SESSION CONTEXT/); // not turn 1 — no bootstrap re-sent
   }, 30_000);
 });
@@ -310,4 +316,101 @@ describe('Bug B: loreweaver arg sanitization is wired through a live seam, not s
     );
     expect(result.hookSpecificOutput.updatedInput.student).toBe(cfg.student);
   }, 30_000);
+});
+
+describe('graph-cache invalidation on the SDK route', () => {
+  it('exposes a PostToolUse hook that drops the cached graph after record_evidence, and only then', async () => {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-cache');
+      yield assistantMsg('sess-cache', [{ type: 'text', text: 'ok' }]);
+      yield resultMsg('sess-cache');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any,
+      'learn', 'thread-cache',
+    ));
+
+    const matchers = calls[0].options.hooks?.PostToolUse;
+    expect(Array.isArray(matchers) && matchers.length > 0).toBe(true);
+    const hookFn = matchers[0].hooks[0];
+    const hookInput = (toolName: string) => ({
+      hook_event_name: 'PostToolUse',
+      session_id: 'sess-cache', transcript_path: '/tmp/x', cwd: '/tmp',
+      tool_name: toolName, tool_input: {}, tool_response: {}, tool_use_id: 'tu-cache',
+    });
+    const hookExtra = { signal: new AbortController().signal };
+
+    // Asserted through the cache's public API, not a spy: a fetch only happens when the cache is
+    // actually empty, so the fetch count IS the invalidation behavior.
+    invalidateGraphCache();
+    let fetches = 0;
+    const fetchGraph = async () => { fetches += 1; return { nodes: [], goal: null, summary: {} }; };
+    await getGraphCached(fetchGraph);
+    await getGraphCached(fetchGraph);
+    expect(fetches).toBe(1); // warm cache serves without refetching
+
+    await hookFn(hookInput('mcp__loreweaver__read_page'), 'tu-cache', hookExtra);
+    await getGraphCached(fetchGraph);
+    expect(fetches).toBe(1); // reads must NOT invalidate
+
+    await hookFn(hookInput('mcp__loreweaver__record_evidence'), 'tu-cache', hookExtra);
+    await getGraphCached(fetchGraph);
+    expect(fetches).toBe(2); // evidence write dropped the cache
+
+    await hookFn(hookInput('mcp__loreweaver__write_page'), 'tu-cache', hookExtra);
+    await getGraphCached(fetchGraph);
+    expect(fetches).toBe(3); // page write dropped it too
+  }, 30_000);
+});
+
+describe('course tools on the SDK route', () => {
+  function seededVault(): string {
+    const v = mkdtempSync(join(tmpdir(), 'lwh-sdk-course-'));
+    mkdirSync(join(v, '.harness'), { recursive: true });
+    writeFileSync(join(v, '.harness', 'course-bank.jsonl'), [
+      JSON.stringify({ id: 'exam#1', source: 'exam', n: 1, text: 'Compute the tax owed on $58,000.', answer: '$10,268', added: '2026-07-20', lastCorrect: '2026-07-21' }),
+      JSON.stringify({ id: 'exam#2', source: 'exam', n: 2, text: 'Define a deduction versus a credit.', added: '2026-07-20' }),
+    ].join('\n') + '\n');
+    return v;
+  }
+
+  // Loosely typed on purpose: .find() over the heterogeneous tool array intersects the two
+  // handlers' arg shapes, which no real call ever satisfies.
+  async function callCourseTool(v: string, name: string, args: Record<string, unknown>): Promise<any> {
+    const t = courseMcpTools(v).find((tool) => tool.name === name)! as any;
+    const res = await t.handler(args, {});
+    return JSON.parse(res.content[0].text);
+  }
+
+  it('course_problems serves never-answered first, verbatim, with answer and lastCorrect intact', async () => {
+    const v = seededVault();
+    const payload = await callCourseTool(v, 'course_problems', { k: 5 });
+    expect(payload.problems.map((p: any) => p.id)).toEqual(['exam#2', 'exam#1']);
+    expect(payload.problems[0].text).toBe('Define a deduction versus a credit.'); // verbatim contract
+    expect(payload.problems[1].answer).toBe('$10,268');
+    expect(payload.problems[1].lastCorrect).toBe('2026-07-21');
+  });
+
+  it('mark_course_problem persists lastCorrect to the bank on disk; an unknown id is an error', async () => {
+    const v = seededVault();
+    const ok = await callCourseTool(v, 'mark_course_problem', { id: 'exam#2' });
+    expect(ok).toEqual({ marked: 'exam#2' });
+    const bank = readFileSync(join(v, '.harness', 'course-bank.jsonl'), 'utf8');
+    const entry = bank.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => JSON.parse(l))
+      .find((e) => e.id === 'exam#2');
+    expect(entry.lastCorrect).toBe(new Date().toISOString().slice(0, 10));
+
+    const miss = await callCourseTool(v, 'mark_course_problem', { id: 'nope#9' });
+    expect(miss.error).toContain('nope#9');
+  });
+
+  it('an empty bank answers with the empty-bank note, not a bare empty list', async () => {
+    const v = mkdtempSync(join(tmpdir(), 'lwh-sdk-course-empty-'));
+    const payload = await callCourseTool(v, 'course_problems', {});
+    expect(payload.problems).toEqual([]);
+    expect(payload.note).toContain('course bank is empty');
+  });
 });

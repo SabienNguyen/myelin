@@ -10,6 +10,7 @@ import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput } from './grading.js';
+import { invalidateGraphCache } from './graphCache.js';
 import type { Loreweaver } from './mcp.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { availableBlocks, sanitizeToolArgs, vaultGap, type VaultGap } from './session.js';
@@ -86,8 +87,10 @@ function blockMcpTools() {
 
 /** The course bank's tools on the SDK route — same behavior as session.ts's buildCourseTools,
  * re-expressed in the Agent SDK's tool() shape (its handlers return MCP content blocks, so the
- * ai-sdk ToolSet can't be reused directly). Keep the two in sync by hand, like TEACH_TOOLS. */
-function courseMcpTools(vault: string) {
+ * ai-sdk ToolSet can't be reused directly). Keep the two in sync by hand, like TEACH_TOOLS.
+ * Exported for tests: the SDK executes these handlers inside its own loop, so the fake-queryImpl
+ * tests can't reach them — tests/claudeSdkTutor.test.ts calls the handlers directly instead. */
+export function courseMcpTools(vault: string) {
   return [
     tool(
       'course_problems',
@@ -235,6 +238,23 @@ export function createClaudeSdkTutorSession(
             };
           }],
         }],
+        // Graph-cache invalidation for THIS route. The ai-sdk route's writes all pass through
+        // src/server/mcp.ts's invalidateIfWrite, but here the Agent SDK spawns its own Loreweaver
+        // stdio server (mcpServers.loreweaver above) and executes tool calls itself — a
+        // record_evidence on this route never touches the harness's Loreweaver wrapper, so without
+        // this hook a freshly recorded misconception kept its stale graph payload for up to a TTL
+        // (the exact bug c5b64f4 fixed on the other route). PostToolUse fires only on success —
+        // failures go to PostToolUseFailure — which preserves mcp.ts's only-invalidate-on-success
+        // rule. Keep the tool list in sync with invalidateIfWrite by hand.
+        PostToolUse: [{
+          hooks: [async (input) => {
+            if (input.hook_event_name === 'PostToolUse'
+              && (input.tool_name === RECORD_EVIDENCE_TOOL || input.tool_name === `${LOREWEAVER_PREFIX}write_page`)) {
+              invalidateGraphCache();
+            }
+            return {};
+          }],
+        }],
       },
     };
     if (resumeId) options.resume = resumeId;
@@ -274,8 +294,21 @@ export function createClaudeSdkTutorSession(
             + 'page-writing tools here, so nothing you find is saved — offer freeform afterwards.');
         }
         if (grades.length) {
+          // The submission itself rides along. On the ai-sdk route the model re-reads the full
+          // message history every turn, block outputs included; here the resumed SDK session holds
+          // only the block-display sentinel ("their answer arrives next message") — so a grades
+          // prompt that asserts a verdict without showing the work reads as unverifiable, and a
+          // live sitting (audit 45) caught the model refusing to record_evidence over exactly
+          // that: "I'm not seeing an actual code submission from you". Showing the work also lets
+          // the tutor diagnose the specific mistake, not just relay a verdict. Bounded per block —
+          // a full_body submission is small, but nothing here should be able to flood a prompt.
+          const submissions = pending.map((p) => {
+            const { grading: _, ...output } = p.output ?? {};
+            return `- ${p.tool} ${JSON.stringify(p.input)}\n  student's output: ${JSON.stringify(output).slice(0, 2_000)}`;
+          }).join('\n');
           promptParts.push(
-            `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
+            `HARNESS: the student answered the block(s) you displayed. Their actual work:\n${submissions}\n\n`
+            + `Graded mechanically/by the grader as: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
             + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
           );
         }

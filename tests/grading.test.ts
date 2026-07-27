@@ -184,6 +184,24 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(g.detail).toBe('recorded as applied-correctly');
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'applied-correctly' });
   });
+  // "submit anyway": the block lets a learner commit a red suite (completed: true with failures),
+  // and wroteCode is a scaffold-diff, not a pass marker — so completed + wroteCode alone minted
+  // 'applied-correctly' with the note "passed real tests" for a 1/4 submission (caught live in
+  // audit 45). A red suite earns 'struggled', with the failing-case diagnosis in the note.
+  it('completed + wroteCode with a failing suite ("submit anyway") -> struggled, never applied-correctly', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'dilution-calculator', rung: 'full_body', pageSlug: 'dilution-calculator' },
+      {
+        completed: true, rungReached: 'full_body', testsPassed: 1, testsTotal: 4, wroteCode: true,
+        failingTests: ['a simple tenfold dilution', 'rounds to 2 decimal places'],
+      }, cfg);
+    expect(g.verdict).toBe('incorrect');
+    expect(g.evidence[0]).toMatchObject({ slug: 'dilution-calculator', kind: 'struggled' });
+    expect(g.evidence[0].note).toContain('submitted with 1/4 passing');
+    expect(g.evidence[0].note).toContain('still failing: a simple tenfold dilution');
+    expect(g.detail).toContain('recorded as struggled — submitted with a failing suite');
+  });
+
   // Reveal ceiling: expected-vs-actual is available in TestResultsPanel, but a run that used it
   // cannot mint 'applied-correctly' — same shape as the Anki-review ceiling.
   it('completed + wroteCode + revealedExpected -> capped at exposed, not applied-correctly', async () => {
