@@ -270,3 +270,12 @@ Written after the sprint that followed the original verdict; each line names its
   /api/chat with the freshly selected mode. useChatRuntime honors the per-render transport;
   nothing to fix. The history drive is also now a permanent e2e spec (sixth spec, 7/7 tests
   green) with threads seeded straight into the session store so no scripted turn is consumed.
+- **Fresh-vault cold start — driven end to end, no defect.** With zero authored pages, every read
+  endpoint answers 200 with honest empties, and the app self-seeds exactly one practice pattern
+  (the built-in sandbox's stream-consumer stub — by design, so the first coding exercise always
+  has a page to record against). The chat shows "What do you want to learn?" with three example
+  prompts, the Library says plainly what doesn't exist yet and which control creates it, the
+  graph renders its single node with legend and focus hint, and the first chat turn completes.
+  loreweaver's side also gained a permanent fuzz suite this cycle: 900 seeded hostile inputs
+  through parsePage/serializePage/slugify — the surface compiled pages are written to — with a
+  parse→serialize→parse fixed-point invariant, all holding on first run (84/84).
