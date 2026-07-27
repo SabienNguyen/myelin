@@ -198,8 +198,10 @@ Written after the sprint that followed the original verdict; each line names its
   build at 10.9 SECONDS — fetchGraph made 1+2N stdio roundtrips, two per page. loreweaver grew a
   list_pages bulk tool and the whole-map student call already carried every field the graph
   reads, so the build is two calls total: 16ms cold on the same fixture, ~680× faster, with a
-  fallback to the old path for older bundled loreweavers. "Learn anything" implies years of
-  accumulation; the graph no longer punishes it.
+  fallback to the old path for older bundled loreweavers. The client side holds up too: the
+  contextual default renders 35 nodes instantly, the Whole-vault toggle renders all 501 in
+  250ms with responsive zoom, and the session plan interleaves review/new correctly across the
+  whole fixture. "Learn anything" implies years of accumulation; the app no longer punishes it.
 - **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
   the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
   first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored
