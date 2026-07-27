@@ -16,7 +16,7 @@ import { modelFor } from './models.js';
 import {
   readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
-import { sanitizeToolArgs } from './session.js';
+import { sanitizeToolArgs, SLUG_LIST_CAP } from './session.js';
 import { isVideoUrl, linkifyTimestamps } from './videoIngest.js';
 
 /** Injectable seam for tests — see claudeSdk.ts. */
@@ -403,7 +403,7 @@ export function chunkChapter(markdown: string, budget = CHAPTER_CHUNK_CHARS): st
   return parts;
 }
 
-function buildCompilePrompt(
+export function buildCompilePrompt(
   bookTitle: string, chapterN: number, chapterTitle: string, chapterMarkdown: string, existingSlugs: string[],
   partLabel = '',
 ): string {
@@ -411,8 +411,16 @@ function buildCompilePrompt(
     compileInstructions(),
     `Book: "${bookTitle}"`,
     `Chapter ${chapterN}: "${chapterTitle}"${partLabel}`,
-    `Existing vault slugs (the ONLY valid slugs for prereqs/deepens/links besides ones you write in `
-      + `this batch): ${existingSlugs.join(', ') || '(none yet)'}`,
+    // Same scale cap as the tutor's slug grounding (session.ts's SLUG_LIST_CAP): a small vault
+    // inlines every slug — genuinely useful link candidates — but past the cap the list is
+    // thousands of tokens per compile PART that the model cannot meaningfully scan anyway, and
+    // write_page's own proposeLinks already surfaces verified candidates by content similarity.
+    existingSlugs.length <= SLUG_LIST_CAP
+      ? `Existing vault slugs (the ONLY valid slugs for prereqs/deepens/links besides ones you `
+        + `write in this batch): ${existingSlugs.join(', ') || '(none yet)'}`
+      : `The vault has ${existingSlugs.length} pages — too many to list. Do not guess slugs: for `
+        + 'prereqs/deepens/links, reference only pages you write in this batch or the verified '
+        + 'candidates write_page proposes back to you.',
     'Chapter content (markdown):',
     '"""',
     chapterMarkdown,

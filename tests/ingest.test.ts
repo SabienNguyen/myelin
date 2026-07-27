@@ -590,3 +590,20 @@ describe('sweepInterruptedConversions', async () => {
     expect(q[0].error).toMatch(/re-run the repo ingest/);
   });
 });
+
+
+describe('buildCompilePrompt slug cap', async () => {
+  const { buildCompilePrompt } = await import('../src/server/ingest.js');
+  it('small vaults inline every slug as link candidates', () => {
+    const p = buildCompilePrompt('B', 1, 'C', 'body', ['a', 'b']);
+    expect(p).toContain('Existing vault slugs');
+    expect(p).toContain('a, b');
+  });
+  it('past the cap, points at write_page proposals instead of a thousand-token list', () => {
+    const slugs = Array.from({ length: 400 }, (_, i) => `s${i}`);
+    const p = buildCompilePrompt('B', 1, 'C', 'body', slugs);
+    expect(p).toContain('400 pages — too many to list');
+    expect(p).not.toContain('s200');
+    expect(p).toMatch(/write_page proposes/);
+  });
+});
