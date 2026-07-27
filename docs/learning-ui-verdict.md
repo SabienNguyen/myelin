@@ -412,3 +412,10 @@ Written after the sprint that followed the original verdict; each line names its
   backslashes cannot break — with the fence tolerance kept and no-parseable-cards still throwing
   readably. The re-probe: 12 cards, zero failures, including four from the page that broke every
   JSON attempt. The failure class is gone rather than patched around.
+- **Quantization leg: folklore correction plus a live self-heal.** The tutor dismantled "int4 is
+  basically free" with this-session sources (GPTQ, AWQ, LLM.int8()) and real numbers — naive
+  int4 breaks on outlier features eating the scale budget, not on bit count — and its check
+  probed exactly that mechanism (graded correct). When the evidence record bounced against a
+  missing page, the tutor wrote the page itself, retried the record successfully, and flagged
+  the page unverified because it came from knowledge rather than read sources. The bounce →
+  write → record → honest-provenance sequence, unprompted, under a live model.
