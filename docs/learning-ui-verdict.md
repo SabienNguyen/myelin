@@ -304,3 +304,12 @@ Written after the sprint that followed the original verdict; each line names its
   hides the topbar copy. One observation judged fine as-is: the repo path's "ingesting in the
   background" topbar note is written at accept time and doesn't update when the background clone
   later fails — the Library card is the live surface and reports the failure in full.
+- **Two tabs on the same conversation — a silent data-loss bug found and fixed.** A live probe
+  opened the same thread in two tabs and sent a turn from each: the staler tab's turn-finish
+  write replaced the thread file with only its own view, erasing the other tab's entire
+  exchange from disk — no crash, no error, just a vanished conversation turn. saveThread now
+  merges by message id instead of replacing: a writer keeps its own (fresher) versions of
+  messages it knows, and messages it has never seen are preserved in front. Threads only grow —
+  there is no message-edit or branch UI — so the union loses nothing, and the normal single-tab
+  flow writes byte-identical files. Unit-tested both ways and re-probed live: all four messages
+  survive in order, and a fresh tab renders the merged conversation. Full suite 968, e2e 7/7.

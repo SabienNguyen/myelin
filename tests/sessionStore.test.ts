@@ -95,6 +95,31 @@ describe('loadThread / saveThread — corrupt-file and duplicate-id hardening', 
   });
 });
 
+// Two tabs on the same thread each PUT their own view. A blind replace let the staler tab
+// silently erase the other tab's whole exchange (found by a live two-tab probe) — saveThread
+// merges by id instead. Threads only grow (no edit/branch UI), so union loses nothing.
+describe('saveThread — concurrent-writer merge', () => {
+  it('a stale writer cannot erase messages it never saw', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ id: 'a1', v: 'tab A user' }, { id: 'a2', v: 'tab A reply' }]);
+    // Tab B loaded before A's exchange existed; its view has only its own turn.
+    saveThread(vault, 't', [{ id: 'b1', v: 'tab B user' }, { id: 'b2', v: 'tab B reply' }]);
+    expect(loadThread(vault, 't')).toEqual([
+      { id: 'a1', v: 'tab A user' }, { id: 'a2', v: 'tab A reply' },
+      { id: 'b1', v: 'tab B user' }, { id: 'b2', v: 'tab B reply' },
+    ]);
+  });
+
+  it('the normal single-tab flow is unchanged: a superset write IS the file, fresher versions win', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ id: 'u1', v: 'user' }, { id: 'as1', v: 'streaming…' }]);
+    saveThread(vault, 't', [{ id: 'u1', v: 'user' }, { id: 'as1', v: 'final text' }, { id: 'u2', v: 'next' }]);
+    expect(loadThread(vault, 't')).toEqual([
+      { id: 'u1', v: 'user' }, { id: 'as1', v: 'final text' }, { id: 'u2', v: 'next' },
+    ]);
+  });
+});
+
 describe('listThreads', () => {
   it('returns [] when no sessions dir exists yet', () => {
     const vault = makeVault();

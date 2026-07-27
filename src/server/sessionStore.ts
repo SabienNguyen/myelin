@@ -18,7 +18,17 @@ function assertThreadId(threadId: string) {
 export function saveThread(vault: string, threadId: string, messages: unknown[]) {
   assertThreadId(threadId);
   mkdirSync(dir(vault), { recursive: true });
-  writeFileSync(join(dir(vault), `${threadId}.json`), JSON.stringify(dedupeById(messages)));
+  // Merge with what's on disk instead of replacing it. Two tabs on the same thread each write
+  // their own view; a blind replace let the staler tab silently erase the other's entire
+  // exchange (found by a live two-tab probe). Threads only grow — there is no message-edit or
+  // branch UI — so union-by-id loses nothing: messages the writer already knows keep the
+  // writer's (fresher) version, and messages it has never seen are kept in front, matching the
+  // usual case of a stale tab writing after another tab's turns. Order under truly interleaved
+  // writers is best-effort; content survival is the guarantee.
+  const incoming = dedupeById(messages);
+  const incomingIds = new Set((incoming as any[]).map((m) => m?.id));
+  const unseen = (loadThread(vault, threadId) as any[]).filter((m) => !incomingIds.has(m?.id));
+  writeFileSync(join(dir(vault), `${threadId}.json`), JSON.stringify([...unseen, ...incoming]));
 }
 /** Restores a persisted thread. A corrupt file (invalid JSON, or JSON that isn't an array) must
  * never 500 the GET — it's treated as an empty thread instead. Deduped by id as a durable
