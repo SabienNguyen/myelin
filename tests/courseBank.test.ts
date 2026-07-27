@@ -94,3 +94,25 @@ describe('bank storage', () => {
     expect(readBank(vault)).toHaveLength(4);
   });
 });
+
+describe('courseSeeds', () => {
+  const { mkdtempSync: mkd, rmSync: rms } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir: tmp } = require('node:os') as typeof import('node:os');
+  const { join: j } = require('node:path') as typeof import('node:path');
+  it('derives one stub page per banked source, so drill evidence has a home', async () => {
+    const { courseSeeds } = await import('../src/server/seedPatternPages.js');
+    const v = mkd(j(tmp(), 'lwh-seed-'));
+    try {
+      saveProblems(v, 'chem201-midterm2', extractProblems(EXAM));
+      const seeds = courseSeeds(v);
+      expect(seeds).toHaveLength(1);
+      expect(seeds[0].slug).toBe('course-chem201-midterm2');
+      expect(seeds[0].domain).toBe('course');
+    } finally { rms(v, { recursive: true, force: true }); }
+  });
+  it('an empty bank seeds nothing', async () => {
+    const { courseSeeds } = await import('../src/server/seedPatternPages.js');
+    const v = mkd(j(tmp(), 'lwh-seed-'));
+    try { expect(courseSeeds(v)).toEqual([]); } finally { rms(v, { recursive: true, force: true }); }
+  });
+});

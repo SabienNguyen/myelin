@@ -14,6 +14,7 @@
 // tutor's freeform-mode write would need one.
 import type { HarnessConfig } from './config.js';
 import { approvedGenerated } from './gap/generated.js';
+import { readBank } from './courseBank.js';
 import type { Loreweaver } from './mcp.js';
 
 interface PatternPageSeed {
@@ -59,6 +60,23 @@ const PATTERN_PAGES: PatternPageSeed[] = [
  * so re-running this on every boot is safe and cheap (one `listSlugs()` glob plus zero or more
  * `write_page` calls). No gate on cfg.gap any more: the built-in sandbox (gap/service.ts) means
  * there is ALWAYS at least the stream-consumer ladder to seed a page for. */
+/** One stub page per course-bank source, so drilled problems have somewhere for evidence to
+ *  land. The live-model sitting exposed the gap: a blank answer on a banked problem produced no
+ *  `struggled` trace anywhere, because the bank is not a page and record_evidence needs one.
+ *  Slug course-<source> — the tutor prompt names it as the pageSlug for bank drills. */
+export function courseSeeds(vault: string): PatternPageSeed[] {
+  const sources = [...new Set(readBank(vault).map((p) => p.source))];
+  return sources.map((source) => ({
+    slug: `course-${source}`,
+    title: `Course practice: ${source}`,
+    domain: 'course',
+    body: 'Stub page, seeded at boot for an added problem set or past exam. Evidence from '
+      + 'drilling its problems lands here, so struggles and passes on YOUR course material '
+      + 'track like any other page.',
+    sources: [`course bank source ${source}`],
+  }));
+}
+
 export async function seedPatternPages(lw: Loreweaver, cfg: HarnessConfig): Promise<void> {
   const existing = new Set(await lw.listSlugs());
   // Approved GENERATED exercises seed pages too — derived from what is on disk, not from widening
@@ -77,7 +95,11 @@ export async function seedPatternPages(lw: Loreweaver, cfg: HarnessConfig): Prom
     ].join('\n'),
     sources: [`generated exercise ${ex.pattern} (${ex.generatedBy})`],
   }));
-  for (const page of [...PATTERN_PAGES, ...generated]) {
+  // Course-bank sources seed a page each, so drilled problems have somewhere for evidence to
+  // land. The live-model sitting exposed the gap: a blank answer on a banked problem produced no
+  // `struggled` trace anywhere, because the bank is not a page and record_evidence needs one.
+  // Slug course-<source> — the tutor prompt names it as the pageSlug for bank drills.
+  for (const page of [...PATTERN_PAGES, ...generated, ...courseSeeds(cfg.vault)]) {
     if (existing.has(page.slug)) continue;
     await lw.call('write_page', {
       slug: page.slug,
