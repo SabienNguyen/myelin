@@ -345,3 +345,13 @@ Written after the sprint that followed the original verdict; each line names its
   was genuinely diagnostic (rotate only V — does relative position survive?), and the learner's
   "no, the m−n dependence lives in q·k" answer graded correct with evidence recorded. Four
   topics deep, every check graded, every evidence kind honest.
+- **The deep-LLM sitting completed the full learn-anything arc.** Six topics taught by the live
+  subscription tutor (QKV, scaling, multi-head, positional/RoPE, KV cache, training-vs-inference),
+  every one closed with a graded check — two machine-graded computations, four model-judged
+  transfer questions, all six recording honest evidence kinds with zero level inflation. The
+  KV-cache leg was quantitatively exact (128 KiB/token for the Llama-3-8B shape; its 32K→4 GiB
+  check graded mechanically), the exposure-bias leg taught mixed evidence honestly instead of
+  folklore, and the sitting closed with freeform compiling all four remaining stubs into solid,
+  sourced pages — teach → check → record → durable memory, end to end, under a real model. Two
+  papercuts the sitting surfaced were fixed and shipped on the spot (the Mermaid stream latch,
+  the double-escaped \n\n in block prose).
