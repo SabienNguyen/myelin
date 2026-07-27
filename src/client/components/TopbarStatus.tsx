@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrainIcon as Brain, UserCircleIcon as UserCircle } from '@phosphor-icons/react';
 
 type Status = { anki?: 'up' | 'down' | 'backlog'; student?: string; tutor?: string };
@@ -43,7 +43,7 @@ export function TopbarStatus() {
   }, []);
   return (
     <div className="topbar-status">
-      {status.student && <span className="badge"><UserCircle size={14} weight="duotone" /> {status.student}</span>}
+      {status.student && <StudentSwitcher current={status.student} onSwitched={(name) => setStatus((s) => ({ ...s, student: name }))} />}
       {status.tutor && (() => {
         const { name, how } = modelLabel(status.tutor);
         return (
@@ -67,5 +67,74 @@ export function TopbarStatus() {
         </span>
       )}
     </div>
+  );
+}
+
+
+/**
+ * The student badge, grown into a switcher: one vault, several learners, separate evidence —
+ * loreweaver has always keyed the student model by id, and this is the surface that lets a
+ * household actually use that. Menu lists known students (anyone with a state file) plus a
+ * field for a new name; switching takes effect on the next request and persists.
+ */
+function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched: (name: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [students, setStudents] = useState<string[]>([]);
+  const [fresh, setFresh] = useState('');
+  const [note, setNote] = useState('');
+  const rootRef = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    fetch('/api/students').then((r) => r.json())
+      .then((d) => setStudents(d.students ?? [])).catch(() => {});
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const switchTo = async (name: string) => {
+    const res = await fetch('/api/student', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { setNote(d.error ?? 'could not switch'); return; }
+    setNote(d.warning ?? '');
+    onSwitched(d.current);
+    setOpen(false);
+    setFresh('');
+  };
+
+  return (
+    <span className="student-switcher" ref={rootRef}>
+      <button
+        type="button" className="badge student-badge"
+        aria-haspopup="menu" aria-expanded={open}
+        aria-label={`student: ${current} — switch student`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <UserCircle size={14} weight="duotone" /> {current}
+      </button>
+      {open && (
+        <span className="student-menu" role="menu" aria-label="switch student">
+          {students.map((s) => (
+            <button key={s} type="button" role="menuitem" className={s === current ? 'on' : ''}
+              onClick={() => (s === current ? setOpen(false) : switchTo(s))}>
+              {s}{s === current ? ' \u00b7 current' : ''}
+            </button>
+          ))}
+          <input
+            aria-label="new student name"
+            placeholder="new student\u2026"
+            value={fresh}
+            onChange={(e) => setFresh(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && fresh.trim()) void switchTo(fresh.trim()); }}
+          />
+          {note && <span className="student-note" role="status">{note}</span>}
+        </span>
+      )}
+    </span>
   );
 }

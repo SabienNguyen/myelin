@@ -511,3 +511,54 @@ describe('GET /api/source — the reader is served only vault raw files', () => 
     expect((await app().request('/api/source?path=raw%2Fuploads%2Fnope.md')).status).toBe(404);
   });
 });
+
+describe('student profiles — one vault, several learners', () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir } = require('node:os') as typeof import('node:os');
+  const { join } = require('node:path') as typeof import('node:path');
+  const lw = { listSlugs: async () => [], call: async () => ({}) } as any;
+  let vault: string; let cfgFile: string; let prevEnv: string | undefined;
+  beforeEach(() => {
+    vault = mkdtempSync(join(tmpdir(), 'lwh-students-'));
+    mkdirSync(join(vault, 'students'), { recursive: true });
+    writeFileSync(join(vault, 'students', 'alice.json'), '{}');
+    cfgFile = join(vault, 'harness.config.json');
+    writeFileSync(cfgFile, JSON.stringify({ student: 'alice', keep: 'me' }));
+    prevEnv = process.env.HARNESS_CONFIG;
+    process.env.HARNESS_CONFIG = cfgFile;
+  });
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.HARNESS_CONFIG;
+    else process.env.HARNESS_CONFIG = prevEnv;
+    rmSync(vault, { recursive: true, force: true });
+  });
+  const mkCfg = () => ({ student: 'alice', vault } as unknown as HarnessConfig);
+
+  it('lists known students including the current one', async () => {
+    const res = await buildRestRoutes(lw, mkCfg()).request('/api/students');
+    const body = await res.json();
+    expect(body.current).toBe('alice');
+    expect(body.students).toContain('alice');
+  });
+
+  it('switching mutates cfg in place and persists without clobbering other fields', async () => {
+    const cfg = mkCfg();
+    const res = await buildRestRoutes(lw, cfg).request('/api/student', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Bobby' }),
+    });
+    expect((await res.json()).current).toBe('bobby'); // case-folded
+    expect((cfg as any).student).toBe('bobby');       // in place — next request is bobby's
+    const onDisk = JSON.parse(readFileSync(cfgFile, 'utf8'));
+    expect(onDisk.student).toBe('bobby');
+    expect(onDisk.keep).toBe('me');                   // read-modify-write preserved the rest
+  });
+
+  it('rejects names that could not be a state filename', async () => {
+    const res = await buildRestRoutes(lw, mkCfg()).request('/api/student', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '../evil' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

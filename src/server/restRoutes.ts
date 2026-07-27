@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import type { AnkiClient } from './anki/client.js';
@@ -302,6 +302,42 @@ export function buildRestRoutes(
       bySource.set(p.source, row);
     }
     return c.json({ sources: [...bySource.values()] });
+  });
+
+  /**
+   * Student profiles — the homeschool-parent persona: one vault, several learners, separate
+   * evidence. Loreweaver has always keyed evidence by student id; these two routes and the
+   * topbar switcher are the missing surface. Switching mutates cfg.student IN PLACE (the
+   * signin.ts applyRoute precedent — every handler reads cfg.student per request, so the next
+   * request is the new learner) and persists to the config file so a restart keeps it.
+   */
+  app.get('/api/students', (c) => {
+    const dir = join(cfg.vault, 'students');
+    const known = existsSync(dir)
+      ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => f.replace(/\.json$/, ''))
+      : [];
+    if (!known.includes(cfg.student)) known.push(cfg.student);
+    return c.json({ current: cfg.student, students: known.sort() });
+  });
+  app.put('/api/student', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const name = String(body?.name ?? '').trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-_]{0,39}$/.test(name)) {
+      return c.json({ error: 'student names are 1-40 chars: letters, digits, - and _' }, 400);
+    }
+    cfg.student = name;
+    // Persist so a restart keeps the switch. Read-modify-write of the JSON on disk preserves
+    // every other field (and any fields this build does not know about).
+    try {
+      const path = process.env.HARNESS_CONFIG ?? './harness.config.json';
+      const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+      onDisk.student = name;
+      writeFileSync(path, `${JSON.stringify(onDisk, null, 2)}\n`);
+    } catch (e: any) {
+      // The in-memory switch already took effect; a failed persist is named, not hidden.
+      return c.json({ current: name, warning: `switched for this run, but not saved: ${e?.message ?? e}` });
+    }
+    return c.json({ current: name });
   });
 
   /**
