@@ -378,3 +378,8 @@ Written after the sprint that followed the original verdict; each line names its
   and its shift-invariance transfer question ("+50 per prompt — does the loss change?") graded
   the learner's cancellation answer correct with evidence recorded. The graph now grows a second
   domain from a live sitting.
+- **The KL-penalty leg went Socratic, and the level machinery promoted honestly.** With the
+  Bradley-Terry prereq freshly proven, the tutor flipped to asking first — the learner's
+  extrapolation-plus-trust-region answer graded correct, and rlhf-reward-model promoted exposed
+  → practicing on the strength of two explained-correctly records. Repetition earning promotion,
+  a single check never doing so — the leveling contract observed working rather than asserted.
