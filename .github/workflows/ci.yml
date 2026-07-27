@@ -1,0 +1,76 @@
+name: ci
+
+# The harness's unit suite spawns the REAL loreweaver MCP server (tests/mcp.test.ts and friends
+# resolve it at ~/Dev/personal/loreweaver), and the e2e backend does the same — so CI needs a
+# checkout of SabienNguyen/loreweaver next to this repo. Both repos are private, and the default
+# GITHUB_TOKEN can only read the repo the workflow lives in, so that second checkout needs a
+# fine-grained personal access token with read (contents) access to SabienNguyen/loreweaver,
+# saved as the repository secret LOREWEAVER_CI_TOKEN.
+#
+# Until that secret exists the test steps are skipped with a visible notice rather than failing —
+# a red X that means "secret not configured" would teach everyone to ignore red X's.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for the loreweaver checkout token
+        id: gate
+        env:
+          HAVE: ${{ secrets.LOREWEAVER_CI_TOKEN != '' }}
+        run: |
+          echo "have=$HAVE" >> "$GITHUB_OUTPUT"
+          if [ "$HAVE" != "true" ]; then
+            echo "::warning::LOREWEAVER_CI_TOKEN secret is not set — skipping the test suites. Add a fine-grained PAT with read access to SabienNguyen/loreweaver to enable CI."
+          fi
+
+      - name: Check out loreweaver beside the harness
+        if: steps.gate.outputs.have == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: SabienNguyen/loreweaver
+          token: ${{ secrets.LOREWEAVER_CI_TOKEN }}
+          path: loreweaver
+
+      # The suites resolve both repos through ~/Dev/personal (see tests/mcp.test.ts and
+      # tests/e2e/*.config.json) — mirror that layout with symlinks.
+      - name: Lay out ~/Dev/personal
+        if: steps.gate.outputs.have == 'true'
+        run: |
+          mkdir -p "$HOME/Dev/personal"
+          ln -sfn "$GITHUB_WORKSPACE" "$HOME/Dev/personal/loreweaver-harness"
+          ln -sfn "$GITHUB_WORKSPACE/loreweaver" "$HOME/Dev/personal/loreweaver"
+
+      - uses: actions/setup-node@v4
+        if: steps.gate.outputs.have == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install harness dependencies
+        if: steps.gate.outputs.have == 'true'
+        run: npm ci
+
+      - name: Install loreweaver dependencies
+        if: steps.gate.outputs.have == 'true'
+        run: npm ci
+        working-directory: loreweaver
+
+      - name: Unit and integration suite
+        if: steps.gate.outputs.have == 'true'
+        run: npx vitest run
+
+      - name: Install Playwright Chromium
+        if: steps.gate.outputs.have == 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end suite
+        if: steps.gate.outputs.have == 'true'
+        run: npx playwright test
