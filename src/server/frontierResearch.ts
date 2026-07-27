@@ -56,9 +56,11 @@ export async function searchArxiv(topic: string, fetchImpl: typeof fetch = fetch
   }).filter((p) => p.title && p.date);
 }
 
-export async function searchCrossref(topic: string, fetchImpl: typeof fetch = fetch): Promise<FrontierPaper[]> {
+export async function searchCrossref(
+  topic: string, fetchImpl: typeof fetch = fetch, sort: 'created' | 'is-referenced-by-count' = 'created',
+): Promise<FrontierPaper[]> {
   const url = `https://api.crossref.org/works?query=${encodeURIComponent(topic)}`
-    + `&sort=created&order=desc&rows=${MAX_PER_SOURCE}`
+    + `&sort=${sort}&order=desc&rows=${MAX_PER_SOURCE}`
     + '&select=title,author,created,URL,DOI,container-title';
   const res = await fetchImpl(url);
   if (!res.ok) throw new Error(`Crossref responded ${res.status}`);
@@ -104,4 +106,23 @@ export async function findRecentPapers(
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, MAX_TOTAL);
   return { papers, sourceErrors };
+}
+
+/**
+ * The CANONICAL artifacts of a field — Crossref sorted by citation count instead of date.
+ *
+ * The distinction this serves (3blue1brown's framing, and this app's own): a model's best role in
+ * learning is LIBRARIAN, not author — route the learner to the load-bearing human artifacts and
+ * the people behind them, then let the artifacts teach. Newest-first answers "what is happening";
+ * most-cited answers "who should I read first". Both end in ingest_url, never in generated prose.
+ */
+export async function findCanonicalPapers(
+  topic: string, fetchImpl: typeof fetch = fetch,
+): Promise<{ papers: FrontierPaper[]; sourceErrors: string[] }> {
+  try {
+    const papers = (await searchCrossref(topic, fetchImpl, 'is-referenced-by-count')).slice(0, MAX_TOTAL);
+    return { papers, sourceErrors: [] };
+  } catch (e: any) {
+    throw new Error(`no index reachable — Crossref: ${e?.message ?? e}`);
+  }
 }

@@ -7,7 +7,7 @@ import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blo
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
-import { findRecentPapers } from './frontierResearch.js';
+import { findCanonicalPapers, findRecentPapers } from './frontierResearch.js';
 import { gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Loreweaver } from './mcp.js';
@@ -331,6 +331,22 @@ export function buildFrontierTools(fetchImpl: typeof fetch = fetch): ToolSet {
           };
         } catch (e: any) {
           return { error: `could not reach the literature indices: ${e?.message ?? e}` };
+        }
+      },
+    }),
+    find_canonical_sources: tool({
+      description: 'The LOAD-BEARING literature of a field: Crossref sorted by citation count — '
+        + 'who to read first, not what is newest. Use it when a student is STARTING a subject, so '
+        + 'you can route them to the canonical human artifacts (and name the researchers behind '
+        + 'them) rather than teaching from your own memory. Offer to ingest the best ones.',
+      inputSchema: z.object({
+        topic: z.string().describe('the field or topic, e.g. "spaced repetition learning"'),
+      }),
+      execute: async ({ topic }: { topic: string }) => {
+        try {
+          return await findCanonicalPapers(topic);
+        } catch (e: any) {
+          return { error: `could not reach the literature index: ${e?.message ?? e}` };
         }
       },
     }),

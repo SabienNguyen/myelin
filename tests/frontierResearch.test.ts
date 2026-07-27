@@ -1,6 +1,6 @@
 // Frontier research: the tutor's "what's newest on X" answered from live indices, never memory.
 import { describe, it, expect } from 'vitest';
-import { findRecentPapers, searchArxiv, searchCrossref } from '../src/server/frontierResearch.js';
+import { findCanonicalPapers, findRecentPapers, searchArxiv, searchCrossref } from '../src/server/frontierResearch.js';
 
 const ARXIV_XML = `<?xml version="1.0"?><feed>
 <entry>
@@ -93,5 +93,18 @@ describe('findRecentPapers', () => {
   it('both indices down throws an error the tutor can say out loud', async () => {
     await expect(findRecentPapers('kv cache', fakeFetch(false, false)))
       .rejects.toThrow(/no index reachable/);
+  });
+});
+
+describe('findCanonicalPapers', () => {
+  it('asks Crossref for citation-sorted results — who to read, not what is newest', async () => {
+    const urls: string[] = [];
+    const spy: typeof fetch = (async (u: any) => {
+      urls.push(String(u));
+      return new Response(JSON.stringify(CROSSREF_JSON), { status: 200 });
+    }) as typeof fetch;
+    const { papers } = await findCanonicalPapers('kv cache', spy);
+    expect(urls[0]).toContain('sort=is-referenced-by-count');
+    expect(papers.length).toBeGreaterThan(0);
   });
 });
