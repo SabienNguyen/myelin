@@ -313,3 +313,20 @@ Written after the sprint that followed the original verdict; each line names its
   there is no message-edit or branch UI — so the union loses nothing, and the normal single-tab
   flow writes byte-identical files. Unit-tested both ways and re-probed live: all four messages
   survive in order, and a fresh tab renders the merged conversation. Full suite 968, e2e 7/7.
+- **Live deep-learning sitting (the LLM syllabus) — the strongest pedagogy evidence yet, and two
+  real finds.** A learner persona studied transformer internals against the live subscription
+  tutor: the QKV asymmetry argument taught with a concrete 2×2 worked example and a scratchpad
+  exercise (graded correct — the equation-chain grader fix earning its keep live), then the full
+  √d_k variance derivation cross-checked against the paper and a textbook, with sources named
+  and an honest disclosure that WebFetch was down so one framing rested on search snippets. The
+  evidence guardrail fired honestly when no page existed ("✗ evidence not recorded", explained),
+  and after the learner switched to freeform the tutor wrote six prereq-chained pages, created
+  the path, set the goal, and retroactively recorded the two bounced evidence items at exposed.
+  Find 1, fixed: a Mermaid diagram in the final reply showed source instead of rendering — the
+  component saw the fence mid-stream, a half-written chart failed to parse, and the failure
+  LATCHED over the later successful render (the reload proved the chart itself fine). The retry
+  now clears the failure; pinned by a client test that streams a broken-then-complete chart.
+  Find 2, recorded: on this container the Agent-SDK tutor's turn ended with "(No action needed —
+  unrelated project task list…)" — the SDK session picked up the host's Claude Code task-list
+  reminders. Gracefully ignored, environment-specific (a user's machine has no such reminders),
+  but noted as an isolation surface for the claude-sdk route.

@@ -29,9 +29,14 @@ export function Mermaid({ chart }: { chart: string }) {
         const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
         mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'neutral' });
         const { svg: rendered } = await mermaid.render(idRef.current, chart);
-        if (!cancelled) setSvg(rendered);
+        // Clear any earlier failure: while the tutor is STREAMING, this component sees the fence
+        // grow chunk by chunk, and a half-written chart legitimately fails to parse. Without the
+        // reset that failure latched — the completed chart rendered fine into `svg`, but the
+        // fallback branch won and the finished message showed source forever (seen live on the
+        // transformer-syllabus sitting; a reload of the same thread rendered the diagram).
+        if (!cancelled) { setSvg(rendered); setFailed(false); }
       } catch {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) { setFailed(true); setSvg(null); }
       }
     })();
     return () => { cancelled = true; };
