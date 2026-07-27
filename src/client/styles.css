@@ -1808,6 +1808,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .label-diagram-canvas {
   position: relative;
   margin: 0.6rem 0;
+  /* A broken or dimension-less SVG must not collapse the canvas — pins are placed in percent,
+     and a ~26px-tall canvas crushed all of them into one unclickable band (live sitting). */
+  min-height: 260px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm, 6px);
   background: var(--bg-panel);

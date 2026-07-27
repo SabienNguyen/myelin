@@ -8,6 +8,47 @@ import { Mark, Verdict } from './Verdict.js';
 interface Region { id: string; x: number; y: number; label: string }
 interface Args { prompt: string; pageSlug: string; svg: string; regions: Region[]; distractors?: string[] }
 
+/** A live tutor delivered its whole SVG HTML-entity-escaped (`&lt;svg …`), which rendered as a
+ * broken ~26px-tall image that crushed every pin into one unclickable band. When the string
+ * plainly isn't markup but its escaped form is, decode the five XML entities — `&amp;` last so
+ * double-escapes resolve in one pass. Already-valid SVG passes through untouched. */
+export function decodeEntityEscapedSvg(svg: string): string {
+  if (!svg.trimStart().startsWith('&lt;')) return svg;
+  return svg
+    .replaceAll('&lt;', '<').replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"').replaceAll('&#39;', "'")
+    .replaceAll('&amp;', '&');
+}
+
+/** Minimum pin separation in canvas percent — a pin is ~30px on a ~550px canvas. */
+const PIN_MIN_GAP = 6;
+
+/** Model-supplied coordinates arrive with no spacing guarantee, and two coincident regions left
+ * one pin buried under the other — visible, but never clickable, so the exercise could not be
+ * completed by mouse (caught by a live sitting: region `embed` under region `ln2`). A greedy
+ * deterministic pass nudges any colliding pin downward until it clears everything placed before
+ * it; order is the regions array, so the same input always renders the same layout. */
+export function separatePins(regions: Region[]): Region[] {
+  const placed: Region[] = [];
+  for (const r of regions) {
+    let { x, y } = r;
+    x = Math.min(97, Math.max(2, x));
+    y = Math.min(97, Math.max(2, y));
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const p of placed) {
+        if (Math.hypot(p.x - x, p.y - y) < PIN_MIN_GAP) {
+          y = y + PIN_MIN_GAP > 97 ? y - PIN_MIN_GAP : y + PIN_MIN_GAP;
+          moved = true;
+        }
+      }
+    }
+    placed.push({ ...r, x, y });
+  }
+  return placed;
+}
+
 /**
  * Assign labels to regions of a diagram. Click a label, then click the pin it belongs on —
  * chosen over drag-and-drop deliberately: click-click works with a keyboard and a screen reader
@@ -30,7 +71,7 @@ export function LabelDiagram({ args, result, addResult }: {
     return [...new Set(all)].sort((a, b) => hash(a) - hash(b));
   }, [args.regions, args.distractors]);
 
-  const src = `data:image/svg+xml;utf8,${encodeURIComponent(args.svg)}`;
+  const src = `data:image/svg+xml;utf8,${encodeURIComponent(decodeEntityEscapedSvg(args.svg))}`;
 
   if (result) {
     const byId = new Map<string, boolean>(
@@ -75,7 +116,17 @@ export function LabelDiagram({ args, result, addResult }: {
       });
     }
   };
-  const used = new Set(Object.values(placed));
+  // A label the DIAGRAM needs twice (two residual-add regions, say) must survive its first
+  // placement — the tray dedupes labels into one chip, and a chip that died after one use made
+  // duplicate-label diagrams impossible to complete (caught by a live sitting: the second
+  // residual pin could never be filled and Submit stayed disabled forever). A chip exhausts when
+  // placed as many times as regions carry its label; distractors exhaust after one placement.
+  const neededCount = new Map<string, number>();
+  for (const r of args.regions) neededCount.set(r.label, (neededCount.get(r.label) ?? 0) + 1);
+  const placedCount = new Map<string, number>();
+  for (const l of Object.values(placed)) placedCount.set(l, (placedCount.get(l) ?? 0) + 1);
+  const exhausted = (label: string) =>
+    (placedCount.get(label) ?? 0) >= Math.max(1, neededCount.get(label) ?? 0);
   const allPlaced = args.regions.every((r) => placed[r.id]);
 
   const inner = (
@@ -84,7 +135,7 @@ export function LabelDiagram({ args, result, addResult }: {
       <BlockProse text={args.prompt} />
       <div className="label-diagram-canvas">
         <img src={src} alt="diagram to label" draggable={false} />
-        {args.regions.map((r) => (
+        {separatePins(args.regions).map((r) => (
           <button
             key={r.id}
             type="button"
@@ -102,10 +153,10 @@ export function LabelDiagram({ args, result, addResult }: {
           <button
             key={label}
             type="button"
-            className={`label-chip${selected === label ? ' is-selected' : ''}${used.has(label) ? ' is-used' : ''}`}
+            className={`label-chip${selected === label ? ' is-selected' : ''}${exhausted(label) ? ' is-used' : ''}`}
             aria-pressed={selected === label}
             onClick={() => setSelected((s) => (s === label ? null : label))}
-            disabled={used.has(label)}
+            disabled={exhausted(label)}
           >
             {label}
           </button>

@@ -473,3 +473,14 @@ Written after the sprint that followed the original verdict; each line names its
   panel-width of pixels for labels that had already shrunk, crushing small vaults into a postage
   stamp). Measured after: 10 labels, zero overlapping pairs, 76% width fill. The README's graph
   screenshot is now this fitted three-domain capture.
+- **The label_diagram block's first live sitting found three real bugs — all fixed, then 8/8.**
+  Driving the last never-live block: (1) the tutor delivered its SVG HTML-entity-escaped
+  (`&lt;svg…`), which rendered as a broken 26px-tall image that crushed every percent-positioned
+  pin into one unclickable band — the UI now decodes a plainly-escaped SVG and (2) the canvas
+  carries a min-height so no broken image can ever crush the pins again; (3) the diagram needed
+  "Residual add" twice but the deduped tray chip died after one placement, making duplicate-label
+  diagrams impossible to complete — chips now exhaust only when placed as many times as regions
+  need them. Plus a coordinate-collision nudge (separatePins) for model-supplied pin positions.
+  Re-driven live after: proper 494×691 canvas, every pin clickable, both residual chips placeable,
+  8/8 graded correct with the two rendered Mermaid teaching diagrams above it — the stream-latch
+  fix visibly earning its keep.
