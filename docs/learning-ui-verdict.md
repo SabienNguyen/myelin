@@ -131,3 +131,10 @@ Written after the sprint that followed the original verdict; each line names its
   fake research, labeling pages "unverified model knowledge") is the strongest honesty evidence
   of the session. Across three sittings the residual risk is precisely characterized: not
   invention, but overclaiming depth from search snippets — constrained by rule, not eliminated.
+- **The packaged binary itself — executed.** Every prior drive ran electron/main.mjs from
+  source; packaging defects (asar path resolution, bundled-resource lookup) only show in the
+  real artifact. The built AppImage was launched cold in a clean HOME: it booted, found the
+  bundled loreweaver memory engine inside its own resources, created a fresh vault, bound its
+  server on a free port (API answering over HTTP), and rendered the first-run key screen with
+  the correct fallback copy for "Claude Code installed but not signed in" — the honest no-key
+  state, screenshotted. The packaging pipeline produces a runnable product, not just a file.
