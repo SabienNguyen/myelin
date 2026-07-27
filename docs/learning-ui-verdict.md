@@ -108,7 +108,10 @@ Written after the sprint that followed the original verdict; each line names its
   across all seven blocks, the math field named after its problem, marks with accessible names.
   What tree probes cannot prove: actual speech output of a specific screen reader (needs NVDA/
   VoiceOver — unverified, said so).
-- **Still unverified or parked**: the CUDA runtime against a real nvcc (no toolkit here),
+- **Still unverified or parked**: the frontier/canonical literature tools against the LIVE
+  indices — the request path is proven to the proxy boundary, but this container's egress policy
+  403s arxiv.org and crossref.org (a user's machine has no such proxy; unit fakes cover the
+  parsing) — the CUDA runtime against a real nvcc (no toolkit here),
   speaking practice (needs audio-capable models), a drawable design input (rubric presets
   shipped as the interim), and long-horizon pedagogy (a semester, not a sitting — no audit can
   compress that).
