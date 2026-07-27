@@ -147,7 +147,7 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
 });
 
 describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
-  it('routes llmGenerateCards to the injected fake and parses its JSON-only response', async () => {
+  it('routes llmGenerateCards to the injected fake and parses the FRONT/BACK format', async () => {
     const { cfg, lw } = await makeVaultLoreweaver('kid5', 'integrals', 'Integrals');
     await bringToPracticing(lw, 'kid5', 'integrals');
     const anki = new AnkiClient(url);
@@ -155,7 +155,7 @@ describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
     const calls: any[] = [];
     const sdkGenerate = async (opts: any) => {
       calls.push(opts);
-      return { text: JSON.stringify({ cards: [{ front: 'Q1', back: 'A1' }] }), toolCallNames: [] };
+      return { text: 'FRONT: Q1\nBACK: A1\n===', toolCallNames: [] };
     };
     const sdkCfg = { ...cfg, models: { card_gen: { model: 'claude-sdk:sonnet' } } } as HarnessConfig;
 
@@ -170,7 +170,7 @@ describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
 });
 
 describe('syncOutbound — claude-sdk card_gen wrapped in a markdown fence', () => {
-  it('strips the ```json fence the live model adds despite the no-fences instruction', async () => {
+  it('tolerates a whole-response fence around the FRONT/BACK blocks', async () => {
     const { cfg, lw } = await makeVaultLoreweaver('kid7', 'fenced-page', 'Fenced Page');
     await bringToPracticing(lw, 'kid7', 'fenced-page');
     (cfg as any).models = { card_gen: { model: 'claude-sdk:sonnet' } };
@@ -178,7 +178,7 @@ describe('syncOutbound — claude-sdk card_gen wrapped in a markdown fence', () 
     const result = await syncOutbound(lw, anki, cfg, {
       deps: {
         sdkGenerate: async () => ({
-          text: '```json\n{"cards": [{"front": "Q", "back": "A"}]}\n```',
+          text: '```\nFRONT: Q\nBACK: A\n===\n```',
         }) as any,
       },
     });

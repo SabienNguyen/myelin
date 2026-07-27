@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
 import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from '../claudeSdk.js';
-import { parseSdkJson } from '../grading.js';
 import type { HarnessConfig } from '../config.js';
 import type { Loreweaver } from '../mcp.js';
 import { modelFor } from '../models.js';
@@ -66,6 +65,23 @@ function contentHash(front: string, back: string): string {
   return createHash('sha256').update(`${front} ${back}`).digest('hex');
 }
 
+/** FRONT/BACK/=== blocks out of sdk card_gen text. Tolerates a whole-response fence and blank
+ * blocks; a response with no parseable card at all throws with the raw head attached, matching
+ * the JSON path's readable-failure convention. */
+export function parseSdkCards(text: string): { front: string; back: string }[] {
+  const fenced = text.trim().match(/^```[a-z]*\s*([\s\S]*?)\s*```$/);
+  const body = fenced ? fenced[1] : text.trim();
+  const cards: { front: string; back: string }[] = [];
+  for (const block of body.split(/^\s*===\s*$/m)) {
+    const m = block.match(/FRONT:\s*([\s\S]*?)\nBACK:\s*([\s\S]*?)$/);
+    if (m && m[1].trim() && m[2].trim()) cards.push({ front: m[1].trim(), back: m[2].trim() });
+  }
+  if (cards.length === 0) {
+    throw new Error(`claude-sdk card_gen returned no parseable FRONT/BACK cards. Raw: ${text.slice(0, 300)}`);
+  }
+  return cards;
+}
+
 async function llmGenerateCards(
   cfg: HarnessConfig, slug: string, page: any, misconceptions: string[], deps: OutboundDeps = {},
 ): Promise<{ front: string; back: string }[]> {
@@ -79,15 +95,17 @@ async function llmGenerateCards(
 
   if (isClaudeSdkModel(cardModelId)) {
     const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-    // The Agent SDK path has no Output.object — ask for JSON-only and validate with the same
-    // zod schema the ai-sdk path uses for structured output.
-    const prompt = `${parts.join('\n\n')}\n\nRespond with ONLY valid JSON (no markdown fences, no `
-      + 'commentary) matching this exact shape: {"cards": [{"front": <string>, "back": <string>}]} '
-      + '(at most 4 cards).';
+    // The Agent SDK path has no Output.object, and asking for JSON prose proved structurally
+    // fragile on math-heavy pages: three live probes over the same taught vault produced three
+    // parse failures (a ```json fence once, unescaped characters inside LaTeX-bearing strings
+    // twice). Cards are plain text pairs — a delimiter format has nothing quotes or backslashes
+    // can break.
+    const prompt = `${parts.join('\n\n')}\n\nRespond with up to 4 flashcards in EXACTLY this `
+      + 'format and nothing else (no JSON, no fences):\n'
+      + 'FRONT: <one precise question>\nBACK: <the answer in at most 2 sentences>\n===\n'
+      + 'Repeat FRONT/BACK/=== for each card.';
     const { text } = await sdkGenerate({ model: stripClaudeSdkPrefix(cardModelId), prompt, maxTurns: 1 });
-    // parseSdkJson strips the ```json fence models add despite the no-fences instruction — a live
-    // probe watched a page fail on exactly that.
-    return cardsSchema.parse(parseSdkJson<unknown>(text, 'claude-sdk card_gen')).cards;
+    return parseSdkCards(text).slice(0, 4);
   }
 
   const { output } = await generateText({

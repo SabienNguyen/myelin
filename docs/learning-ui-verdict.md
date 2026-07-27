@@ -405,3 +405,10 @@ Written after the sprint that followed the original verdict; each line names its
   despite the no-fences instruction. grading.ts already had the fence-stripper for exactly this;
   the card path now shares it (parseSdkJson exported) instead of raw JSON.parse. Pinned by a
   fenced-response unit test.
+- **Third probe, root fix: the sdk card protocol is no longer JSON.** After the fence fix, the
+  same math-heavy page failed AGAIN — a different unescaped character deep in a LaTeX-bearing
+  string. Three probes, three distinct JSON defects: the format itself was the bug. Cards are
+  plain text pairs, so the sdk path now asks for FRONT/BACK/=== blocks — a shape quotes and
+  backslashes cannot break — with the fence tolerance kept and no-parseable-cards still throwing
+  readably. The re-probe: 12 cards, zero failures, including four from the page that broke every
+  JSON attempt. The failure class is gone rather than patched around.
