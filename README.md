@@ -225,9 +225,10 @@ serves captions with no network). On a machine that ships a pinned Chromium:
 `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
 
 **CI** runs on every push: typecheck and the client component suite unconditionally; the
-integration and e2e suites unlock when a `LOREWEAVER_CI_TOKEN` secret (read access to the
-loreweaver repo) exists — until then CI stays green on the ungated steps and prints a warning
-naming the missing secret.
+integration and e2e suites run whenever the loreweaver repo can be checked out beside this one —
+automatic when it's public (forks included), or via a `LOREWEAVER_CI_TOKEN` fine-grained PAT
+secret if it's private. When neither works, CI stays green on the ungated steps and prints a
+warning saying why.
 
 ## The evidence model, in five lines
 

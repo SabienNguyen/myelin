@@ -2,13 +2,14 @@ name: ci
 
 # The harness's unit suite spawns the REAL loreweaver MCP server (tests/mcp.test.ts and friends
 # resolve it at ~/Dev/personal/loreweaver), and the e2e backend does the same — so CI needs a
-# checkout of SabienNguyen/loreweaver next to this repo. Both repos are private, and the default
-# GITHUB_TOKEN can only read the repo the workflow lives in, so that second checkout needs a
-# fine-grained personal access token with read (contents) access to SabienNguyen/loreweaver,
-# saved as the repository secret LOREWEAVER_CI_TOKEN.
+# checkout of SabienNguyen/loreweaver next to this repo. The checkout is ATTEMPTED on every run:
+# with loreweaver public it succeeds on the default GITHUB_TOKEN (forks included, no setup); if
+# it is private, a fine-grained PAT with read (contents) access saved as the repository secret
+# LOREWEAVER_CI_TOKEN authorises it instead.
 #
-# Until that secret exists the test steps are skipped with a visible notice rather than failing —
-# a red X that means "secret not configured" would teach everyone to ignore red X's.
+# When the checkout cannot succeed (private repo, no secret) the dependent suites are skipped
+# with a visible notice rather than failing — a red X that means "not configured" would teach
+# everyone to ignore red X's.
 
 on:
   push:
@@ -21,28 +22,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check for the loreweaver checkout token
-        id: gate
-        env:
-          HAVE: ${{ secrets.LOREWEAVER_CI_TOKEN != '' }}
-        run: |
-          echo "have=$HAVE" >> "$GITHUB_OUTPUT"
-          if [ "$HAVE" != "true" ]; then
-            echo "::warning::LOREWEAVER_CI_TOKEN secret is not set — skipping the test suites. Add a fine-grained PAT with read access to SabienNguyen/loreweaver to enable CI."
-          fi
-
       - name: Check out loreweaver beside the harness
-        if: steps.gate.outputs.have == 'true'
+        id: gate
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: SabienNguyen/loreweaver
-          token: ${{ secrets.LOREWEAVER_CI_TOKEN }}
+          token: ${{ secrets.LOREWEAVER_CI_TOKEN || github.token }}
           path: loreweaver
+
+      - name: Report a skipped loreweaver checkout
+        if: steps.gate.outcome != 'success'
+        run: |
+          echo "::warning::Could not check out SabienNguyen/loreweaver — skipping the suites that spawn it. A public loreweaver needs no setup; a private one needs a fine-grained PAT with read access saved as LOREWEAVER_CI_TOKEN."
 
       # The suites resolve both repos through ~/Dev/personal (see tests/mcp.test.ts and
       # tests/e2e/*.config.json) — mirror that layout with symlinks.
       - name: Lay out ~/Dev/personal
-        if: steps.gate.outputs.have == 'true'
+        if: steps.gate.outcome == 'success'
         run: |
           mkdir -p "$HOME/Dev/personal"
           ln -sfn "$GITHUB_WORKSPACE" "$HOME/Dev/personal/loreweaver-harness"
@@ -67,18 +64,18 @@ jobs:
         run: npx vitest run tests/client
 
       - name: Install loreweaver dependencies
-        if: steps.gate.outputs.have == 'true'
+        if: steps.gate.outcome == 'success'
         run: npm ci
         working-directory: loreweaver
 
       - name: Unit and integration suite
-        if: steps.gate.outputs.have == 'true'
+        if: steps.gate.outcome == 'success'
         run: npx vitest run
 
       - name: Install Playwright Chromium
-        if: steps.gate.outputs.have == 'true'
+        if: steps.gate.outcome == 'success'
         run: npx playwright install --with-deps chromium
 
       - name: End-to-end suite
-        if: steps.gate.outputs.have == 'true'
+        if: steps.gate.outcome == 'success'
         run: npx playwright test
