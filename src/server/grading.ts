@@ -18,7 +18,7 @@ export interface GradingDeps {
  *  lost an entire grade turn to the resulting JSON.parse throw). Unwrap one fence when present;
  *  text that still fails to parse throws with the raw head attached so the failure stays
  *  readable. */
-function parseSdkJson<T>(text: string, who: string): T {
+export function parseSdkJson<T>(text: string, who: string): T {
   const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
   const body = fenced ? fenced[1] : text.trim();
   try {

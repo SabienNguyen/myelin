@@ -169,6 +169,24 @@ describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
   }, 30_000);
 });
 
+describe('syncOutbound — claude-sdk card_gen wrapped in a markdown fence', () => {
+  it('strips the ```json fence the live model adds despite the no-fences instruction', async () => {
+    const { cfg, lw } = await makeVaultLoreweaver('kid7', 'fenced-page', 'Fenced Page');
+    await bringToPracticing(lw, 'kid7', 'fenced-page');
+    (cfg as any).models = { card_gen: { model: 'claude-sdk:sonnet' } };
+    const anki = new AnkiClient(url);
+    const result = await syncOutbound(lw, anki, cfg, {
+      deps: {
+        sdkGenerate: async () => ({
+          text: '```json\n{"cards": [{"front": "Q", "back": "A"}]}\n```',
+        }) as any,
+      },
+    });
+    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0, failed: 0 });
+    await lw.close();
+  }, 30_000);
+});
+
 describe('syncOutbound — Anki offline', () => {
   it('skips silently without touching Loreweaver when Anki is down', async () => {
     // Bind then immediately close a server to get a port nothing is listening on.

@@ -399,3 +399,9 @@ Written after the sprint that followed the original verdict; each line names its
   syncOutbound now contains a generation failure to its page: logged loudly, counted in a new
   honest `failed` field, and the run carries on. Pinned by a unit test using the suite's real
   loreweaver fixture.
+- **Second card-gen find from the same probe: the fence.** The re-run with containment produced
+  8 genuinely strong cards (atomic, correct, misconception-first where one was recorded) and one
+  contained failure — whose raw text showed the model wrapping its JSON in a ```json fence
+  despite the no-fences instruction. grading.ts already had the fence-stripper for exactly this;
+  the card path now shares it (parseSdkJson exported) instead of raw JSON.parse. Pinned by a
+  fenced-response unit test.

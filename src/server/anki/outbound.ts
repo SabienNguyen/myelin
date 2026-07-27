@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
 import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from '../claudeSdk.js';
+import { parseSdkJson } from '../grading.js';
 import type { HarnessConfig } from '../config.js';
 import type { Loreweaver } from '../mcp.js';
 import { modelFor } from '../models.js';
@@ -84,13 +85,9 @@ async function llmGenerateCards(
       + 'commentary) matching this exact shape: {"cards": [{"front": <string>, "back": <string>}]} '
       + '(at most 4 cards).';
     const { text } = await sdkGenerate({ model: stripClaudeSdkPrefix(cardModelId), prompt, maxTurns: 1 });
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch (e) {
-      throw new Error(`claude-sdk card_gen returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
-    }
-    return cardsSchema.parse(parsed).cards;
+    // parseSdkJson strips the ```json fence models add despite the no-fences instruction — a live
+    // probe watched a page fail on exactly that.
+    return cardsSchema.parse(parseSdkJson<unknown>(text, 'claude-sdk card_gen')).cards;
   }
 
   const { output } = await generateText({
