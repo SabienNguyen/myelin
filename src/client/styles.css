@@ -530,7 +530,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tab-body { flex: 1; overflow: auto; padding: 1.1rem 1.25rem; }
 
 #stage-root:empty::after {
-  content: "Nothing on stage yet — quizzes, math work, and drafts appear here when your tutor sends them.";
+  content: "Nothing on stage yet — exercises land here when your tutor sends them: quizzes, math work, science checks, diagrams, drafts, code.";
   display: block;
   margin-top: 30%;
   text-align: center;

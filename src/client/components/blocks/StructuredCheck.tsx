@@ -154,7 +154,17 @@ export function StructuredCheck({ args, result, addResult }: {
           )}
         </div>
       )}
-      {isSingle && <AnswerPreview value={single} />}
+      {/* Notes get their own preview: standard notation capitalises note letters, and grading
+          accepts "c e g" silently — teach the convention without penalising it (audit 39's
+          recommendation). Shown only when the canonical spelling differs from what was typed. */}
+      {checker.kind === 'notes'
+        ? (() => {
+          const canon = single.split(/[\s,]+/).filter(Boolean)
+            .map((t) => t.length ? t[0].toUpperCase() + t.slice(1) : t).join(' ');
+          if (!canon || canon === single.trim().replace(/[\s,]+/g, ' ')) return null;
+          return <p className="structured-preview" aria-live="polite">reads as: {canon}</p>;
+        })()
+        : isSingle && <AnswerPreview value={single} />}
 
       {(checker.kind === 'set' || checker.kind === 'sequence') && (
         <>

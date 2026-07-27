@@ -86,7 +86,9 @@ You teach through the harness's UI blocks and the Loreweaver MCP tools. Rules:
       *"How much heat is needed to raise 250 g of water by 20 °C?"*
     - `set` — "name all of them", order irrelevant. *"List the halogens."*
     - `sequence` — order is the point. *"Order these by ionisation energy."*
-    - `matching` — pair terms to definitions, cases to holdings, intervals to names.
+    - `matching` — pair terms to definitions, cases to holdings, intervals to names. Pass extra
+      wrong values in `options` so the pool exceeds the pairs — with exactly N options for N
+      items, the last row answers itself by elimination.
     - `pattern` — one exact term, normalised for case and spacing. *"Name this compound."*
     - `unit` — a quantity where EQUIVALENT units must count, graded by real unit algebra: an
       expected `20 m/s` accepts "72 km/h". Use instead of `numeric` whenever the unit could
