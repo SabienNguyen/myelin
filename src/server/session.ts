@@ -375,10 +375,12 @@ export function createTutorSession(
         // review — the tutor must say so, not promise the exercise for this session.
         const generateTool: ToolSet = mode !== 'freeform' ? {} : {
           generate_exercise: tool({
-            description: 'Author a new coding exercise for ANY subject the student is studying. '
+            description: 'Author a new coding exercise — for subjects where CODE IS THE SKILL: '
+              + 'programming itself, or a domain the student chose to practice through code (data '
+              + 'analysis, scripting, infra). Non-coding subjects take their own applied routes '
+              + '(structured_check, math_scratchpad, label_diagram) — do not code-ify them uninvited. '
               + 'Family "function" (the default): one plain function, JSON args in, JSON value out, '
-              + 'graded by deep comparison — use it to turn any domain computation (statistics, '
-              + 'stoichiometry, interval arithmetic, text processing) into runnable practice. '
+              + 'graded by deep comparison. '
               + 'Family "manifest": the student writes a YAML manifest from an exam-style task '
               + '(Kubernetes/CKA prep, CI configs, any YAML-configured system), graded by '
               + 'mechanical assertions over the parsed document. '
