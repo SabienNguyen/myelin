@@ -426,3 +426,8 @@ Written after the sprint that followed the original verdict; each line names its
   rescaling identity — and reported that the outlier-mechanism framing survived contact with all
   three. A page that entered the vault flagged unverified left it solid with four sources: the
   full honesty lifecycle (teach → flag → research → verify → upgrade) observed end to end.
+- **Math-heavy transcript at narrow/dark — verified clean, no action.** The sitting's transcripts
+  are the heaviest display-math content the app has rendered (RoPE compositions, DPO
+  derivations, Bradley-Terry losses). Probed at 900px dark, 1360px dark, and 900px light with
+  no-horizontal-scroll assertions at the page, thread, and per-KaTeX-block levels: zero overflow
+  anywhere. The earlier responsive and display-math containment work holds against real content.
