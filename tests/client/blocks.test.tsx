@@ -6,6 +6,7 @@
 // error-shaped result and still renders SOMETHING (the app must outlive the model's mistake).
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { MathScratchpad } from '../../src/client/components/blocks/MathScratchpad.js';
 import { Quiz } from '../../src/client/components/blocks/Quiz.js';
 import { StructuredCheck } from '../../src/client/components/blocks/StructuredCheck.js';
 import { WritingDraftInner } from '../../src/client/components/blocks/WritingDraft.js';
@@ -34,6 +35,17 @@ describe('blocks survive a server-rejected (non-contract) result', () => {
     />);
     expect(screen.getByText(/how many/i)).toBeTruthy();
     expect(screen.getByText(/\(blank\)/)).toBeTruthy();
+  });
+
+  it('MathScratchpad renders the done card instead of crashing KaTeX on missing finalLatex', () => {
+    const { container } = render(<MathScratchpad
+      args={{ problemLatex: 'x^2', stepMode: false, expectedLatex: '2x', variable: 'x', pageSlug: 'p' }}
+      result={errorResult}
+      addResult={vi.fn()}
+    />);
+    expect(container.querySelector('.block.done')).toBeTruthy();
+    // The problem statement still shows, so the card reads as a question even without an answer.
+    expect(container.querySelector('.katex')).toBeTruthy();
   });
 
   it('WritingDraft renders the prompt on missing result.draft', () => {
