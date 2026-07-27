@@ -81,6 +81,14 @@ describe('structured_check checkers (mechanical, any subject)', () => {
     expect(nan.verdict).toBe('incorrect');
     expect(nan.detail).toContain('no number');
   });
+  it('numeric: accepts the printed unit form the prompt itself renders', async () => {
+    // Prompts show m/s² (KaTeX) and the answer preview echoes ² — a learner who types or pastes
+    // that printed form must not be told the unit is wrong.
+    const c = { kind: 'numeric', expected: 9.81, tolerance: 0.01, unit: 'm/s^2' };
+    expect((await grade(c, ['9.81 m/s²'])).verdict).toBe('correct');
+    const ohm = { kind: 'numeric', expected: 3, tolerance: 0.01, unit: 's^-1' };
+    expect((await grade(ohm, ['3 s⁻¹'])).verdict).toBe('correct');
+  });
   it('numeric: relative tolerance handles large magnitudes', async () => {
     const c = { kind: 'numeric', expected: 6.022e23, tolerance: 1e-3, relative: true };
     expect((await grade(c, ['6.022e23'])).verdict).toBe('correct');

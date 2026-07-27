@@ -1402,7 +1402,8 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .scratch-output .scratch-chunks { font-size: 0.78rem; color: var(--text-muted); }
 
 /* structured_check — the generic applied block. */
-.structured-check .structured-prompt { margin: 0 0 0.5rem; }
+/* Also matches the math scratchpad's done card, which borrows this done-card grammar. */
+.structured-check .structured-prompt, .block.done .structured-prompt { margin: 0 0 0.5rem; }
 .structured-check .structured-hint { margin: 0 0 0.5rem; color: var(--text-muted); font-size: 0.85rem; }
 .structured-check .structured-list-label {
   margin: 0 0 0.2rem;

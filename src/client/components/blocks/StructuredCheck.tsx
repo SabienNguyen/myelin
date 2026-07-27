@@ -61,6 +61,13 @@ export function StructuredCheck({ args, result, addResult }: {
   args: Args; result: any; addResult: (r: any) => void;
 }) {
   const { checker } = args;
+  // A chem_equation prompt is the one place the tutor reliably writes formulas as plain ASCII
+  // (`CH4 + O2 -> CO2 + H2O`), and the audit screenshot showed it sitting raw directly above the
+  // learner's own SUBSCRIPTED answer preview — the question read less like chemistry than the
+  // answer. Scoped to this checker kind because there letter+digit tokens are formulas; running
+  // it on every prompt would subscript prose like "step2". Display only, as always.
+  const displayPrompt = checker.kind === 'chem_equation'
+    ? (prettyAnswer(args.prompt) ?? args.prompt) : args.prompt;
   // Everything the learner answers in ONE input. `unit` includes its unit in the answer (that is
   // the point of the checker), `chem_equation` is one equation, `notes` split server-side.
   const isSingle = ['numeric', 'pattern', 'unit', 'chem_equation', 'notes'].includes(checker.kind);
@@ -79,7 +86,7 @@ export function StructuredCheck({ args, result, addResult }: {
             this card is submitted-not-graded, and the tag saying otherwise was a lie a screenshot
             caught. */}
         <span className="graded-tag">{g ? 'graded' : 'submitted'}</span>
-        <div className="structured-prompt"><BlockProse text={args.prompt} /></div>
+        <div className="structured-prompt"><BlockProse text={displayPrompt} /></div>
         <p className="structured-answer">
           {/* (result.values ?? []): a server-rejected tool call reaches here with a non-contract
               output, and .length on undefined unmounted the app root (see Quiz for the incident). */}
@@ -109,7 +116,7 @@ export function StructuredCheck({ args, result, addResult }: {
 
   return (
     <div className="block structured-check">
-      <div className="structured-prompt"><BlockProse text={args.prompt} /></div>
+      <div className="structured-prompt"><BlockProse text={displayPrompt} /></div>
       {args.hint && <p className="structured-hint">{args.hint}</p>}
 
       {isSingle && (
@@ -124,8 +131,10 @@ export function StructuredCheck({ args, result, addResult }: {
             onChange={(e) => setSingle(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
           />
+          {/* Prettified (m/s^2 shows as m/s²): the suffix says what quantity is being asked for,
+              not what to type — grading normalises ^ and superscripts away, so both forms count. */}
           {checker.kind === 'numeric' && checker.unit && (
-            <span className="structured-unit">{checker.unit}</span>
+            <span className="structured-unit">{prettyAnswer(checker.unit) ?? checker.unit}</span>
           )}
         </div>
       )}

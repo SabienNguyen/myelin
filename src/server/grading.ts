@@ -147,9 +147,13 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     const limit = checker.relative ? Math.abs(checker.expected) * tol : tol;
     const numOk = Math.abs(got - checker.expected) <= limit;
     // Unit is checked only when the question asked for one, and only as a normalised substring —
-    // "m/s^2", "m/s2" and "M/S^2" all satisfy a declared "m/s^2".
-    const unitOk = !checker.unit
-      || normKey(clean[0] ?? '').replace(/[\s^]/g, '').includes(normKey(checker.unit).replace(/[\s^]/g, ''));
+    // "m/s^2", "m/s2" and "M/S^2" all satisfy a declared "m/s^2". Unicode superscripts fold to
+    // digits first: prompts render units as m/s² (KaTeX) and the answer preview echoes ², so a
+    // learner who copies or types the printed form must not be told their unit is wrong.
+    const foldSup = (s: string) => s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g,
+      (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
+    const unitKey = (s: string) => foldSup(normKey(s)).replace(/[\s^]/g, '');
+    const unitOk = !checker.unit || unitKey(clean[0] ?? '').includes(unitKey(checker.unit));
     const ok = numOk && unitOk;
     // "value and unit match" only when a unit was actually asked for — the audit caught a unitless
     // numeric check congratulating a unit that never existed, which is a small lie in the one

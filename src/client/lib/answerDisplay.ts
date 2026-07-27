@@ -21,11 +21,14 @@ const SUP: Record<string, string> = {
  * The prettified form of one answer, or null when it would be identical — null is the signal to
  * render no preview at all, so plain answers ("42", "mitochondria") get no redundant echo.
  *
- * Two mechanical rules, chosen because they are how people actually type these answers:
+ * Three mechanical rules, chosen because they are how people actually type these answers:
  *   * digits directly after a letter or a closing paren subscript — `H2O` → H₂O, `Ca(OH)2` → Ca(OH)₂.
  *     A digit after a space or at the start stays full size, which is also chemically right:
  *     the coefficient in `2H2O` is not a subscript.
  *   * `^` followed by digits/signs superscripts — `SO4^2-` → SO₄²⁻, `x^2` → x².
+ *   * ` -> ` becomes a real reaction arrow — the typed form of an equation reads as the printed
+ *     one, matching what the equation parser itself accepts (`->` and `→` are the same arrow).
+ *     Space-delimited so a bare `->` inside prose or notation stays untouched.
  *
  * Strings containing `$` are LaTeX territory and are left to BlockProse (the caller checks);
  * mixing the two transforms would mangle real TeX like `x_1`.
@@ -33,6 +36,7 @@ const SUP: Record<string, string> = {
 export function prettyAnswer(raw: string): string | null {
   if (raw.includes('$')) return null;
   const out = raw
+    .replace(/ -> /g, ' → ')
     .replace(/\^([0-9+-]+)/g, (_, sup: string) => [...sup].map((c) => SUP[c] ?? c).join(''))
     .replace(/([A-Za-z)])(\d+)/g, (_, head: string, digits: string) =>
       head + [...digits].map((c) => SUB[c] ?? c).join(''));

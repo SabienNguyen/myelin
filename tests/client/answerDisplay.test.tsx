@@ -24,6 +24,13 @@ describe('prettyAnswer', () => {
     expect(prettyAnswer('x^2')).toBe('x²');
   });
 
+  it('renders a typed equation with a real reaction arrow', () => {
+    expect(prettyAnswer('CH4 + 2O2 -> CO2 + 2H2O')).toBe('CH₄ + 2O₂ → CO₂ + 2H₂O');
+    // The arrow rule needs its delimiting spaces — a cramped -> is a parse error the checker
+    // explains, not something display should paper over.
+    expect(prettyAnswer('a->b')).toBeNull();
+  });
+
   it('returns null when nothing would change, so plain answers get no echo', () => {
     for (const plain of ['42', 'mitochondria', 'route 66', '', 'F, Cl, Br']) {
       expect(prettyAnswer(plain)).toBeNull();
@@ -73,6 +80,24 @@ describe('StructuredCheck answer preview', () => {
     expect(document.querySelector('.structured-preview')).toBeNull();
     fireEvent.change(box, { target: { value: 'H2O\nCO2' } });
     expect(document.querySelector('.structured-preview')?.textContent).toContain('H₂O · CO₂');
+  });
+
+  it('renders a chem_equation prompt as chemistry, not ASCII', () => {
+    // The tutor writes formulas in typed form; the learner should still read printed chemistry —
+    // otherwise the question looks less like chemistry than the answer preview under it.
+    render(<StructuredCheck
+      args={{ prompt: 'Balance: CH4 + O2 -> CO2 + H2O', pageSlug: 'p',
+        checker: { kind: 'chem_equation', reactants: ['CH4', 'O2'], products: ['CO2', 'H2O'] } }}
+      result={null} addResult={() => {}}
+    />);
+    expect(document.querySelector('.structured-prompt')?.textContent).toContain('CH₄ + O₂ → CO₂ + H₂O');
+  });
+
+  it('shows the numeric unit suffix in printed form', () => {
+    render(<StructuredCheck
+      args={args({ kind: 'numeric', expected: 9.8, unit: 'm/s^2' })} result={null} addResult={() => {}}
+    />);
+    expect(document.querySelector('.structured-unit')?.textContent).toBe('m/s²');
   });
 
   it('shows the pretty form on the graded card too', () => {

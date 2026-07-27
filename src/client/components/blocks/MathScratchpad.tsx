@@ -48,14 +48,18 @@ export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput
 
 export function MathScratchpad(props: { args: any; result: any; addResult: (r: any) => void }) {
   if (props.result) {
+    // Same done-card grammar as StructuredCheck: problem, then "You: <answer>", then the verdict
+    // on its own line. The old one-liner spliced them with a colon ("… Find v.: 14 — …"), which
+    // read as a typo whenever the problem ended in punctuation, and its leading "— " wrapped onto
+    // a line of its own — the exact orphan StructuredCheck already removed.
     return <div className="block done"><span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
       {/* The problem travels into the done card — without it the thread reads as answers to
           invisible questions when scanned later. */}
-      <Latex tex={props.args.problemLatex ?? ''} />{': '}
+      <div className="structured-prompt"><Latex tex={props.args.problemLatex ?? ''} /></div>
       {/* (?? ''): a server-rejected tool call reaches here with a non-contract output, and
           undefined into katex.renderToString threw (see Quiz for the incident). */}
-      <Latex tex={props.result.finalLatex ?? ''} />
-      {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}> — {props.result.grading.detail}</em>}</div>;
+      <p className="structured-answer">You: <Latex tex={props.result.finalLatex ?? ''} /></p>
+      {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}>{props.result.grading.detail}</em>}</div>;
   }
   return (
     <>
