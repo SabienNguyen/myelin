@@ -49,14 +49,17 @@ jobs:
           ln -sfn "$GITHUB_WORKSPACE/loreweaver" "$HOME/Dev/personal/loreweaver"
 
       - uses: actions/setup-node@v4
-        if: steps.gate.outputs.have == 'true'
         with:
           node-version: 22
           cache: npm
 
       - name: Install harness dependencies
-        if: steps.gate.outputs.have == 'true'
         run: npm ci
+
+      # Needs no second checkout, so it runs even without the secret — vite builds transpile
+      # without checking types, so this is the only place client types are enforced.
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Install loreweaver dependencies
         if: steps.gate.outputs.have == 'true'
