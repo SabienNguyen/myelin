@@ -10,6 +10,7 @@ import type { HarnessConfig } from './config.js';
 import {
   cleanHeading, defaultConverter, defaultIncrementalConverter, splitChapters, type Converter, type IncrementalConverter,
 } from './convert.js';
+import { extractProblems, saveProblems } from './courseBank.js';
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
 import {
@@ -134,6 +135,11 @@ function singleShotIncremental(converter: Converter): IncrementalConverter {
  * behavior (no progressive splitting — a paper is one unit of work) but still streams progress
  * onto the placeholder.
  *
+ * Problem sets and past exams take NEITHER path: when the converted markdown extracts as a
+ * problem set (courseBank.ts's extractProblems), the problems are saved to the course bank
+ * verbatim and the ledger records "N problems banked" — no compile entries are queued, because a
+ * drilled exam must stay the professor's wording, not become prose pages.
+ *
  * On completion the placeholder is removed, opts.onComplete fires, and — when cfg.autoCompile is
  * not explicitly false — ensureCompileDrain is kicked so newly-pending chapters start compiling
  * without a manual "Compile now" click. On failure the placeholder becomes 'convert-error' with
@@ -165,7 +171,13 @@ export function startConversion(
   });
   writeQueue(cfg.vault, ledger);
 
-  const incremental = opts.incrementalConverter ?? singleShotIncremental(opts.converter ?? defaultConverter);
+  // An injected plain Converter (tests, and callers that already have a single-shot conversion)
+  // wraps into the one-shot shape; with NOTHING injected the real incremental converter runs.
+  // The old expression here — `singleShotIncremental(opts.converter ?? defaultConverter)` — never
+  // selected defaultIncrementalConverter at all, so production uploads silently lost progressive
+  // chapter queueing and the page-count progress bar this function's doc comment promises.
+  const incremental = opts.incrementalConverter
+    ?? (opts.converter ? singleShotIncremental(opts.converter) : defaultIncrementalConverter);
 
   const bookTitle = basename(filePath, extname(filePath));
   const bookSlug = slugify(bookTitle) || 'book';
@@ -182,6 +194,15 @@ export function startConversion(
   void (async () => {
     try {
       const outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
+      // Set as soon as any cumulative markdown extracts as a problem set (courseBank.ts) — the
+      // whole document then goes to the COURSE BANK, not the page-compile queue. A past exam
+      // paraphrased into prose pages is the wrong shape; the student wants the professor's actual
+      // problems, verbatim.
+      let bankProblems: ReturnType<typeof extractProblems> | null = null;
+      // Chapter identities this conversion queued before extraction tipped over MIN_PROBLEMS (a
+      // sliced PDF can queue early chapters before enough of the exam has converted to recognize
+      // it) — removed again when the document banks.
+      const queuedChapters: string[] = [];
 
       if (mode === 'paper') {
         let lastMarkdown = '';
@@ -189,24 +210,34 @@ export function startConversion(
           lastMarkdown = u.markdown;
           await updatePlaceholderProgress(u.pagesDone, u.pagesTotal);
         });
+        bankProblems = extractProblems(lastMarkdown);
         const title = opts.title || lastMarkdown.match(H1_LINE)?.[1]?.trim() || basename(filePath, extname(filePath));
         const slug = slugify(title) || 'paper';
         const dir = join(cfg.vault, 'raw', 'uploads', slug);
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, 'paper.md'), `<!-- source: "${title}" -->\n\n${lastMarkdown}\n`);
 
-        await updateQueue(cfg.vault, (entries) => {
-          const kept = entries.filter((e) => e.chapter !== placeholderKey);
-          kept.push({
-            book: title, chapter: `raw/uploads/${slug}/paper.md`, title, status: 'pending',
+        if (bankProblems.length === 0) {
+          await updateQueue(cfg.vault, (entries) => {
+            const kept = entries.filter((e) => e.chapter !== placeholderKey);
+            kept.push({
+              book: title, chapter: `raw/uploads/${slug}/paper.md`, title, status: 'pending',
+            });
+            return kept;
           });
-          return kept;
-        });
+        }
       } else {
         mkdirSync(uploadsDir, { recursive: true });
         let queuedCount = 0;
 
         await incremental(filePath, outDir, async (u) => {
+          bankProblems = extractProblems(u.markdown);
+          if (bankProblems.length > 0) {
+            // A problem set: keep the raw markdown for the record, queue nothing further.
+            writeFileSync(join(uploadsDir, 'source.md'), `<!-- source: "${bookTitle}" -->\n\n${u.markdown}\n`);
+            await updatePlaceholderProgress(u.pagesDone, u.pagesTotal);
+            return;
+          }
           const sections = splitChapters(u.markdown);
           // A chapter is "complete" once a later heading confirms nothing more will be appended
           // under it — every section except the last, unless this is the final update (then the
@@ -225,6 +256,7 @@ export function startConversion(
             };
           });
           queuedCount += newSections.length;
+          queuedChapters.push(...newEntries.map((e) => e.chapter));
 
           await updateQueue(cfg.vault, (entries) => {
             entries.push(...newEntries);
@@ -232,6 +264,24 @@ export function startConversion(
             if (ph) ph.progress = { pagesDone: u.pagesDone, pagesTotal: u.pagesTotal };
           });
         });
+      }
+
+      if (bankProblems && bankProblems.length > 0) {
+        const banked = saveProblems(cfg.vault, bookSlug, bankProblems);
+        const bankKey = `__course_bank__/${bookSlug}`;
+        await updateQueue(cfg.vault, (entries) => {
+          // Any chapters queued before extraction recognized the exam come back out, along with
+          // the placeholder and any earlier bank row for the same source (re-ingest replaces).
+          const kept = entries.filter((e) => e.chapter !== placeholderKey
+            && e.chapter !== bankKey && !queuedChapters.includes(e.chapter));
+          kept.push({
+            book: bookTitle, chapter: bankKey,
+            title: `${banked.length} problems banked`, status: 'done',
+          });
+          return kept;
+        });
+        opts.onComplete?.();
+        return; // deliberately NO compile drain: this ingest queued no pages
       }
 
       await updateQueue(cfg.vault, (entries) => entries.filter((e) => e.chapter !== placeholderKey));

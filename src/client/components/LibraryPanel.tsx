@@ -3,6 +3,7 @@ import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 import { PracticePanel } from './PracticePanel.js';
 import { ReviewQueue } from './ReviewQueue.js';
 import { PathsSection } from './PathsSection.js';
+import { CoursePractice } from './CoursePractice.js';
 
 type Entry = {
   book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string;
@@ -102,58 +103,6 @@ function BookTitle({ book, onRenamed }: { book: string; onRenamed: () => void })
   );
 }
 
-/** B2c: "Add repo" affordance (paired with the topbar's "Add book" — git URL or absolute local
- * path, ingested via POST /api/ingest/repo). Kept self-contained in LibraryPanel rather than
- * threaded through App.tsx's own upload state, since the repo queue row it produces already lives
- * here. */
-function AddRepoForm({ onQueued }: { onQueued: () => void }) {
-  const [value, setValue] = useState('');
-  const [submitting, setSubmitting] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    const source = value.trim();
-    if (!source || submitting) return;
-    setSubmitting(true);
-    setNote(null);
-    try {
-      const res = await fetch('/api/ingest/repo', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        setValue('');
-        setNote(`${data.name}: ingesting in the background`);
-        onQueued();
-      } else {
-        setNote(`Add repo failed: ${data.error ?? res.statusText}`);
-      }
-    } catch (err: any) {
-      setNote(`Add repo failed: ${err?.message ?? err}`);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form className="add-repo-form" onSubmit={submit}>
-      <input
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="git URL or local path"
-        aria-label="Repo URL or path"
-        disabled={submitting}
-      />
-      <button type="submit" disabled={submitting || !value.trim()}>
-        {submitting ? 'Adding…' : 'Add repo'}
-      </button>
-      {note && <span className="library-note" role="status">{note}</span>}
-    </form>
-  );
-}
-
 const POLL_MS = 10_000;
 
 export function LibraryPanel({ visible = true }: { visible?: boolean }) {
@@ -240,8 +189,8 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
             state, and it is exactly when a syllabus matters most: they may have a path and no books
             at all. Omitting it here hid the whole feature for the default case. */}
         <PathsSection visible={visible} />
-        <AddRepoForm onQueued={() => setRefresh((r) => r + 1)} />
-        <p className="empty">No books yet — use “Add book” in the top bar, or ask the tutor (freeform) to pull in a paper.</p>
+        <p className="empty">No books yet — use “Add material” in the top bar, or ask the tutor (freeform) to pull in a paper.</p>
+        <CoursePractice visible={visible} />
         <PracticePanel visible={visible} />
       </div>
     );
@@ -255,7 +204,6 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
       <ReviewQueue visible={visible} />
       {/* Paths next — the syllabus is the frame the books and practice rows sit inside. */}
       <PathsSection visible={visible} />
-      <AddRepoForm onQueued={() => setRefresh((r) => r + 1)} />
       <div className="library-actions">
         <button
           type="button"
@@ -303,6 +251,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
           </ul>
         </section>
       ))}
+      <CoursePractice visible={visible} />
       <PracticePanel visible={visible} />
     </div>
   );

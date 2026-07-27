@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildRestRoutes } from '../src/server/restRoutes.js';
 import { invalidateGraphCache } from '../src/server/graphCache.js';
+import { saveProblems, markCorrect } from '../src/server/courseBank.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
 const TTL_MS = 60_000;
@@ -396,6 +400,54 @@ describe('GET /api/due and /api/session-plan', () => {
     } as any;
     const { plan } = await (await buildRestRoutes(lw, cfg).request('/api/session-plan')).json();
     expect(plan.map((p: any) => p.slug)).toEqual(['chosen-topic']);
+  });
+
+  describe('course-bank entries', () => {
+    function bankedCfg(problems: { n: number; text: string }[]) {
+      const vault = mkdtempSync(join(tmpdir(), 'lwh-plan-bank-'));
+      saveProblems(vault, 'midterm-2', problems);
+      return { ...cfg, vault } as HarnessConfig;
+    }
+
+    it('rotates in up to TWO never-answered bank problems as [course] items, with their own titles', async () => {
+      const bcfg = bankedCfg([1, 2, 3, 4].map((n) => ({ n, text: `problem ${n}` })));
+      const { plan } = await (await buildRestRoutes(spacedLw(), bcfg).request('/api/session-plan')).json();
+      const course = plan.filter((p: any) => p.kind === 'course');
+      expect(course.map((p: any) => p.slug)).toEqual(['midterm-2#1', 'midterm-2#2']); // capped at 2
+      expect(course[0].why).toBe('from midterm-2');
+      // Bank ids resolve to no page — the title must come from the bank, not a read_page fallback.
+      expect(course[0].title).toBe('Problem 1 from midterm-2');
+    });
+
+    it('answered problems stay out — only never-answered ones enter the plan', async () => {
+      const bcfg = bankedCfg([{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
+      markCorrect(bcfg.vault, 'midterm-2#1');
+      const { plan } = await (await buildRestRoutes(spacedLw(), bcfg).request('/api/session-plan')).json();
+      expect(plan.filter((p: any) => p.kind === 'course').map((p: any) => p.slug)).toEqual(['midterm-2#2']);
+    });
+  });
+});
+
+describe('GET /api/course-bank', () => {
+  const lw = { listSlugs: async () => [], call: async () => ({}) } as any;
+
+  it('reports per-source problem and never-answered counts', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-bank-route-'));
+    saveProblems(vault, 'midterm-2', [{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
+    saveProblems(vault, 'pset-7', [{ n: 1, text: 'c' }]);
+    markCorrect(vault, 'midterm-2#1');
+    const app = buildRestRoutes(lw, { ...cfg, vault } as HarnessConfig);
+    const { sources } = await (await app.request('/api/course-bank')).json();
+    expect(sources).toEqual([
+      { source: 'midterm-2', problems: 2, fresh: 1 },
+      { source: 'pset-7', problems: 1, fresh: 1 },
+    ]);
+  });
+
+  it('an empty bank answers an empty list, not an error', async () => {
+    const app = buildRestRoutes(lw, cfg); // cfg has no vault at all — readBank's guard case
+    const { sources } = await (await app.request('/api/course-bank')).json();
+    expect(sources).toEqual([]);
   });
 });
 

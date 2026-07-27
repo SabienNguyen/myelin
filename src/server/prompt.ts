@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { CourseProblem } from './courseBank.js';
 
 export const MODES = ['learn', 'review', 'quiz', 'freeform'] as const;
 export type Mode = (typeof MODES)[number];
@@ -28,6 +29,8 @@ export function buildBootstrapContext(a: {
   goal?: { kind: 'path' | 'page'; slug: string; title?: string; known?: number; total?: number; nextSlug?: string | null } | null;
   /** True when the vault has no pages at all. Drives the cold-start line below. */
   emptyVault?: boolean;
+  /** The course bank's contents (courseBank.ts's readBank), when the caller has one. */
+  courseBank?: CourseProblem[];
 }): string {
   const lines = [
     'SESSION CONTEXT (auto-injected by harness — not visible to the student):',
@@ -39,6 +42,16 @@ export function buildBootstrapContext(a: {
       ? `Anki trouble: ${a.ankiLapses.map((l) => `${l.slug} — ${l.count} lapses this week; probe for misconceptions`).join('; ')}`
       : 'Anki trouble: none',
   ];
+
+  // The course bank is invisible unless named here: nothing else tells the tutor the learner has a
+  // past exam waiting, so without this line course_problems only ever gets called when a session
+  // plan happens to carry a [course] item.
+  if (a.courseBank?.length) {
+    const fresh = a.courseBank.filter((p) => !p.lastCorrect).length;
+    const sources = [...new Set(a.courseBank.map((p) => p.source))];
+    lines.push(`Course bank: ${a.courseBank.length} problems from ${sources.join(', ')}`
+      + ` (${fresh} never answered) — fetch with course_problems and drill them verbatim.`);
+  }
 
   // The goal is what makes "how far through this subject am I" answerable. Without it every session
   // starts from the whole vault and the learner has no spine to follow.

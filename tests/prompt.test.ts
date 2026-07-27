@@ -32,6 +32,17 @@ describe('prompt assembly', () => {
     expect(ctx).toMatch(/Active goal: none/);
     expect(ctx).toMatch(/create_path/);
   });
+  it('names the course bank when problems are waiting, and stays silent when it is empty', () => {
+    const bank = [
+      { id: 'midterm-2#1', source: 'midterm-2', n: 1, text: 'a', added: '2026-07-27' },
+      { id: 'midterm-2#2', source: 'midterm-2', n: 2, text: 'b', added: '2026-07-27', lastCorrect: '2026-07-27' },
+    ];
+    const ctx = buildBootstrapContext({ ...base, courseBank: bank });
+    expect(ctx).toMatch(/Course bank: 2 problems from midterm-2 \(1 never answered\)/);
+    expect(ctx).toMatch(/course_problems/);
+    // An empty bank must not add a line — "Course bank: empty" in every session is noise.
+    expect(buildBootstrapContext({ ...base, courseBank: [] })).not.toMatch(/Course bank/);
+  });
   it('cold start in a teaching mode says research IS available but building the curriculum is not', () => {
     // An empty vault is the one case where a teaching mode gets web research (session.ts's
     // researchUnlocked) — so this line has to grant the one and withhold the other, or the tutor

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 
 // LibraryPanel renders PracticePanel, which needs the assistant-ui thread runtime — same seam
 // tests/client/practicePanel.test.tsx uses.
@@ -17,48 +17,51 @@ function jsonRes(body: unknown, ok = true) {
   return { ok, json: async () => body } as any;
 }
 
-function routedFetch(queue: any[]) {
-  return vi.fn(async (url: string, init?: any) => {
+function routedFetch(queue: any[], bank: any[] = []) {
+  return vi.fn(async (url: string) => {
     if (url === '/api/ingest/queue') return jsonRes(queue);
     if (url === '/api/status') return jsonRes({ autoCompile: false });
     if (url === '/api/gap/ladder') return NO_GAP; // keep PracticePanel a no-op for these tests
-    if (url === '/api/ingest/repo' && init?.method === 'POST') {
-      const body = JSON.parse(init.body);
-      return jsonRes({ name: body.source.split('/').pop().replace(/\.git$/, ''), ingesting: true });
-    }
+    if (url === '/api/course-bank') return jsonRes({ sources: bank });
     throw new Error(`unexpected fetch: ${url}`);
   });
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-describe('LibraryPanel — Add repo (B2c)', () => {
-  it('shows the Add repo form even with an empty queue, beside the "no books yet" note', async () => {
+describe('LibraryPanel — the single add entry point lives in the topbar, not here', () => {
+  it('renders NO add control of its own (the "Add repo" form is gone — AddMaterial owns ingestion)', async () => {
     vi.stubGlobal('fetch', routedFetch([]));
     render(<LibraryPanel />);
     await screen.findByText(/no books yet/i);
-    expect(screen.getByPlaceholderText(/git url or local path/i)).not.toBeNull();
-    expect(screen.getByRole('button', { name: /^add repo$/i })).not.toBeNull();
+    expect(screen.getByText(/add material/i)).not.toBeNull(); // empty state points at the topbar
+    expect(screen.queryByRole('button', { name: /add/i })).toBeNull();
+    expect(screen.queryByPlaceholderText(/git url/i)).toBeNull();
+  });
+});
+
+describe('LibraryPanel — Course practice section', () => {
+  it('lists each banked source with its problem count and never-answered count', async () => {
+    vi.stubGlobal('fetch', routedFetch([], [
+      { source: 'midterm-2', problems: 4, fresh: 3 },
+      { source: 'pset-7', problems: 5, fresh: 0 },
+    ]));
+    render(<LibraryPanel />);
+    await screen.findByText('Course practice');
+    expect(screen.getByText('midterm-2')).not.toBeNull();
+    expect(screen.getByText(/4 problems · 3 never answered/)).not.toBeNull();
+    expect(screen.getByText(/5 problems · all answered/)).not.toBeNull();
   });
 
-  it('submitting the form POSTs to /api/ingest/repo and shows a confirmation note', async () => {
-    const fetchMock = routedFetch([]);
-    vi.stubGlobal('fetch', fetchMock);
+  it('an empty bank renders no section at all — not an empty shell', async () => {
+    vi.stubGlobal('fetch', routedFetch([]));
     render(<LibraryPanel />);
     await screen.findByText(/no books yet/i);
-
-    fireEvent.change(screen.getByPlaceholderText(/git url or local path/i), {
-      target: { value: 'https://github.com/foo/widgets.git' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /^add repo$/i }));
-
-    await screen.findByText(/widgets: ingesting in the background/i);
-    expect(fetchMock).toHaveBeenCalledWith('/api/ingest/repo', expect.objectContaining({
-      method: 'POST',
-      body: JSON.stringify({ source: 'https://github.com/foo/widgets.git' }),
-    }));
+    expect(screen.queryByText('Course practice')).toBeNull();
   });
+});
 
+describe('LibraryPanel — repo queue rows', () => {
   it('renders a repo-mode queue entry with a distinct badge and its phase text', async () => {
     const queue = [
       {

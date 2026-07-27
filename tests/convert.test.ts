@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  consumeContiguousSlices, isMarkerBatchAvailable, pdfPageCount, splitChapters, splitPdfSlices,
-  type SliceInfo, cleanHeading,
+  consumeContiguousSlices, defaultConverter, isMarkerBatchAvailable, pdfPageCount, splitChapters,
+  splitPdfSlices, type SliceInfo, cleanHeading,
 } from '../src/server/convert.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -100,6 +100,26 @@ describe.skipIf(!existsSync(MARKER_PYTHON))('pdfPageCount', () => {
     const p = join(dir, 'one-page.pdf');
     makeTestPdf(p, 1);
     await expect(pdfPageCount(p)).resolves.toBe(1);
+  });
+});
+
+describe('defaultConverter — markdown/text passthrough', () => {
+  // The one defaultConverter branch tests exercise for real: no marker, no pandoc, no GPU — a
+  // typed .md or .txt IS the markdown, and problem sets/notes must not require a converter.
+  it('reads .md and .txt files as-is', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-md-'));
+    const md = join(dir, 'pset.md');
+    writeFileSync(md, '# Pset 7\n\n1. First problem.');
+    expect((await defaultConverter(md, dir)).markdown).toBe('# Pset 7\n\n1. First problem.');
+
+    const txt = join(dir, 'notes.TXT'); // extension check is case-insensitive
+    writeFileSync(txt, 'plain notes');
+    expect((await defaultConverter(txt, dir)).markdown).toBe('plain notes');
+  });
+
+  it('still refuses an extension nothing can convert, naming the accepted ones', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-md-'));
+    await expect(defaultConverter(join(dir, 'x.rtf'), dir)).rejects.toThrow(/\.md, or \.txt/);
   });
 });
 

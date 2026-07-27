@@ -143,12 +143,18 @@ async function convertWithPandoc(file: string, outDir: string): Promise<{ markdo
   return { markdown };
 }
 
-/** Dispatches on file extension. Tests never invoke this — they inject a fake Converter instead. */
+/** Dispatches on file extension. Tests never invoke this — they inject a fake Converter instead
+ * (except the .md/.txt branch, which needs no external binary and is tested for real). */
 export const defaultConverter: Converter = async (file, outDir) => {
   const ext = extname(file).toLowerCase();
   if (ext === '.pdf') return convertPdf(file, outDir);
   if (ext === '.epub' || ext === '.docx') return convertWithPandoc(file, outDir);
-  throw new Error(`unsupported file type for conversion: "${ext}" (expected .pdf, .epub, or .docx)`);
+  // Already markdown (or close enough): typed notes and problem sets should not have to round-trip
+  // through a converter that exists for scanned books.
+  if (ext === '.md' || ext === '.markdown' || ext === '.txt') {
+    return { markdown: await readFile(file, 'utf8') };
+  }
+  throw new Error(`unsupported file type for conversion: "${ext}" (expected .pdf, .epub, .docx, .md, or .txt)`);
 };
 
 /** Pages per marker slice for incremental PDF conversion — large enough to amortize marker's

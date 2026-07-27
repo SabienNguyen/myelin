@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
+import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Loreweaver } from './mcp.js';
@@ -247,6 +248,50 @@ export async function vaultGap(
   }
 }
 
+/**
+ * The course bank's session tools — available in EVERY mode, because drilling a banked problem is
+ * a teaching activity, not a vault-writing one. The contract they serve (courseBank.ts): banked
+ * problems are drilled VERBATIM, so course_problems hands the tutor the exact text plus a stable
+ * id, and mark_course_problem is how a correct answer reaches the bank's spacing. Exported for
+ * claudeSdkTutor.ts's SDK-flavored wrappers to stay behaviorally identical.
+ */
+export function buildCourseTools(vault: string): ToolSet {
+  return {
+    course_problems: tool({
+      description: 'The next banked course problems (past exams, problem sets) worth drilling — '
+        + 'never-answered first, then correct-longest-ago. Each comes with a stable id and its '
+        + 'VERBATIM text: present that text word for word as the prompt of a quick_check or '
+        + 'structured_check; never paraphrase it.',
+      inputSchema: z.object({
+        k: z.number().int().min(1).max(5).optional().describe('how many problems (default 5)'),
+      }),
+      execute: async ({ k }: { k?: number }) => {
+        const problems = nextProblems(vault, k ?? 5);
+        return problems.length
+          ? {
+            problems: problems.map((p) => ({
+              id: p.id, source: p.source, n: p.n, text: p.text,
+              ...(p.answer ? { answer: p.answer } : {}),
+              ...(p.lastCorrect ? { lastCorrect: p.lastCorrect } : {}),
+            })),
+          }
+          : { problems: [], note: 'the course bank is empty — no problem set or past exam has been added' };
+      },
+    }),
+    mark_course_problem: tool({
+      description: 'Record that the learner just answered a banked course problem correctly in a '
+        + 'graded block — spacing uses it to stop re-asking. Call it alongside record_evidence, '
+        + 'never for an answer that was not graded correct.',
+      inputSchema: z.object({
+        id: z.string().describe('the problem id from course_problems, e.g. "midterm-2#3"'),
+      }),
+      execute: async ({ id }: { id: string }) => (markCorrect(vault, id)
+        ? { marked: id }
+        : { error: `no banked problem with id "${id}"` }),
+    }),
+  };
+}
+
 /** Find block-tool outputs in the tail of the incoming history (since the last user text turn). */
 function pendingBlockOutputs(messages: UIMessage[]) {
   const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
@@ -312,6 +357,7 @@ export function createTutorSession(
       ankiLapses: recentLapses(cfg.vault),
       goal: goalCtx,
       emptyVault: slugs.length === 0,
+      courseBank: readBank(cfg.vault),
     });
     // Ground the model in the REAL page ids — small models otherwise invent slugs like
     // "derivatives-introduction" and every downstream slug-taking call fails.
@@ -428,7 +474,10 @@ export function createTutorSession(
         const agent = new ToolLoopAgent({
           model,
           instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
-          tools: { ...activeMcp, ...webTools, ...ingestTools, ...generateTool, ...blockTools() },
+          tools: {
+            ...activeMcp, ...buildCourseTools(cfg.vault), ...webTools, ...ingestTools,
+            ...generateTool, ...blockTools(),
+          },
           stopWhen: isStepCount(24),
         });
 

@@ -3,8 +3,10 @@ import {
   type Options, type SDKMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
+import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
 import { recentLapses } from './anki/inbound.js';
+import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput } from './grading.js';
@@ -31,6 +33,7 @@ const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'compile_source'];
 
 const LOREWEAVER_PREFIX = 'mcp__loreweaver__';
 const BLOCKS_PREFIX = 'mcp__blocks__';
+const COURSE_PREFIX = 'mcp__course__';
 const RECORD_EVIDENCE_TOOL = `${LOREWEAVER_PREFIX}record_evidence`;
 
 /** Injectable seam for tests: a fake must accept the same {prompt, options} shape query() does
@@ -81,6 +84,48 @@ function blockMcpTools() {
   ));
 }
 
+/** The course bank's tools on the SDK route — same behavior as session.ts's buildCourseTools,
+ * re-expressed in the Agent SDK's tool() shape (its handlers return MCP content blocks, so the
+ * ai-sdk ToolSet can't be reused directly). Keep the two in sync by hand, like TEACH_TOOLS. */
+function courseMcpTools(vault: string) {
+  return [
+    tool(
+      'course_problems',
+      'The next banked course problems (past exams, problem sets) worth drilling — never-answered '
+        + 'first. Each has a stable id and its VERBATIM text: present that text word for word as a '
+        + 'quick_check or structured_check prompt; never paraphrase it.',
+      { k: z.number().int().min(1).max(5).optional().describe('how many problems (default 5)') },
+      async ({ k }) => {
+        const problems = nextProblems(vault, k ?? 5);
+        const payload = problems.length
+          ? {
+            problems: problems.map((p) => ({
+              id: p.id, source: p.source, n: p.n, text: p.text,
+              ...(p.answer ? { answer: p.answer } : {}),
+              ...(p.lastCorrect ? { lastCorrect: p.lastCorrect } : {}),
+            })),
+          }
+          : { problems: [], note: 'the course bank is empty — no problem set or past exam has been added' };
+        return { content: [{ type: 'text' as const, text: JSON.stringify(payload) }] };
+      },
+    ),
+    tool(
+      'mark_course_problem',
+      'Record that the learner just answered a banked course problem correctly in a graded block — '
+        + 'spacing uses it to stop re-asking. Call it alongside record_evidence, never for an '
+        + 'answer that was not graded correct.',
+      { id: z.string().describe('the problem id from course_problems, e.g. "midterm-2#3"') },
+      async ({ id }) => ({
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify(markCorrect(vault, id)
+            ? { marked: id } : { error: `no banked problem with id "${id}"` }),
+        }],
+      }),
+    ),
+  ];
+}
+
 export function createClaudeSdkTutorSession(
   lw: Loreweaver, cfg: HarnessConfig, deps: ClaudeSdkTutorDeps = {},
 ) {
@@ -97,6 +142,7 @@ export function createClaudeSdkTutorSession(
       lessons,
       reviewsDue: lessons.filter((l: any) => l.reason === 'review-due').map((l: any) => l.slug),
       ankiLapses: recentLapses(cfg.vault),
+      courseBank: readBank(cfg.vault),
     });
     return `${ctx}\nVault pages (the ONLY valid slugs — use them verbatim): ${slugs.join(', ')}`;
   }
@@ -132,6 +178,8 @@ export function createClaudeSdkTutorSession(
     const allowedTools = [
       ...activeLoreweaverTools.map((n) => `${LOREWEAVER_PREFIX}${n}`),
       ...availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`),
+      // Every mode, matching session.ts: drilling a banked problem is a teaching activity.
+      `${COURSE_PREFIX}course_problems`, `${COURSE_PREFIX}mark_course_problem`,
       // Same gate as the ai-sdk route: research when the vault has a gap, never otherwise.
       ...(gap ? SDK_RESEARCH_TOOLS : []),
     ];
@@ -155,6 +203,7 @@ export function createClaudeSdkTutorSession(
           },
         },
         blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools() }),
+        course: createSdkMcpServer({ name: 'course', tools: courseMcpTools(cfg.vault) }),
       },
       // Block/loreweaver tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK
       // executes them itself, not us). canUseTool would be the natural rewrite seam, but it is

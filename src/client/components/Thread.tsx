@@ -98,7 +98,7 @@ function SessionPlanCta() {
   }, []);
   if (!plan || plan.length === 0) return null;
 
-  const KIND_LABEL: Record<string, string> = { review: 'review', new: 'new', misconception: 'fix' };
+  const KIND_LABEL: Record<string, string> = { review: 'review', new: 'new', misconception: 'fix', course: 'course' };
   const start = () => {
     const lines = plan.map((p, i) => `${i + 1}. [${p.kind}] "${p.slug}" — ${p.why}`).join('\n');
     composer.setText(

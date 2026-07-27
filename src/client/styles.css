@@ -117,6 +117,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 
 /* ── Top bar ─────────────────────────────────────────── */
 .topbar {
+  position: relative; /* the Add-material panel anchors to the whole bar at narrow widths */
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -200,6 +201,31 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 
 .ingest-status { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
 .anki-down .statusdot { background: var(--text-muted); }
+
+/* ── Add material: the one entry point for files, repos, and folders ── */
+.add-material { position: relative; display: flex; align-items: center; gap: 0.6rem; }
+.add-material-panel {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 10;
+  width: 22rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.85rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.add-material-panel.dragging { border-color: var(--accent); background: var(--accent-soft); }
+.add-material-panel form { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.add-material-panel label { flex-basis: 100%; font-size: 0.8rem; color: var(--text-muted); }
+.add-material-panel form input { flex: 1; min-width: 0; }
+.add-material-file { display: flex; align-items: center; gap: 0.6rem; }
+.add-material-file button { flex: none; }
+.add-material-hint { font-size: 0.78rem; color: var(--text-muted); }
 
 /* ── Layout ──────────────────────────────────────────── */
 .workspace { display: grid; grid-template-columns: 1.4fr 1fr; min-height: 0; }
@@ -699,6 +725,10 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   .msg.user { margin-left: 8%; }
   .topbar { flex-wrap: wrap; gap: 0.5rem; }
   .ingest-status { display: none; }
+  /* Anchored to its trigger the panel can hang off either screen edge once the topbar wraps —
+     re-anchor it to the whole (position: relative) topbar instead, spanning just below it. */
+  .add-material { position: static; }
+  .add-material-panel { top: calc(100% + 0.4rem); left: 0.75rem; right: 0.75rem; width: auto; }
 }
 
 /* ── Motion is optional ──────────────────────────────── */
@@ -928,9 +958,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 .library-autocompile-note { font-style: italic; }
 
-/* ── B2c: "Add repo" + repo-ingest queue rows ────────── */
-.add-repo-form { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-.add-repo-form input { min-width: 260px; flex: 1; }
+/* ── B2c: repo-ingest queue rows ─────────────────────── */
 .repo-ingest-row { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--text-muted); }
 .repo-ingest-row .dot {
   width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
@@ -1933,6 +1961,22 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .practice-pending-actions button { font-size: 0.85rem; padding: 0.25rem 0.7rem; }
 
 /* ── Review queue: what is about to slip, above everything else in the Library ─────────────── */
+/* ── Course practice: the bank's per-source counts, shaped like Review ── */
+.course-practice { margin-bottom: 1.1rem; padding-bottom: 0.9rem; border-bottom: 1px solid var(--border); }
+.course-practice h3 { font-family: var(--font-serif); font-size: 1rem; margin: 0 0 0.25rem; display: flex; align-items: center; gap: 0.4rem; }
+.course-practice-lede { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--text-muted); }
+.course-practice ul { list-style: none; margin: 0; padding: 0; }
+.course-practice li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.25rem 0;
+}
+.course-practice li + li { border-top: 1px solid var(--border); }
+.course-source { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.course-counts { flex: none; font-size: 0.8rem; color: var(--text-muted); }
+
 .review-queue { margin-bottom: 1.1rem; padding-bottom: 0.9rem; border-bottom: 1px solid var(--border); }
 .review-queue h3 { font-family: var(--font-serif); font-size: 1rem; margin: 0 0 0.25rem; display: flex; align-items: center; gap: 0.4rem; }
 .review-queue-lede { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--text-muted); }
@@ -1991,6 +2035,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .session-plan-kind--review { background: color-mix(in srgb, var(--warn) 18%, var(--bg-inset)); color: var(--warn); }
 .session-plan-kind--misconception { background: color-mix(in srgb, var(--bad) 15%, var(--bg-inset)); color: var(--bad); }
 .session-plan-kind--new { background: var(--accent-soft); color: var(--accent); }
+/* Course items reuse the accent family deliberately — banked problems are new work drawn from the
+   learner's own material, not a third status hue. The label text carries the distinction. */
+.session-plan-kind--course { background: var(--accent-soft); color: var(--accent); }
 
 /* Dismiss on terminal ledger rows — quiet until hovered, never louder than the row it removes.
    Anchored to the row's top-right corner: repo rows contain block children, so an inline ✕

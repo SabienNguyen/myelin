@@ -7,6 +7,7 @@ import type { HarnessConfig } from './config.js';
 import { getGraphCached, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
 import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
+import { readBank } from './courseBank.js';
 
 async function fetchGraph(lw: Loreweaver, cfg: HarnessConfig): Promise<GraphPayload> {
   const [slugs, student] = await Promise.all([
@@ -254,22 +255,51 @@ export function buildRestRoutes(
       return !seeded;
     });
 
+    // Banked course problems nobody has answered yet — a past exam is exactly the material a
+    // sitting should touch, but two per plan is the cap: the bank must not crowd out reviews or
+    // new work. `slug` is the problem's bank id, not a page — the tutor resolves it through
+    // course_problems and drills the text verbatim.
+    const course = readBank(cfg.vault)
+      .filter((p) => !p.lastCorrect)
+      .slice(0, 2)
+      .map((p) => ({
+        kind: 'course' as const, slug: p.id,
+        title: `Problem ${p.n} from ${p.source}`, why: `from ${p.source}`,
+      }));
+
     // Rotate the queues; whichever still has items feeds the next slot. Review leads — the most
     // urgent item should be the first thing in the sitting.
-    const queues = [review, fresh, misconception];
-    const plan: { kind: string; slug: string; why: string }[] = [];
+    const queues = [review, fresh, course, misconception];
+    const plan: { kind: string; slug: string; why: string; title?: string }[] = [];
     for (let i = 0; plan.length < CAP && queues.some((q) => q.length > 0); i++) {
       const q = queues[i % queues.length];
       const next = q.shift();
       if (next) plan.push(next);
     }
-    const titled = await Promise.all(plan.map(async (p) => ({
+    // Course entries carry their own title — their slug is a bank id no page will ever resolve.
+    const titled = await Promise.all(plan.map(async (p) => (p.title ? p : {
       ...p,
       title: await lw.call('read_page', { slug: p.slug })
         .then((pg: any) => pg.page?.meta?.title ?? p.slug)
         .catch(() => p.slug),
     })));
     return c.json({ plan: titled });
+  });
+
+  /**
+   * The course bank by source, for the Library's Course practice section: how many problems each
+   * ingested problem set banked and how many the learner has never answered. Counts only — the
+   * problems themselves stay the tutor's to present (verbatim, in a session), not a browsing UI's.
+   */
+  app.get('/api/course-bank', (c) => {
+    const bySource = new Map<string, { source: string; problems: number; fresh: number }>();
+    for (const p of readBank(cfg.vault)) {
+      const row = bySource.get(p.source) ?? { source: p.source, problems: 0, fresh: 0 };
+      row.problems++;
+      if (!p.lastCorrect) row.fresh++;
+      bySource.set(p.source, row);
+    }
+    return c.json({ sources: [...bySource.values()] });
   });
 
   app.get('/api/due', async (c) => {

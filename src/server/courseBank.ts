@@ -105,6 +105,10 @@ export function extractProblems(md: string): { n: number; text: string; answer?:
 /** All bank entries, newest source last. Corrupt lines are skipped, not fatal — the bank is an
  *  accumulating log and one bad line must not take down the whole feature. */
 export function readBank(vault: string): CourseProblem[] {
+  // Same guard (and rationale) as goalStore's readGoal: /api/session-plan and the bootstrap
+  // context read the bank, and several route tests build a partial config with no vault at all —
+  // "empty bank" is the right answer for "nowhere to look", not a join() crash.
+  if (typeof vault !== 'string' || vault === '') return [];
   const p = bankPath(vault);
   if (!existsSync(p)) return [];
   const out: CourseProblem[] = [];

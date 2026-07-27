@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BookOpenTextIcon as BookOpenText } from '@phosphor-icons/react';
 import { Runtime } from './runtime.js';
 import { Thread } from './components/Thread.js';
@@ -7,15 +7,13 @@ import { TopbarStatus } from './components/TopbarStatus.js';
 import { HistoryMenu } from './components/HistoryMenu.js';
 import { FocusRail } from './components/FocusRail.js';
 import { FirstRun } from './components/FirstRun.js';
+import { AddMaterial } from './components/AddMaterial.js';
 import { panelBus } from './lib/panelBus.js';
 import { parseHash, serializeHash } from './lib/urlState.js';
 
 export function App() {
   const [mode, setMode] = useState('learn');
   const [threadId, setThreadId] = useState(() => parseHash(location.hash).threadId);
-  const [ingesting, setIngesting] = useState(false);
-  const [ingestStatus, setIngestStatus] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
 
   // P1 (docs/superpowers/plans/2026-07-20-gap-integration.md): IDE focus mode. A code_exercise
   // block (CodeExercise.tsx) emits panelBus `focusMode` on mount-with-no-result / unmount; App
@@ -60,26 +58,6 @@ export function App() {
     };
   }, []);
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    setIngesting(true);
-    setIngestStatus(null);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch('/api/ingest', { method: 'POST', body: form });
-      const data = await res.json();
-      setIngestStatus(res.ok ? `${data.book}: converting in the background — see Library` : `ingest failed: ${data.error ?? res.statusText}`);
-      if (res.ok) panelBus.setTab('library');
-    } catch (err: any) {
-      setIngestStatus(`ingest failed: ${err?.message ?? err}`);
-    } finally {
-      setIngesting(false);
-    }
-  }
-
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
   return (
@@ -92,13 +70,9 @@ export function App() {
           <h1><BookOpenText size={20} weight="duotone" /> Loreweaver</h1>
           <HistoryMenu activeId={threadId} onSelect={selectThread} />
           <TopbarStatus />
-          <button type="button" onClick={() => fileInput.current?.click()} disabled={ingesting}>
-            {ingesting ? 'Converting…' : 'Add book'}
-          </button>
-          <input
-            ref={fileInput} type="file" accept=".pdf,.epub,.docx" hidden onChange={handleFile}
-          />
-          {ingestStatus && <span className="ingest-status" role="status">{ingestStatus}</span>}
+          {/* THE add entry point — one control for every kind of material (file, git URL, local
+              folder). Not one button per artifact; AddMaterial routes by what it was given. */}
+          <AddMaterial />
           {/* Named: an unlabeled combobox announces as "combobox: learn" — four one-word options
               with no hint of what any of them switches (the audit's keyboard pass caught it). */}
           <select
