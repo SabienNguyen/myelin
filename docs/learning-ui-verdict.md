@@ -287,3 +287,8 @@ Written after the sprint that followed the original verdict; each line names its
   under AA; it now inherits the row's accent foreground (≥5.4:1 in both themes, computed).
   Re-scanned after both fixes: zero violations in light and dark with the quiz card and open
   menu present.
+- **Setup-state axe pass — one more real fix.** Generalizing the "new state, new scan" lesson:
+  the FirstRun screen (both variants — subscription offer and the expanded API-key form) had its
+  card outside any landmark (no main — the screen replaces the whole app, so it needs its own).
+  Now a main landmark; zero violations across FirstRun × both variants × both themes, and the
+  Add-material popover scanned clean in both themes as-is.
