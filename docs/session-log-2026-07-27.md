@@ -125,3 +125,18 @@ the strongest evidence the project has:
   six-kind evidence model), both repos scrubbed and metadata'd for the public flip you decided
   on. Two things wait on you: the license file (MIT recommended — say the word) and the
   visibility toggle in each repo's GitHub settings.
+
+## After you came back
+
+- **MIT license** landed in both repos the moment you named it, lockfiles synced.
+- **The graph you called out** ("that looks not good") was a real bug with one mechanism and two
+  symptoms: labels kept screen size below zoom 1 while positions shrank, and fit reserved screen
+  pixels for labels that had already shrunk. Both fixed; the fitted three-domain graph now
+  measures zero overlapping labels at 76% width fill, and the README screenshot is that capture.
+- **The label_diagram block's first live sitting found three bugs in one exercise** — an
+  entity-escaped SVG rendering as a 26px broken image that crushed every pin, no minimum canvas
+  height behind it, and duplicate-label diagrams being impossible to complete. All fixed;
+  re-driven to 8/8 correct.
+- **CI is flip-ready**: the loreweaver checkout is now attempted on every run (secret if
+  present, default token otherwise), so the moment loreweaver goes public the full integration
+  and e2e suites run in CI automatically — for forks too. The graceful-skip path is proven live.
