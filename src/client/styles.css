@@ -2093,3 +2093,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* Revise: the failed rubric's way of closing its own loop. Quiet secondary style — the verdict
    is the headline; the action is an offer, not an alarm. */
 .writing-draft .revise-btn { margin-top: 0.5rem; }
+
+/* Hear-it: quiet utility next to the notes input — sound is an aid, not the exercise. */
+.play-notes { font-size: 0.8rem; padding: 0.25rem 0.6rem; }
+.play-notes:disabled { opacity: 0.45; }

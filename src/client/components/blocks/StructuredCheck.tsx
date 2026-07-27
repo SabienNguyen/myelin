@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { BlockProse } from '../BlockProse.js';
 import { prettyAnswer } from '../../lib/answerDisplay.js';
+import { parseNotes, playNotes } from '../../lib/audio.js';
 
 type Checker =
   | { kind: 'numeric'; expected: number; tolerance?: number; relative?: boolean; unit?: string }
@@ -95,6 +96,10 @@ export function StructuredCheck({ args, result, addResult }: {
               <span key={i}>{i > 0 && ', '}<AnswerText value={v} /></span>
             ))}
         </p>
+        {checker.kind === 'notes' && parseNotes(String(result.values?.[0] ?? '')).length > 0 && (
+          <button type="button" className="play-notes" aria-label="play your answer"
+            onClick={() => playNotes(String(result.values[0]))}>▶ hear it</button>
+        )}
         {/* No leading dash: the verdict wraps onto its own line below the answer, where an
             orphaned "— " read as a typo in the audit screenshot. */}
         {g && <em className={`verdict ${g.verdict}`}>{g.detail}</em>}
@@ -135,6 +140,17 @@ export function StructuredCheck({ args, result, addResult }: {
               not what to type — grading normalises ^ and superscripts away, so both forms count. */}
           {checker.kind === 'numeric' && checker.unit && (
             <span className="structured-unit">{prettyAnswer(checker.unit) ?? checker.unit}</span>
+          )}
+          {/* Ear feedback for music answers: plays the learner's OWN notes (never the expected
+              ones — that would be the answer). Disabled until something parseable is typed. */}
+          {checker.kind === 'notes' && (
+            <button
+              type="button"
+              className="play-notes"
+              aria-label="play the notes you typed"
+              disabled={parseNotes(single).length === 0}
+              onClick={() => playNotes(single)}
+            >▶ hear it</button>
           )}
         </div>
       )}
