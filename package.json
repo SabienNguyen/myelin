@@ -2,6 +2,10 @@
   "name": "loreweaver-harness",
   "version": "1.0.0",
   "description": "A localhost tutor with a teaching memory: it researches a subject, writes an Obsidian-compatible vault of pages, and grades your work against them.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SabienNguyen/loreweaver-harness.git"
+  },
   "main": "electron/main.mjs",
   "scripts": {
     "test": "vitest",

@@ -3,7 +3,7 @@
   "_modelRoutes": "models.*.model supports three prefixes, mixable per role: a plain id (e.g. \"claude-sonnet-5\") routes through the Anthropic API and needs ANTHROPIC_API_KEY — the app will ask for one on first run and save it outside the vault; \"ollama:<model>\" routes to a local Ollama model; \"claude-sdk:<model>\" (e.g. \"claude-sdk:sonnet\") routes through the Agent SDK, drawing from your Claude Pro/Max subscription via your local `claude` CLI login (no API key, but you must be logged in on this machine) — including the tutor role (T43), which streams via SDK session resume instead of the ai-sdk agent loop. See README 'Model routes' for the full writeup and current limitations.",
   "_search": "Only needed for an ollama: tutor. An Anthropic-routed tutor researches via Anthropic's server-side web search with nothing to install.",
   "vault": "~/Documents/Loreweaver",
-  "student": "sabien",
+  "student": "your-name",
   "models": {
     "tutor":   { "model": "claude-sonnet-5" },
     "grader":  { "model": "claude-haiku-4-5" },
