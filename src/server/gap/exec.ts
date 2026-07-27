@@ -13,7 +13,8 @@
 // security boundary against an adversary, and no copy anywhere should claim otherwise.
 //
 // What this still is not: an ENVIRONMENT. One file, one process, no network services, no
-// databases, no filesystem fixtures. The container runtimes below do not change that — Docker
+// database SERVERS (sqlite qualifies because :memory: lives and dies inside the one process), no
+// filesystem fixtures. The container runtimes below do not change that — Docker
 // here buys LANGUAGES the machine lacks (go, java) with real resource caps, not multi-service
 // scenarios; a containerized judge run is still one program, one stdin, one stdout. Claiming
 // more would be the kind of lie this codebase exists to avoid.
@@ -50,6 +51,11 @@ export interface Runtime {
    *  a multi-gigabyte download is a hang report waiting to happen. */
   image?: string;
   containerCmd?: string[];
+  /** The program travels on stdin instead of as an argv path, prefixed by the case's stdin.
+   *  Exists for sqlite: the shell's positional arg is a DATABASE file, not a script, so the
+   *  case's stdin (a schema+data fixture) and the learner's SQL are piped in as one script. A
+   *  runtime with this flag repurposes ExecCase.stdin as per-case setup; args go unused. */
+  stdinProgram?: boolean;
   /** Program file name inside the temp dir — some runtimes care about the extension. */
   file: string;
   /** Comment prefix for scaffolds/statements in this runtime's language. */
@@ -67,6 +73,16 @@ const RUNTIMES: Runtime[] = [
   { id: 'python3', command: ['python3'], file: 'main.py', comment: '#' },
   { id: 'bash', command: ['bash'], file: 'main.sh', comment: '#' },
   { id: 'ruby', command: ['ruby'], file: 'main.rb', comment: '#' },
+  // SQL through the sqlite3 shell against a fresh in-memory database per case. Each case's stdin
+  // carries the fixture ("CREATE TABLE ...; INSERT ...;"); the learner's SQL runs after it, and
+  // the expected output is the query's rows in the shell's default pipe-separated form. An SQL
+  // error exits 1 (batch mode stops at the failing statement), which grades as a crash — same as
+  // a python traceback.
+  {
+    id: 'sqlite', command: ['sqlite3', '-batch', ':memory:'], stdinProgram: true,
+    file: 'main.sql', comment: '--',
+    installHint: 'the sqlite3 command-line shell is not installed — install your OS\'s sqlite3 package',
+  },
   // Compiled local runtimes: one compile per suite, then the binary per case. cc is the portable
   // C compiler name on Linux and macOS alike; rustc alone (no cargo) handles a single file fine.
   { id: 'c', compileArgv: ['cc', '$SRC', '-O2', '-o', '$OUT'], file: 'main.c', comment: '//' },
@@ -136,7 +152,7 @@ export async function runtimeStatus(id: string): Promise<RuntimeStatus> {
   } else if (!isContainerRuntime(rt)) {
     const ok = await probeOk(rt.command![0], ['--version']);
     status = ok ? { id, available: true }
-      : { id, available: false, reason: `${id} is not installed on this machine` };
+      : { id, available: false, reason: rt.installHint ?? `${id} is not installed on this machine` };
   } else if (!(await probeOk('docker', ['--version']))) {
     status = { id, available: false, reason: `${id} runs in a container, and Docker is not installed` };
   } else if (!(await probeOk('docker', ['info']))) {
@@ -206,6 +222,7 @@ interface ProgramRun { stdout: string; exitCode: number | null; killed: boolean;
 function argvFor(rt: Runtime, dir: string, args: string[]): string[] {
   if (isContainerRuntime(rt)) return ['docker', ...dockerArgs(rt, dir, args)];
   if (rt.compileArgv) return [join(dir, 'prog'), ...args];
+  if (rt.stdinProgram) return [...rt.command!]; // the program arrives on stdin; a path here would be parsed as SQL
   return [...rt.command!, join(dir, rt.file), ...args];
 }
 
@@ -292,7 +309,9 @@ export async function runProgram(
     const results: RunnerResult['results'] = [];
     const fired: string[] = [];
     for (const c of cases) {
-      const run = await runOnce(rt, dir, c.args ?? [], c.stdin ?? '', envVars);
+      // stdinProgram runtimes: the case's stdin is the setup script, the learner's code follows it.
+      const stdin = rt.stdinProgram ? `${c.stdin ?? ''}\n${code}` : c.stdin ?? '';
+      const run = await runOnce(rt, dir, c.args ?? [], stdin, envVars);
       if (run.spawnError) {
         return { pass: false, results: [], syntaxError: `could not start ${rt.id}: ${run.spawnError}` };
       }
@@ -334,7 +353,7 @@ export async function scratchProgram(
       const compileError = await compileOnce(rt, dir);
       if (compileError) return { pass: false, results: [], scratch: true, runtimeError: compileError };
     }
-    const run = await runOnce(rt, dir, [], stdin, envVars);
+    const run = await runOnce(rt, dir, [], rt.stdinProgram ? `${stdin}\n${code}` : stdin, envVars);
     if (run.spawnError) {
       return { pass: false, results: [], scratch: true, runtimeError: `could not start ${rt.id}: ${run.spawnError}` };
     }

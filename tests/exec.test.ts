@@ -186,6 +186,100 @@ describe('python3 runtime (when installed)', () => {
   });
 });
 
+// ── sql via the sqlite3 shell ───────────────────────────────────────────────────────────────────
+//
+// The stdin-program runtime: the learner's file is pure SQL, and each case's stdin is the
+// schema+data fixture piped in ahead of it against a fresh :memory: database. Guarded on the
+// shell being installed, same as python3 above.
+
+describe('sqlite runtime (when the sqlite3 shell is installed)', () => {
+  const FIXTURE = `CREATE TABLE orders (id INTEGER, customer TEXT, total INTEGER);
+INSERT INTO orders VALUES (1, 'ada', 12), (2, 'grace', 40), (3, 'ada', 8);`;
+  const FIXTURE_ONE = `CREATE TABLE orders (id INTEGER, customer TEXT, total INTEGER);
+INSERT INTO orders VALUES (1, 'joan', 5);`;
+  const QUERY = 'SELECT customer, SUM(total) FROM orders GROUP BY customer ORDER BY customer;';
+  const SQL_CASES: ExecCase[] = [
+    { name: 'aggregates per customer', stdin: FIXTURE, expect: 'ada|20\ngrace|40' },
+    { name: 'handles a single row', stdin: FIXTURE_ONE, expect: 'joan|5' },
+  ];
+
+  it('availability probes the shell; an absence names sqlite3, not just the id', async () => {
+    const s = await runtimeStatus('sqlite');
+    expect(s.id).toBe('sqlite');
+    if (!s.available) expect(s.reason).toContain('sqlite3');
+  });
+
+  it('each case runs the query against its own fixture', async () => {
+    if (!(await runtimeAvailable('sqlite'))) return;
+    const out = await runProgram('sqlite', QUERY, SQL_CASES);
+    expect(out.pass).toBe(true);
+    expect(out.results).toHaveLength(2);
+  });
+
+  it('a wrong query fails with the pipe-separated row diff', async () => {
+    if (!(await runtimeAvailable('sqlite'))) return;
+    const wrong = 'SELECT customer, MAX(total) FROM orders GROUP BY customer ORDER BY customer;';
+    const out = await runProgram('sqlite', wrong, SQL_CASES);
+    expect(out.pass).toBe(false);
+    const miss = out.results.find((r) => !r.pass)!;
+    expect(miss.expected).toBe('ada|20\ngrace|40');
+    expect(miss.actual).toBe('ada|12\ngrace|40');
+  });
+
+  it('an SQL error grades as a crash — batch mode stops with exit 1', async () => {
+    if (!(await runtimeAvailable('sqlite'))) return;
+    const out = await runProgram('sqlite', 'SELEC bogus;', SQL_CASES.slice(0, 1));
+    expect(out.pass).toBe(false);
+    expect(out.results[0].actual).toContain('exited with code 1');
+  });
+
+  it('scratch treats my stdin as the fixture and returns the query rows', async () => {
+    if (!(await runtimeAvailable('sqlite'))) return;
+    const out = await scratchProgram('sqlite', QUERY, FIXTURE);
+    expect(out.scratch).toBe(true);
+    expect(out.actual).toBe('ada|20\ngrace|40');
+  });
+
+  it('verification admits a real sqlite exercise and its -- scaffold does not pre-solve it', async () => {
+    if (!(await runtimeAvailable('sqlite'))) return;
+    const report = await verifyExercise({
+      entryPoint: 'main',
+      statement: 'Print each customer and their total spend, alphabetically.',
+      reference: QUERY,
+      cases: [...SQL_CASES, {
+        name: 'no rows for an empty table',
+        stdin: 'CREATE TABLE orders (id INTEGER, customer TEXT, total INTEGER);',
+        expect: '',
+      }],
+      family: 'exec' as const,
+      runtime: 'sqlite',
+    });
+    expect(report.ok).toBe(true);
+  });
+
+  it('REJECTS an all-empty-expect sqlite suite — an empty main.sql would pass it', async () => {
+    if (!(await runtimeAvailable('sqlite'))) return;
+    const report = await verifyExercise({
+      entryPoint: 'main',
+      statement: 'Print each customer and their total spend.',
+      reference: QUERY,
+      cases: [
+        { name: 'a', stdin: FIXTURE, expect: '' },
+        { name: 'b', stdin: FIXTURE_ONE, expect: '' },
+        { name: 'c', stdin: FIXTURE, expect: '' },
+      ],
+      family: 'exec' as const,
+      runtime: 'sqlite',
+    });
+    expect(report.ok).toBe(false);
+    expect(report.gates.find((g) => g.gate === 'rejects-empty-implementation')?.ok).toBe(false);
+  });
+
+  it('carries the SQL comment prefix for scaffolds', () => {
+    expect(runtimeFor('sqlite')?.comment).toBe('--');
+  });
+});
+
 // ── the container tier: go/java via Docker ──────────────────────────────────────────────────────
 //
 // This dev environment has the docker CLI but no reachable daemon, which makes the FAILURE paths —

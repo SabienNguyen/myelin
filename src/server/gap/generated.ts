@@ -38,7 +38,7 @@ export interface GeneratedExercise {
   /** Absent in files stored before the function family existed — read through familyOf(), which
    *  defaults it to 'stream', so no stored exercise needs migrating. */
   family?: GeneratedFamily;
-  /** exec family only: which runtime runs the program ('node' | 'python3' | 'bash' | 'ruby'). */
+  /** exec family only: which runtime runs the program — an id from exec.ts's RUNTIMES. */
   runtime?: string;
   /** exec family only: a vetted service environment (gap/environment.ts registry) brought up for
    *  each suite run — the program receives its connection string via env var. */
@@ -255,9 +255,18 @@ Respond with ONLY valid JSON, no fences:
 // language free.
 const EXEC_PROMPT = (pattern: string, description: string, runtime: string, envBlurb?: string) => `Author a coding exercise for the pattern "${pattern}".
 ${description ? `Context from the tutor: ${description}\n` : ''}
-The exercise family is: the learner writes a COMPLETE PROGRAM for the ${runtime} runtime. Each test
+The exercise family is: the learner writes a COMPLETE PROGRAM for the ${runtime} runtime. ${runtime === 'sqlite'
+  // sqlite repurposes the judge's stdin slot: the case's stdin is a fixture script run before the
+  // learner's SQL, not input the program reads — the prompt must say so or the model authors
+  // stdin-reading exercises that cannot work.
+  ? `Each test
+case's "stdin" is a schema+data fixture ("CREATE TABLE ...; INSERT ...;") executed against a fresh
+in-memory database before the learner's SQL runs; "expect" is the exact rows the learner's query
+prints, in sqlite3's default pipe-separated format. Omit "args". The reference is plain SQL ending
+in the SELECT under test.`
+  : `Each test
 case runs the program as its own process with a given stdin and argv, and compares stdout exactly
-(trailing whitespace ignored). The program must be deterministic — no randomness, no clock${envBlurb
+(trailing whitespace ignored).`} The program must be deterministic — no randomness, no clock${envBlurb
   ? ` — and runs alongside ${envBlurb}. Every case gets a FRESH instance of that service, so the
 program must create whatever state it needs; expectations must not depend on prior runs`
   : ', no network, no files beyond stdin/stdout'} — and must exit 0 on success. Pick a task worth

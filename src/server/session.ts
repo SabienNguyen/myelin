@@ -503,9 +503,10 @@ export function createTutorSession(
               + '(Kubernetes/CKA prep, CI configs, any YAML-configured system), graded by '
               + 'mechanical assertions over the parsed document. '
               + 'Family "exec": the student writes a WHOLE PROGRAM in a named runtime (python3, '
-              + 'bash, ruby, or node), judged per test case on stdin/argv in and exact stdout out — '
-              + 'use it for algorithm practice, CLI tools, text processing, and any language the '
-              + 'student wants that their machine has. '
+              + 'bash, ruby, node, sqlite, ...), judged per test case on stdin/argv in and exact '
+              + 'stdout out — use it for algorithm practice, CLI tools, text processing, and any '
+              + 'language the student wants that their machine has. The sqlite runtime judges SQL: '
+              + 'each case is a schema+data fixture and the expected rows of the student\'s query. '
               + 'Family "stream": async-generator-over-byte-chunks (SSE, NDJSON, line protocols, '
               + 'framing). The result is verified mechanically and stored PENDING REVIEW — tell the '
               + 'student it is waiting in the Library\'s Practice section for their approval, and do '
@@ -515,12 +516,12 @@ export function createTutorSession(
               description: z.string().describe('what the exercise should teach, 1-3 sentences'),
               family: z.enum(['function', 'manifest', 'exec', 'stream']).optional()
                 .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); exec for whole programs in a chosen language; stream only for byte-stream parsing'),
-              runtime: z.enum(['python3', 'bash', 'ruby', 'node', 'typescript', 'c', 'rust', 'cuda', 'go', 'java']).optional()
-                .describe('exec family only: which runtime the program targets. node and typescript always work (the app itself runs them); python3/bash/ruby need a local install; c needs cc, rust needs rustc; go and java run in Docker containers and need Docker running with the image pulled. Generation fails loudly with the exact fix when something is missing.'),
+              runtime: z.enum(['python3', 'bash', 'ruby', 'node', 'typescript', 'sqlite', 'c', 'rust', 'cuda', 'go', 'java']).optional()
+                .describe('exec family only: which runtime the program targets. node and typescript always work (the app itself runs them); python3/bash/ruby need a local install; sqlite needs the sqlite3 shell and judges SQL against an in-memory database; c needs cc, rust needs rustc; go and java run in Docker containers and need Docker running with the image pulled. Generation fails loudly with the exact fix when something is missing.'),
               environment: z.enum(['redis', 'postgres']).optional()
                 .describe('exec family only: a real service composed up fresh for every suite run — the program gets its connection string via REDIS_URL / DATABASE_URL. Needs Docker with the compose plugin and the image pulled; generation fails loudly with the exact fix when it is missing. Use for exercises about caching, queues, SQL — anything worth practicing against the real thing.'),
             }),
-            execute: async ({ pattern, description, family, runtime, environment }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' | 'typescript' | 'c' | 'rust' | 'cuda' | 'go' | 'java'; environment?: 'redis' | 'postgres' }) => {
+            execute: async ({ pattern, description, family, runtime, environment }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' | 'typescript' | 'sqlite' | 'c' | 'rust' | 'cuda' | 'go' | 'java'; environment?: 'redis' | 'postgres' }) => {
               const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
               if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
                 return { error: `an exercise for "${slug}" already exists` };
