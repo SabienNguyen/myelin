@@ -355,3 +355,11 @@ Written after the sprint that followed the original verdict; each line names its
   sourced pages — teach → check → record → durable memory, end to end, under a real model. Two
   papercuts the sitting surfaced were fixed and shipped on the spot (the Mermaid stream latch,
   the double-escaped \n\n in block prose).
+- **The decay→review loop closed against genuinely taught content.** qkv-attention (taught,
+  applied, and compiled earlier in this same session) was fixture-decayed 30 days at practicing;
+  /api/due listed it slipped (raw practicing, effective exposed), and review mode did everything
+  right live: named exactly that page with the correct decay narrative, declined to re-research
+  a page already solid ("no actual content gap here"), and re-proved it with a question aimed at
+  the originally-taught concept — the trophy/suitcase asymmetry. The correct answer graded,
+  recorded, restored the level to practicing, and emptied the due queue. Spaced repetition,
+  teach-to-re-proof, end to end under a real model on real material.
