@@ -21,6 +21,7 @@ const VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-va
 // pre-created skeleton is needed for a first run from a clean checkout either — Loreweaver's
 // writes mkdir recursively (~/Dev/personal/loreweaver/src/vault/vaultStore.ts dir()).
 const GAP_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-gap');
+const LABEL_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-label');
 
 
 export default async function globalSetup() {
@@ -30,6 +31,15 @@ export default async function globalSetup() {
     join(VAULT, 'pages', 'derivatives.md'),
     '---\ntitle: Derivatives\ndifficulty: 1\nstatus: solid\n---\n' +
       'The derivative measures the instantaneous rate of change — the slope at a point.',
+  );
+
+  // label-diagram.e2e.ts's vault: fresh sessions each run, and the page its evidence lands on.
+  rmSync(join(LABEL_VAULT, 'students'), { recursive: true, force: true });
+  rmSync(join(LABEL_VAULT, '.harness', 'sessions'), { recursive: true, force: true });
+  mkdirSync(join(LABEL_VAULT, 'pages'), { recursive: true });
+  writeFileSync(
+    join(LABEL_VAULT, 'pages', 'water-cycle.md'),
+    '---\ntitle: The Water Cycle\ndifficulty: 1\nstatus: solid\n---\nEvaporation, condensation, precipitation.',
   );
 
   rmSync(join(GAP_VAULT, 'students'), { recursive: true, force: true });

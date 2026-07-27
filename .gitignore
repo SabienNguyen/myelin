@@ -3,13 +3,16 @@ node_modules/
 .tools/
 dist/
 dist-gap/
+dist-label/
 # outDir used by the ad-hoc browser drive in .claude/skills/browser-verify (a third build alongside
-# playwright.config.ts's dist/ and dist-gap/ pair, pointed at a sandbox backend via HARNESS_API).
+# playwright.config.ts's dist/ and dist-gap/
+dist-label/ pair, pointed at a sandbox backend via HARNESS_API).
 dist-drive/
 .env
 harness.config.json
 tests/e2e/.tmp-vault/
 tests/e2e/.tmp-vault-gap/
+tests/e2e/.tmp-vault-label/
 test-results/
 playwright-report/
 blob-report/

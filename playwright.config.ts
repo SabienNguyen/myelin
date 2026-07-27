@@ -69,6 +69,14 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
     },
+    // label-diagram.e2e.ts gets its own pair for the same turn-counter reason as I3 above.
+    {
+      command:
+        'LW_MOCK_MODEL=tests/e2e/label-script.json HARNESS_CONFIG=tests/e2e/label.config.json npx tsx src/server/index.ts',
+      port: 4822,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
     {
       // Separate --outDir (dist-gap, not dist) so this build never races the other frontend
       // entry's concurrent `vite build` writing the same directory — Playwright starts every
@@ -78,6 +86,14 @@ export default defineConfig({
         'HARNESS_API=http://localhost:4821 sh -c "npx vite build --outDir dist-gap '
         + '&& npx vite preview --outDir dist-gap --port 4174 --strictPort"',
       port: 4174,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    {
+      command:
+        'HARNESS_API=http://localhost:4822 sh -c "npx vite build --outDir dist-label '
+        + '&& npx vite preview --outDir dist-label --port 4175 --strictPort"',
+      port: 4175,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

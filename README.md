@@ -213,15 +213,16 @@ place to learn — the sandbox only serves ladders and runs tests for it.
 ```bash
 npx tsc --noEmit    # typecheck
 npx vitest run      # 900+ unit + integration tests (incl. seeded fuzz suites)
-npm run e2e         # Playwright, 6 specs against a scripted model
+npm run e2e         # Playwright, 8 specs against a scripted model
 ```
 
 The e2e suite spins up the real backend and a real Loreweaver server (fake embeddings, disposable
 fixture vaults) with the tutor replaced by a scripted model, then drives the built SPA with a real
 browser: the full tutor loop (quick_check → grade → evidence on disk), the whole coding flow
 (predict gate → editor → real tests → evidence), the exercise Help tab, the contextual graph,
-conversation history (restore, switch, APG keyboard menu), and video ingest (a fake `yt-dlp`
-serves captions with no network). On a machine that ships a pinned Chromium:
+conversation history (restore, switch, APG keyboard menu), diagram labelling (an entity-escaped
+SVG, coincident pins, and a duplicate label — the three shapes a live tutor actually produced),
+and video ingest (a fake `yt-dlp` serves captions with no network). On a machine that ships a pinned Chromium:
 `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
 
 **CI** runs on every push: typecheck and the client component suite unconditionally; the

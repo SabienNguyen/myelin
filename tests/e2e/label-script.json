@@ -1,0 +1,24 @@
+{
+  "turns": [
+    {
+      "toolCalls": [
+        {
+          "toolName": "label_diagram",
+          "input": {
+            "prompt": "Label the water cycle.",
+            "pageSlug": "water-cycle",
+            "svg": "&lt;svg viewBox=&quot;0 0 100 60&quot; xmlns=&quot;http://www.w3.org/2000/svg&quot;&gt;&lt;rect x=&quot;5&quot; y=&quot;5&quot; width=&quot;90&quot; height=&quot;50&quot; fill=&quot;none&quot; stroke=&quot;gray&quot;/&gt;&lt;/svg&gt;",
+            "regions": [
+              { "id": "up", "x": 30, "y": 30, "label": "Evaporation" },
+              { "id": "cloud", "x": 30, "y": 30, "label": "Condensation" },
+              { "id": "down", "x": 70, "y": 30, "label": "Condensation" }
+            ],
+            "distractors": ["Photosynthesis"]
+          }
+        }
+      ],
+      "text": "Pin each stage where it happens."
+    },
+    { "text": "All three placed — the cycle is yours." }
+  ]
+}

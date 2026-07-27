@@ -484,3 +484,8 @@ Written after the sprint that followed the original verdict; each line names its
   Re-driven live after: proper 494×691 canvas, every pin clickable, both residual chips placeable,
   8/8 graded correct with the two rendered Mermaid teaching diagrams above it — the stream-latch
   fix visibly earning its keep.
+- **The label_diagram triple-find is pinned as an e2e spec** — its own scripted backend pair
+  (:4822/:4175, the gap precedent), with the script deliberately shaped like the live sitting:
+  the SVG entity-escaped, two regions at identical coordinates, one label needed twice. The spec
+  asserts real canvas height, clicks both coincident pins, re-uses the duplicate chip, and
+  completes to 3/3 graded. Suite is now 8 browser specs.
