@@ -59,13 +59,33 @@ describe('applyRoute', () => {
     expect(c.models.tutor.model).toBe('claude-sdk:sonnet');
   });
 
-  it('never overrides a role the config file set explicitly', () => {
-    // Someone who wrote `"grader": {"model": "ollama:qwen"}` meant it. Signing in with a
-    // subscription is a statement about billing, not a licence to rewrite their choices.
+  it('keeps an explicitly chosen Anthropic model but reroutes it through the login', () => {
+    // The user picked a MODEL, then clicked "use my subscription" — honour both. Leaving the
+    // explicit id on the API route meant the signin click succeeded and left the app exactly as
+    // blocked as before, with no error and no visible change (the stranded-FirstRun bug).
     const c = cfg();
     applyRoute(c, new Set(['grader']), 'subscription');
-    expect(c.models.grader.model).toBe('claude-haiku-4-5');
+    expect(c.models.grader.model).toBe('claude-sdk:claude-haiku-4-5');
     expect(c.models.tutor.model).toBe('claude-sdk:sonnet');
+  });
+
+  it('never touches an explicit role that already names its own route', () => {
+    // `ollama:qwen` is a statement about where the model runs; `claude-sdk:opus` already rides
+    // the login. A billing choice must not rewrite either.
+    const c = cfg();
+    c.models.grader.model = 'ollama:qwen';
+    c.models.compile.model = 'claude-sdk:opus';
+    applyRoute(c, new Set(['grader', 'compile']), 'subscription');
+    expect(c.models.grader.model).toBe('ollama:qwen');
+    expect(c.models.compile.model).toBe('claude-sdk:opus');
+  });
+
+  it('is idempotent: a second application changes nothing', () => {
+    const c = cfg();
+    applyRoute(c, new Set(['tutor']), 'subscription');
+    const after = JSON.stringify(c);
+    applyRoute(c, new Set(['tutor']), 'subscription');
+    expect(JSON.stringify(c)).toBe(after);
   });
 
   it('does nothing for the api-key route or no route at all', () => {

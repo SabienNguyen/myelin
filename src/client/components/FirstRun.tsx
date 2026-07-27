@@ -51,7 +51,13 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
       });
       const data = await res.json();
       if (!res.ok) setError(data.error ?? 'That did not work.');
-      else setState(data);
+      else {
+        setState(data);
+        // A success that leaves the app blocked would re-render this card unchanged — a click
+        // that visibly does nothing. Should be unreachable now that applyRoute reroutes explicit
+        // Anthropic models too; if a future change reopens the gap, at least say so.
+        if (data.blocked) setError('That worked, but something still blocks lessons — these roles still need an API key: ' + (data.apiKey?.rolesNeeding ?? []).join(', ') + '.');
+      }
     } catch (err: any) {
       setError(`Could not reach the app’s own server (${err?.message ?? err}).`);
     } finally {

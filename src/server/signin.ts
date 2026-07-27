@@ -90,8 +90,12 @@ export function writeRoute(route: AuthRoute, path = credentialsPath()): void {
  * making the learner restart the app to finish signing in. chatRoute.ts picks its tutor
  * implementation per request precisely so this can take effect on the next turn.
  *
- * A model id written explicitly in harness.config.json always wins: someone who set
- * `"tutor": {"model": "ollama:qwen"}` meant it, and a stored route must not quietly override them.
+ * A MODEL chosen explicitly in harness.config.json always wins; the route only decides how that
+ * model is reached and paid for. So `"tutor": {"model": "ollama:qwen"}` stays untouched, and an
+ * explicit plain Anthropic id like `claude-sonnet-5` keeps its exact model but rides the local
+ * login as `claude-sdk:claude-sonnet-5` — the alternative was a config that pins any API model
+ * making "Use my Claude subscription" a click that succeeds server-side and changes nothing the
+ * user can see, because every role still demanded the key they were trying not to paste.
  */
 export function applyRoute(
   cfg: { models: Record<string, { model: string }> },
@@ -99,7 +103,11 @@ export function applyRoute(
   route: AuthRoute | null,
 ): void {
   if (route !== 'subscription') return;
-  for (const [role, model] of Object.entries(SUBSCRIPTION_MODELS)) {
-    if (!explicitRoles.has(role) && cfg.models[role]) cfg.models[role].model = model;
+  for (const [role, entry] of Object.entries(cfg.models)) {
+    if (!explicitRoles.has(role)) {
+      if (SUBSCRIPTION_MODELS[role]) entry.model = SUBSCRIPTION_MODELS[role];
+    } else if (!entry.model.includes(':')) {
+      entry.model = `claude-sdk:${entry.model}`;
+    }
   }
 }

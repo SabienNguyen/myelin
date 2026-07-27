@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { CodeExercise, CodeExerciseInner } from '../../src/client/components/blocks/CodeExercise.js';
@@ -101,7 +101,13 @@ const TextEditor = ({ scaffold, onDocChange }: any) => {
   const onDocChangeRef = useRef(onDocChange);
   onDocChangeRef.current = onDocChange;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { onDocChangeRef.current(scaffold); }, []);
+  // Layout effect, deliberately: the real RungEditor cannot be typed into before its mount
+  // effect runs (the CM6 view IS the input, and that effect creates it), so its starting-doc
+  // report can never clobber an edit. This stand-in's textarea exists at first commit — with a
+  // passive effect, findBy* could observe it, the test could type, and THEN the stale mount
+  // report would fire setCode(scaffold) over the typed text (seen live: wroteCode:false flake).
+  // Reporting at layout time closes the fidelity gap: report lands before the DOM is observable.
+  useLayoutEffect(() => { onDocChangeRef.current(scaffold); }, []);
   return <textarea aria-label="gap-input" defaultValue={scaffold} onChange={(e) => onDocChange(e.target.value)} />;
 };
 
@@ -184,7 +190,9 @@ describe('CodeExercise — mined pattern resolution (final integration, docs/sup
     const input = await screen.findByLabelText('gap-input');
     fireEvent.change(input, { target: { value: 'return fetchPage(url);' } });
 
-    await screen.findByText('2/2 passing');
+    // 5s, not findBy's 1s default: the auto-run debounce alone is 900ms, so the default left
+    // ~100ms of real margin — a loaded runner turned that into the suite's rarest flake.
+    await screen.findByText('2/2 passing', {}, { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: /^submit$/i }));
 
     expect(addResult).toHaveBeenCalledExactlyOnceWith({
@@ -257,7 +265,9 @@ describe('CodeExercise — full_body grading (mechanical, via real tests)', () =
     const input = await screen.findByLabelText('gap-input');
     fireEvent.change(input, { target: { value: 'return onToken(chunk);' } });
 
-    await screen.findByText('2/2 passing');
+    // 5s, not findBy's 1s default: the auto-run debounce alone is 900ms, so the default left
+    // ~100ms of real margin — a loaded runner turned that into the suite's rarest flake.
+    await screen.findByText('2/2 passing', {}, { timeout: 5000 });
     expect(addResult).not.toHaveBeenCalled();
   }, 10_000);
 
@@ -270,7 +280,7 @@ describe('CodeExercise — full_body grading (mechanical, via real tests)', () =
     />);
     const input = await screen.findByLabelText('gap-input');
     fireEvent.change(input, { target: { value: 'return onToken(chunk);' } });
-    await screen.findByText('1/1 passing');
+    await screen.findByText('1/1 passing', {}, { timeout: 5000 });
 
     const runCall = fetchMock.mock.calls.find((c: any[]) => {
       if (c[0] !== '/api/gap/run') return false;
@@ -292,7 +302,9 @@ describe('CodeExercise — full_body grading (mechanical, via real tests)', () =
     const input = await screen.findByLabelText('gap-input');
     fireEvent.change(input, { target: { value: 'return onToken(chunk);' } });
 
-    await screen.findByText('2/2 passing');
+    // 5s, not findBy's 1s default: the auto-run debounce alone is 900ms, so the default left
+    // ~100ms of real margin — a loaded runner turned that into the suite's rarest flake.
+    await screen.findByText('2/2 passing', {}, { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: /^submit$/i }));
 
     expect(addResult).toHaveBeenCalledExactlyOnceWith({
