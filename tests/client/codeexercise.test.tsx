@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useEffect, useRef } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import { CodeExercise, CodeExerciseInner } from '../../src/client/components/blocks/CodeExercise.js';
 import { panelBus } from '../../src/client/lib/panelBus.js';
 
@@ -502,9 +502,10 @@ describe('CodeExercise — Help tab (Track A, docs/superpowers/plans/2026-07-21-
 
     fireEvent.keyDown(window, { key: '/', ctrlKey: true });
 
-    const composer = await screen.findByPlaceholderText('ask about this exercise…');
-    // rAF-scheduled focus — flush one frame.
-    await new Promise((r) => { requestAnimationFrame(() => r(undefined)); });
-    expect(document.activeElement).toBe(composer);
+    // findBy* under a loaded full-suite run can exceed the default 1s; the focus itself is
+    // rAF-scheduled, and "flush one frame" assumed an ordering jsdom does not guarantee under
+    // load — this was the suite's one recurring flake. Poll for the CONDITION, not the frame.
+    const composer = await screen.findByPlaceholderText('ask about this exercise…', {}, { timeout: 5000 });
+    await waitFor(() => expect(document.activeElement).toBe(composer), { timeout: 5000 });
   });
 });
