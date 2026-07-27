@@ -570,7 +570,11 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .graph-node.dim { opacity: 0.18; }
 .graph-node circle { transition: filter 0.12s; }
 .graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }
-.graph-node text { fill: var(--text); pointer-events: none; }
+/* pointer-events auto, not none: the label sits inside the node's g[role=link], so clicking the
+   words routes to the same open-page handler as the dot. With none, the label — the biggest and
+   most readable part of a node — was a dead zone, and the only click target was the ~10px dot
+   (audit 33 caught it: a real unforced click on a label timed out on actionability). */
+.graph-node text { fill: var(--text); pointer-events: auto; }
 /* The global focus-visible rule only names input/textarea/select/button, so a focusable <g> got
    nothing. An SVG outline follows the element's own bounding box, which for a node group is the
    circle plus its label — close enough to read as "this node", and it scales with the zoom for

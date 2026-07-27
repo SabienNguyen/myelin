@@ -263,7 +263,10 @@ export async function mineRepoBuiltin(
     const rawCases: any[] = Array.isArray(parsed.cases) ? parsed.cases : [];
     const ex: GeneratedExercise = {
       pattern,
-      title: String(parsed.title ?? c.name),
+      // The repo name rides in the title: mined pages seed graph nodes, and two repos' same-named
+      // utilities otherwise render as identical labels (three indistinguishable "Total with tax"
+      // nodes in the audit). The slug is repo-prefixed already; the human-facing name must be too.
+      title: `${String(parsed.title ?? c.name)} (${repoName})`,
       family: c.lang === 'py' ? 'exec' : 'function',
       ...(c.lang === 'py' ? { runtime: 'python3' } : {}),
       entryPoint: c.name,
