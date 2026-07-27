@@ -464,3 +464,12 @@ Written after the sprint that followed the original verdict; each line names its
   fit control zooms but doesn't relax overlap), and the existing 9-node capture is cleaner. One
   observation for a future layout pass, not worth risk now: small-N whole-vault could use a
   label-collision nudge.
+- **User-reported: the fitted graph "looks not good" — root-caused and fixed.** Labels
+  counter-scaled by raw zoom (staying 11 screen px at any zoom) while node geometry clamps at 1,
+  so a fit below scale 1 shrank positions but not labels — full-size text crammed into shrunken
+  spacing. Two coordinated fixes: the label counter-scale now clamps at 1 too (labels shrink
+  with the world below scale 1, preserving the collide-tuned separation), and fit's label
+  allowance moves from screen space into the content box below scale 1 (the old math reserved a
+  panel-width of pixels for labels that had already shrunk, crushing small vaults into a postage
+  stamp). Measured after: 10 labels, zero overlapping pairs, 76% width fill. The README's graph
+  screenshot is now this fitted three-domain capture.

@@ -389,10 +389,21 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     // 8-node graph ended up with over 100px of margin per side and filled 7% of its canvas.
     const usableW = Math.max(1, vw - FIT_PAD_PX * 2 - sideMaxPx * 2);
     const usableH = Math.max(1, vh - FIT_PAD_PX * 2 - rMaxPx * 2 - FIT_LABEL_PX);
-    const scale = Math.max(
-      FIT_MIN_SCALE,
-      Math.min(FIT_MAX_SCALE, usableW / bw, usableH / bh),
-    );
+    let scale = Math.min(FIT_MAX_SCALE, usableW / bw, usableH / bh);
+    if (scale < 1) {
+      // Below scale 1 the labels ride the world transform (the label render clamps its
+      // counter-scale at 1), so their allowance belongs to the CONTENT box, not the viewport.
+      // Keeping it in screen space here reserved a panel-width of pixels for labels that had
+      // already shrunk, and fit crushed small vaults into a postage stamp in a sea of parchment.
+      const worldW = bw + sideMaxPx * 2;
+      const worldH = bh + rMaxPx * 2 + FIT_LABEL_PX;
+      scale = Math.min(
+        1,
+        Math.max(1, vw - FIT_PAD_PX * 2) / worldW,
+        Math.max(1, vh - FIT_PAD_PX * 2) / worldH,
+      );
+    }
+    scale = Math.max(FIT_MIN_SCALE, scale);
     const cx = (minX + maxX) / 2;
     const cy = (minY + maxY) / 2;
     select<SVGSVGElement, unknown>(el).call(
@@ -820,8 +831,8 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                             ring, the audit read it as ring texture while looking straight at it.
                             The halo (paintOrder stroke) keeps it legible over any node color. */}
                         <text
-                          x={r + 2 / zoomClamp} y={-r + 2 / zoomClamp} fontSize={16 / zoomScale}
-                          fill="var(--bad)" stroke="var(--bg-panel)" strokeWidth={3 / zoomScale}
+                          x={r + 2 / zoomClamp} y={-r + 2 / zoomClamp} fontSize={16 / zoomClamp}
+                          fill="var(--bad)" stroke="var(--bg-panel)" strokeWidth={3 / zoomClamp}
                           paintOrder="stroke" fontWeight="bold"
                         >{'⚠︎'}{/* U+FE0E forces text presentation — as an emoji the glyph ignores fill */}</text>
                       </g>
@@ -833,7 +844,13 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                       // collisions (the hub "Derivatives · 45d" overlapped its neighbours at any
                       // spreading strength worth using). Shown on hover/selection, where it is
                       // actually being read.
-                      <text y={r + 14 / zoomScale} textAnchor="middle" fontSize={11 / zoomScale}>
+                      // zoomClamp, not zoomScale: dividing by raw scale kept labels at 11 SCREEN
+                      // px even when fit zoomed the world below 1 — positions shrank, labels
+                      // didn't, and a fitted small vault crammed full-size labels into shrunken
+                      // spacing (user-reported: "that looks not good"). Clamping at 1 keeps the
+                      // readable-at-any-zoom-in behavior and lets labels shrink WITH the world
+                      // below 1, preserving the collide-tuned separation.
+                      <text y={r + 14 / zoomClamp} textAnchor="middle" fontSize={11 / zoomClamp}>
                         {n.title}
                         {(isHovered || selected === n.slug) && n.daysLeft != null ? ` · ${n.daysLeft}d` : ''}
                       </text>
