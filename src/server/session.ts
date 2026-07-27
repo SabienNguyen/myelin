@@ -125,6 +125,17 @@ export function availableBlocks(): BlockToolName[] {
 /** Frontend tools: no execute — the loop pauses; the browser supplies output via addToolOutput.
  *  (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats
  *  tool()'s generic overload inference, which otherwise falls back to Tool<never, never, ...>.) */
+/** The turn's block toolset under structural rule 1a: a pure grading turn withholds every block
+ *  except open_source (navigation is not staging work) — two live probes showed prompt wording
+ *  alone does not stop the model staging a block over its own next-step offer. Exported for tests. */
+export function turnBlockTools(gradingOnly: boolean): ToolSet {
+  const tools = { ...blockTools() };
+  if (gradingOnly) {
+    for (const name of Object.keys(tools)) if (name !== 'open_source') delete tools[name];
+  }
+  return tools;
+}
+
 export function blockTools(): ToolSet {
   const blocks = Object.fromEntries(availableBlocks().map((name) => [name, tool({
     description: `Present a ${name} block to the student and wait for their work.`,
@@ -574,12 +585,23 @@ export function createTutorSession(
           }),
         };
 
+        // STRUCTURAL "let a win land" (rule 1a): in a pure grading turn — block outputs arriving,
+        // no new words from the student — the block tools are WITHHELD, not just discouraged. Two
+        // live probes showed the model asks the right next-step question and then stages a block
+        // over it anyway; wording was tried twice and did not hold. With the tools absent the
+        // offer is the only possible ending, and the student's "yes" is a real user turn where
+        // the tools return. open_source stays available: navigation is not staging work.
+        const gradingOnly = pending.length > 0;
+        const turnBlocks = turnBlockTools(gradingOnly);
         const agent = new ToolLoopAgent({
           model,
-          instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
+          instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
+            + (gradingOnly
+              ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
+              : ''),
           tools: {
             ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(cfg.vault), ...webTools, ...ingestTools,
-            ...generateTool, ...blockTools(),
+            ...generateTool, ...turnBlocks,
           },
           stopWhen: isStepCount(24),
         });

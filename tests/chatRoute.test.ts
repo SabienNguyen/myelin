@@ -51,3 +51,4 @@ describe('DELETE /api/thread/:id', () => {
     expect(res.status).toBeGreaterThanOrEqual(400);
   });
 });
+

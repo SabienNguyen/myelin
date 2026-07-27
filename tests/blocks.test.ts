@@ -48,3 +48,14 @@ describe('block schemas', () => {
     )).toThrow();
   });
 });
+
+describe('structural rule 1a on the ai-sdk route', () => {
+  it('grading turns get only open_source; user turns get every block', async () => {
+    const { turnBlockTools } = await import('../src/server/session.js');
+    expect(Object.keys(turnBlockTools(true))).toEqual(['open_source']);
+    const full = Object.keys(turnBlockTools(false));
+    expect(full).toContain('quiz');
+    expect(full).toContain('writing_draft');
+    expect(full).toContain('open_source');
+  });
+});

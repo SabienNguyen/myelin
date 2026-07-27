@@ -429,3 +429,15 @@ describe('course tools on the SDK route', () => {
     expect(payload.note).toContain('course bank is empty');
   });
 });
+
+describe('structural rule 1a — grading turns withhold the block tools', () => {
+  it('a grading turn lists no block tools (open_source excepted); a user turn lists all', async () => {
+    const { blockAllowlist } = await import('../src/server/claudeSdkTutor.js');
+    const grading = blockAllowlist(true);
+    const user = blockAllowlist(false);
+    expect(grading).toEqual(['mcp__blocks__open_source']);
+    expect(user).toContain('mcp__blocks__quiz');
+    expect(user).toContain('mcp__blocks__writing_draft');
+    expect(user).toContain('mcp__blocks__open_source');
+  });
+});

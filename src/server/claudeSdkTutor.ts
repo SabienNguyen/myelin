@@ -35,6 +35,16 @@ const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'compile_source'];
 
 const LOREWEAVER_PREFIX = 'mcp__loreweaver__';
 const BLOCKS_PREFIX = 'mcp__blocks__';
+
+/** STRUCTURAL rule 1a (mirrors session.ts): a pure grading turn withholds the block tools — two
+ *  live probes showed wording alone does not stop the model staging a block over its own offer.
+ *  open_source stays in both cases: navigation is not staging work. Exported for tests. */
+export function blockAllowlist(gradingOnly: boolean): string[] {
+  return [
+    ...(gradingOnly ? [] : availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`)),
+    `${BLOCKS_PREFIX}open_source`,
+  ];
+}
 const COURSE_PREFIX = 'mcp__course__';
 const RECORD_EVIDENCE_TOOL = `${LOREWEAVER_PREFIX}record_evidence`;
 
@@ -206,12 +216,12 @@ export function createClaudeSdkTutorSession(
 
   function buildOptions(
     mode: Mode, slugs: string[], resumeId: string | undefined, gap: VaultGap | null,
+    gradingOnly = false,
   ): Options {
     const activeLoreweaverTools = mode === 'freeform' ? [...TEACH_TOOLS, ...FREEFORM_EXTRA_TOOLS] : TEACH_TOOLS;
     const allowedTools = [
       ...activeLoreweaverTools.map((n) => `${LOREWEAVER_PREFIX}${n}`),
-      ...availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`),
-      `${BLOCKS_PREFIX}open_source`,
+      ...blockAllowlist(gradingOnly),
       // Every mode, matching session.ts: drilling a banked problem is a teaching activity.
       `${COURSE_PREFIX}course_problems`, `${COURSE_PREFIX}mark_course_problem`,
       // Same gate as the ai-sdk route: research when the vault has a gap, never otherwise.
@@ -346,7 +356,8 @@ export function createClaudeSdkTutorSession(
           promptParts.push(
             `HARNESS: the student answered the block(s) you displayed. Their actual work:\n${submissions}\n\n`
             + `Graded mechanically/by the grader as: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
-            + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
+            + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student. `
+            + 'The block tools are withheld this turn: deliver the grade and END on your offer of the next step; the student will answer.',
           );
         }
         // Same stale-text hazard as the gap above, but worse: the resumed session already HOLDS
@@ -367,7 +378,7 @@ export function createClaudeSdkTutorSession(
         // itself throws (a resume against a stale/pruned session id is expected to surface this
         // way — the caller decides whether to catch-and-fall-back or let it propagate).
         const runQuery = async (prompt: string, resumeId: string | undefined) => {
-          const options = buildOptions(mode, slugs, resumeId, gap);
+          const options = buildOptions(mode, slugs, resumeId, gap, pending.length > 0);
           let capturedSessionId: string | undefined;
           let sawRecordEvidence = false;
           // Per-message-batch state: index -> what content_block_start told us about that index.
