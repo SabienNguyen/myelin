@@ -50,6 +50,16 @@ that is where the live verification actually happened.
 
 ## What remains, ranked
 
+> **Status note, added later:** this list is the audit-era snapshot, kept for the record. Almost
+> all of it has since shipped — see the addendum below for each closure's evidence class.
+> Closed: 1 (six live sittings — all four modes, video teaching, degradation probes), 2 (live
+> drive + unit tests), 3 (driven live; the video branch also has a browser e2e now), 4
+> (revise-btn, same rubric, priorDraft), 5 (sqlite runtime), 6 (WebAudio hear-it), 7
+> (options-pool guidance), 8 (repaired-misconception history on the page), 9 (student switcher +
+> voice), 12 (paper_references tool + reader). Still open: 10 (real screen-reader speech —
+> parked, needs NVDA/VoiceOver) and 11 (audio in — parked, modality cost), plus whatever of 13's
+> polish list the shipped work didn't absorb.
+
 1. **A real tutor model, end to end.** The one gap no scripted audit can close. Everything above
    proves the UI, grading, and loops; whether a real model picks the right exercise, paces a
    beginner, and repairs a misconception well is a different claim and currently has zero
@@ -82,6 +92,9 @@ that is where the live verification actually happened.
     plan-chip click-through (43).
 
 ## Recommended next five
+
+> **Status note, added later:** all five landed — sittings, SDK-route verification, entry-point
+> coverage, the revise round, and the SQL runtime. Kept as written for the record.
 
 1. **Live-model sitting** — the only remaining claim class; everything else is refinement of an
    already-verified layer.
