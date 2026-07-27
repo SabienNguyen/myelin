@@ -1,12 +1,32 @@
 # loreweaver-harness
 
-A localhost tutoring web app that sits on top of the [Loreweaver](https://github.com) MCP
-teaching-memory server: a chat tutor (Anthropic models, one per role — tutor / grader / quiz
-generator / card generator / compiler) that teaches through subject blocks (quick checks, quizzes,
-math scratchpads, writing drafts), shows a live mastery DAG of the student's pages, enforces an
-evidence guardrail so nothing gets taught without being graded and recorded, and syncs two-way with
-Anki. Loreweaver is the only writer of the vault and student files — the harness talks to it
-exclusively over stdio MCP.
+A learn-anything tutoring app (desktop and localhost web) on top of the Loreweaver MCP
+teaching-memory server. A chat tutor teaches through graded blocks, a mastery graph tracks what
+you have actually proven, and an evidence guardrail keeps the two honest: nothing counts as
+learned without being graded and recorded, and a model's opinion can never mint the evidence a
+machine check earns. Loreweaver is the only writer of the vault and student files — the harness
+talks to it exclusively over stdio MCP.
+
+What that means in practice:
+
+- **Every subject gets an applied check.** Mechanical checkers for science and structured answers
+  (numeric/unit algebra/chem equations/sets/sequences/matching/note arithmetic), a step-aware
+  math scratchpad (MathLive + numeric equivalence), diagram labelling for picture subjects,
+  rubric'd writing drafts with annotations and a one-click revise round for essay subjects, and a
+  code sandbox: exercise ladders, generated exercises behind a review gate, and whole-program
+  judging in ten runtimes (node, TypeScript, python3, bash, ruby, sqlite, C, Rust, CUDA where a
+  toolkit exists; Go/Java via Docker) plus compose-backed service environments (redis, postgres).
+- **Your material is the curriculum.** One "Add material" control ingests books/papers
+  (PDF/EPUB/DOCX/MD), git repos (functions mined into exercises with your approval), and problem
+  sets or past exams — banked and drilled verbatim, never paraphrased. A source reader opens any
+  ingested artifact beside the conversation; select a passage to ask about it, and the tutor can
+  bring you to a source itself.
+- **The tutor is a librarian first.** Live literature search (newest and most-cited), citation
+  chasing through an ingested paper's own references, and prompt rules that route learning
+  through real human artifacts — with research claims that must match what was actually read.
+- **The loop closes visibly.** Spaced review with decay, an interleaved one-click session plan,
+  misconception record → surface → repair → resolve (with the repair history kept), per-student
+  profiles, a teaching-style preference, and two-way Anki sync.
 
 ## Setup
 
