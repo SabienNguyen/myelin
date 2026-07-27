@@ -168,9 +168,15 @@ export function AddMaterial() {
               if (file) void ingestFile(file);
             }}
           />
+          {/* Failures leave the panel open, so they report HERE, where the user is looking and
+              long text can wrap — the yt-dlp install hint rendered as one unwrapped topbar line
+              running off the window edge before this. */}
+          {status && <p className="ingest-status" role="status">{status}</p>}
         </div>
       )}
-      {status && <span className="ingest-status" role="status">{status}</span>}
+      {/* Success closes the panel; its short status lands beside the button, capped so no
+          message can displace the topbar again. */}
+      {status && !open && <span className="ingest-status" role="status">{status}</span>}
     </div>
   );
 }

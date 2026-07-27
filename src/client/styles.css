@@ -203,7 +203,15 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .anki-up .statusdot { background: var(--good); }
 .anki-backlog .statusdot { background: var(--warn); }
 
-.ingest-status { color: var(--text-muted); font-size: 0.8rem; white-space: nowrap; }
+.ingest-status {
+  color: var(--text-muted); font-size: 0.8rem; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 26rem;
+}
+/* Inside the panel (the failure path) the full message matters more than the topbar's tidiness. */
+.add-material-panel .ingest-status {
+  display: block; white-space: normal; overflow: visible; max-width: none;
+  margin: 0.6rem 0 0;
+}
 .anki-down .statusdot { background: var(--text-muted); }
 
 /* ── Add material: the one entry point for files, repos, and folders ── */

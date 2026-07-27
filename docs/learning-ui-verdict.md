@@ -292,3 +292,15 @@ Written after the sprint that followed the original verdict; each line names its
   card outside any landmark (no main — the screen replaces the whole app, so it needs its own).
   Now a main landmark; zero violations across FirstRun × both variants × both themes, and the
   Add-material popover scanned clean in both themes as-is.
+- **Ingest failure paths — driven, one real layout bug fixed.** With yt-dlp deliberately absent
+  and a dead repo URL, both Add-material failure paths were driven in the real browser. The repo
+  path already reported exemplarily (ERROR chip in the Library with the exact git command and
+  exit code, dismissable). The video path's install hint, though, rendered as a single unwrapped
+  line loose in the topbar, running off the window edge — the one message that tells a user how
+  to fix their setup was unreadable. Failures now report inside the open panel where text wraps
+  and the user is looking; the topbar span only carries the short post-success status and is
+  ellipsis-capped so no message can displace the topbar again. Verified at 1360px and 900px with
+  a no-horizontal-scroll assertion; the panel error also survives the narrow-screen rule that
+  hides the topbar copy. One observation judged fine as-is: the repo path's "ingesting in the
+  background" topbar note is written at accept time and doesn't update when the background clone
+  later fails — the Library card is the live surface and reports the failure in full.
