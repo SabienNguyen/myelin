@@ -245,3 +245,10 @@ Written after the sprint that followed the original verdict; each line names its
   "x^2=4" vs "x=2" (two roots vs one). Unit-tested both ways and re-driven live: the same
   derivation now grades clean, and a wrong equation chain gets the break located between the
   right steps.
+- **Quiz multi-item flow — driven end to end, no defect.** A three-item quiz mixing all
+  answer shapes (choice buttons, short-answer input, cloze input) rendered on the stage with
+  its chip in chat; a deliberate miss on the cloze produced the honest per-item marks
+  (✓ ✓ ✗) and a 2/3 verdict, all on the mechanical path — no model consulted for exact
+  matches; the tutor's follow-up arrived by auto-resubmit. One nit chased and dismissed:
+  a prompt's "x^2" renders literally only because the fixture omitted $…$ — BlockProse has
+  rendered delimited math through KaTeX since the block-prose pass.
