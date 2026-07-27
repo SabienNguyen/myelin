@@ -61,6 +61,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # The client component suite is fully self-contained (jsdom, no loreweaver spawn), so it
+      # also runs ungated — real test coverage on every push even before the secret exists.
+      - name: Client component suite
+        run: npx vitest run tests/client
+
       - name: Install loreweaver dependencies
         if: steps.gate.outputs.have == 'true'
         run: npm ci
