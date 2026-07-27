@@ -233,10 +233,12 @@ naming the missing secret.
 
 1. Mastery levels: `unseen → exposed → practicing → mastered` — they change **only** through
    `record_evidence`, never by presenting material, never promoted from mere recall.
-2. Mastery **decays**: `mastered` needs reinforcement within 45 days, `practicing` within 21, or
-   the *effective* level drops a rung (raw level kept for history).
-3. Evidence kinds: `exposed`, `explained-correctly`, `applied-correctly`, `struggled`,
-   `misconception` (with a note) — and a machine check outranks a model's opinion.
+2. Mastery **decays**: `mastered` needs reinforcement within 45 days, `practicing` within 21,
+   rubric evidence within 14, or the *effective* level drops a rung (raw level kept for history).
+3. Evidence kinds: `exposed`, `explained-correctly`, `applied-correctly`, `rubric-passed` (a
+   model's rubric judgment on produced work — its own kind, so it never launders into applied
+   evidence), `struggled`, `misconception` (with a note) — and a machine check outranks a
+   model's opinion.
 4. Anki reviews have a ceiling: a review maps to `exposed` (refreshes the decay clock, never
    promotes); a lapse maps to `struggled`. Flashcards alone can never mint `applied-correctly`.
 5. If a graded block isn't followed by a `record_evidence` call, the guardrail nudges the tutor
