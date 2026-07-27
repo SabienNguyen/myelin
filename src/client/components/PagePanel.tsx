@@ -218,7 +218,9 @@ export function PagePanel({ slug }: { slug: string | null }) {
 
   return (
     <article className="page-panel">
-      <h2>{meta.title ?? page.page.slug}</h2>
+      {/* Classed so the body's own `##` headings (also h2 after markdown render) can be styled a
+          step below it — see the .page-title / .page-panel h2 pair in styles.css. */}
+      <h2 className="page-title">{meta.title ?? page.page.slug}</h2>
 
       <div className="page-meta">
         {meta.status && <span className={`page-chip page-status-${meta.status}`}>{meta.status}</span>}
