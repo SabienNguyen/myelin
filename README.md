@@ -17,10 +17,11 @@ What that means in practice:
   judging in ten runtimes (node, TypeScript, python3, bash, ruby, sqlite, C, Rust, CUDA where a
   toolkit exists; Go/Java via Docker) plus compose-backed service environments (redis, postgres).
 - **Your material is the curriculum.** One "Add material" control ingests books/papers
-  (PDF/EPUB/DOCX/MD), git repos (functions mined into exercises with your approval), and problem
-  sets or past exams — banked and drilled verbatim, never paraphrased. A source reader opens any
-  ingested artifact beside the conversation; select a passage to ask about it, and the tutor can
-  bring you to a source itself.
+  (PDF/EPUB/DOCX/MD), git repos (functions mined into exercises with your approval), YouTube
+  lectures (the video's own captions become a timestamped transcript — needs `yt-dlp`, no video
+  download), and problem sets or past exams — banked and drilled verbatim, never paraphrased. A
+  source reader opens any ingested artifact beside the conversation; select a passage to ask
+  about it, and the tutor can bring you to a source itself.
 - **The tutor is a librarian first.** Live literature search (newest and most-cited), citation
   chasing through an ingested paper's own references, and prompt rules that route learning
   through real human artifacts — with research claims that must match what was actually read.

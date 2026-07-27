@@ -2,10 +2,12 @@
 // and "Add repo" (an input+button inside the Library) — which meant the learner had to already
 // know the app's internal taxonomy to add anything. One control, routed by what was given:
 //   a file (browsed or dropped)          -> POST /api/ingest        (document conversion)
+//   a pasted YouTube URL                 -> POST /api/ingest        (caption transcript -> paper)
 //   a pasted git URL / local folder path -> POST /api/ingest/repo   (repo ingestion)
 // The server decides what the document becomes (book chapters, a paper, or a banked problem set).
 import { useEffect, useRef, useState } from 'react';
 import { panelBus } from '../lib/panelBus.js';
+import { isVideoUrl } from '../../shared/videoUrl.js';
 
 const FILE_KINDS = '.pdf, .epub, .docx, .md, .txt';
 
@@ -65,6 +67,29 @@ export function AddMaterial() {
     if (!trimmed || busy) return;
     setBusy(true);
     setStatus(null);
+    // One field, routed by what was pasted: a video URL goes to caption ingestion (its transcript
+    // becomes a paper), everything else stays on the repo path. Same door, no extra button.
+    if (isVideoUrl(trimmed)) {
+      try {
+        const res = await fetch('/api/ingest', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url: trimmed }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setStatus(`${data.book}: transcript fetched — compiling in the background, see Library`);
+          setSource('');
+          setOpen(false);
+          panelBus.setTab('library');
+        } else {
+          setStatus(`ingest failed: ${data.error ?? res.statusText}`);
+        }
+      } catch (err: any) {
+        setStatus(`ingest failed: ${err?.message ?? err}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const res = await fetch('/api/ingest/repo', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ source: trimmed }),
@@ -112,7 +137,7 @@ export function AddMaterial() {
           }}
         >
           <form onSubmit={ingestSource}>
-            <label htmlFor="add-material-source">Paste a git URL or local folder path</label>
+            <label htmlFor="add-material-source">Paste a git URL, a YouTube link, or a local folder path</label>
             <input
               id="add-material-source"
               ref={sourceRef}

@@ -32,7 +32,7 @@ describe('AddMaterial — the one entry point', () => {
     render(<AddMaterial />);
     openPanel();
 
-    fireEvent.change(screen.getByLabelText(/git url or local folder path/i), {
+    fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
       target: { value: 'https://github.com/foo/widgets.git' },
     });
     fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
@@ -65,11 +65,43 @@ describe('AddMaterial — the one entry point', () => {
     expect(init?.body).toBeInstanceOf(FormData);
   });
 
+  it('a pasted YouTube URL routes to /api/ingest as a caption transcript, same field', async () => {
+    const fetchMock = vi.fn(async () => jsonRes({ book: 'The essence of calculus', converting: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<AddMaterial />);
+    openPanel();
+
+    fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
+      target: { value: 'https://www.youtube.com/watch?v=WUvTyaaNkzM' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await screen.findByText(/The essence of calculus: transcript fetched/i);
+    expect(fetchMock).toHaveBeenCalledWith('/api/ingest', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=WUvTyaaNkzM' }),
+    }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('a video ingest failure (e.g. yt-dlp missing) keeps the panel open and names it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ error: 'yt-dlp is not installed — fetching a video’s captions needs it.' }, false)));
+    render(<AddMaterial />);
+    openPanel();
+    fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
+      target: { value: 'https://youtu.be/WUvTyaaNkzM' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await screen.findByText(/ingest failed: yt-dlp is not installed/i);
+    expect(screen.getByRole('dialog')).not.toBeNull();
+  });
+
   it('a failed repo ingest keeps the panel open and names the failure', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ error: 'no such path' }, false)));
     render(<AddMaterial />);
     openPanel();
-    fireEvent.change(screen.getByLabelText(/git url or local folder path/i), {
+    fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
       target: { value: '/nowhere' },
     });
     fireEvent.click(screen.getByRole('button', { name: /^add$/i }));

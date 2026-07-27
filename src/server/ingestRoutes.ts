@@ -9,12 +9,14 @@ import { downloadToTemp } from './download.js';
 import { compileNext, readQueue, renameBook, startConversion } from './ingest.js';
 import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
+import { fetchVideoTranscript, isVideoUrl, type VideoIngestDeps } from './videoIngest.js';
 import type { Loreweaver } from './mcp.js';
 
 export function buildIngestRoutes(
   lw: Loreweaver, cfg: HarnessConfig,
   deps: {
-    converter?: Converter; model?: LanguageModel; fetchImpl?: typeof fetch; ingestRepoDeps?: IngestRepoDeps;
+    converter?: Converter; model?: LanguageModel; fetchImpl?: typeof fetch;
+    ingestRepoDeps?: IngestRepoDeps; videoDeps?: VideoIngestDeps;
   } = {},
 ) {
   const app = new Hono();
@@ -27,6 +29,24 @@ export function buildIngestRoutes(
     if (contentType.includes('application/json')) {
       const body = await c.req.json().catch(() => null) as { url?: string; mode?: 'book' | 'paper' } | null;
       if (!body?.url) return c.json({ error: 'JSON body requires a "url" field' }, 400);
+
+      // A video URL through the SAME door as papers and books (single Add material entry point —
+      // a product rule, not an accident): its captions become a timestamped transcript, which is
+      // ordinary markdown from here on — paper mode, source reader, select-to-ask, all of it.
+      if (isVideoUrl(body.url)) {
+        try {
+          const { title, markdown } = await fetchVideoTranscript(body.url, deps.videoDeps);
+          const tmpDirV = mkdtempSync(join(tmpdir(), 'lwh-video-'));
+          const mdPath = join(tmpDirV, 'transcript.md');
+          writeFileSync(mdPath, markdown);
+          return c.json(startConversion(lw, cfg, mdPath, {
+            converter: deps.converter, mode: 'paper', title, model: deps.model, sourceUrl: body.url,
+          }));
+        } catch (e: any) {
+          return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+        }
+      }
+
       let downloaded: Awaited<ReturnType<typeof downloadToTemp>>;
       try {
         downloaded = await downloadToTemp(body.url, { fetchImpl: deps.fetchImpl });
