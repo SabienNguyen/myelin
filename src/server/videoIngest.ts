@@ -86,8 +86,16 @@ const stamp = (s: number) => {
 
 export interface VideoMeta { title: string; channel: string; duration: string; url: string }
 
+/** The video URL with a start-time parameter — YouTube honors ?t=/&t= seconds on watch,
+ *  youtu.be, and shorts URLs alike. */
+export function atTime(url: string, seconds: number): string {
+  return `${url}${url.includes('?') ? '&' : '?'}t=${Math.floor(seconds)}s`;
+}
+
 /** Cues grouped into readable timestamped paragraphs. One [M:SS] per ~500 characters of speech —
- *  dense enough to find a moment in the video, sparse enough to read as prose. */
+ *  dense enough to find a moment in the video, sparse enough to read as prose. Each stamp is a
+ *  DEEP LINK to that second of the video (Electron routes external links to the system browser),
+ *  so "scrub to [1:05]" is one click in the reader, not a manual seek. */
 export function transcriptMarkdown(meta: VideoMeta, cues: Cue[]): string {
   const blocks: { start: number; parts: string[] }[] = [];
   let current: { start: number; parts: string[]; chars: number } | null = null;
@@ -103,7 +111,9 @@ export function transcriptMarkdown(meta: VideoMeta, cues: Cue[]): string {
     current.chars += cue.text.length + 1;
     lastStart = cue.start;
   }
-  const body = blocks.map((b) => `**[${stamp(b.start)}]** ${b.parts.join(' ')}`).join('\n\n');
+  const body = blocks
+    .map((b) => `**[\\[${stamp(b.start)}\\]](${atTime(meta.url, b.start)})** ${b.parts.join(' ')}`)
+    .join('\n\n');
   return [
     `# ${meta.title}`,
     '',

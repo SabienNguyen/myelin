@@ -80,10 +80,16 @@ describe('transcriptMarkdown', () => {
     expect(md).toContain('3Blue1Brown · 17:04 · [watch](https://youtu.be/abc)');
   });
 
-  it('stamps blocks as [M:SS] and [H:MM:SS] past the hour', () => {
+  it('stamps blocks as [M:SS] deep links into the video, [H:MM:SS] past the hour', () => {
     const md = transcriptMarkdown(meta, parseVtt(VTT));
-    expect(md).toContain('**[0:01]**');
-    expect(md).toContain('**[1:02:03]**');
+    // Each stamp links to its second — clicking [0:01] in the reader opens the video there.
+    expect(md).toContain('**[\\[0:01\\]](https://youtu.be/abc?t=1s)**');
+    expect(md).toContain('**[\\[1:02:03\\]](https://youtu.be/abc?t=3723s)**');
+  });
+
+  it('deep links append with & when the URL already carries a query', () => {
+    const md = transcriptMarkdown({ ...meta, url: 'https://www.youtube.com/watch?v=abc' }, parseVtt(VTT));
+    expect(md).toContain('(https://www.youtube.com/watch?v=abc&t=1s)');
   });
 });
 
