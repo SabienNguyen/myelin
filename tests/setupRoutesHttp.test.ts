@@ -96,7 +96,7 @@ describe('PUT /api/setup/api-key', () => {
   const REAL_SHAPE = `sk-ant-${'a'.repeat(60)}`;
 
   it('a probe-approved key saves, enters the environment, and unblocks', async () => {
-    const probeFetch = vi.fn(async () => ({ ok: true, status: 200 }) as Response);
+    const probeFetch = vi.fn(async (..._args: Parameters<typeof fetch>) => ({ ok: true, status: 200 }) as Response);
     const app = buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn, probeFetch });
     const res = await put(app, REAL_SHAPE);
     expect(res.status).toBe(200);
