@@ -252,7 +252,15 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     const foldSup = (s: string) => s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g,
       (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
     const unitKey = (s: string) => foldSup(normKey(s)).replace(/[\s^]/g, '');
-    const unitOk = !checker.unit || unitKey(clean[0] ?? '').includes(unitKey(checker.unit));
+    // '%' is formatting, not a unit that changes meaning: a bare "0.1" against an expected-%
+    // checker cannot mean anything else (a fraction-vs-percent confusion fails the NUMERIC
+    // comparison already). A live check dinged a learner `struggled` for answering "0.1" when
+    // the tutor's own example said 'e.g. "5" for 5%' — bare numbers must satisfy a % unit,
+    // though an explicitly different unit ("0.1 kg") still fails it.
+    const bareNumber = !/[a-z%]/i.test((clean[0] ?? '').trim());
+    const unitOk = !checker.unit
+      || unitKey(clean[0] ?? '').includes(unitKey(checker.unit))
+      || (checker.unit.trim() === '%' && bareNumber);
     const ok = numOk && unitOk;
     // "value and unit match" only when a unit was actually asked for — the audit caught a unitless
     // numeric check congratulating a unit that never existed, which is a small lie in the one

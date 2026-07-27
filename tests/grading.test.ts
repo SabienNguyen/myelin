@@ -91,6 +91,16 @@ describe('structured_check checkers (mechanical, any subject)', () => {
   const grade = (checker: any, values: string[]) => gradeBlockOutput('structured_check',
     { prompt: 'p', pageSlug: 'topic', checker }, { values }, cfg);
 
+  it('percent unit: a bare number satisfies it — % is formatting, not meaning', async () => {
+    // A live check dinged `struggled` for "0.1" against unit '%' when the tutor's own example
+    // said 'e.g. "5" for 5%'. Fraction-vs-percent confusion still fails the numeric comparison.
+    const c = { kind: 'numeric', expected: 0.1, tolerance: 0.01, unit: '%' };
+    expect((await grade(c, ['0.1'])).verdict).toBe('correct');     // bare number
+    expect((await grade(c, ['0.1%'])).verdict).toBe('correct');    // explicit %
+    expect((await grade(c, ['0.1 kg'])).verdict).toBe('partial');  // a DIFFERENT unit still flags
+    expect((await grade(c, ['0.001'])).verdict).toBe('incorrect'); // fraction confusion → numeric miss
+  });
+
   it('numeric: tolerance, units, and non-numeric input', async () => {
     const c = { kind: 'numeric', expected: 9.81, tolerance: 0.01, unit: 'm/s^2' };
     expect((await grade(c, ['9.81 m/s^2'])).verdict).toBe('correct');

@@ -440,3 +440,10 @@ Written after the sprint that followed the original verdict; each line names its
   STANDING box reads "seen once — earned by 1 explanation, judged by the tutor. No exercise has
   confirmed it" and names the structured check as the way to confirm — the applied-route
   honesty surface verified against genuinely earned (not fixture) state. No action.
+- **The standing-box loop found one last grading unfairness — fixed.** Following the Page tab's
+  own advice, the learner asked for the structured check; the tutor set a numeric check whose
+  example said 'e.g. "5" for 5%' — and then its checker demanded a literal % unit, so the
+  learner who followed the example exactly was graded partial and recorded struggled. The app
+  now defends mechanically: '%' is formatting, not a meaning-bearing unit — a bare number
+  satisfies it (fraction-vs-percent confusion still fails the numeric comparison; an explicitly
+  different unit still flags). Four tests pin the rule.
