@@ -88,7 +88,7 @@ export function PathsSection({ visible = true }: { visible?: boolean }) {
 
   return (
     <section className="paths-section">
-      <h3>Paths</h3>
+      <h2>Paths</h2>
       {paths.length === 0
         ? (
           <p className="empty">

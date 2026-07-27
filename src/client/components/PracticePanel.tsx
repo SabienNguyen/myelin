@@ -143,7 +143,7 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
 
   return (
     <section className="practice-panel">
-      <h3>Practice</h3>
+      <h2>Practice</h2>
       <ul>
         {rows.map((row) => (
           <li key={row.pattern}>

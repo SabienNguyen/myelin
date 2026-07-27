@@ -685,7 +685,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* ── Library (compile queue) ─────────────────────────── */
 .library-actions { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 1rem; flex-wrap: wrap; }
 .library-note { color: var(--text-muted); font-size: 0.85rem; }
-.library-book h3 { font-family: var(--font-serif); font-size: 1rem; margin: 0.9rem 0 0.3rem; }
+.library-book h2 { font-family: var(--font-serif); font-size: 1rem; margin: 0.9rem 0 0.3rem; }
 .library-book ul { list-style: none; margin: 0; padding: 0; }
 .library-book li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 .q-status {
@@ -710,9 +710,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 .converting-row .dot:nth-child(2) { animation-delay: 0.18s; }
 .converting-row .dot:nth-child(3) { animation-delay: 0.36s; }
-.library-book h3 { display: flex; align-items: center; gap: 0.3rem; }
+.library-book h2 { display: flex; align-items: center; gap: 0.3rem; }
 .rename-btn { opacity: 0.35; }
-.library-book h3:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
+.library-book h2:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
 .book-rename { font-family: var(--font-serif); font-size: 1rem; margin: 0.9rem 0 0.3rem; }
 
 /* ── Responsive: stack panels under ~900px ───────────── */
@@ -1136,7 +1136,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* I3: Practice section (Library tab) — clicking a row hands the composer a message, it never
    talks to the gap or writes evidence directly (the tutor stays the orchestrator). */
 .practice-panel { margin-top: 1.2rem; padding-top: 0.8rem; border-top: 1px solid var(--border); }
-.practice-panel h3 { font-family: var(--font-serif); font-size: 1rem; margin: 0 0 0.5rem; }
+.practice-panel h2 { font-family: var(--font-serif); font-size: 1rem; margin: 0 0 0.5rem; }
 .practice-panel ul { list-style: none; margin: 0; padding: 0; }
 .practice-panel li { margin-bottom: 0.3rem; }
 .practice-row {
@@ -1484,7 +1484,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Paths (syllabus) ────────────────────────────────── */
 .paths-section { margin-bottom: 1rem; }
-.paths-section h3 {
+.paths-section h2 {
   font-family: var(--font-serif);
   font-size: 1rem;
   font-weight: 560;

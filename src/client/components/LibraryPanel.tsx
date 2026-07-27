@@ -94,13 +94,16 @@ function BookTitle({ book, onRenamed }: { book: string; onRenamed: () => void })
     );
   }
   return (
-    <h3>
+    // h2, not h3: book names and Paths are the Library's TOP-level sections, and with no h1/h2
+    // rendered before them an h3 was the document's first heading — the one axe violation the
+    // whole app produced (heading-order).
+    <h2>
       {book}
       <button type="button" className="ghost-btn rename-btn" aria-label={`Rename ${book}`}
         onClick={() => { setValue(book); setEditing(true); }}>
         <PencilSimple size={13} weight="duotone" />
       </button>
-    </h3>
+    </h2>
   );
 }
 
