@@ -100,3 +100,28 @@ does not support TS 7 yet).
   old summary had silently dropped rubric-passed), the example config's personal student id
   neutralized, package metadata added, no secrets in tracked files (grep-verified). Waiting on
   two decisions only you can make: a license, and flipping both repos public together.
+
+## The night arc (the persona marathon)
+
+You asked for one thing tonight: pretend to be someone learning about LLMs, deeply, and keep
+testing that way. That persona ran the app through two continuous multi-hour sittings and it is
+the strongest evidence the project has:
+
+- **Three domains taught live** — transformer internals (six pages), RLHF (reward models, KL,
+  DPO), and quantization — every topic closed with a graded check (twelve in all, honest
+  evidence kinds throughout, four promotions each earned by repetition, zero inflation).
+- **Every honesty mechanism observed working unprompted**: the research-grant disclosure, pages
+  flagged draft/unverified when taught from knowledge, the evidence bounce → write page → record
+  → flag provenance self-heal, the decay → review → re-proof loop on real material, and finally
+  unverified → researched → solid with per-claim sources.
+- **Seven product bugs found by the probing, all fixed and shipped**: the two-tab silent data
+  loss, the Mermaid mid-stream latch, double-escaped newlines reaching learners, the Anki sync
+  aborting on one bad page, the missing fence-stripper on the card path, the JSON card protocol
+  itself (three failures → FRONT/BACK blocks, twelve cards zero failures), and the bundle script
+  dirtying the sibling repo's lockfile.
+- **The vault the sittings produced ships in the repo** (docs/demo-vault) with the README's
+  graph screenshot taken from it — the cold-start demo problem solved with genuinely earned data.
+- **Your questions got answered en route**: both READMEs beautified (screenshots, accurate
+  six-kind evidence model), both repos scrubbed and metadata'd for the public flip you decided
+  on. Two things wait on you: the license file (MIT recommended — say the word) and the
+  visibility toggle in each repo's GitHub settings.
