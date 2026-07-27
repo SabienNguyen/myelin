@@ -447,3 +447,8 @@ Written after the sprint that followed the original verdict; each line names its
   now defends mechanically: '%' is formatting, not a meaning-bearing unit — a bare number
   satisfies it (fraction-vs-percent confusion still fails the numeric comparison; an explicitly
   different unit still flags). Four tests pin the rule.
+- **The percent fix verified live, and the record repaired the honest way.** A fresh check on
+  the same fact, answered with a bare "0.1" again, graded "value and unit match" under the fixed
+  checker — correct, applied-correctly recorded mechanically, page promoted to practicing. The
+  earlier struggled record stays in the history untouched: repair means earning new evidence,
+  never editing old.
