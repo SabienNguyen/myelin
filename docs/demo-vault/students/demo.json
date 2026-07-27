@@ -111,12 +111,22 @@
     "last_reinforced": "2026-07-27"
   },
   "quantization-int4-outliers": {
-    "level": "exposed",
+    "level": "practicing",
     "evidence": [
       {
         "date": "2026-07-27",
         "kind": "explained-correctly",
         "note": "open answer: A colleague says \"int4 quantization is uniformly bad for transformers because 4 bits just isn't enough precision.\" Based on what the outlier-feature numbers actually show, what's wrong with that framing \u2014 what's the *real* reason naive int4 quantization degrades perplexity so badly?"
+      },
+      {
+        "date": "2026-07-27",
+        "kind": "struggled",
+        "note": "numeric check: Per Dettmers et al., LLM.int8() (arXiv:2208.07339): roughly what percentage of a large transformer's feature dimensions are the systematic \"outlier features\" \u2014 the tiny fraction that, left in low precision, degrades validation perplexity by 600\u20131000%?\n\nAnswer as a percent, e.g. \"5\" for 5%."
+      },
+      {
+        "date": "2026-07-27",
+        "kind": "applied-correctly",
+        "note": "numeric check: Per Dettmers et al., LLM.int8() (arXiv:2208.07339): roughly what percentage of a large transformer's feature dimensions are the systematic \"outlier features\" \u2014 the tiny fraction that, left in low precision, degrades validation perplexity by 600\u20131000%?\n\nThis time include the percent sign in your answer, e.g. \"5%\" for 5%."
       }
     ],
     "misconceptions": [],

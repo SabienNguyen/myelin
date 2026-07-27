@@ -452,3 +452,8 @@ Written after the sprint that followed the original verdict; each line names its
   checker — correct, applied-correctly recorded mechanically, page promoted to practicing. The
   earlier struggled record stays in the history untouched: repair means earning new evidence,
   never editing old.
+- **Vault provenance complete.** The last two knowledge-only drafts (rlhf-reward-model, dpo)
+  were researched and upgraded to solid with per-claim sources — including pinning the
+  previously-flagged-unverified DPO failure mode to the paper that names it (DPO-Positive,
+  arXiv:2402.13228). Every page in the sitting's vault is now sourced-solid or an honest stub;
+  the shipped demo vault carries the final state.
