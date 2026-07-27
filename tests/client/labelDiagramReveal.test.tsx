@@ -33,6 +33,9 @@ describe('label_diagram done-view reveals the correct label on a miss', () => {
     // Each miss names the region's true label.
     expect(screen.getByText(/should be .*left ventricle/)).toBeTruthy();
     expect(screen.getByText(/should be .*right ventricle/)).toBeTruthy();
+    // The ✗ glyphs carry words a screen reader can say, and the verdict is a live region.
+    expect(screen.getAllByRole('img', { name: 'incorrect' })).toHaveLength(2);
+    expect(screen.getByRole('status').textContent).toContain('0/2');
   });
 
   it('a fully-correct diagram reveals nothing (no answer given away)', () => {

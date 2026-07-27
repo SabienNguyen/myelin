@@ -75,3 +75,25 @@ describe('MathScratchpad', () => {
     expect(items.length).toBe(1); // the final rides on the "You:" line, not the list
   });
 });
+
+describe('math field accessible name', () => {
+  afterEach(cleanup);
+  // The injected field forwards the label the way the real MathLiveInput puts it on <math-field>.
+  const LabelledInput = ({ onChange, value, label }: any) => (
+    <input aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} />
+  );
+
+  it('names the field after the problem it answers, LaTeX flattened to words', () => {
+    render(<MathScratchpadInner
+      args={{ ...args, problemLatex: '\\text{Differentiate } f(x) = x^3 - 5x' }}
+      addResult={vi.fn()} MathInput={LabelledInput} />);
+    expect(screen.getByLabelText('your answer — Differentiate f(x) = x^3 - 5x')).toBeTruthy();
+  });
+
+  it('flattens fractions and known commands instead of reading backslashes', () => {
+    render(<MathScratchpadInner
+      args={{ ...args, problemLatex: '\\frac{x}{2} + \\sqrt{y} \\cdot \\pi' }}
+      addResult={vi.fn()} MathInput={LabelledInput} />);
+    expect(screen.getByLabelText('your answer — (x)/(2) + sqrt(y) cdot pi')).toBeTruthy();
+  });
+});

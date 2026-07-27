@@ -37,6 +37,7 @@ import { CodeIcon as Code, CheckIcon as Check } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 import { PredictGate } from './gap/PredictGate.js';
+import { Verdict } from './Verdict.js';
 import { getLadder, postRun } from './gap/api.js';
 import { RungEditor } from './gap/RungEditor.js';
 import { WorkedExample } from './gap/WorkedExample.js';
@@ -653,7 +654,7 @@ export function CodeExercise(props: { args: any; result: any; addResult: (r: any
     const r = props.result;
     return (
       <div className="block code-exercise done">
-        <span className="graded-tag"><Check size={12} weight="bold" /> graded</span>
+        <span className="graded-tag"><Check size={12} weight="bold" aria-hidden /> graded</span>
         <p>{props.args.pattern} — {r.rungReached}{r.completed ? '' : ' (stopped early)'}</p>
         {/* Only when a run actually happened. An exercise abandoned before its first run has no
             counts, and the unguarded version printed a bare "/ tests" — a fraction with no numbers
@@ -663,7 +664,7 @@ export function CodeExercise(props: { args: any; result: any; addResult: (r: any
         ) : (
           <p>No test run{r.wroteCode ? ', own code written' : ''}.</p>
         )}
-        {r.grading && <em className={`verdict ${r.grading.verdict}`}> — {r.grading.detail}</em>}
+        <Verdict grading={r.grading} dash />
       </div>
     );
   }

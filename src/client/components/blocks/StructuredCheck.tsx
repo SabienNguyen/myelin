@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { BlockProse } from '../BlockProse.js';
 import { prettyAnswer } from '../../lib/answerDisplay.js';
 import { parseNotes, playNotes } from '../../lib/audio.js';
+import { Verdict } from './Verdict.js';
 
 type Checker =
   | { kind: 'numeric'; expected: number; tolerance?: number; relative?: boolean; unit?: string }
@@ -102,7 +103,7 @@ export function StructuredCheck({ args, result, addResult }: {
         )}
         {/* No leading dash: the verdict wraps onto its own line below the answer, where an
             orphaned "— " read as a typo in the audit screenshot. */}
-        {g && <em className={`verdict ${g.verdict}`}>{g.detail}</em>}
+        <Verdict grading={g} />
       </div>
     );
   }

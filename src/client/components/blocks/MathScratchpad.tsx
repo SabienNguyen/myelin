@@ -4,22 +4,50 @@ import 'katex/dist/katex.min.css';
 import { CheckIcon as Check, PencilSimpleIcon as Pencil, SigmaIcon as Sigma, XIcon as X } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
+import { Verdict } from './Verdict.js';
 
 export function Latex({ tex }: { tex: string }) {
   return <span dangerouslySetInnerHTML={{ __html: katex.renderToString(tex, { throwOnError: false }) }} />;
 }
 
+/** LaTeX flattened to words for the field's accessible name. Not a speech engine — MathLive's own
+ *  live region already speaks the CONTENT as it is typed (verified in audit 53); what it never had
+ *  is a NAME, so a screen reader landed on an anonymous textbox with no idea which problem it
+ *  answers. Common structures get a readable shape, unknown commands just lose the backslash. */
+function texToWords(tex: string): string {
+  return tex
+    .replace(/\\text\{([^{}]*)\}/g, '$1')
+    .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)')
+    .replace(/\\sqrt\{([^{}]*)\}/g, 'sqrt($1)')
+    .replace(/\\left|\\right/g, '')
+    .replace(/\\[a-zA-Z]+/g, (m) => ` ${m.slice(1)} `)
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // Measured (audit 28): for ~100ms after a focus-gaining click, MathLive is still wiring its
 // hidden keyboard sink and drops keystrokes. Below human click-to-type latency, so not worked
 // around here — but automation driving this field must wait ≥150ms after click before typing.
-function MathLiveInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function MathLiveInput({ value, onChange, label }: {
+  value: string; onChange: (v: string) => void; label?: string;
+}) {
   const ref = useRef<any>(null);
-  useEffect(() => { import('mathlive'); }, []); // registers <math-field>
+  useEffect(() => { // registers <math-field>
+    import('mathlive').then(() => {
+      // MathLive names its focusable keyboard sink (shadow [role=textbox]) only after the first
+      // edit, when it stores the spoken form of the content there. Until then a screen reader
+      // tabs onto an anonymous textbox — the host's aria-label sits on a node focus never visits.
+      // Seed the sink with the field's name; guarded, so once MathLive writes its own it wins.
+      const sink = ref.current?.shadowRoot?.querySelector('[role="textbox"]');
+      if (label && sink && !sink.hasAttribute('aria-label')) sink.setAttribute('aria-label', label);
+    }, (e) => console.error('mathlive failed to load:', e));
+  }, [label]);
   useEffect(() => {
     if (ref.current && ref.current.value !== value)
       ref.current.setValue?.(value, { silenceNotifications: true });
   }, [value]);
-  return <math-field ref={ref} onInput={(e: any) => onChange(e.target.value)} />;
+  return <math-field ref={ref} aria-label={label} onInput={(e: any) => onChange(e.target.value)} />;
 }
 
 export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput }: {
@@ -65,7 +93,7 @@ export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput
           </span>
         </li>))}
       </ol>
-      <MathInput value={current} onChange={setCurrent} />
+      <MathInput value={current} onChange={setCurrent} label={`your answer — ${texToWords(args.problemLatex ?? '')}`} />
       {args.stepMode && (
         <button type="button" onClick={saveStep}>{editing !== null ? `Save step ${editing + 1}` : 'Add step'}</button>
       )}
@@ -83,7 +111,7 @@ export function MathScratchpad(props: { args: any; result: any; addResult: (r: a
     // on its own line. The old one-liner spliced them with a colon ("… Find v.: 14 — …"), which
     // read as a typo whenever the problem ended in punctuation, and its leading "— " wrapped onto
     // a line of its own — the exact orphan StructuredCheck already removed.
-    return <div className="block done"><span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
+    return <div className="block done"><span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
       {/* The problem travels into the done card — without it the thread reads as answers to
           invisible questions when scanned later. */}
       <div className="structured-prompt"><Latex tex={props.args.problemLatex ?? ''} /></div>
@@ -98,7 +126,7 @@ export function MathScratchpad(props: { args: any; result: any; addResult: (r: a
       {/* (?? ''): a server-rejected tool call reaches here with a non-contract output, and
           undefined into katex.renderToString threw (see Quiz for the incident). */}
       <p className="structured-answer">You: <Latex tex={props.result.finalLatex ?? ''} /></p>
-      {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}>{props.result.grading.detail}</em>}</div>;
+      <Verdict grading={props.result.grading} /></div>;
   }
   return (
     <>

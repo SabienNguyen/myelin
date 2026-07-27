@@ -34,6 +34,23 @@ describe('QuickCheck submitted/graded tag', () => {
   });
 });
 
+describe('QuickCheck verdict live region', () => {
+  afterEach(cleanup);
+
+  // aria-live announces CHANGES: the status element must exist from submit time and gain its
+  // text when grading lands. A region that mounts already holding the verdict says nothing.
+  it('mounts the status region empty at submit and fills the SAME element on grading', () => {
+    const args = { question: 'q?' };
+    const { rerender } = render(<QuickCheck args={args} result={{ answer: 'x' }} addResult={vi.fn()} />);
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe('');
+    rerender(<QuickCheck args={args}
+      result={{ answer: 'x', grading: { verdict: 'correct', detail: 'exact match' } }} addResult={vi.fn()} />);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toContain('correct');
+  });
+});
+
 describe('QuickCheck graded card with no answer', () => {
   // Scoped to this block: the tests above predate it and render without cleanup, and unmounting
   // between cases here is what keeps the two blank variants from matching each other's output.

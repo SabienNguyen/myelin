@@ -3,6 +3,7 @@ import { CheckIcon as Check, MapPinIcon as MapPin } from '@phosphor-icons/react'
 import { BlockProse } from '../BlockProse.js';
 import { StagePortal } from '../StagePortal.js';
 import { panelBus } from '../../lib/panelBus.js';
+import { Mark, Verdict } from './Verdict.js';
 
 interface Region { id: string; x: number; y: number; label: string }
 interface Args { prompt: string; pageSlug: string; svg: string; regions: Region[]; distractors?: string[] }
@@ -40,7 +41,7 @@ export function LabelDiagram({ args, result, addResult }: {
     );
     return (
       <div className="block label-diagram done">
-        <span className="graded-tag">{result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
+        <span className="graded-tag">{result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
         <BlockProse text={args.prompt} />
         <ul className="label-diagram-summary">
           {args.regions.map((r) => {
@@ -48,9 +49,7 @@ export function LabelDiagram({ args, result, addResult }: {
             const ok = byId.get(r.id);
             return (
               <li key={r.id}>
-                {got ?? '(left blank)'} {ok != null && (
-                  <span className={ok ? 'mark-ok' : 'mark-bad'}>{ok ? '✓' : '✗'}</span>
-                )}
+                {got ?? '(left blank)'} {ok != null && <Mark ok={ok} />}
                 {/* A miss shows what the region actually was — an ✗ alone tells the learner they
                     were wrong but not the anatomy. Same honesty as the pattern checker naming its
                     expected value. Only after grading, so it never pre-reveals the answer. */}
@@ -59,7 +58,7 @@ export function LabelDiagram({ args, result, addResult }: {
             );
           })}
         </ul>
-        {result.grading && <em className={`verdict ${result.grading.verdict}`}>{result.grading.detail}</em>}
+        <Verdict grading={result.grading} />
       </div>
     );
   }
@@ -104,6 +103,7 @@ export function LabelDiagram({ args, result, addResult }: {
             key={label}
             type="button"
             className={`label-chip${selected === label ? ' is-selected' : ''}${used.has(label) ? ' is-used' : ''}`}
+            aria-pressed={selected === label}
             onClick={() => setSelected((s) => (s === label ? null : label))}
             disabled={used.has(label)}
           >
@@ -111,7 +111,10 @@ export function LabelDiagram({ args, result, addResult }: {
           </button>
         ))}
       </div>
-      <p className="label-diagram-hint">
+      {/* role="status": picking a chip flips this line to "now click the pin…", which is the only
+          confirmation the selection took — sighted users see the chip highlight, a screen reader
+          needs the change spoken. */}
+      <p className="label-diagram-hint" role="status">
         {selected ? `now click the pin where “${selected}” belongs` : 'pick a label, then click its pin'}
       </p>
       <button

@@ -3,6 +3,7 @@ import { CheckIcon as Check, ListChecksIcon as ListChecks } from '@phosphor-icon
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 import { BlockProse } from '../BlockProse.js';
+import { Mark, Verdict } from './Verdict.js';
 
 export function QuizInner({ args, addResult }: {
   args: any; addResult: (r: any) => void;
@@ -49,7 +50,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
     const answers: { id: string; answer: string }[] = Array.isArray(props.result.answers) ? props.result.answers : [];
     return (
       <div className="block quiz done">
-        <span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
+        <span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
         <h3>{props.args.title}</h3>
         <ul>
           {props.args.items.map((item: any) => {
@@ -57,9 +58,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
             const scored = byId.get(item.id);
             return (
               <li key={item.id}>
-                <BlockProse text={item.prompt} inline /> — {answer} {scored != null && (
-                  <span className={scored.correct ? 'mark-ok' : 'mark-bad'}>{scored.correct ? '✓' : '✗'}</span>
-                )}
+                <BlockProse text={item.prompt} inline /> — {answer} {scored != null && <Mark ok={scored.correct} />}
                 {/* Which verdicts are a machine's and which are a model's opinion — the evidence
                     note already said "(model-graded)", but the learner could not see WHICH items.
                     Checked is the default and gets no badge; judged is the exception worth naming. */}
@@ -70,7 +69,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
         </ul>
         {/* No leading dash — the verdict wraps onto its own line, where "— 2/3" read as a typo
             in the audit screenshot (same fix as StructuredCheck). */}
-        {props.result.grading && <em className={`verdict ${props.result.grading.verdict}`}>{props.result.grading.detail}</em>}
+        <Verdict grading={props.result.grading} />
       </div>
     );
   }

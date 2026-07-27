@@ -4,6 +4,7 @@ import { PenNibIcon as PenNib } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 import { BlockProse } from '../BlockProse.js';
+import { Mark, Verdict } from './Verdict.js';
 
 type Annotation = { span: string; category: string; note: string };
 type Segment = { text: string; category?: string; note?: string };
@@ -80,7 +81,7 @@ export function WritingDraftInner({ args, result, addResult }: {
             <ul className="rubric-results">
             {grading.rubric.map((r: any) => (
               <li key={r.criterion} className={r.pass ? 'rubric-pass' : 'rubric-fail'}>
-                <span className={r.pass ? 'mark-ok' : 'mark-bad'}>{r.pass ? '✓' : '✗'}</span>{' '}
+                <Mark ok={r.pass} />{' '}
                 {r.criterion}
                 {r.note && <em> — {r.note}</em>}
               </li>
@@ -110,6 +111,10 @@ export function WritingDraftInner({ args, result, addResult }: {
             ))}
           </ul>
         )}
+        {/* The only done card that never showed grading.detail ("rubric: 2/3 criteria met") — the
+            rubric list implied it. Shown now for the same reason every block gained this element:
+            it is the live region that announces grading's arrival to a screen reader. */}
+        <Verdict grading={grading} />
       </div>
     );
   }
