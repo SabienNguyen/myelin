@@ -2119,3 +2119,12 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* Unit glyph row: four quiet taps under the input, not a toolbar. */
 .unit-glyphs { display: flex; gap: 0.3rem; margin: 0.25rem 0 0; }
 .unit-glyphs button { font-size: 0.85rem; padding: 0.1rem 0.55rem; min-width: 2rem; }
+
+/* Criterion-to-span: the quoted evidence lights up in the draft on demand. */
+.ann-cite { background: transparent; outline: 2px solid var(--accent); border-radius: 2px; color: inherit; }
+.cite-link {
+  background: none; border: none; padding: 0; font: inherit; font-style: inherit;
+  color: var(--accent); cursor: pointer; text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+.cite-link.on { text-decoration-style: solid; }

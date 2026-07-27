@@ -39,13 +39,20 @@ export function WritingDraftInner({ args, result, addResult }: {
 }) {
   const [draft, setDraft] = useState(args.priorDraft ?? '');
   const threadRuntime = useThreadRuntime();
+  // A rubric note that QUOTES the draft can point at its evidence: clicking the quote adds an
+  // ephemeral 'cite' annotation over the quoted text, so the criterion and the passage that
+  // earned it light up together. Toggles off on a second click; never stored.
+  const [cite, setCite] = useState<string | null>(null);
 
   if (result) {
     const grading = result.grading;
     const annotations: Annotation[] = grading?.annotations?.annotations ?? [];
     // (?? ''): a server-rejected tool call reaches here with a non-contract output, and
     // undefined.indexOf inside annotateDraft unmounted the app root (see Quiz for the incident).
-    const segments = annotateDraft(result.draft ?? '', annotations);
+    const withCite = cite && (result.draft ?? '').includes(cite)
+      ? [{ span: cite, category: 'cite', note: 'quoted by a rubric note' }, ...annotations]
+      : annotations;
+    const segments = annotateDraft(result.draft ?? '', withCite);
     // Tufte-style footnotes: each annotated span gets a superscript number after the mark
     // (outside it — tests match the mark's exact text), with the grader's notes listed below.
     let n = 0;
@@ -56,6 +63,7 @@ export function WritingDraftInner({ args, result, addResult }: {
         <p className="draft-text">
           {segments.map((seg, i) => {
             if (!seg.category) return <span key={i}>{seg.text}</span>;
+            if (seg.category === 'cite') return <mark key={i} className="ann-cite">{seg.text}</mark>;
             n += 1;
             notes.push({ n, category: seg.category, note: seg.note ?? '' });
             return (
@@ -83,7 +91,27 @@ export function WritingDraftInner({ args, result, addResult }: {
               <li key={r.criterion} className={r.pass ? 'rubric-pass' : 'rubric-fail'}>
                 <Mark ok={r.pass} />{' '}
                 {r.criterion}
-                {r.note && <em> — {r.note}</em>}
+                {r.note && (() => {
+                  // "…" fragments in the note that appear verbatim in the draft link back to it —
+                  // the grader is told to quote where possible, and a quote that can be POINTED
+                  // AT beats one the learner has to hunt for.
+                  const q = String(r.note).match(/[\u201c"']([^\u201c\u201d"']{4,120})[\u201d"']/);
+                  const quoted = q && (result.draft ?? '').includes(q[1]) ? q[1] : null;
+                  if (!quoted) return <em> — {r.note}</em>;
+                  const [pre, post] = String(r.note).split(q![0]);
+                  return (
+                    <em> — {pre}
+                      <button
+                        type="button"
+                        className={`cite-link${cite === quoted ? ' on' : ''}`}
+                        aria-pressed={cite === quoted}
+                        title="highlight this passage in the draft"
+                        onClick={() => setCite((c) => (c === quoted ? null : quoted))}
+                      >“{quoted}”</button>
+                      {post}
+                    </em>
+                  );
+                })()}
               </li>
             ))}
             </ul>

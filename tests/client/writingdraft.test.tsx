@@ -62,3 +62,30 @@ describe('revise round', () => {
     expect(container.querySelector('.revise-btn')).toBeNull();
   });
 });
+
+describe('criterion-to-span links', () => {
+  const gradedWithQuote = {
+    draft: 'The printing press mattered because literacy spread fast.',
+    grading: { verdict: 'reviewed', detail: '', rubric: [
+      { criterion: 'cites a consequence', pass: true, note: 'yes — "literacy spread fast" is concrete' }] },
+  };
+
+  it('a rubric note quoting the draft becomes a toggleable highlight', () => {
+    const { container } = render(<WritingDraftInner args={{ prompt: 'Argue', round: 1, pageSlug: 't', rubric: ['cites a consequence'] }}
+      result={gradedWithQuote} addResult={vi.fn()} />);
+    const link = container.querySelector('.cite-link') as HTMLButtonElement;
+    expect(link).toBeTruthy();
+    expect(container.querySelector('.ann-cite')).toBeNull();
+    fireEvent.click(link);
+    expect(container.querySelector('.ann-cite')?.textContent).toBe('literacy spread fast');
+    fireEvent.click(link);
+    expect(container.querySelector('.ann-cite')).toBeNull();
+  });
+
+  it('a quote NOT found in the draft stays plain text — no dead link', () => {
+    const { container } = render(<WritingDraftInner args={{ prompt: 'Argue', round: 1, pageSlug: 't', rubric: ['x'] }}
+      result={{ draft: 'other words entirely', grading: { verdict: 'reviewed', detail: '', rubric: [
+        { criterion: 'x', pass: false, note: 'missing "a phrase that is not there"' }] } }} addResult={vi.fn()} />);
+    expect(container.querySelector('.cite-link')).toBeNull();
+  });
+});
