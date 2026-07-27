@@ -284,3 +284,13 @@ fn main() {
     expect(out.pass).toBe(true);
   }, 60_000);
 });
+
+describe('cuda runtime', () => {
+  it('is registered with the compile-once shape and an honest unavailable reason', async () => {
+    const s = await runtimeStatus('cuda');
+    expect(s.id).toBe('cuda');
+    // This dev container has no nvcc: the status must name the toolkit AND the hardware
+    // implication, not emit the generic "not installed" line.
+    if (!s.available) expect(s.reason).toMatch(/CUDA toolkit.*NVIDIA GPU/);
+  });
+});

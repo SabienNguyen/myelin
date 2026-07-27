@@ -41,6 +41,9 @@ export interface Runtime {
    *  runs per case. Compiler stderr becomes the run's syntaxError — a C learner's compile error
    *  belongs in the same slot a JS learner's syntax error uses. */
   compileArgv?: string[];
+  /** Unavailable-reason suffix naming the exact fix, where the generic "X is not installed"
+   *  would under-explain (cuda: the toolkit implies GPU hardware). */
+  installHint?: string;
   /** Container runtimes only: the image the program runs in, and the in-container command the
    *  program file path is appended to. The image is NEVER pulled implicitly — a missing image is
    *  reported with the exact `docker pull` to run, because a grading request that silently starts
@@ -68,6 +71,13 @@ const RUNTIMES: Runtime[] = [
   // C compiler name on Linux and macOS alike; rustc alone (no cargo) handles a single file fine.
   { id: 'c', compileArgv: ['cc', '$SRC', '-O2', '-o', '$OUT'], file: 'main.c', comment: '//' },
   { id: 'rust', compileArgv: ['rustc', '$SRC', '-O', '-o', '$OUT'], file: 'main.rs', comment: '//' },
+  // CUDA for the GPU-learning path: same compile-once shape as c/rust, via nvcc. Only lights up
+  // on a machine with the CUDA toolkit (which itself implies an NVIDIA GPU worth practicing on);
+  // everywhere else runtimeStatus names the miss precisely instead of pretending.
+  {
+    id: 'cuda', compileArgv: ['nvcc', '$SRC', '-O2', '-o', '$OUT'], file: 'main.cu', comment: '//',
+    installHint: 'install the NVIDIA CUDA toolkit (nvcc) — requires an NVIDIA GPU',
+  },
   // The container tier: languages the machine itself need not have. `go run` compiles per case;
   // `java Main.java` is the single-file source launcher (Java 11+). Both are one-file judge runs —
   // multi-file projects and services stay out of scope, containers or not.
@@ -119,7 +129,10 @@ export async function runtimeStatus(id: string): Promise<RuntimeStatus> {
   } else if (rt.compileArgv) {
     const ok = await probeOk(rt.compileArgv[0], ['--version']);
     status = ok ? { id, available: true }
-      : { id, available: false, reason: `${rt.compileArgv[0]} (the ${id} compiler) is not installed on this machine` };
+      : {
+        id, available: false,
+        reason: rt.installHint ?? `${rt.compileArgv[0]} (the ${id} compiler) is not installed on this machine`,
+      };
   } else if (!isContainerRuntime(rt)) {
     const ok = await probeOk(rt.command![0], ['--version']);
     status = ok ? { id, available: true }

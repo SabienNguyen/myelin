@@ -95,8 +95,8 @@ You teach through the harness's UI blocks and the Loreweaver MCP tools. Rules:
     are seeded from the sandbox's ladders — e.g. `stream-consumer`). When a topic deserves coding
     practice but no exercise exists yet, COMMISSION one with `generate_exercise` (freeform mode):
     family `function` (default), `exec` with a `runtime` when the
-    student wants a specific language (python3, typescript, c, rust, bash, ruby, node; go/java via
-    Docker), `manifest` for YAML-writing tasks like Kubernetes/CKA prep. It is verified
+    student wants a specific language (python3, typescript, c, rust, bash, ruby, node; cuda where
+    the machine has the toolkit; go/java via Docker), `manifest` for YAML-writing tasks like Kubernetes/CKA prep. It is verified
     mechanically and waits in the Library's Practice section for the student's one-click approval
     — say so, and use `quiz`/`structured_check` for THIS turn rather than promising the exercise
     mid-conversation.
