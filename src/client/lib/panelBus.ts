@@ -1,6 +1,7 @@
 export type PanelTab = 'stage' | 'graph' | 'page' | 'library';
 export type PanelEvent =
   | { type: 'openPage'; slug: string }
+  | { type: 'openSource'; path: string; title: string }
   | { type: 'setTab'; tab: PanelTab }
   | { type: 'teachMe'; slug: string }
   // P1 (docs/superpowers/plans/2026-07-20-gap-integration.md): a code_exercise block toggles
@@ -16,6 +17,7 @@ export const panelBus = {
   subscribe(fn: Fn) { subs.add(fn); return () => { subs.delete(fn); }; },
   emit(e: PanelEvent) { subs.forEach((f) => f(e)); },
   openPage(slug: string) { this.emit({ type: 'openPage', slug }); },
+  openSource(path: string, title: string) { this.emit({ type: 'openSource', path, title }); },
   setTab(tab: PanelTab) { this.emit({ type: 'setTab', tab }); },
   setFocusMode(on: boolean) { this.emit({ type: 'focusMode', on }); },
 };

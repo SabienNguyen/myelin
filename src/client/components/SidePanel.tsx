@@ -4,6 +4,7 @@ import { parseHash, serializeHash } from '../lib/urlState.js';
 import { GraphPanel } from './GraphPanel.js';
 import { LibraryPanel } from './LibraryPanel.js';
 import { PagePanel } from './PagePanel.js';
+import { SourceReader } from './SourceReader.js';
 import { useTablistKeys } from '../lib/tablist.js';
 
 // How often the tab strip re-asks how much is due. Slow on purpose: due-ness changes on the scale
@@ -15,6 +16,9 @@ export function SidePanel() {
   const onTabKeys = useTablistKeys();
   const [tab, setTab] = useState<PanelTab>(() => parseHash(location.hash).tab);
   const [pageSlug, setPageSlug] = useState<string | null>(() => parseHash(location.hash).pageSlug);
+  // The source reader is a MODE of the Page tab (deliberately not a fifth tab): reading the raw
+  // artifact and reading its compiled page are the same seat at the same desk.
+  const [source, setSource] = useState<{ path: string; title: string } | null>(null);
   // The due count lives on the TAB, not only inside the Library — review is only optimal when the
   // system reminds you, and a reminder you must open a tab to see is not one.
   const [dueCount, setDueCount] = useState(0);
@@ -31,7 +35,8 @@ export function SidePanel() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
   useEffect(() => panelBus.subscribe((e) => {
-    if (e.type === 'openPage') { setPageSlug(e.slug); setTab('page'); }
+    if (e.type === 'openPage') { setPageSlug(e.slug); setSource(null); setTab('page'); }
+    if (e.type === 'openSource') { setSource({ path: e.path, title: e.title }); setTab('page'); }
     if (e.type === 'setTab') setTab(e.tab);
   }), []);
 
@@ -90,7 +95,11 @@ export function SidePanel() {
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage" />
       <div hidden={tab !== 'graph'} id="panel-graph" className="tab-body" role="tabpanel" aria-labelledby="tab-graph"><GraphPanel visible={tab === 'graph'} /></div>
-      <div hidden={tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page"><PagePanel slug={pageSlug} visible={tab === 'page'} /></div>
+      <div hidden={tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page">
+        {source
+          ? <SourceReader path={source.path} title={source.title} onClose={() => setSource(null)} />
+          : <PagePanel slug={pageSlug} visible={tab === 'page'} />}
+      </div>
       <div hidden={tab !== 'library'} id="panel-library" className="tab-body" role="tabpanel" aria-labelledby="tab-library"><LibraryPanel visible={tab === 'library'} /></div>
     </aside>
   );

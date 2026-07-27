@@ -1,3 +1,5 @@
+import { readFileSync, realpathSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import type { AnkiClient } from './anki/client.js';
 import { backlogDays } from './anki/inbound.js';
@@ -300,6 +302,31 @@ export function buildRestRoutes(
       bySource.set(p.source, row);
     }
     return c.json({ sources: [...bySource.values()] });
+  });
+
+  /**
+   * The raw ingested artifact, for the source reader — the surface where "the tutor brings you
+   * to a source and you query ON it" happens. Serves only files under vault/raw/ (the ledger's
+   * `chapter` paths), resolved and prefix-checked so a crafted path cannot escape the vault.
+   */
+  app.get('/api/source', (c) => {
+    const rel = c.req.query('path') ?? '';
+    if (!rel.startsWith('raw/')) return c.json({ error: 'only raw/ source paths are served' }, 400);
+    const rawRoot = resolve(cfg.vault, 'raw');
+    const target = resolve(cfg.vault, rel);
+    if (target !== rawRoot && !target.startsWith(rawRoot + '/')) {
+      return c.json({ error: 'path escapes the vault' }, 400);
+    }
+    try {
+      // realpath after the prefix check: a symlink inside raw/ pointing outside must not win.
+      const real = realpathSync(target);
+      if (real !== rawRoot && !real.startsWith(realpathSync(rawRoot) + '/')) {
+        return c.json({ error: 'path escapes the vault' }, 400);
+      }
+      return c.json({ markdown: readFileSync(real, 'utf8') });
+    } catch {
+      return c.json({ error: 'no such source' }, 404);
+    }
   });
 
   app.get('/api/due', async (c) => {

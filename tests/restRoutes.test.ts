@@ -480,3 +480,34 @@ describe('GET /api/status — the anki badge tells the truth', () => {
     expect((await res.json()).anki).toBe('backlog');
   });
 });
+
+describe('GET /api/source — the reader is served only vault raw files', () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir } = require('node:os') as typeof import('node:os');
+  const { join } = require('node:path') as typeof import('node:path');
+  const lw = { listSlugs: async () => [], call: async () => ({}) } as any;
+  let vault: string;
+  beforeEach(() => {
+    vault = mkdtempSync(join(tmpdir(), 'lwh-src-'));
+    mkdirSync(join(vault, 'raw', 'uploads', 'attn'), { recursive: true });
+    writeFileSync(join(vault, 'raw', 'uploads', 'attn', 'paper.md'), '# Attention\n\nis all you need');
+    writeFileSync(join(vault, 'secret.md'), 'not served');
+  });
+  afterEach(() => { rmSync(vault, { recursive: true, force: true }); });
+  const app = () => buildRestRoutes(lw, { student: 'kid', vault } as unknown as HarnessConfig);
+
+  it('serves a ledger chapter path', async () => {
+    const res = await app().request('/api/source?path=raw%2Fuploads%2Fattn%2Fpaper.md');
+    expect(res.status).toBe(200);
+    expect((await res.json()).markdown).toContain('is all you need');
+  });
+
+  it('refuses paths outside raw/ and traversal attempts', async () => {
+    expect((await app().request('/api/source?path=secret.md')).status).toBe(400);
+    expect((await app().request('/api/source?path=raw%2F..%2Fsecret.md')).status).toBe(400);
+  });
+
+  it('a missing file is a 404, not a crash', async () => {
+    expect((await app().request('/api/source?path=raw%2Fuploads%2Fnope.md')).status).toBe(404);
+  });
+});

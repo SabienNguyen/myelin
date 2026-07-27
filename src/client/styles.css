@@ -2061,3 +2061,31 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   border-color: transparent;
 }
 .q-dismiss:hover { color: var(--bad); border-color: var(--border); background: var(--bg-panel); }
+
+/* ── Source reader: the artifact as the surface ────────────────────────────────────────────── */
+.source-reader { display: flex; flex-direction: column; height: 100%; }
+.source-reader-bar {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.45rem 0.9rem; border-bottom: 1px solid var(--border);
+}
+.source-reader-title { font-family: var(--font-serif); font-weight: 600; }
+.source-reader-hint { color: var(--text-muted); font-size: 0.8rem; margin-left: auto; }
+.source-reader-body {
+  position: relative; overflow-y: auto; padding: 1rem 1.4rem 3rem;
+  font-family: var(--font-prose); line-height: 1.55; max-width: 46rem;
+}
+.source-reader-body pre { background: var(--bg-inset); padding: 0.6rem 0.8rem; border-radius: var(--radius-sm); overflow-x: auto; }
+.source-reader-error, .source-reader-loading { color: var(--text-muted); padding: 1rem 1.4rem; }
+/* The one affordance: floats at the selection, reads as an action, never steals the selection. */
+.source-ask {
+  position: absolute; z-index: 5;
+  background: var(--accent); color: var(--accent-text);
+  border: none; border-radius: var(--radius-sm); padding: 0.3rem 0.7rem;
+  font-size: 0.85rem; box-shadow: var(--shadow); cursor: pointer;
+}
+.q-open-source {
+  background: none; border: none; padding: 0; font: inherit; color: inherit;
+  cursor: pointer; text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 3px;
+}
+.q-open-source:hover { color: var(--accent); }

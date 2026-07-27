@@ -1,3 +1,4 @@
+import { panelBus } from '../lib/panelBus.js';
 import { useEffect, useRef, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 import { PracticePanel } from './PracticePanel.js';
@@ -226,7 +227,11 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
                 <span className="q-status">{e.status === 'convert-error' ? 'failed' : e.status}</span>
                 {e.mode === 'repo' ? <RepoIngestRow entry={e} />
                   : e.status === 'converting' ? <ConvertingRow entry={e} />
-                    : ` ${e.title}`}
+                    : e.chapter.startsWith('raw/')
+                      // The title IS the way into the source reader — the artifact a row names
+                      // should be one click from being read, not a filing-cabinet label.
+                      ? <button type="button" className="q-open-source" onClick={() => panelBus.openSource(e.chapter, e.title)}> {e.title}</button>
+                      : ` ${e.title}`}
                 {/* Terminal rows are history the learner has read — dismissable, so a failed
                     ingest from weeks ago stops haunting the Library. The server refuses
                     non-terminal rows, so this renders only where the request can succeed. */}
