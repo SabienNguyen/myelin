@@ -12,7 +12,7 @@ export function QuizInner({ args, addResult }: {
   const setAnswer = (id: string, answer: string) => setAnswers((a) => ({ ...a, [id]: answer }));
   return (
     <div className="block quiz">
-      <h3>{args.title}</h3>
+      <h2>{args.title}</h2>
       {args.items.map((item: any) => (
         <div className="quiz-item" key={item.id}>
           <BlockProse text={item.prompt} />
@@ -51,7 +51,7 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
     return (
       <div className="block quiz done">
         <span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
-        <h3>{props.args.title}</h3>
+        <h2>{props.args.title}</h2>
         <ul>
           {props.args.items.map((item: any) => {
             const answer = answers.find((a) => a.id === item.id)?.answer;

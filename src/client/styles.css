@@ -181,6 +181,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .history-row.history-new { color: var(--accent); font-weight: 600; margin-bottom: 0.15rem; }
 .history-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-time { flex: none; color: var(--text-muted); font-size: 0.78rem; }
+/* On the active row's accent-soft background, --text-muted is 4.09:1 in dark — under AA for
+   small text (axe color-contrast, caught with the menu open). The row's accent foreground
+   clears 4.5:1 on that background in both themes. */
+.history-row.active .history-time { color: inherit; }
 .history-empty { padding: 0.5rem 0.6rem; color: var(--text-muted); font-size: 0.85rem; }
 
 .topbar-status { display: flex; gap: 0.4rem; align-items: center; }
@@ -334,7 +338,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   padding: 0.9rem 1.1rem;
   margin: 0.7rem 0;
 }
-.block h3 { margin: 0 0 0.6rem; font-size: 1.05rem; font-family: var(--font-serif); font-weight: 560; }
+/* h2, not h3: chat-column and stage blocks sit directly under the topbar h1 — an h3 there is a
+   heading-level skip (axe heading-order, caught scanning the quiz done card). Same look. */
+.block h2, .block h3 { margin: 0 0 0.6rem; font-size: 1.05rem; font-family: var(--font-serif); font-weight: 560; }
 .block > p:first-child { margin-top: 0; }
 
 .block button { margin: 0.15rem 0.35rem 0.15rem 0; }

@@ -279,3 +279,11 @@ Written after the sprint that followed the original verdict; each line names its
   loreweaver's side also gained a permanent fuzz suite this cycle: 900 seeded hostile inputs
   through parsePage/serializePage/slugify — the surface compiled pages are written to — with a
   parse→serialize→parse fixed-point invariant, all holding on first run (84/84).
+- **Axe re-swept with the new states in the tree — two real fixes.** The earlier zero-violation
+  passes never had a quiz done card or an open history menu in the scanned DOM. Scanning those:
+  (1) block titles in the chat/stage columns were h3 directly under the topbar h1 — a
+  heading-level skip; Quiz and LabelDiagram titles are now h2 with the same look. (2) The active
+  history row's relative-time text sat at 4.09:1 on the accent-soft background in dark theme —
+  under AA; it now inherits the row's accent foreground (≥5.4:1 in both themes, computed).
+  Re-scanned after both fixes: zero violations in light and dark with the quiz card and open
+  menu present.

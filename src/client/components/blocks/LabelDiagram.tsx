@@ -80,7 +80,7 @@ export function LabelDiagram({ args, result, addResult }: {
 
   const inner = (
     <div className="block label-diagram">
-      <h3><MapPin size={16} weight="duotone" /> Label the diagram</h3>
+      <h2><MapPin size={16} weight="duotone" /> Label the diagram</h2>
       <BlockProse text={args.prompt} />
       <div className="label-diagram-canvas">
         <img src={src} alt="diagram to label" draggable={false} />
