@@ -383,3 +383,11 @@ Written after the sprint that followed the original verdict; each line names its
   extrapolation-plus-trust-region answer graded correct, and rlhf-reward-model promoted exposed
   → practicing on the strength of two explained-correctly records. Repetition earning promotion,
   a single check never doing so — the leveling contract observed working rather than asserted.
+- **The RLHF arc closed with the DPO derivation and its honest costs.** The tutor taught the
+  closed-form-optimum-to-loss derivation, then answered "what does DPO give up" with the real
+  list — off-policy staleness, population identity vs training guarantee, the both-likelihoods-
+  can-fall failure mode (flagged as recalled, not verified fresh — the honesty contract again),
+  no portable reward artifact, no live hacking detection. Its final check was a three-lesson
+  callback: cross-prompt reward comparison, previously asserted as a category error, now derived
+  from the un-canceled Z(x) — graded correct, dpo promoted to practicing. The vault now carries
+  two live-taught domains; the gauge-freedom thread ran coherently across three separate lessons.
