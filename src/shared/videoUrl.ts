@@ -8,6 +8,8 @@
 const YOUTUBE_PATTERNS = [
   /^https?:\/\/(www\.|m\.)?youtube\.com\/watch\?/i,
   /^https?:\/\/(www\.|m\.)?youtube\.com\/shorts\//i,
+  /^https?:\/\/(www\.|m\.)?youtube\.com\/live\//i,
+  /^https?:\/\/(www\.|m\.)?youtube\.com\/embed\//i,
   /^https?:\/\/youtu\.be\//i,
 ];
 

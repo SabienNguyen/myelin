@@ -13,6 +13,8 @@ describe('isVideoUrl — conservative YouTube-shape detection', () => {
     'https://m.youtube.com/watch?v=abc123',
     'https://youtu.be/abc123',
     'https://www.youtube.com/shorts/abc123',
+    'https://www.youtube.com/live/abc123',         // recorded livestream lecture
+    'https://www.youtube.com/embed/abc123',        // iframe src copied off a course page
   ])('accepts %s', (url) => expect(isVideoUrl(url)).toBe(true));
 
   it.each([
