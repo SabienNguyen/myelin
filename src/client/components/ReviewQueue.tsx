@@ -22,6 +22,7 @@ interface DueRow {
 
 export function ReviewQueue({ visible = true }: { visible?: boolean }) {
   const [due, setDue] = useState<DueRow[] | null>(null);
+  const [total, setTotal] = useState(0);
   const threadRuntime = useThreadRuntime();
 
   useEffect(() => {
@@ -29,7 +30,11 @@ export function ReviewQueue({ visible = true }: { visible?: boolean }) {
     let cancelled = false;
     fetch('/api/due')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d) setDue(d.due ?? []); })
+      .then((d) => {
+        if (cancelled || !d) return;
+        setDue(d.due ?? []);
+        setTotal(d.total ?? (d.due ?? []).length);
+      })
       .catch(() => { /* no queue is a quiet state, not an error banner — the Library still works */ });
     return () => { cancelled = true; };
   }, [visible]);
@@ -43,6 +48,8 @@ export function ReviewQueue({ visible = true }: { visible?: boolean }) {
         {due.some((d) => d.slipped)
           ? 'Some of what you earned has started to slip — a quick rep brings it back.'
           : 'These are close to slipping — a quick rep now resets the clock.'}
+        {/* No silent caps: the list stays humane, the count stays honest. */}
+        {total > due.length && ` Showing the ${due.length} most urgent of ${total}.`}
       </p>
       <ul>
         {due.map((d) => (

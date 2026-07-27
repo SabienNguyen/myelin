@@ -354,8 +354,9 @@ describe('GET /api/due and /api/session-plan', () => {
 
   it('/api/due: slipped leads, healthy excluded, titles resolved', async () => {
     const app = buildRestRoutes(spacedLw(), cfg);
-    const { due } = await (await app.request('/api/due')).json();
+    const { due, total } = await (await app.request('/api/due')).json();
     expect(due.map((d: any) => d.slug)).toEqual(['slipped', 'soon']);
+    expect(total).toBe(2); // pre-cap count — the badge's number, honest under load
     expect(due[0].slipped).toBe(true);
     expect(due[0].title).toBe('T:slipped');
   });

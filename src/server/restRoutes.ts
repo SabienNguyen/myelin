@@ -270,17 +270,20 @@ export function buildRestRoutes(
         slipped: m.slipped === true,
       }))
       .filter((e) => e.slipped || (e.daysLeft !== null && e.daysLeft <= DUE_SOON_DAYS))
-      .sort((a, b) => (a.slipped === b.slipped ? (a.daysLeft ?? 0) - (b.daysLeft ?? 0) : a.slipped ? -1 : 1))
-      .slice(0, CAP);
+      .sort((a, b) => (a.slipped === b.slipped ? (a.daysLeft ?? 0) - (b.daysLeft ?? 0) : a.slipped ? -1 : 1));
+    // `total` before the cap: the cap keeps the LIST humane, but hiding that more exist — and a
+    // badge reading 12 when 15 have slipped — is a silent lie the load test caught.
+    const total = entries.length;
+    const capped = entries.slice(0, CAP);
     // Titles resolved per due page — bounded by the cap, and a page that fails to resolve keeps
     // its slug rather than dropping off the review list.
-    const due = await Promise.all(entries.map(async (e) => ({
+    const due = await Promise.all(capped.map(async (e) => ({
       ...e,
       title: await lw.call('read_page', { slug: e.slug })
         .then((p: any) => p.page?.meta?.title ?? e.slug)
         .catch(() => e.slug),
     })));
-    return c.json({ due });
+    return c.json({ due, total });
   });
   app.get('/api/status', async (c) => {
     // Read the tutor model from cfg HERE, not from the snapshot passed in at boot. Signing in with a

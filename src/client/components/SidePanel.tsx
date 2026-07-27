@@ -22,7 +22,9 @@ export function SidePanel() {
     let cancelled = false;
     const load = () => fetch('/api/due')
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d) setDueCount((d.due ?? []).length); })
+      // `total`, not the capped list length: with 15 slipped pages the badge read 12 — the one
+      // number the learner glances at was quietly wrong under load.
+      .then((d) => { if (!cancelled && d) setDueCount(d.total ?? (d.due ?? []).length); })
       .catch(() => { /* a missing count is a quiet state, never an error surface */ });
     load();
     const id = setInterval(load, DUE_POLL_MS);
