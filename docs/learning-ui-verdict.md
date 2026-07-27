@@ -457,3 +457,10 @@ Written after the sprint that followed the original verdict; each line names its
   previously-flagged-unverified DPO failure mode to the paper that names it (DPO-Positive,
   arXiv:2402.13228). Every page in the sitting's vault is now sourced-solid or an honest stub;
   the shipped demo vault carries the final state.
+- **Final demo-vault boot check: 10 nodes, four practicing, every page solid-or-stub** — the
+  shipped fixture verified working one last time after the provenance completion. A README
+  screenshot refresh was attempted and honestly abandoned: the whole-vault force layout at 10
+  nodes sometimes converges tight enough for labels to collide (run-to-run nondeterminism; the
+  fit control zooms but doesn't relax overlap), and the existing 9-node capture is cleaner. One
+  observation for a future layout pass, not worth risk now: small-N whole-vault could use a
+  label-collision nudge.
