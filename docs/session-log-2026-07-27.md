@@ -43,6 +43,11 @@ evidence, due badge accurate, zero drift).
   `list_pages`; the harness builds the graph in two calls; 16ms on the same fixture (539ed4f,
   loreweaver a15fe44). Probed to 2,000 pages: no cliff, first-to-degrade surface named
   (a9a98b3).
+- The prompts didn't scale either: both tutor routes inlined EVERY vault slug into EVERY turn,
+  and every compile part did the same — thousands of tokens per call at 2,000 pages, billed
+  forever. Capped past 150 pages, byte-identical below it, leaning on the server-side mechanisms
+  that already cover the gap (repairSlug auto-correction; write_page's link proposals)
+  (ed288c8, 826c175).
 
 ## Hardening
 
