@@ -2089,3 +2089,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   text-underline-offset: 3px;
 }
 .q-open-source:hover { color: var(--accent); }
+
+/* Revise: the failed rubric's way of closing its own loop. Quiet secondary style — the verdict
+   is the headline; the action is an offer, not an alarm. */
+.writing-draft .revise-btn { margin-top: 0.5rem; }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useThreadRuntime } from '@assistant-ui/react';
 import { PenNibIcon as PenNib } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
@@ -36,6 +37,7 @@ export function WritingDraftInner({ args, result, addResult }: {
   args: any; result: any; addResult: (r: any) => void;
 }) {
   const [draft, setDraft] = useState(args.priorDraft ?? '');
+  const threadRuntime = useThreadRuntime();
 
   if (result) {
     const grading = result.grading;
@@ -85,6 +87,21 @@ export function WritingDraftInner({ args, result, addResult }: {
             ))}
             </ul>
           </>
+        )}
+        {/* A failed criterion is an OPEN loop, and the card should offer to close it: one click
+            asks the tutor for a revision round. The tutor reissues writing_draft with round+1,
+            the SAME rubric, and priorDraft carrying this text (prompt rule 11b) — so the learner
+            edits their own words against the same contract instead of retyping from memory. */}
+        {grading?.rubric?.some((r: any) => !r.pass) && (
+          <button
+            type="button"
+            className="revise-btn"
+            onClick={() => threadRuntime.append(
+              `Set me up to revise this draft — round ${(args.round ?? 1) + 1}, same rubric, starting from what I wrote.`,
+            )}
+          >
+            Revise this draft
+          </button>
         )}
         {grading?.annotations?.skillGrades && (
           <ul className="skill-grades">

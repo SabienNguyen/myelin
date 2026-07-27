@@ -5,6 +5,13 @@
 // the entire app in audit 27. These tests pin that every block with a done-branch survives an
 // error-shaped result and still renders SOMETHING (the app must outlive the model's mistake).
 import { describe, it, expect, vi } from 'vitest';
+// WritingDraftInner now offers a revise round via the thread runtime — same seam the panel
+// tests mock (tests/client/libraryPanel.test.tsx).
+vi.mock('@assistant-ui/react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@assistant-ui/react')>();
+  return { ...actual, useThreadRuntime: () => ({ append: appendSpy }) };
+});
+const appendSpy = vi.fn();
 import { render, screen } from '@testing-library/react';
 import { MathScratchpad } from '../../src/client/components/blocks/MathScratchpad.js';
 import { Quiz } from '../../src/client/components/blocks/Quiz.js';
