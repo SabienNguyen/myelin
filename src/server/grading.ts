@@ -52,18 +52,32 @@ function normalizeAsciiMath(latex: string): string {
     .replace(/\)\s*(?=[A-Za-z0-9(])/g, ')*'); // fixes (1)/(2)x binding to 1/(2x)
 }
 
-function latexToCompiled(latex: string) {
-  return math.compile(normalizeAsciiMath(latex));
+/** Top-level split of a normalized AsciiMath string on a single bare '=' — the equation shape
+ * students actually write algebra in ("2x+3=11 → 2x=8 → x=4"). mathjs reads '=' as ASSIGNMENT:
+ * it happens to evaluate when the left side is a bare symbol ("x=4") and THROWS for any other
+ * left side ("2x=8"), so before this split existed a perfectly ordinary equation step was
+ * reported "unparseable" and the break-locating walker skipped equation-form derivations
+ * entirely. Comparison spellings (<=, >=, !=, ==) are not equations and are left alone. */
+function splitEquation(am: string): [string, string] | null {
+  let depth = 0;
+  for (let i = 0; i < am.length; i++) {
+    const c = am[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === '=' && depth === 0) {
+      const prev = am[i - 1], next = am[i + 1];
+      if (prev === '<' || prev === '>' || prev === '!' || prev === '=' || next === '=') continue;
+      const lhs = am.slice(0, i).trim(), rhs = am.slice(i + 1).trim();
+      return lhs && rhs ? [lhs, rhs] : null;
+    }
+  }
+  return null;
 }
 
-/** Free variables actually referenced by a LaTeX expression. mathjs parses to an AST whose
- * SymbolNodes are either variables or function names; a symbol used as a call target
- * (`sin(x)`) is a FunctionNode's fn, so filtering on `isSymbolNode` alone would wrongly collect
- * `sin`. Constants mathjs defines itself (pi, e, i, …) are excluded by checking the default scope.
- * Returns [] rather than throwing on unparseable input — callers already treat that as not-equal. */
-export function freeVariables(latex: string): string[] {
+/** freeVariables' core on an already-normalized AsciiMath EXPRESSION (one side of an equation). */
+function detectedVars(am: string): string[] {
   try {
-    const node = math.parse(normalizeAsciiMath(latex));
+    const node = math.parse(am);
     const found = new Set<string>();
     node.traverse((n: any, _path: string, parent: any) => {
       if (n.type !== 'SymbolNode') return;
@@ -72,6 +86,20 @@ export function freeVariables(latex: string): string[] {
       found.add(n.name);
     });
     return [...found].sort();
+  } catch { return []; }
+}
+
+/** Free variables actually referenced by a LaTeX expression. mathjs parses to an AST whose
+ * SymbolNodes are either variables or function names; a symbol used as a call target
+ * (`sin(x)`) is a FunctionNode's fn, so filtering on `isSymbolNode` alone would wrongly collect
+ * `sin`. Constants mathjs defines itself (pi, e, i, …) are excluded by checking the default scope.
+ * Equations contribute the variables of BOTH sides. Returns [] rather than throwing on
+ * unparseable input — callers already treat that as not-equal. */
+export function freeVariables(latex: string): string[] {
+  try {
+    const am = normalizeAsciiMath(latex);
+    const sides = splitEquation(am) ?? [am];
+    return [...new Set(sides.flatMap(detectedVars))].sort();
   } catch { return []; }
 }
 
@@ -94,29 +122,85 @@ export function mathEquivalent(
   a: string, b: string, vars?: string | string[], eps = 1e-9,
 ): boolean {
   try {
-    const fa = latexToCompiled(a), fb = latexToCompiled(b);
-    const declared = vars === undefined ? [] : (Array.isArray(vars) ? vars : [vars]);
-    const detected = [...new Set([...freeVariables(a), ...freeVariables(b)])];
-    // Fall back to 'x' so a caller passing nothing against a constant-only pair still samples once.
-    const names = [...new Set([...declared, ...detected])];
-    if (names.length === 0) names.push('x');
+    const amA = normalizeAsciiMath(a), amB = normalizeAsciiMath(b);
+    const eqA = splitEquation(amA), eqB = splitEquation(amB);
 
-    const points = names.length === 1 ? SAMPLES.length : SAMPLES.length * 3;
-    for (let k = 0; k < points; k++) {
-      const scope: Record<string, number> = {};
-      names.forEach((name, i) => {
-        // Stride 2i+1 is coprime-ish with SAMPLES.length (7) for small i, so variables sweep the
-        // sample set out of phase with each other instead of moving together.
-        scope[name] = SAMPLES[(k * (2 * i + 1) + i * 3) % SAMPLES.length];
-      });
-      let ra: number, rb: number;
-      try { ra = fa.evaluate(scope); rb = fb.evaluate(scope); } catch { continue; }
-      if (typeof ra !== 'number' || typeof rb !== 'number') continue; // matrices/units — not sampled
-      if (Number.isNaN(ra) && Number.isNaN(rb)) continue;
-      if (Math.abs(ra - rb) > eps * Math.max(1, Math.abs(ra), Math.abs(rb))) return false;
+    // Equation vs expression: an equation that ISOLATES a symbol ("x=4", "V = nRT/P") means its
+    // other side — compare that side to the expression, so a student answering "x=4" against an
+    // expected "4" is correct by design, not by mathjs's assignment accident. An equation that
+    // isolates nothing ("2x=8") has no expression reading and is honestly not equivalent to one.
+    if (!eqA !== !eqB) {
+      const [eq, otherAm] = eqA ? [eqA, amB] as const : [eqB!, amA] as const;
+      const bare = /^[A-Za-z][A-Za-z0-9_]*$/;
+      const side = bare.test(eq[0]) ? eq[1] : bare.test(eq[1]) ? eq[0] : null;
+      return side !== null && sampledEqual(side, otherAm, vars, eps);
     }
-    return true;
+    // Two equations state the same thing when their residuals (lhs − rhs) are proportional by a
+    // nonzero constant — "2x=8" vs "x=4" (ratio 2) or any add/subtract/scale of both sides. A
+    // varying ratio means the solution sets differ ("x^2=4" vs "x=2": one root vs two).
+    if (eqA && eqB) return residualsProportional(eqA, eqB, vars, eps);
+    return sampledEqual(amA, amB, vars, eps);
   } catch { return false; }
+}
+
+/** Sampling scope for point k — stride 2i+1 is coprime-ish with SAMPLES.length (7) for small i,
+ * so variables sweep the sample set out of phase with each other instead of moving together. */
+function scopeAt(names: string[], k: number): Record<string, number> {
+  const scope: Record<string, number> = {};
+  names.forEach((name, i) => {
+    scope[name] = SAMPLES[(k * (2 * i + 1) + i * 3) % SAMPLES.length];
+  });
+  return scope;
+}
+
+function sampleNames(ams: string[], vars?: string | string[]): string[] {
+  const declared = vars === undefined ? [] : (Array.isArray(vars) ? vars : [vars]);
+  const names = [...new Set([...declared, ...ams.flatMap(detectedVars)])];
+  // Fall back to 'x' so a caller passing nothing against a constant-only pair still samples once.
+  if (names.length === 0) names.push('x');
+  return names;
+}
+
+/** The original mathEquivalent core, on normalized AsciiMath expressions. */
+function sampledEqual(amA: string, amB: string, vars?: string | string[], eps = 1e-9): boolean {
+  const fa = math.compile(amA), fb = math.compile(amB);
+  const names = sampleNames([amA, amB], vars);
+  const points = names.length === 1 ? SAMPLES.length : SAMPLES.length * 3;
+  for (let k = 0; k < points; k++) {
+    let ra: number, rb: number;
+    try { ra = fa.evaluate(scopeAt(names, k)); rb = fb.evaluate(scopeAt(names, k)); } catch { continue; }
+    if (typeof ra !== 'number' || typeof rb !== 'number') continue; // matrices/units — not sampled
+    if (Number.isNaN(ra) && Number.isNaN(rb)) continue;
+    if (Math.abs(ra - rb) > eps * Math.max(1, Math.abs(ra), Math.abs(rb))) return false;
+  }
+  return true;
+}
+
+function residualsProportional(
+  eqA: [string, string], eqB: [string, string], vars?: string | string[], eps = 1e-9,
+): boolean {
+  const fa = math.compile(`(${eqA[0]})-(${eqA[1]})`);
+  const fb = math.compile(`(${eqB[0]})-(${eqB[1]})`);
+  const names = sampleNames([...eqA, ...eqB], vars);
+  const points = names.length === 1 ? SAMPLES.length : SAMPLES.length * 3;
+  let ratio: number | undefined;
+  let sawPoint = false;
+  for (let k = 0; k < points; k++) {
+    let ra: number, rb: number;
+    try { ra = fa.evaluate(scopeAt(names, k)); rb = fb.evaluate(scopeAt(names, k)); } catch { continue; }
+    if (typeof ra !== 'number' || typeof rb !== 'number') continue;
+    if (Number.isNaN(ra) || Number.isNaN(rb)) continue;
+    sawPoint = true;
+    const zeroA = Math.abs(ra) <= eps, zeroB = Math.abs(rb) <= eps;
+    if (zeroA && zeroB) continue;      // a shared root — consistent, but no ratio to read
+    if (zeroA !== zeroB) return false; // a root of one that the other doesn't have
+    const r = ra / rb;
+    if (ratio === undefined) ratio = r;
+    else if (Math.abs(r - ratio) > 1e-6 * Math.max(1, Math.abs(r), Math.abs(ratio))) return false;
+  }
+  // Every sampled point a shared root (e.g. "1=1" vs "2·0=0"): identically-true statements agree.
+  // No evaluable point at all: nothing was checked — refuse to call that equivalent.
+  return ratio !== undefined || sawPoint;
 }
 
 import { gradeChemEquation, gradeNotes, gradeUnitAnswer } from './structuredCheckers.js';
@@ -651,7 +735,13 @@ async function annotateDraft(
 }
 
 function latexParses(latex: string): boolean {
-  try { latexToCompiled(latex); return true; } catch { return false; }
+  try {
+    const am = normalizeAsciiMath(latex);
+    const eq = splitEquation(am);
+    if (eq) { math.compile(eq[0]); math.compile(eq[1]); return true; }
+    math.compile(am);
+    return true;
+  } catch { return false; }
 }
 
 async function gradeOpenAnswer(

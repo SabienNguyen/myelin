@@ -230,3 +230,18 @@ Written after the sprint that followed the original verdict; each line names its
   — both previously misrouted to the git-repo path. The rebuilt AppImage carries this plus the
   graph and prompt-cost work, and was cold smoke-tested again: boots to a clean first-run
   screen, detects the existing claude.ai sign-in, serves the SPA.
+- **math_scratchpad — MathLive entry driven live, and it caught a grading lie.** The full flow
+  holds: the block lands on the stage with its chip in chat, typed keystrokes reach the real
+  MathLive field (after its documented ~150ms wiring window), "Add step" folds the field into the
+  derivation, Submit grades mechanically and the tutor's follow-up arrives by auto-resubmit. But
+  the verdict on a perfectly ordinary derivation — 2x+3=11 solved as "2x=8" then "x=4" — read
+  "final answer numerically equivalent; step 1 unparseable". mathjs reads '=' as ASSIGNMENT:
+  "x=4" happened to evaluate (bare-symbol left side) while "2x=8" threw, so the equation shape
+  students actually write algebra in was branded unparseable, and the step-break walker skipped
+  equation chains entirely. Fixed by making equations first-class in the grader: both sides must
+  parse, an isolating equation ("x=4", "V=nRT/P") grades as its other side against an expected
+  expression by design rather than by accident, and two equations are the same statement when
+  their residuals are proportional by a nonzero constant — which also correctly refuses
+  "x^2=4" vs "x=2" (two roots vs one). Unit-tested both ways and re-driven live: the same
+  derivation now grades clean, and a wrong equation chain gets the break located between the
+  right steps.

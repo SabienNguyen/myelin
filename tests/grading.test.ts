@@ -56,6 +56,32 @@ describe('mathEquivalent (numeric sampling)', () => {
   it('handles ln via rewrite', () => {
     expect(mathEquivalent('\\ln(x)', '\\ln(x)', 'x')).toBe(true);
   });
+
+  // Equations are how students actually write algebra ("2x+3=11 → 2x=8 → x=4"). mathjs reads '='
+  // as ASSIGNMENT — "x=4" happened to evaluate while "2x=8" threw, so a live math_scratchpad
+  // sitting saw an ordinary equation step called "unparseable" in the verdict.
+  describe('equations', () => {
+    it('grades an isolating equation against an expected expression', () => {
+      expect(mathEquivalent('x=4', '4', 'x')).toBe(true);
+      expect(mathEquivalent('x=5', '4', 'x')).toBe(false);
+      expect(mathEquivalent('V=\\frac{nRT}{P}', '\\frac{nRT}{P}')).toBe(true); // isolated symbol, either side
+      expect(mathEquivalent('4', 'x=4', 'x')).toBe(true);                      // symmetric
+    });
+    it('treats equivalent equations as the same statement (residual proportionality)', () => {
+      expect(mathEquivalent('2x=8', 'x=4', 'x')).toBe(true);        // both sides halved
+      expect(mathEquivalent('2x+3=11', '2x=8', 'x')).toBe(true);    // 3 subtracted from both sides
+      expect(mathEquivalent('2x+3=11', 'x=4', 'x')).toBe(true);     // two legal moves at once
+      expect(mathEquivalent('2x=8', 'x=5', 'x')).toBe(false);       // different solution
+      expect(mathEquivalent('x^2=4', 'x=2', 'x')).toBe(false);      // two roots vs one — not the same statement
+    });
+    it('does not read a non-isolating equation as an expression', () => {
+      expect(mathEquivalent('2x=8', '4', 'x')).toBe(false);
+    });
+    it('detects free variables on both sides of an equation', () => {
+      expect(freeVariables('2x+3=11')).toEqual(['x']);
+      expect(freeVariables('P V=nRT')).toEqual(['P', 'R', 'T', 'V', 'n']);
+    });
+  });
 });
 
 // structured_check — the generic applied block. `cfg = {} as any` in the suite below is the guard
@@ -438,5 +464,23 @@ describe('math_scratchpad step-chain break detection', () => {
     const g = await grade(['4x - 2x'], '2x');
     expect(g.verdict).toBe('correct');
     expect(g.detail).not.toContain('breaks');
+  });
+
+  // Regression from a live MathLive drive: the natural way to solve "2x+3=11" is an equation
+  // chain, and every one of those steps was being called unparseable (mathjs '=' assignment).
+  it('an equation-chain derivation grades clean — no unparseable call-out', async () => {
+    const eqInput = { problemLatex: '2x+3=11', expectedLatex: '4', variable: 'x', stepMode: true, pageSlug: 'p' };
+    const g = await gradeBlockOutput('math_scratchpad', eqInput,
+      { steps: [{ latex: '2x=8' }, { latex: 'x=4' }], finalLatex: 'x=4' }, cfg, {} as any);
+    expect(g.verdict).toBe('correct');
+    expect(g.detail).toBe('final answer numerically equivalent');
+  });
+
+  it('locates the break inside an equation chain on a wrong final', async () => {
+    const eqInput = { problemLatex: '2x+3=11', expectedLatex: '4', variable: 'x', stepMode: true, pageSlug: 'p' };
+    const g = await gradeBlockOutput('math_scratchpad', eqInput,
+      { steps: [{ latex: '2x=8' }, { latex: 'x=5' }], finalLatex: 'x=5' }, cfg, {} as any);
+    expect(g.verdict).toBe('incorrect');
+    expect(g.detail).toContain('breaks between steps 1 and 2');
   });
 });
