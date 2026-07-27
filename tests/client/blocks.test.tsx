@@ -78,3 +78,17 @@ describe('toolkit rejects a fabricated submission for an errored call', () => {
     expect(container.querySelector('.block')).toBeNull();
   });
 });
+
+describe('errored block copy tells the right story', () => {
+  it('a schema rejection blames the malformed call; a cancellation blames nobody', async () => {
+    const { toolkit } = await import('../../src/client/toolkit.js');
+    const render1 = (toolkit as any).quick_check.render({
+      args: {}, result: 'Invalid input: expected string, received undefined', addResult: vi.fn(), isError: true,
+    });
+    expect(render1.props.children).toContain('could not be shown');
+    const render2 = (toolkit as any).quick_check.render({
+      args: {}, result: 'tool call was aborted', addResult: vi.fn(), isError: true,
+    });
+    expect(render2.props.children).toContain('skipped; the conversation moved on');
+  });
+});
