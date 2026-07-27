@@ -123,3 +123,11 @@ Written after the sprint that followed the original verdict; each line names its
   the honest path unavailable) — fixed so degradation is now honest by construction, verified
   against the SDK transcript. Net: upgraded on breadth, downgraded on "honest by default",
   landing at honest-by-construction. Latency observed: 26-64s essay grading, 33-36s staging.
+- **Third live sitting (cold start, freeform)** — the learn-anything-from-zero promise now holds
+  end to end: empty vault → real web searches → pages whose sources verifiably match the actual
+  search results → a syllabus a musician would recognize → path in the Library → teaching with
+  evidence on disk, in one ~3.5-minute turn. It exposed and fixed the harness granting web tools
+  while telling the model it had none — the tutor's response to that contradiction (refusing to
+  fake research, labeling pages "unverified model knowledge") is the strongest honesty evidence
+  of the session. Across three sittings the residual risk is precisely characterized: not
+  invention, but overclaiming depth from search snippets — constrained by rule, not eliminated.
