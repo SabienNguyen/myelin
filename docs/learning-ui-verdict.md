@@ -431,3 +431,7 @@ Written after the sprint that followed the original verdict; each line names its
   derivations, Bradley-Terry losses). Probed at 900px dark, 1360px dark, and 900px light with
   no-horizontal-scroll assertions at the page, thread, and per-KaTeX-block levels: zero overflow
   anywhere. The earlier responsive and display-math containment work holds against real content.
+- **Library path progress with real data — correct, no action.** The sitting's path renders
+  1/6 with a proportional bar (exactly one page at practicing), "resume at attention-scaling"
+  names the genuinely-next unproven page, and set-as-goal is offered. Progress arithmetic,
+  resume logic, and layout all verified against earned — not fixture — state.
