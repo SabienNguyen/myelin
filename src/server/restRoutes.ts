@@ -160,6 +160,12 @@ export function buildRestRoutes(
       })(),
       struggled: count('struggled'),
       misconceptions: (d.misconceptions ?? []) as string[],
+      // The repairs, from the evidence log's `resolved` field — the misconceptions list correctly
+      // forgets a cleared confusion, but the learner deserves to SEE their progress arc: what
+      // they used to get wrong, and when they proved they no longer do.
+      repaired: (d.evidence ?? [])
+        .filter((e: any) => e.resolved)
+        .map((e: any) => ({ date: e.date as string, text: e.resolved as string })),
     };
   }
 

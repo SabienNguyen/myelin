@@ -2111,3 +2111,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .student-menu button.on { color: var(--text-muted); cursor: default; }
 .student-menu input { font-size: 0.85rem; }
 .student-note { font-size: 0.75rem; color: var(--warn); }
+
+/* Repairs: the standing section's good news — quiet, checked, past tense. */
+.page-standing-repaired { list-style: none; padding-left: 0; }
+.page-standing-repaired li { color: var(--text-muted); font-size: 0.85rem; }

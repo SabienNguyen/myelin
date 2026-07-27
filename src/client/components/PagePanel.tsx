@@ -285,6 +285,15 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
               </ul>
             </>
           )}
+          {/* The progress arc: repairs stay visible after the active list forgets them. Muted and
+              checked, not red — this is the section's good news. */}
+          {(standing.repaired ?? []).length > 0 && (
+            <ul className="page-standing-repaired">
+              {standing.repaired.map((r: { date: string; text: string }, i: number) => (
+                <li key={i}><span className="mark-ok">✓</span> repaired {r.date} — {r.text}</li>
+              ))}
+            </ul>
+          )}
         </section>
       )}
       {/* A page with NO standing at all still gets the route hint, in its own small section — a
