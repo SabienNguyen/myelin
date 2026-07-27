@@ -16,7 +16,7 @@ to it exclusively over stdio MCP.
 | ![Cold start — what do you want to learn?](docs/screenshots/cold-start.png) | ![A graded math derivation](docs/screenshots/math-graded.png) |
 | *First run: ask for anything — the tutor writes pages as you go.* | *A step-aware math scratchpad, graded mechanically.* |
 | ![The mastery graph](docs/screenshots/graph.png) | ![A graded quiz, dark theme at 900px](docs/screenshots/quiz-dark.png) |
-| *The mastery graph: prerequisite edges, decay clocks, honest colors.* | *Per-item verdicts — ✗ stays ✗. Dark theme, narrow layout.* |
+| *The mastery graph after a real sitting: two domains, levels earned by graded evidence.* | *Per-item verdicts — ✗ stays ✗. Dark theme, narrow layout.* |
 
 ## Why it's different
 

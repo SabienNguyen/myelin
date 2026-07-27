@@ -1,0 +1,113 @@
+{
+  "qkv-attention": {
+    "level": "practicing",
+    "evidence": [
+      {
+        "date": "2026-06-27",
+        "kind": "applied-correctly",
+        "note": "math: given x_1=(1,0), x_2=(0,1), W_Q=[[1,1],[0,1]], W_K=[[1,0],[1,1]], q_i=W_Q x_i, k_i=W_K x_i, and q_1\u00b7k_2=0, computed the reverse-direction score q_2\u00b7k_1 \u2192 2, demonstrating Q/K asymmetry directly."
+      },
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: Why can't the naive version of attention \u2014 using the raw embedding dot product $x_i \\cdot x_j$ directly as the relevance score \u2014 represent the fact that \"it\" in \"the trophy didn't fit in the suitcase because it was too big\" should point strongly to \"trophy,\" even though \"trophy\" has no corresponding pull back toward \"it\"? What does splitting into separate Q and K projections fix about this?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  },
+  "attention-scaling": {
+    "level": "exposed",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "applied-correctly",
+        "note": "math: given Var(q\u00b7k)=d_k for independent unit-variance components, computed Var((q\u00b7k)/sqrt(d_k)) for d_k=256 \u2192 1, confirming the scaling normalizes variance regardless of dimension."
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  },
+  "multi-head-attention": {
+    "level": "exposed",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: In one or two sentences: given the Voita et al. and Michel et al. findings, is \"each attention head learns its own specialized, interpretable role\" an accurate description of multi-head attention, or an overstated version of a narrower truth? If overstated, what's the narrower, more defensible claim?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  },
+  "positional-encoding": {
+    "level": "exposed",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: Suppose you swapped sinusoidal PE's additive vectors for RoPE's rotation, but only rotated the **value** vectors (not Q and K) before the weighted sum. Would relative-position-aware attention still work? Why or why not?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  },
+  "kv-cache": {
+    "level": "exposed",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "applied-correctly",
+        "note": "numeric check: Mistral-7B has the same relevant shape as Llama-3-8B: 32 layers, 8 KV heads, head_dim 128, served in fp16. A request comes in using 32,768 tokens of context (32K).\\n\\nHow many GiB does the KV cache take for that one sequence?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  },
+  "training-vs-inference": {
+    "level": "exposed",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: Suppose someone proposed adding a KV cache during **training** to \"speed things up,\" the same way it speeds up inference. Would it actually save any compute? Why or why not?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  },
+  "rlhf-reward-model": {
+    "level": "practicing",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: The Bradley-Terry loss only ever depends on the *difference* $r_\\theta(x,y_w) - r_\\theta(x,y_l)$, never on either reward alone. Suppose you took a trained reward model and added +50 to its output for every completion of a given prompt $x$ (but left other prompts alone). Would this change the training loss at all? What does your answer say about what a single number like \"reward = 4.2\" is actually allowed to mean?"
+      },
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: Take a first pass at this yourself before I lay it out. You just showed the RM only ever learns a *difference* signal from a narrow slice of human comparisons (pairs of completions the annotators actually saw). Now suppose PPO maximizes r_\u03b8(x,y) directly, with no KL term tying the policy back to the reference/pretrained model. In your own words: (1) why does this break down in practice, and (2) is \"reward hacking\" here just Goodhart's law (\"any measure that becomes a target ceases to be a good measure\"), or is there something more specific about probability mass moving off the distribution the RM was actually trained on?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  },
+  "dpo": {
+    "level": "practicing",
+    "evidence": [
+      {
+        "date": "2026-07-27",
+        "kind": "exposed",
+        "note": "Walked through the closed-form-optimum derivation of DPO from the KL-regularized RLHF objective, the Z(x) cancellation trick, the resulting loss, and an honest accounting of what DPO gives up vs PPO-RLHF (off-policy/no live correction, population-vs-finite-sample gap, joint-likelihood-collapse failure mode, no portable reward artifact)."
+      },
+      {
+        "date": "2026-07-27",
+        "kind": "explained-correctly",
+        "note": "open answer: In the derivation, $Z(x)$ cancels because $y_w$ and $y_l$ are always compared under the *same* prompt $x$. Suppose someone tried to compare preference strength *across* two different prompts $x_1 \\neq x_2$ \u2014 e.g. claim $r_\\theta(x_1,y_1) - r_\\theta(x_2,y_2)$ tells you something meaningful. What goes wrong?"
+      }
+    ],
+    "misconceptions": [],
+    "last_reinforced": "2026-07-27"
+  }
+}
