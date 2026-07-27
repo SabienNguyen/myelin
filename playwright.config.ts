@@ -33,8 +33,10 @@ export default defineConfig({
   webServer: [
     {
       // Real backend + real Loreweaver MCP server (fake embeddings) + scripted model.
+      // fake-bin leads PATH so video-ingest.e2e.ts's Add-material drive resolves the fake yt-dlp
+      // (tests/e2e/fake-bin/yt-dlp) — captions with no network, same observable surface.
       command:
-        'LW_MOCK_MODEL=tests/e2e/script.json HARNESS_CONFIG=tests/e2e/e2e.config.json npx tsx src/server/index.ts',
+        'PATH="$PWD/tests/e2e/fake-bin:$PATH" LW_MOCK_MODEL=tests/e2e/script.json HARNESS_CONFIG=tests/e2e/e2e.config.json npx tsx src/server/index.ts',
       port: 4820,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,

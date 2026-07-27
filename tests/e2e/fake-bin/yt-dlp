@@ -1,0 +1,34 @@
+#!/bin/bash
+# Fake yt-dlp for the e2e suite: answers --print with fixed metadata and "fetches captions" by
+# writing a small VTT beside the -o prefix — the same observable surface the real binary has,
+# with no network. Mirrors tests/videoIngest.test.ts's fakeYtDlp, at the process boundary.
+set -euo pipefail
+
+args=("$@")
+prefix=""
+for ((i = 0; i < ${#args[@]}; i++)); do
+  [ "${args[$i]}" = "-o" ] && prefix="${args[$((i + 1))]}"
+done
+
+for a in "${args[@]}"; do
+  if [ "$a" = "--print" ]; then
+    printf 'Signals and Boundaries\nFake Lectures\n9:41\n'
+    exit 0
+  fi
+done
+
+for a in "${args[@]}"; do
+  if [ "$a" = "--write-subs" ] && [ -n "$prefix" ]; then
+    cat > "${prefix}.en.vtt" << 'VTT'
+WEBVTT
+
+00:00:02.000 --> 00:00:05.000
+a boundary is where a signal changes meaning
+
+00:00:05.000 --> 00:00:09.000
+and every parser is a theory of where those boundaries sit
+VTT
+    exit 0
+  fi
+done
+exit 0

@@ -40,10 +40,13 @@ test('code_exercise: the built-in sandbox renders the full_body editor, the refe
   await page.keyboard.press('Enter');
   await firstChat;
 
-  // (1) Chat proof: the scripted turn's code_exercise tool call rendered as the chip (Stage
-  // auto-switches via StagePortal's mount effect — see CodeExercise.tsx).
-  const chip = page.getByRole('button', { name: /code exercise waiting on the stage/i });
-  await expect(chip).toBeVisible();
+  // (1) Staging proof: the scripted turn's code_exercise tool call mounted the exercise on the
+  // stage. Asserted on the STAGE's own content, not the thread-side chip — focus mode collapses
+  // the chat column to a rail as soon as the exercise mounts, and whether the chip is still in
+  // the tree when this assertion runs is a race the exercise's presence doesn't depend on
+  // (observed losing under load; the exercise itself had staged fine).
+  await expect(page.locator('#stage-root').getByRole('heading', { name: 'stream-consumer' }))
+    .toBeVisible({ timeout: 10000 });
   await page.screenshot({ path: '/tmp/i3-1.png', fullPage: true });
 
   // Predict-before-write gate (backlog item 4, added after this test was written): the editor
