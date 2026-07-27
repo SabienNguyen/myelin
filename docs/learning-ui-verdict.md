@@ -115,3 +115,11 @@ Written after the sprint that followed the original verdict; each line names its
   speaking practice (needs audio-capable models), a drawable design input (rubric presets
   shipped as the interim), and long-horizon pedagogy (a semester, not a sitting — no audit can
   compress that).
+
+- **Second live sitting (humanities + study loop)** — confirms the pedagogy finding on a second
+  genre: rubrics readable in advance, quote-anchored verdicts, a revise loop that edits rather
+  than restarts, verbatim drills, evidence honesty enforced on disk. It also caught the tutor
+  FABRICATING research provenance under a frontier question (a route-level prompt defect made
+  the honest path unavailable) — fixed so degradation is now honest by construction, verified
+  against the SDK transcript. Net: upgraded on breadth, downgraded on "honest by default",
+  landing at honest-by-construction. Latency observed: 26-64s essay grading, 33-36s staging.
