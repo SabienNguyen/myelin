@@ -44,7 +44,10 @@ const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: 'inherit' 
 
 // Its own deps first — the copy below includes node_modules, because the shipped server imports
 // @modelcontextprotocol/sdk and gray-matter at runtime and nothing hoists them for it.
-if (!existsSync(join(repo, 'node_modules'))) run('npm', ['install'], repo);
+// npm ci, not npm install: install is allowed to REWRITE the checkout's package-lock.json (npm
+// versions disagree about optional-dep metadata like `libc`), and a packaging script must never
+// dirty the sibling repo it reads from. ci installs exactly the lockfile and writes nothing.
+if (!existsSync(join(repo, 'node_modules'))) run('npm', ['ci'], repo);
 run('npm', ['run', 'build'], repo);
 
 const entry = join(repo, 'dist', 'server.js');
