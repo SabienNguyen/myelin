@@ -154,6 +154,18 @@ export function StructuredCheck({ args, result, addResult }: {
           )}
         </div>
       )}
+      {/* Unit glyphs, one tap: · ² ³ ⁻ are the whole difference between typing physics and
+          fighting a keyboard (audit 38's top friction). Insert-at-end is enough — these come at
+          the end of a unit expression in practice. ASCII forms still grade identically. */}
+      {(checker.kind === 'unit' || (checker.kind === 'numeric' && checker.unit)) && (
+        <p className="unit-glyphs" aria-label="insert a unit symbol">
+          {['·', '²', '³', '⁻¹'].map((glyph) => (
+            <button key={glyph} type="button" onClick={() => setSingle((s) => s + glyph)}>
+              {glyph}
+            </button>
+          ))}
+        </p>
+      )}
       {/* Notes get their own preview: standard notation capitalises note letters, and grading
           accepts "c e g" silently — teach the convention without penalising it (audit 39's
           recommendation). Shown only when the canonical spelling differs from what was typed. */}
