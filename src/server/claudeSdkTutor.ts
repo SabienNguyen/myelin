@@ -181,6 +181,19 @@ export function createClaudeSdkTutorSession(
       'Interactive learning blocks (quick_check, quiz, math_scratchpad, writing_draft, code_exercise) '
         + 'are presented via the blocks tools. After calling one, END YOUR TURN immediately — the '
         + "student's answer arrives as the next message. Never answer a block yourself.",
+      // The base prompt's research rules name the ai-sdk route's tools, none of which exist here.
+      // Without this correction a frontier question with no research tools in sight has no honest
+      // script to follow — and a live sitting caught the model inventing one: it answered "what's
+      // the newest research on spaced repetition?" from recall while claiming "I read the FSRS
+      // wiki page and the LECTOR paper directly", with zero tool calls in the turn.
+      'On this route the research tools named above (`find_recent_papers`, `find_canonical_sources`, '
+        + '`web_search`, `read_url`, `paper_references`, `ingest_url`) DO NOT EXIST. Your only '
+        + 'research tools are WebSearch and WebFetch, and only on turns where the harness grants '
+        + 'them (it says so in a HARNESS gap line). When the student asks what is new, recent, or '
+        + 'frontier and you cannot call WebSearch this turn — or the call fails — say plainly that '
+        + 'you could not reach the live indices, and label anything you offer instead as unverified '
+        + 'model memory with its training cutoff. NEVER claim to have read, fetched, or checked a '
+        + 'source unless you actually called WebFetch or WebSearch on it this session.',
     ].join('\n\n');
   }
 

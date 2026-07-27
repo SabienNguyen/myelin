@@ -64,6 +64,12 @@ export async function claudeSdkGenerate(opts: ClaudeSdkGenerateOpts): Promise<Cl
   };
   if (opts.system !== undefined) options.systemPrompt = opts.system;
   if (opts.maxTurns !== undefined) options.maxTurns = opts.maxTurns;
+  // A one-turn query cannot survive a tool call — the result would need a second assistant turn,
+  // so the SDK terminates with error_max_turns instead. Every maxTurns:1 caller (graders, gap
+  // help) wants pure text, yet under bypassPermissions the model sees the full default toolset
+  // and occasionally reaches for it, killing the grade. Seen live: a rubric judge burned its only
+  // turn on a tool call and the learner's draft lost its verdict. Strip built-ins up front.
+  if (opts.maxTurns === 1) options.tools = [];
   if (opts.allowedTools !== undefined) options.allowedTools = opts.allowedTools;
   if (opts.mcp) {
     options.mcpServers = {

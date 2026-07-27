@@ -92,6 +92,13 @@ describe('turn 1 (fresh session)', () => {
     // turn-1 prompt carries the bootstrap ("SESSION CONTEXT") since there's no prior assistant turn
     expect(calls[0].prompt).toMatch(/SESSION CONTEXT/);
     expect(calls[0].options.resume).toBeUndefined();
+
+    // The base prompt's research rules name ai-sdk tools this route does not have. The system
+    // prompt must correct that and give the no-research-tools case an honest script — a live
+    // sitting caught the model claiming to have "read" papers on a turn with zero tool calls.
+    expect(calls[0].options.systemPrompt).toMatch(/Your only research tools are WebSearch and WebFetch/);
+    expect(calls[0].options.systemPrompt).toMatch(/could not reach the live indices/);
+    expect(calls[0].options.systemPrompt).toMatch(/NEVER claim to have read, fetched, or checked a source/);
   }, 30_000);
 });
 

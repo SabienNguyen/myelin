@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
+import { escapeLooseDollars } from '../lib/panelBus.js';
 
 /**
  * Markdown and maths for a block's own prompt text.
@@ -33,7 +34,10 @@ export const BlockProse = memo(function BlockProse(
         ? { p: ({ children }) => <>{children}</> }
         : undefined}
     >
-      {text}
+      {/* Course-bank problems are drilled VERBATIM, and real exam text says things like "bought
+          for $12,000 is sold for $19,500" — which remark-math would typeset as one math span.
+          The same guard runs in chatPreprocess, so chat and block still agree on what $…$ means. */}
+      {escapeLooseDollars(text)}
     </Markdown>
   );
 });

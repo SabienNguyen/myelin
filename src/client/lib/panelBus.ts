@@ -36,6 +36,45 @@ export function mathDelims(md: string): string {
     .replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => `$${tex}$`);
 }
 
+/** remark-math treats ANY `$…$` pair as inline math, so verbatim prose with two currency amounts
+ * — "bought for $12,000 is sold for $19,500" (a banked exam problem, drilled word-for-word) —
+ * typeset as garbage: KaTeX ate "$12,000 is sold for $" and ran the words together. Pandoc hit
+ * the same ambiguity and settled adjacency rules we adopt here: a `$` only OPENS math when
+ * followed by a non-space, and only CLOSES it when preceded by a non-space and not followed by a
+ * digit. Every `$` that cannot take part in such a span is escaped to `\$` (CommonMark renders
+ * that as a literal dollar), which leaves real notation like `$C_1V_1=C_2V_2$` untouched. Code
+ * spans, fences, and `$$…$$` blocks pass through unmodified — an escape inside a code block
+ * would surface as a literal backslash. */
+export function escapeLooseDollars(md: string): string {
+  return md
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`|\$\$[\s\S]*?\$\$)/)
+    .map((seg, i) => (i % 2 ? seg : escapeLooseDollarsInText(seg)))
+    .join('');
+}
+
+function escapeLooseDollarsInText(text: string): string {
+  const out: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === '\\' && text[i + 1] === '$') { out.push('\\$'); i += 2; continue; }
+    if (text[i] !== '$') { out.push(text[i]); i += 1; continue; }
+    const next = text[i + 1];
+    if (next !== undefined && next !== '$' && !/\s/.test(next)) {
+      // Look for a valid closer before the paragraph ends — math never spans a blank line.
+      let closer = -1;
+      for (let j = i + 2; j < text.length && !(text[j] === '\n' && text[j - 1] === '\n'); j += 1) {
+        if (text[j] !== '$' || text[j - 1] === '\\') continue;
+        const after = text[j + 1];
+        if (!/\s/.test(text[j - 1]) && !(after !== undefined && /\d/.test(after))) { closer = j; break; }
+      }
+      if (closer >= 0) { out.push(text.slice(i, closer + 1)); i = closer + 1; continue; }
+    }
+    out.push('\\$');
+    i += 1;
+  }
+  return out.join('');
+}
+
 /** Local models occasionally degenerate and echo their chat-template control tokens
  * (`<|im_start|>assistant`, `<|endoftext|>`, ...) as literal text instead of the harness ever
  * seeing them as structure — server-side stop tokens are the root fix, but already-saved threads
@@ -58,5 +97,7 @@ export function scrubModelArtifacts(md: string): string {
     .trim();
 }
 
+// escapeLooseDollars runs BEFORE mathDelims: it must only judge dollars the model (or a banked
+// problem) wrote as `$`, never the `$…$` pairs mathDelims itself mints from `\(…\)`.
 export const chatPreprocess = (md: string): string =>
-  mathDelims(wikiPreprocess(scrubModelArtifacts(md)));
+  mathDelims(escapeLooseDollars(wikiPreprocess(scrubModelArtifacts(md))));

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { panelBus, wikiPreprocess, scrubModelArtifacts, chatPreprocess } from '../../src/client/lib/panelBus.js';
+import { panelBus, wikiPreprocess, scrubModelArtifacts, chatPreprocess, escapeLooseDollars } from '../../src/client/lib/panelBus.js';
 
 describe('panelBus', () => {
   it('notifies subscribers of page opens', () => {
@@ -59,6 +59,41 @@ describe('scrubModelArtifacts', () => {
 
   it('does not mangle math delimiters or plain text with no artifacts', () => {
     expect(scrubModelArtifacts('\\(x^2\\) and normal text')).toBe('\\(x^2\\) and normal text');
+  });
+});
+
+describe('escapeLooseDollars', () => {
+  it('escapes the exact banked-problem currency pair that KaTeX ate in the live sitting', () => {
+    expect(escapeLooseDollars('An asset bought for $12,000 is sold for $19,500 after 14 months.'))
+      .toBe('An asset bought for \\$12,000 is sold for \\$19,500 after 14 months.');
+  });
+
+  it('escapes a run of currency amounts none of which can close a math span', () => {
+    expect(escapeLooseDollars('income of $58,000. Using brackets of 10% up to $11,000, 12% up to $44,725'))
+      .toBe('income of \\$58,000. Using brackets of 10% up to \\$11,000, 12% up to \\$44,725');
+  });
+
+  it('keeps real inline math untouched', () => {
+    expect(escapeLooseDollars('the formula $C_1V_1 = C_2V_2$ requires molarity'))
+      .toBe('the formula $C_1V_1 = C_2V_2$ requires molarity');
+  });
+
+  it('escapes a lone trailing dollar and a postfix dollar', () => {
+    expect(escapeLooseDollars('costs 50$ plus $5.')).toBe('costs 50\\$ plus \\$5.');
+  });
+
+  it('will not close a span on a dollar that is followed by a digit', () => {
+    // Pandoc's digit rule: the "$" before 19 could otherwise close the span opened before 12.
+    expect(escapeLooseDollars('$12,000 and $19,500')).toBe('\\$12,000 and \\$19,500');
+  });
+
+  it('leaves code spans, fences and display math alone', () => {
+    const md = 'run `echo $HOME` and\n```sh\n$PATH is $set\n```\nand $$a b$$ stays';
+    expect(escapeLooseDollars(md)).toBe(md);
+  });
+
+  it('passes already-escaped dollars through unchanged', () => {
+    expect(escapeLooseDollars('literal \\$5 stays')).toBe('literal \\$5 stays');
   });
 });
 

@@ -62,6 +62,19 @@ describe('claudeSdkGenerate', () => {
     expect(call.options.maxTurns).toBe(3);
     expect(call.options.permissionMode).toBe('bypassPermissions');
     expect(call.options.allowDangerouslySkipPermissions).toBe(true);
+    // maxTurns 3 leaves room to consume a tool result, so built-ins stay available.
+    expect(call.options.tools).toBeUndefined();
+  });
+
+  it('strips built-in tools on a one-turn query, where any tool call is a guaranteed error_max_turns', async () => {
+    queryMock.mockReturnValue(messages([
+      { type: 'result', subtype: 'success', result: 'OK', is_error: false },
+    ]));
+
+    await claudeSdkGenerate({ model: 'sonnet', prompt: 'judge this rubric', maxTurns: 1 });
+
+    const call = queryMock.mock.calls[0][0] as any;
+    expect(call.options.tools).toEqual([]);
   });
 
   it('wires mcp.loreweaver into options.mcpServers as a stdio server, and allowedTools through', async () => {
