@@ -419,3 +419,10 @@ Written after the sprint that followed the original verdict; each line names its
   missing page, the tutor wrote the page itself, retried the record successfully, and flagged
   the page unverified because it came from knowledge rather than read sources. The bounce →
   write → record → honest-provenance sequence, unprompted, under a live model.
+- **The provenance loop closed: unverified → researched → solid.** Asked to source its own
+  knowledge-only quantization page, the freeform tutor read against the actual papers and
+  upgraded the page with per-claim citations — LLM.int8()'s operational outlier definition and
+  the 6.7B phase transition, GPTQ's Hessian-based error compensation, AWQ's activation-salience
+  rescaling identity — and reported that the outlier-mechanism framing survived contact with all
+  three. A page that entered the vault flagged unverified left it solid with four sources: the
+  full honesty lifecycle (teach → flag → research → verify → upgrade) observed end to end.
