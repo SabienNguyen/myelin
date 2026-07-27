@@ -41,14 +41,21 @@ export function needsApiKey(cfg: HarnessConfig): string[] {
  * deliberately narrower than "is anything imperfect" — a missing Ollama or a missing gap sidecar
  * costs a feature, while missing authorisation costs everything.
  */
-export function buildSetupRoutes(cfg: HarnessConfig) {
+export function buildSetupRoutes(
+  cfg: HarnessConfig,
+  // Injectable seams for tests: the real subscriptionStatus shells out to the `claude` CLI and
+  // the real probe hits api.anthropic.com — neither belongs in a unit test of ROUTE behavior,
+  // and this file's route behavior is exactly where the stranded-signin bug lived.
+  deps: { subscription?: typeof subscriptionStatus; probeFetch?: typeof fetch } = {},
+) {
   const app = new Hono();
+  const subStatus = deps.subscription ?? subscriptionStatus;
 
   const state = async () => {
     const roles = needsApiKey(cfg);
     const fromEnv = Boolean(process.env.ANTHROPIC_API_KEY);
     const saved = Boolean(readCredentials().anthropicApiKey);
-    const subscription = await subscriptionStatus();
+    const subscription = await subStatus();
     const route = readRoute();
     // The subscription route needs no key, so a config already on `claude-sdk:` everywhere is ready.
     // A scripted model (LW_MOCK_MODEL, the e2e hook) needs no authorisation at all — every model
@@ -77,7 +84,7 @@ export function buildSetupRoutes(cfg: HarnessConfig) {
 
   /** Sign in with the Claude subscription already on this machine — no key, no paste, one click. */
   app.put('/api/setup/subscription', async (c) => {
-    const status = await subscriptionStatus();
+    const status = await subStatus();
     if (!status.cliFound) {
       return c.json({
         error: 'No `claude` command found on this machine. Install Claude Code first, or use an API key.',
@@ -113,7 +120,7 @@ export function buildSetupRoutes(cfg: HarnessConfig) {
     // Probe before saving. A wrong key that gets stored looks exactly like a working one until the
     // first lesson fails, and at that point the error surfaces as a lost turn rather than as
     // "your key is wrong" — which is the single worst place to learn it.
-    const probe = await fetch('https://api.anthropic.com/v1/models?limit=1', {
+    const probe = await (deps.probeFetch ?? fetch)('https://api.anthropic.com/v1/models?limit=1', {
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
       signal: AbortSignal.timeout(15_000),
     }).catch((e: any) => ({ ok: false, status: 0, statusText: String(e?.message ?? e) } as Response));
