@@ -149,3 +149,11 @@ Written after the sprint that followed the original verdict; each line names its
   the login, keeping the exact model), and the suite's last unnamed transient failure was
   root-caused to a test-double fidelity gap in codeexercise (passive-effect mount report
   clobbering a typed edit) — fixed, 8/8 consecutive green.
+- **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
+  the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
+  first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored
+  against the built-in sandbox: 4 passed, 0 skipped, ~29s — and the restoration itself found a
+  real bug (the first-run gate blocked every scripted run; a scripted model needs no
+  authorisation). Both repos now run their suites in GitHub Actions on every push — the harness
+  workflow gates on a LOREWEAVER_CI_TOKEN secret (documented in the workflow) because the
+  integration tests spawn the real loreweaver server from a second private repo.
