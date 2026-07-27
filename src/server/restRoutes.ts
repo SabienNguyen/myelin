@@ -308,7 +308,13 @@ export function buildRestRoutes(
     const extra: Record<string, string> = { tutor: cfg.models.tutor.model };
     if (anki) {
       const up = await anki.isUp();
-      const backlog = !up && backlogDays(cfg.vault) > cfg.schedule.ankiBacklogNudgeDays;
+      // Number.isFinite: backlogDays is Infinity when Anki has NEVER synced — which is every
+      // fresh install (the client is constructed unconditionally). Infinity > nudge-days read
+      // as 'backlog', so a brand-new machine with no Anki at all wore an amber "Anki has a
+      // review backlog" badge about work that never existed. No sync yet = nothing to have a
+      // backlog of = 'down' (which the topbar deliberately hides).
+      const days = backlogDays(cfg.vault);
+      const backlog = !up && Number.isFinite(days) && days > cfg.schedule.ankiBacklogNudgeDays;
       extra.anki = up ? 'up' : backlog ? 'backlog' : 'down';
     }
     // Unconditional: with no external sidecar configured, isGapUp reports the built-in

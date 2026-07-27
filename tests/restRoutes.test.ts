@@ -398,3 +398,33 @@ describe('GET /api/due and /api/session-plan', () => {
     expect(plan.map((p: any) => p.slug)).toEqual(['chosen-topic']);
   });
 });
+
+describe('GET /api/status — the anki badge tells the truth', () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir } = require('node:os') as typeof import('node:os');
+  const { join } = require('node:path') as typeof import('node:path');
+  const lw = { listSlugs: async () => [], call: async () => ({}) } as any;
+  const ankiDown = { isUp: async () => false } as any;
+  let vault: string;
+  beforeEach(() => { vault = mkdtempSync(join(tmpdir(), 'lwh-status-')); });
+  afterEach(() => { rmSync(vault, { recursive: true, force: true }); });
+  const cfgWith = (v: string) => ({
+    student: 'kid', vault: v,
+    models: { tutor: { model: 'm' } }, schedule: { ankiBacklogNudgeDays: 3 },
+  } as unknown as HarnessConfig);
+
+  it('never-synced is DOWN, not backlog — a fresh install has no backlog to nudge about', async () => {
+    // backlogDays() is Infinity with no sync cursor, and Infinity > nudgeDays wore the amber
+    // "Anki has a review backlog" badge on every brand-new machine (cold-start audit).
+    const res = await buildRestRoutes(lw, cfgWith(vault), {}, ankiDown).request('/api/status');
+    expect((await res.json()).anki).toBe('down');
+  });
+
+  it('a genuinely stale sync cursor still reports backlog', async () => {
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    writeFileSync(join(vault, '.harness', 'anki-map.json'),
+      JSON.stringify({ _cursor: Date.now() - 10 * 86_400_000 }));
+    const res = await buildRestRoutes(lw, cfgWith(vault), {}, ankiDown).request('/api/status');
+    expect((await res.json()).anki).toBe('backlog');
+  });
+});

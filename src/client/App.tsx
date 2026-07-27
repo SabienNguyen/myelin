@@ -99,7 +99,15 @@ export function App() {
             ref={fileInput} type="file" accept=".pdf,.epub,.docx" hidden onChange={handleFile}
           />
           {ingestStatus && <span className="ingest-status" role="status">{ingestStatus}</span>}
-          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+          {/* Named: an unlabeled combobox announces as "combobox: learn" — four one-word options
+              with no hint of what any of them switches (the audit's keyboard pass caught it). */}
+          <select
+            value={mode}
+            aria-label="Tutor mode"
+            title={'Tutor mode — learn: teach the next lesson · review: re-prove due pages first · '
+              + 'quiz: open with a quiz · freeform: follow your lead (and build new pages)'}
+            onChange={(e) => setMode(e.target.value)}
+          >
             {['learn', 'review', 'quiz', 'freeform'].map((m) => <option key={m}>{m}</option>)}
           </select>
         </header>
