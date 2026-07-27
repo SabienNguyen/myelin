@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime } from '@assistant-ui/react';
+import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useThread } from '@assistant-ui/react';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 
@@ -125,9 +125,13 @@ function SessionPlanCta() {
 }
 
 export function Thread() {
+  // The viewport's autoScroll pins to the bottom on mount — correct for a conversation, wrong for
+  // the empty state: in a short window the pitch overflows and a brand-new thread opened with
+  // "What do you want to learn?" scrolled out of view (caught in an audit's 900×800 screenshot).
+  const empty = useThread((s) => s.messages.length === 0);
   return (
     <ThreadPrimitive.Root className="thread">
-      <ThreadPrimitive.Viewport className="thread-viewport">
+      <ThreadPrimitive.Viewport className="thread-viewport" autoScroll={!empty}>
         {/* First run showed a blank half-screen and a placeholder — the single most important
             moment in the app said nothing about what it is or what to type. The suggestions are
             deliberately across different SUBJECTS: the thing most worth conveying in the first

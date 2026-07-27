@@ -485,7 +485,7 @@ export function ingestRepo(
               generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
             })))(name, repoPath);
           const summary = mined.pending.length > 0
-            ? `${mined.pending.length} exercise(s) waiting for your approval in the Library`
+            ? `${mined.pending.length} exercise${mined.pending.length === 1 ? '' : 's'} waiting for your approval in the Library`
             : `no exercises authored (${mined.qualified}/${mined.candidates} candidate functions qualified)`;
           // mined.note names a skipped language (e.g. python3 missing) — without it, a Python
           // repo's "0 candidates" reads as a miner fault instead of a missing runtime.
