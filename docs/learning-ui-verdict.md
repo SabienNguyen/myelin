@@ -263,3 +263,10 @@ Written after the sprint that followed the original verdict; each line names its
   member), and a 900px dark-mode pass over the quiz done card and history dropdown: single
   column stacks correctly, the menu anchors inside the viewport, and no horizontal scroll with
   or without the menu open.
+- **Mode selector mid-session — investigated, no bug.** Runtime is keyed by threadId only while
+  `mode` rides in on each render's transport, which smelled like a stale-closure risk: switch the
+  selector, keep sending the old mode forever. Sniffed the wire in a live drive — both a
+  pre-first-message switch (learn→review) and a mid-conversation switch (review→quiz) reached
+  /api/chat with the freshly selected mode. useChatRuntime honors the per-render transport;
+  nothing to fix. The history drive is also now a permanent e2e spec (sixth spec, 7/7 tests
+  green) with threads seeded straight into the session store so no scripted turn is consumed.
