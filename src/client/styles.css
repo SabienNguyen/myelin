@@ -1803,7 +1803,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 .mermaid-fallback-note { color: var(--text-muted); font-style: italic; }
 
-/* Rubric verdicts on the graded writing card (WritingDraft.tsx). */
+/* Rubric verdicts on the graded writing card (WritingDraft.tsx). The title reuses
+   .rubric-upfront-title; the hairline separates the contract's verdict from the marginalia above. */
+.rubric-results-title { margin-top: 0.6rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
 .rubric-results { margin: 0.4rem 0; padding-left: 0; list-style: none; }
 .rubric-results li { margin: 0.15rem 0; font-size: 0.9rem; }
 .rubric-results em { color: var(--text-muted); }

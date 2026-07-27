@@ -71,7 +71,11 @@ export function WritingDraftInner({ args, result, addResult }: {
           </ol>
         )}
         {grading?.rubric && (
-          <ul className="rubric-results">
+          <>
+            {/* Same label as the pre-writing card, so the verdict visibly answers the contract —
+                without it the ✓/✗ list ran straight on from the footnotes as one more marginalia. */}
+            <p className="rubric-upfront-title rubric-results-title">Judged against:</p>
+            <ul className="rubric-results">
             {grading.rubric.map((r: any) => (
               <li key={r.criterion} className={r.pass ? 'rubric-pass' : 'rubric-fail'}>
                 <span className={r.pass ? 'mark-ok' : 'mark-bad'}>{r.pass ? '✓' : '✗'}</span>{' '}
@@ -79,7 +83,8 @@ export function WritingDraftInner({ args, result, addResult }: {
                 {r.note && <em> — {r.note}</em>}
               </li>
             ))}
-          </ul>
+            </ul>
+          </>
         )}
         {grading?.annotations?.skillGrades && (
           <ul className="skill-grades">

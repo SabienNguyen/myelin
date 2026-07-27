@@ -528,20 +528,51 @@ export async function gradeBlockOutput(
     });
     const passed = results.filter((r: { pass: boolean }) => r.pass).length;
     const all = passed === results.length;
+    // The rubric decides the EVIDENCE; the annotations are the FEEDBACK. Until audit 40 this path
+    // returned bare pass/fail lines, so the one block whose point is prose feedback shipped none of
+    // it whenever a rubric was present — a learner told "gunpowder never engaged" with no marked-up
+    // sentence to anchor it. Best-effort: a rubric verdict that already landed must not be lost to
+    // a failed second grader call, so the miss is logged and named in the detail the tutor reads.
+    let annotations: WritingAnnotations | undefined;
+    let annMiss = '';
+    try {
+      annotations = await annotateDraft(input.prompt, result.draft, cfg, deps);
+    } catch (e) {
+      console.error(`writing_draft: rubric judged, but annotation grading failed: ${(e as Error).message}`);
+      annMiss = '; annotations unavailable';
+    }
     return {
       verdict: 'reviewed', source: 'model',
-      detail: `rubric: ${passed}/${results.length} criteria met`,
+      detail: `rubric: ${passed}/${results.length} criteria met${annMiss}`,
       rubric: results,
+      ...(annotations ? { annotations } : {}),
       evidence: [ev(input.pageSlug, all ? 'rubric-passed' : 'struggled',
         `rubric (${passed}/${results.length}): ${input.rubric.join('; ')}`, 'model')],
     };
   }
 
-  // writing_draft — grader role, structured output
-  const draftPrompt = `Grade this student draft. Prompt: "${input.prompt}"\nDraft:\n${result.draft}\n`
+  // writing_draft without a rubric — annotations are the whole grade.
+  const ann = await annotateDraft(input.prompt, result.draft, cfg, deps);
+  const weak = Object.values(ann.skillGrades).filter((g) => g === 'weak').length;
+  return {
+    verdict: 'reviewed', source: 'model',
+    detail: `${ann.annotations.length} annotations, ${weak} weak skills`,
+    annotations: ann,
+    // The learner really did write something, so this is not a downgrade of what they did — it is
+    // an accurate label for how it was judged. Nothing but the grader model read this draft.
+    evidence: [ev(input.pageSlug, weak === 0 ? 'applied-correctly' : 'struggled',
+      `writing round ${input.round}: skills ${JSON.stringify(ann.skillGrades)}`, 'model')],
+  };
+}
+
+/** The annotation grader — marginalia on the draft plus per-skill grades. Shared by both
+ * writing_draft paths: without a rubric it IS the grade; with one it rides along as feedback. */
+async function annotateDraft(
+  prompt: string, draft: string, cfg: HarnessConfig, deps: GradingDeps,
+): Promise<WritingAnnotations> {
+  const draftPrompt = `Grade this student draft. Prompt: "${prompt}"\nDraft:\n${draft}\n`
     + `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`;
   const graderModelId = cfg.models.grader.model;
-  let ann: WritingAnnotations;
   if (isClaudeSdkModel(graderModelId)) {
     const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
     const { text } = await sdkGenerate({
@@ -554,28 +585,17 @@ export async function gradeBlockOutput(
       maxTurns: 1,
     });
     try {
-      ann = JSON.parse(text) as WritingAnnotations;
+      return JSON.parse(text) as WritingAnnotations;
     } catch (e) {
       throw new Error(`claude-sdk grader returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
     }
-  } else {
-    const { output } = await generateText({
-      model: modelFor('grader', cfg),
-      prompt: draftPrompt,
-      output: Output.object({ schema: annotationSchema }),
-    });
-    ann = output as WritingAnnotations;
   }
-  const weak = Object.values(ann.skillGrades).filter((g) => g === 'weak').length;
-  return {
-    verdict: 'reviewed', source: 'model',
-    detail: `${ann.annotations.length} annotations, ${weak} weak skills`,
-    annotations: ann,
-    // The learner really did write something, so this is not a downgrade of what they did — it is
-    // an accurate label for how it was judged. Nothing but the grader model read this draft.
-    evidence: [ev(input.pageSlug, weak === 0 ? 'applied-correctly' : 'struggled',
-      `writing round ${input.round}: skills ${JSON.stringify(ann.skillGrades)}`, 'model')],
-  };
+  const { output } = await generateText({
+    model: modelFor('grader', cfg),
+    prompt: draftPrompt,
+    output: Output.object({ schema: annotationSchema }),
+  });
+  return output as WritingAnnotations;
 }
 
 function latexParses(latex: string): boolean {

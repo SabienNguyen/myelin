@@ -300,6 +300,44 @@ describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {
       { draft: 'the cat sat' }, cfg, { sdkGenerate }))
       .rejects.toThrow(/invalid JSON/i);
   });
+
+  // Audit 40: a rubric'd draft used to return bare pass/fail lines — the annotation feedback
+  // (marked-up spans, skill grades) was silently skipped whenever a rubric was present.
+  const rubricInput = {
+    prompt: 'Argue it.', round: 1, pageSlug: 'writing-1',
+    rubric: ['thesis takes a side'],
+  };
+  const rubricJson = JSON.stringify({
+    criteria: [{ criterion: 'thesis takes a side', pass: true, note: 'clear side' }],
+  });
+  const annJson = JSON.stringify({
+    annotations: [{ span: 'the cat sat', category: 'strong', note: 'arguable' }],
+    skillGrades: { claim: 'good' },
+  });
+
+  it("a rubric'd draft carries annotation feedback alongside the rubric verdict", async () => {
+    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> =>
+      ({ text: /rubric criterion/i.test(prompt) ? rubricJson : annJson, toolCallNames: [] });
+    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
+    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { sdkGenerate });
+    expect(g.rubric).toEqual([{ criterion: 'thesis takes a side', pass: true, note: 'clear side' }]);
+    expect(g.annotations?.annotations[0].span).toBe('the cat sat');
+    expect(g.annotations?.skillGrades).toEqual({ claim: 'good' });
+    expect(g.evidence.map((e) => e.kind)).toEqual(['rubric-passed']);
+  });
+
+  it('a failed annotation call does not lose the rubric verdict, and says so', async () => {
+    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
+      if (/rubric criterion/i.test(prompt)) return { text: rubricJson, toolCallNames: [] };
+      throw new Error('grader down');
+    };
+    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
+    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { sdkGenerate });
+    expect(g.rubric?.[0].pass).toBe(true);
+    expect(g.annotations).toBeUndefined();
+    expect(g.detail).toContain('annotations unavailable');
+    expect(g.evidence.map((e) => e.kind)).toEqual(['rubric-passed']);
+  });
 });
 
 describe('quick_check phrasing tolerance (audit: correct answer graded wrong on wording)', () => {
