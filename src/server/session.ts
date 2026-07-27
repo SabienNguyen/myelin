@@ -4,6 +4,7 @@ import {
 } from 'ai';
 import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
+import { UI_TOOLS } from '../shared/uiTools.js';
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
@@ -123,10 +124,20 @@ export function availableBlocks(): BlockToolName[] {
  *  (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats
  *  tool()'s generic overload inference, which otherwise falls back to Tool<never, never, ...>.) */
 export function blockTools(): ToolSet {
-  return Object.fromEntries(availableBlocks().map((name) => [name, tool({
+  const blocks = Object.fromEntries(availableBlocks().map((name) => [name, tool({
     description: `Present a ${name} block to the student and wait for their work.`,
     inputSchema: BLOCK_TOOLS[name].input as z.ZodTypeAny,
   })]));
+  // UI tools ride the same frontend transport but are navigation, not graded work — the client
+  // resolves and answers them itself (src/shared/uiTools.ts; grading never sees them because
+  // pendingBlockOutputs filters on BLOCK_TOOL_NAMES).
+  blocks.open_source = tool({
+    description: 'Open an ingested source (book chapter, paper, notes) in the reading surface '
+      + 'beside the conversation — BRING the student to the artifact instead of describing it. '
+      + 'Pass the source title as the Library shows it. Then direct their reading and probe on it.',
+    inputSchema: UI_TOOLS.open_source.input as z.ZodTypeAny,
+  });
+  return blocks;
 }
 
 /** Words that carry no topic, so a page whose body happens to contain them is not evidence that

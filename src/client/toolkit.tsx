@@ -1,5 +1,7 @@
 import { defineToolkit } from '@assistant-ui/react';
 import { BLOCK_TOOLS } from '../shared/blocks.js';
+import { UI_TOOLS } from '../shared/uiTools.js';
+import { OpenSource } from './components/blocks/OpenSource.js';
 import { QuickCheck } from './components/blocks/QuickCheck.js';
 import { Quiz } from './components/blocks/Quiz.js';
 import { StructuredCheck } from './components/blocks/StructuredCheck.js';
@@ -32,4 +34,14 @@ export const toolkit = defineToolkit({
   code_exercise: human('code_exercise', 'Programming-pattern code exercise (the Gap ladder)', CodeExercise),
   // The picture-subject applied block: label regions of a tutor-drawn SVG, graded mechanically.
   label_diagram: human('label_diagram', 'Label regions of a diagram', LabelDiagram),
+  // UI tool, not a block: navigation with a receipt, never graded (src/shared/uiTools.ts).
+  open_source: {
+    type: 'human' as const,
+    description: 'Open an ingested source in the reader',
+    parameters: UI_TOOLS.open_source.input,
+    render: ({ args, result, addResult, isError }: any) =>
+      isError
+        ? <span className="tool-note failed">✗ source could not be opened</span>
+        : <OpenSource args={args} result={result} addResult={addResult} />,
+  },
 });
