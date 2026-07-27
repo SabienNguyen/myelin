@@ -90,3 +90,25 @@ that is where the live verification actually happened.
 3. **Repo-URL happy-path e2e** — closes the last undriven branch of the app's single entry point.
 4. **Revise-round-2** — the cheapest change that adds a learning loop rather than verifying one.
 5. **SQL runtime** — one file in the exec family serves the last fully-unserved practical persona.
+
+## Addendum — the unproven claims, revisited
+
+Written after the sprint that followed the original verdict; each line names its evidence class.
+
+- **Pedagogy with a real tutor model — now verified.** A live sitting ran on the subscription
+  route (no mock): the tutor read the decayed state, interleaved on purpose, treated a wrong
+  answer as diagnosis, recorded and resolved a misconception by demonstration, and drilled a
+  banked problem verbatim. Judged "genuinely good" by a demanding review; three real defects
+  found in the process were fixed (mechanically asserted in a live drive).
+- **Agent-SDK route course tools + cache invalidation — shipped and verified** (live drive +
+  unit tests). **Repo-URL happy path — driven end to end** through the single Add material
+  control. **SQL runtime — shipped** with per-case fixtures and honest row diffs (unit-tested,
+  sqlite3 CLI verified present).
+- **Screen-reader announcements — tree-level verified**: one shared live-region verdict pattern
+  across all seven blocks, the math field named after its problem, marks with accessible names.
+  What tree probes cannot prove: actual speech output of a specific screen reader (needs NVDA/
+  VoiceOver — unverified, said so).
+- **Still unverified or parked**: the CUDA runtime against a real nvcc (no toolkit here),
+  speaking practice (needs audio-capable models), a drawable design input (rubric presets
+  shipped as the interim), and long-horizon pedagogy (a semester, not a sitting — no audit can
+  compress that).
