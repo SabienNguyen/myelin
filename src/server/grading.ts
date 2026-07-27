@@ -505,21 +505,29 @@ export async function gradeBlockOutput(
       criteria: z.array(z.object({ criterion: z.string(), pass: z.boolean(), note: z.string() })),
     });
     const graderId = cfg.models.grader.model;
-    let judged: { criteria: { criterion: string; pass: boolean; note: string }[] };
-    if (isClaudeSdkModel(graderId)) {
-      const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-      const { text } = await sdkGenerate({
-        model: stripClaudeSdkPrefix(graderId),
-        prompt: `${rubricPrompt}\n\nRespond with ONLY valid JSON: {"criteria": [{"criterion": <string>, "pass": <boolean>, "note": <string>}]}`,
-        maxTurns: 1,
-      });
-      judged = JSON.parse(text);
-    } else {
+    const judgeRubric = async (): Promise<{ criteria: { criterion: string; pass: boolean; note: string }[] }> => {
+      if (isClaudeSdkModel(graderId)) {
+        const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
+        const { text } = await sdkGenerate({
+          model: stripClaudeSdkPrefix(graderId),
+          prompt: `${rubricPrompt}\n\nRespond with ONLY valid JSON: {"criteria": [{"criterion": <string>, "pass": <boolean>, "note": <string>}]}`,
+          maxTurns: 1,
+        });
+        return JSON.parse(text);
+      }
       const { output } = await generateText({
         model: modelFor('grader', cfg), prompt: rubricPrompt, output: Output.object({ schema: rubricSchema }),
       });
-      judged = output as typeof judged;
-    }
+      return output as { criteria: { criterion: string; pass: boolean; note: string }[] };
+    };
+    // The rubric judge and the annotation grader are independent reads of the same draft — run
+    // them CONCURRENTLY. In series they doubled every essay's grading latency (two model
+    // round-trips back to back), which is the single slowest interaction in the app.
+    const [judgedRes, annRes] = await Promise.allSettled([
+      judgeRubric(), annotateDraft(input.prompt, result.draft, cfg, deps),
+    ]);
+    if (judgedRes.status === 'rejected') throw judgedRes.reason;
+    const judged = judgedRes.value;
     // The MODEL's list is advisory; the RUBRIC's list is authoritative. A grader that returned
     // fewer criteria than were asked must not pass the draft by omission.
     const byName = new Map(judged.criteria.map((c) => [c.criterion.trim().toLowerCase(), c]));
@@ -538,10 +546,10 @@ export async function gradeBlockOutput(
     // a failed second grader call, so the miss is logged and named in the detail the tutor reads.
     let annotations: WritingAnnotations | undefined;
     let annMiss = '';
-    try {
-      annotations = await annotateDraft(input.prompt, result.draft, cfg, deps);
-    } catch (e) {
-      console.error(`writing_draft: rubric judged, but annotation grading failed: ${(e as Error).message}`);
+    if (annRes.status === 'fulfilled') {
+      annotations = annRes.value;
+    } else {
+      console.error(`writing_draft: rubric judged, but annotation grading failed: ${(annRes.reason as Error)?.message ?? annRes.reason}`);
       annMiss = '; annotations unavailable';
     }
     return {
