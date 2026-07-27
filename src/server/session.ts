@@ -90,6 +90,26 @@ export function sanitizeToolArgs(args: any, toolName: string, student: string, k
 /** Wrap MCP tools so every execute() sees sanitized args — the model cannot send a wrong
  * student id, a null optional field, or (where repairable) a hallucinated slug. Failed calls
  * are logged server-side so journalctl shows WHY a tool chip went ⚠. */
+/** The prompt's slug grounding, capped for scale.
+ *
+ * Small vaults inline every slug — the original behavior, and the right one: small models invent
+ * slugs like "derivatives-introduction" unless shown the real ids. But the list rode EVERY turn,
+ * and at 2,000 pages that is thousands of tokens of pure slug text per turn. Past the cap, the
+ * turn inlines only the slugs it can actually act on (this sitting's lessons, reviews, goal and
+ * course pages) and says how to reach the rest — which stays honest because repairSlug
+ * (sanitizeToolArgs) still auto-corrects near-miss slugs against the FULL list server-side,
+ * where it costs nothing. */
+export const SLUG_LIST_CAP = 150;
+export function slugListLine(slugs: string[], relevant: string[] = []): string {
+  if (slugs.length <= SLUG_LIST_CAP) {
+    return `Vault pages (the ONLY valid slugs — use them verbatim): ${slugs.join(', ')}`;
+  }
+  const shown = [...new Set(relevant.filter((r) => slugs.includes(r)))];
+  return `This sitting's pages (valid slugs, verbatim): ${shown.join(', ') || '(none yet)'} — `
+    + `plus ${slugs.length - shown.length} more in the vault. Find others with the search tool; `
+    + 'a near-miss slug is auto-corrected to the nearest real page.';
+}
+
 function guardMcpTools(tools: ToolSet, student: string, knownSlugs: string[]): ToolSet {
   return Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, {
     ...t,
@@ -473,8 +493,14 @@ export function createTutorSession(
       courseBank: readBank(cfg.vault),
     });
     // Ground the model in the REAL page ids — small models otherwise invent slugs like
-    // "derivatives-introduction" and every downstream slug-taking call fails.
-    return `${ctx}\nVault pages (the ONLY valid slugs — use them verbatim): ${slugs.join(', ')}`;
+    // "derivatives-introduction" and every downstream slug-taking call fails. Capped at scale:
+    // see slugListLine.
+    const relevant = [
+      ...lessons.map((l: any) => l.slug),
+      ...(goalCtx?.pages ?? []),
+      ...readBank(cfg.vault).map((p) => `course-${p.source}`),
+    ];
+    return `${ctx}\n${slugListLine(slugs, relevant)}`;
   }
 
   function turnError(e: unknown): string {

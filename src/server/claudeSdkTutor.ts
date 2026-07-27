@@ -14,7 +14,7 @@ import { gradeBlockOutput } from './grading.js';
 import { invalidateGraphCache } from './graphCache.js';
 import type { Loreweaver } from './mcp.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
-import { availableBlocks, sanitizeToolArgs, vaultGap, type VaultGap } from './session.js';
+import { availableBlocks, sanitizeToolArgs, slugListLine, vaultGap, type VaultGap } from './session.js';
 import { loadSdkSession, logGuardrail, saveSdkSession } from './sessionStore.js';
 
 /**
@@ -177,7 +177,11 @@ export function createClaudeSdkTutorSession(
       ankiLapses: recentLapses(cfg.vault),
       courseBank: readBank(cfg.vault),
     });
-    return `${ctx}\nVault pages (the ONLY valid slugs — use them verbatim): ${slugs.join(', ')}`;
+    const relevant = [
+      ...lessons.map((l: any) => l.slug),
+      ...readBank(cfg.vault).map((p) => `course-${p.source}`),
+    ];
+    return `${ctx}\n${slugListLine(slugs, relevant)}`;
   }
 
   function turnError(e: unknown): string {
