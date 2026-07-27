@@ -175,6 +175,12 @@ Written after the sprint that followed the original verdict; each line names its
   designed gap-based research grant; with this container's egress blocked, every failed fetch
   showed as an honest ✗ chip and the tutor said so and proceeded — "I'll let the probe stand on
   its own." A blank submission was graded as blank, not imagined. Zero turn errors.
+- **Review mode, live, with a genuinely decayed page.** Fixture: a practicing page 32 days past
+  its 21-day window. The Library badge showed 1 due; a real tutor in review mode opened
+  DIRECTLY on the decayed page (zero drift to the healthy one) and staged the full code
+  exercise with its predict gate — re-earning applied-correctly through the same mechanical
+  route that minted it, which is what "re-prove" means. Twelve seconds to staging, zero errors.
+  All four modes now hold their contracts under a live model.
 - **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
   the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
   first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored
