@@ -252,3 +252,9 @@ Written after the sprint that followed the original verdict; each line names its
   matches; the tutor's follow-up arrived by auto-resubmit. One nit chased and dismissed:
   a prompt's "x^2" renders literally only because the fixture omitted $…$ — BlockProse has
   rendered delimited math through KaTeX since the block-prose pass.
+- **Anki backlog badge — driven in both themes, no defect.** A sync cursor aged 5 days past the
+  3-day nudge window (with Anki unreachable) turns /api/status to 'backlog' and the topbar wears
+  the amber-dot "anki" badge — role=status with the full sentence as its accessible name, warn
+  color correctly darker in light theme and lighter in dark. The two honesty edges were already
+  unit-tested: a fresh install (never synced) hides the badge rather than flagging work that
+  never existed, and a genuinely stale cursor still flags.
