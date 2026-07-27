@@ -161,6 +161,15 @@ Written after the sprint that followed the original verdict; each line names its
   transcript's timestamps — fixed in the compile prompt; with anchored pages the tutor cites all
   the real stamps as a rewatch map, opens the source beside the conversation, and probes
   socratically instead of re-lecturing. Verified live end to end, zero page errors.
+- **A live tutor taught from a video transcript with deep-link stamps.** The newest surface got
+  its own sitting: a real Sonnet tutor, asked to teach the area-of-a-circle argument from the
+  ingested 3Blue1Brown transcript, opened the source beside the conversation in 20 seconds,
+  structured the lesson in its own frames, grounded each one in a VERBATIM transcript quote with
+  its timestamp, and closed by naming "[1:05] through [4:18]" as the stretch to rewatch — the
+  stamps in the reader are clickable deep links into the video at those seconds. Zero turn
+  errors; the learner's pending question upstream was left open ("no rush") rather than
+  bulldozed. This is the librarian principle end to end: tutor structures, artifact carries the
+  facts, every claim points back into the artifact.
 - **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
   the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
   first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored
