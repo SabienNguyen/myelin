@@ -38,22 +38,28 @@ literature search (the librarian rules), the source reader with select-to-ask, a
 open_source hand. The live-model sitting also ran: pedagogy judged genuinely good, three real
 defects fixed from it.
 
+From the original ranked backlog, since then: **tone/pacing** (the per-student teaching-style
+field, applied as a voice line in the tutor prompt), **citation chasing** (`paper_references`
+walks an ingested paper's own reference list into ingest offers), **system-design rubric
+presets** (five criteria including numbers-over-vibes; the drawable canvas half stays parked),
+**SR announcements** (shared live-region verdicts across all seven blocks, MathLive named from
+its problem, and a later axe-core sweep to zero violations), **cancelled-vs-rejected block copy**
+(schema-rejected says malformed; talked-past says the conversation moved on), and
+**criterion-to-span links + step-chain break detection** (quote-anchored rubric notes that
+highlight their evidence in the draft; the math grader names the first broken step).
+
+Beyond the original list: **YouTube lectures through Add material** — a video's own captions
+become a timestamped transcript (yt-dlp, no video download), compiled and readable like any
+paper, with a tutor rule to send the student to the moment (`[12:34]`) instead of re-lecturing.
+
 ## The backlog, ranked (remaining)
 
-1. **Tone/pacing setting** (7, 15) — one profile-level line in the tutor prompt ("high school",
-   "no jargon", "brisk expert"). Cheap; changes who can use the app comfortably.
-2. **Audio in / speaking practice** (10) — STT for pronunciation and conversation drills. Big;
+1. **Audio in / speaking practice** (10) — STT for pronunciation and conversation drills. Big;
    needs a model with audio; parked until the modality is cheap locally.
-3. **Citation chasing** (14) — a paper page's references become follow-up ingest offers (the
-   frontier/canonical search covers discovery; this covers depth).
-4. **System-design templates** (16) — rubric presets; a drawable diagram input remains the hard
-   half.
-5. **SR announcements for math/diagram** (20) — verify MathLive's aria output in-app; add
-   live-region verdicts on label_diagram; an accessibility-focused audit iteration.
-6. **Cancelled-vs-rejected block copy** — "could not be shown" is wrong for a block the learner
-   simply talked past (live-sitting observation).
-7. **Criterion-to-span links and step-chain break detection** — deeper feedback wiring, in that
-   order of value.
+2. **Drawable design canvas** (16, the hard half) — system-design practice currently judges a
+   written design against rubric presets; sketching the diagram itself has no input surface.
+3. **Whisper fallback for caption-less videos** — the video path is captions-only by design;
+   caption-less material gets an honest error today. Needs an audio download and an API key.
 
 ## What no persona asked for
 
