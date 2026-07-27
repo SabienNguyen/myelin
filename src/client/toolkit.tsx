@@ -1,3 +1,4 @@
+import { Component as ReactComponent, type ReactNode } from 'react';
 import { defineToolkit } from '@assistant-ui/react';
 import { BLOCK_TOOLS } from '../shared/blocks.js';
 import { UI_TOOLS } from '../shared/uiTools.js';
@@ -23,6 +24,32 @@ const errorNote = (name: string, result: any) => {
     : `— ${name.replace('_', ' ')} skipped; the conversation moved on`;
 };
 
+const malformedNote = (name: string) => (
+  <span className="tool-note failed" title={name}>
+    ✗ {name.replace('_', ' ')} could not be shown — the tutor sent it malformed
+  </span>
+);
+
+/** The LAST line of defence: a block component that throws while rendering must cost one card,
+ *  never the app. Before this existed, a math_scratchpad whose (SDK-rejected, still bridged)
+ *  args lacked problemLatex reached KaTeX as undefined and unmounted the entire React root
+ *  mid-lesson — a blank window, on the live video-transcript sitting. Schema validation below
+ *  catches the malformed-args class; this boundary catches whatever class is invented next. */
+class BlockBoundary extends ReactComponent<{ name: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  render() {
+    if (this.state.failed) {
+      return (
+        <span className="tool-note failed" title={this.props.name}>
+          ✗ {this.props.name.replace('_', ' ')} crashed while rendering — continuing without it
+        </span>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const human = (name: keyof typeof BLOCK_TOOLS, description: string, Component: any) => ({
   type: 'human' as const,
   description,
@@ -30,10 +57,20 @@ const human = (name: keyof typeof BLOCK_TOOLS, description: string, Component: a
   // isError: the rejection/cancellation reaches the renderer as `result`. Handing it to the
   // block used to produce a done-looking card claiming the learner answered "(blank)" — a
   // fabricated submission. Same honesty rule as ToolStatusChip's failed column.
-  render: ({ args, result, addResult, isError }: any) =>
-    isError
-      ? <span className="tool-note failed" title={name}>{errorNote(name, result)}</span>
-      : <Component args={args} result={result} addResult={addResult} />,
+  render: ({ args, result, addResult, isError }: any) => {
+    if (isError) return <span className="tool-note failed" title={name}>{errorNote(name, result)}</span>;
+    // The claude-sdk route bridges EVERY tool_use to the client, including ones the SDK's own
+    // validation then rejects (the model sees the rejection and retries; the client used to keep
+    // the rejected call as a live block). Re-validate here against the same schema the server
+    // uses — the parsed value also applies schema defaults, so components see canonical args.
+    const parsed = BLOCK_TOOLS[name].input.safeParse(args);
+    if (!parsed.success) return malformedNote(name);
+    return (
+      <BlockBoundary name={name}>
+        <Component args={parsed.data} result={result} addResult={addResult} />
+      </BlockBoundary>
+    );
+  },
 });
 
 export const toolkit = defineToolkit({

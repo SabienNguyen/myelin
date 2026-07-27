@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import { MathScratchpad, MathScratchpadInner } from '../../src/client/components/blocks/MathScratchpad.js';
+import { Latex, MathScratchpad, MathScratchpadInner } from '../../src/client/components/blocks/MathScratchpad.js';
 
 // Inject a plain-text stub for the MathLive field (jsdom can't run the web component).
 const TextInput = ({ onChange, value }: any) => (
@@ -10,6 +10,27 @@ const TextInput = ({ onChange, value }: any) => (
 
 const args = { problemLatex: 'x^2', stepMode: true, expectedLatex: '2x', variable: 'x', pageSlug: 'derivatives' };
 const type = (v: string) => fireEvent.change(screen.getByLabelText('math-input'), { target: { value: v } });
+
+describe('Latex — mixed prose and math', () => {
+  it('renders $-delimited segments as math and the rest as plain text', () => {
+    const { container } = render(<Latex tex={'A triangle has base $2\\pi R$ and height $R$.'} />);
+    // The prose words stay literal text (not KaTeX variable-soup)...
+    expect(container.textContent).toContain('A triangle has base ');
+    // ...and the delimited parts really went through KaTeX.
+    expect(container.querySelectorAll('.katex').length).toBe(2);
+    // No red error spans: nothing was fed to KaTeX that KaTeX cannot parse.
+    expect(container.querySelector('.katex-error')).toBeNull();
+  });
+
+  it('a pure-LaTeX string still renders whole as before', () => {
+    const { container } = render(<Latex tex={'\\frac{d}{dx}x^2'} />);
+    expect(container.querySelectorAll('.katex').length).toBe(1);
+  });
+
+  it('a non-string never throws (the crash that unmounted the app)', () => {
+    expect(() => render(<Latex tex={undefined as any} />)).not.toThrow();
+  });
+});
 
 describe('MathScratchpad', () => {
   afterEach(cleanup);

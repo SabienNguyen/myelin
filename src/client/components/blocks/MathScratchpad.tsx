@@ -7,7 +7,26 @@ import { StagePortal } from '../StagePortal.js';
 import { Verdict } from './Verdict.js';
 
 export function Latex({ tex }: { tex: string }) {
-  return <span dangerouslySetInnerHTML={{ __html: katex.renderToString(tex, { throwOnError: false }) }} />;
+  // String coercion, not trust: throwOnError:false only suppresses PARSE errors — a non-string
+  // (a malformed call's missing field) throws before parsing starts, and this throw once
+  // unmounted the whole app. The toolkit's schema gate should make that unreachable; this keeps
+  // the blast radius at one bad span if it ever isn't.
+  const s = typeof tex === 'string' ? tex : String(tex ?? '');
+  // problemLatex is DOCUMENTED as LaTeX, but live tutors also send prose with embedded $…$
+  // ("A triangle has base $2\pi R$ …") — feeding that whole sentence to KaTeX renders the words
+  // as italic variable-soup and the $ signs as red errors (seen on the video-transcript sitting).
+  // A $ split renders each segment in its honest mode: prose as text, delimited math as math.
+  if (s.includes('$')) {
+    const parts = s.split('$');
+    return (
+      <span>
+        {parts.map((part, i) => (i % 2 === 1
+          ? <span key={i} dangerouslySetInnerHTML={{ __html: katex.renderToString(part, { throwOnError: false }) }} />
+          : <span key={i}>{part}</span>))}
+      </span>
+    );
+  }
+  return <span dangerouslySetInnerHTML={{ __html: katex.renderToString(s, { throwOnError: false }) }} />;
 }
 
 /** LaTeX flattened to words for the field's accessible name. Not a speech engine — MathLive's own
