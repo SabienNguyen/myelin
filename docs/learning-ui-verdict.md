@@ -170,6 +170,11 @@ Written after the sprint that followed the original verdict; each line names its
   errors; the learner's pending question upstream was left open ("no rush") rather than
   bulldozed. This is the librarian principle end to end: tutor structures, artifact carries the
   facts, every claim points back into the artifact.
+- **Quiz mode, live.** A real tutor in quiz mode opened with a graded scenario question built
+  from the right page, exactly the mode's contract. The vault's stub page triggered the
+  designed gap-based research grant; with this container's egress blocked, every failed fetch
+  showed as an honest ✗ chip and the tutor said so and proceeded — "I'll let the probe stand on
+  its own." A blank submission was graded as blank, not imagined. Zero turn errors.
 - **The e2e suite runs again, anywhere.** It had rotted into 2 passing + 2 permanently skipped:
   the gap tests demanded an external repo with a systemd sidecar, and every spec predated the
   first-run gate, the predict-before-write gate, the focus rail, and page-edge links. Restored
