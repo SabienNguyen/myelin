@@ -354,6 +354,16 @@ describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {
     expect(g.evidence.map((e) => e.kind)).toEqual(['rubric-passed']);
   });
 
+  it('accepts grader JSON wrapped in a markdown fence — live sonnet does this despite the JSON-only instruction', async () => {
+    const fence = (s: string) => '```json\n' + s + '\n```';
+    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> =>
+      ({ text: fence(/rubric criterion/i.test(prompt) ? rubricJson : annJson), toolCallNames: [] });
+    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
+    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { sdkGenerate });
+    expect(g.rubric?.[0].pass).toBe(true); // a fenced rubric-judge reply must not lose the turn
+    expect(g.annotations?.skillGrades).toEqual({ claim: 'good' });
+  });
+
   it('a failed annotation call does not lose the rubric verdict, and says so', async () => {
     const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
       if (/rubric criterion/i.test(prompt)) return { text: rubricJson, toolCallNames: [] };

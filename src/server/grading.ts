@@ -13,6 +13,21 @@ export interface GradingDeps {
   sdkGenerate?: typeof claudeSdkGenerate;
 }
 
+/** The Agent SDK path has no Output.object, so its graders ask for JSON-only text — and the live
+ *  model still sometimes wraps the JSON in a markdown fence despite that instruction (a probe
+ *  lost an entire grade turn to the resulting JSON.parse throw). Unwrap one fence when present;
+ *  text that still fails to parse throws with the raw head attached so the failure stays
+ *  readable. */
+function parseSdkJson<T>(text: string, who: string): T {
+  const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
+  const body = fenced ? fenced[1] : text.trim();
+  try {
+    return JSON.parse(body) as T;
+  } catch (e) {
+    throw new Error(`${who} returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
+  }
+}
+
 // predictable: true makes functions like log()/sqrt() return NaN (not a Complex) outside
 // their real domain, so the NaN-equality short-circuit below actually fires — without it,
 // e.g. ln(x) at negative samples returns a Complex object and `ra - rb` silently yields NaN
@@ -543,7 +558,7 @@ export async function gradeBlockOutput(
           prompt: `${rubricPrompt}\n\nRespond with ONLY valid JSON: {"criteria": [{"criterion": <string>, "pass": <boolean>, "note": <string>}]}`,
           maxTurns: 1,
         });
-        return JSON.parse(text);
+        return parseSdkJson(text, 'claude-sdk rubric judge');
       }
       const { output } = await generateText({
         model: modelFor('grader', cfg), prompt: rubricPrompt, output: Output.object({ schema: rubricSchema }),
@@ -625,11 +640,7 @@ async function annotateDraft(
         + '{"claim": <"good"|"weak">, "concision": <"good"|"weak">, "specificity": <"good"|"weak">}}',
       maxTurns: 1,
     });
-    try {
-      return JSON.parse(text) as WritingAnnotations;
-    } catch (e) {
-      throw new Error(`claude-sdk grader returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
-    }
+    return parseSdkJson<WritingAnnotations>(text, 'claude-sdk grader');
   }
   const { output } = await generateText({
     model: modelFor('grader', cfg),
