@@ -334,10 +334,29 @@ export async function gradeBlockOutput(
     // garbled step hidden under a green final implied the whole derivation had been read. Naming it
     // both ways keeps the verdict honest about what the machine could and could not see.
     const stepNote = badStep >= 0 ? `; step ${badStep + 1} unparseable` : '';
+    // WHERE the derivation broke, not just that it did (audit 41's top recommendation): on a
+    // wrong final, walk adjacent parseable pairs (steps, then last step -> final) and name the
+    // first non-equivalent transition. Verdict TEXT only, never the grade — and only on a miss,
+    // because legitimate derivations contain non-equivalent lines (a differentiation step IS
+    // one) and flagging those under a green final would cry wolf.
+    let breakNote = '';
+    if (!finalOk && input.stepMode && Array.isArray(result.steps) && result.steps.length > 0) {
+      const vars = input.variables ?? input.variable;
+      const chain: string[] = [...result.steps.map((s: { latex: string }) => s.latex), result.finalLatex];
+      for (let i = 0; i < chain.length - 1; i++) {
+        if (!latexParses(chain[i]) || !latexParses(chain[i + 1])) continue;
+        if (!mathEquivalent(chain[i], chain[i + 1], vars)) {
+          breakNote = i + 1 === chain.length - 1
+            ? `; the work first breaks between the last step and the final answer`
+            : `; the work first breaks between steps ${i + 1} and ${i + 2}`;
+          break;
+        }
+      }
+    }
     return {
       verdict: finalOk ? 'correct' : 'incorrect',
       source: 'mechanical',
-      detail: (finalOk ? 'final answer numerically equivalent' : 'final differs from expected') + stepNote,
+      detail: (finalOk ? 'final answer numerically equivalent' : 'final differs from expected') + stepNote + breakNote,
       evidence: [ev(input.pageSlug, finalOk ? 'applied-correctly' : 'struggled',
         `math: ${input.problemLatex} → ${result.finalLatex}`, 'mechanical')],
     };

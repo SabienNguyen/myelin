@@ -405,3 +405,28 @@ describe('quick_check phrasing tolerance (audit: correct answer graded wrong on 
     expect(g.evidence[0].kind).toBe('struggled');
   });
 });
+
+describe('math_scratchpad step-chain break detection', () => {
+  const cfg = {} as any; // fully mechanical branch — no grader model involved
+  const input = { problemLatex: 'simplify', expectedLatex: '2x', variable: 'x', stepMode: true, pageSlug: 'p' };
+  const grade = (steps: string[], finalLatex: string) =>
+    gradeBlockOutput('math_scratchpad', input, { steps: steps.map((latex) => ({ latex })), finalLatex }, cfg, {} as any);
+
+  it('on a wrong final, names the first non-equivalent transition between steps', async () => {
+    // step1 = x+x (≡ 2x is irrelevant; chain checks ADJACENT pairs): x+x -> 3x breaks first.
+    const g = await grade(['x+x', '3x'], '3x');
+    expect(g.verdict).toBe('incorrect');
+    expect(g.detail).toContain('breaks between steps 1 and 2');
+  });
+
+  it('names the last-step-to-final transition when that is where it breaks', async () => {
+    const g = await grade(['x+x', '2x'], '5x');
+    expect(g.detail).toContain('between the last step and the final answer');
+  });
+
+  it('stays silent on a correct final — non-equivalent lines are legitimate there', async () => {
+    const g = await grade(['4x - 2x'], '2x');
+    expect(g.verdict).toBe('correct');
+    expect(g.detail).not.toContain('breaks');
+  });
+});
