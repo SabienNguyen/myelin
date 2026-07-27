@@ -311,7 +311,13 @@ export function createClaudeSdkTutorSession(
 
         const slugs = await lw.listSlugs();
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
-        const gap = await vaultGap(mode, messages, slugs, {
+        // A block submission is a continuation, not a new ask — pendingBlockOutputs only matches
+        // when the LAST message is the assistant's, so the student typed nothing this turn. Gap
+        // detection keys off lastUserText, which on these turns is the already-answered message
+        // that staged the block: re-running it re-issues the same research directive over the
+        // graded card (a live sitting watched the tutor re-research and re-teach the whole topic
+        // in the grade turn because of it).
+        const gap = pending.length ? null : await vaultGap(mode, messages, slugs, {
           search: (query) => lw.call('search', { query }) as Promise<any>,
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
@@ -343,8 +349,15 @@ export function createClaudeSdkTutorSession(
             + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
           );
         }
+        // Same stale-text hazard as the gap above, but worse: the resumed session already HOLDS
+        // that user message from the turn that staged the block, so replaying it reads to the
+        // model as the student re-sending the identical request. A live sitting watched it
+        // conclude "this is the third time this exact request has come through", re-teach, and
+        // stage a diagnostic quick check over the graded card — the grades prompt is the whole
+        // turn. (The fresh-session fallback below still works: bootstrap + the student's shown
+        // work carry the context.)
         const userText = lastUserText(messages);
-        if (userText) promptParts.push(userText);
+        if (userText && !pending.length) promptParts.push(userText);
         const promptText = promptParts.join('\n\n');
 
         // Runs ONE query() (fresh or resumed), translating its message stream into UI chunks on

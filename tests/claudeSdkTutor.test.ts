@@ -89,8 +89,10 @@ describe('turn 1 (fresh session)', () => {
     expect(toolChunk.toolName).toBe('quick_check'); // bare name, no mcp__blocks__ prefix
     expect(toolChunk.toolCallId).toBe('tc1');
 
-    // turn-1 prompt carries the bootstrap ("SESSION CONTEXT") since there's no prior assistant turn
+    // turn-1 prompt carries the bootstrap ("SESSION CONTEXT") since there's no prior assistant
+    // turn — and the student's own message, which only submission turns omit
     expect(calls[0].prompt).toMatch(/SESSION CONTEXT/);
+    expect(calls[0].prompt).toContain('hello');
     expect(calls[0].options.resume).toBeUndefined();
 
     // The base prompt's research rules name ai-sdk tools this route does not have. The system
@@ -138,6 +140,12 @@ describe('follow-up turn with a completed block output', () => {
     expect(calls[0].prompt).toContain('"answer":"4"');
     expect(calls[0].prompt).toMatch(/Graded mechanically\/by the grader as: correct/);
     expect(calls[0].prompt).not.toMatch(/SESSION CONTEXT/); // not turn 1 — no bootstrap re-sent
+    // The resumed session already holds the "quiz me" turn. Replaying it here read, live, as the
+    // student re-sending the identical request — the model re-taught and staged a diagnostic
+    // check over the graded card. A submission turn carries only the harness grade report, and
+    // gap detection (keyed off that same stale text) must not re-issue its research directive.
+    expect(calls[0].prompt).not.toContain('quiz me');
+    expect(calls[0].prompt).not.toMatch(/HARNESS: your memory has a gap/);
   }, 30_000);
 });
 
