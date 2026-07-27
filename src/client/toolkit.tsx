@@ -12,8 +12,14 @@ const human = (name: keyof typeof BLOCK_TOOLS, description: string, Component: a
   type: 'human' as const,
   description,
   parameters: BLOCK_TOOLS[name].input,
-  render: ({ args, result, addResult }: any) =>
-    <Component args={args} result={result} addResult={addResult} />,
+  // isError: a tutor call the server rejected (schema mismatch — small models do this) still
+  // reaches the renderer, with the rejection as `result`. Handing that to the block used to
+  // produce a done-looking card claiming the learner answered "(blank)" — a fabricated
+  // submission. Same honesty rule as ToolStatusChip's failed column: say it failed, quietly.
+  render: ({ args, result, addResult, isError }: any) =>
+    isError
+      ? <span className="tool-note failed" title={name}>✗ {name.replace('_', ' ')} could not be shown</span>
+      : <Component args={args} result={result} addResult={addResult} />,
 });
 
 export const toolkit = defineToolkit({

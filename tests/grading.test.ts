@@ -161,6 +161,16 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(bad.evidence[0].kind).toBe('struggled');
   });
 
+  it('names an unparseable step even when the final is correct', async () => {
+    // The step call-out must not vanish under a green final — only parseability is checked, and
+    // hiding the miss implied the whole derivation had been read.
+    const g = await gradeBlockOutput('math_scratchpad',
+      { problemLatex: 'x^3-5x', stepMode: true, expectedLatex: '3x^2-5', variable: 'x', pageSlug: 'derivatives' },
+      { steps: [{ latex: '3x^2-' }, { latex: '3x^2-5' }], finalLatex: '3x^2-5' }, cfg);
+    expect(g.verdict).toBe('correct');
+    expect(g.detail).toBe('final answer numerically equivalent; step 1 unparseable');
+  });
+
   // code_exercise (docs/superpowers/plans/2026-07-20-gap-integration.md I2 contract): mechanical,
   // never calls the grader model — `cfg = {} as any` above enforces that (a stray model call would
   // throw reading cfg.models.grader).

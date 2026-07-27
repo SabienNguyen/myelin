@@ -330,11 +330,14 @@ export async function gradeBlockOutput(
     );
     const badStep = input.stepMode
       ? result.steps.findIndex((s: { latex: string }) => !latexParses(s.latex)) : -1;
+    // The step call-out is independent of the final's verdict: only parseability is checked, and a
+    // garbled step hidden under a green final implied the whole derivation had been read. Naming it
+    // both ways keeps the verdict honest about what the machine could and could not see.
+    const stepNote = badStep >= 0 ? `; step ${badStep + 1} unparseable` : '';
     return {
       verdict: finalOk ? 'correct' : 'incorrect',
       source: 'mechanical',
-      detail: finalOk ? 'final answer numerically equivalent'
-        : `final differs from expected${badStep >= 0 ? `; step ${badStep + 1} unparseable` : ''}`,
+      detail: (finalOk ? 'final answer numerically equivalent' : 'final differs from expected') + stepNote,
       evidence: [ev(input.pageSlug, finalOk ? 'applied-correctly' : 'struggled',
         `math: ${input.problemLatex} → ${result.finalLatex}`, 'mechanical')],
     };

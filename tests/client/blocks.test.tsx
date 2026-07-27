@@ -57,3 +57,17 @@ describe('blocks survive a server-rejected (non-contract) result', () => {
     expect(screen.getByText(/argue x/i)).toBeTruthy();
   });
 });
+
+describe('toolkit rejects a fabricated submission for an errored call', () => {
+  // The layer above the survival tests: when assistant-ui marks the part isError, the toolkit
+  // must not hand the error to the block at all — audit 41 caught a rejected quick_check
+  // rendering as a done card claiming the learner answered "(blank)".
+  it('renders a failed note instead of the block when isError is set', async () => {
+    const { toolkit } = await import('../../src/client/toolkit.js');
+    const { container } = render(<>{(toolkit as any).quick_check.render({
+      args: { question: 'q?' }, result: 'Invalid input', isError: true, addResult: vi.fn(),
+    })}</>);
+    expect(container.querySelector('.tool-note.failed')?.textContent).toMatch(/quick check could not be shown/);
+    expect(container.querySelector('.block')).toBeNull();
+  });
+});

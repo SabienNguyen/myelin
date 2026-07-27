@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import { CheckIcon as Check, SigmaIcon as Sigma } from '@phosphor-icons/react';
+import { CheckIcon as Check, PencilSimpleIcon as Pencil, SigmaIcon as Sigma, XIcon as X } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 
@@ -27,20 +27,51 @@ export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput
 }) {
   const [steps, setSteps] = useState<{ latex: string }[]>([]);
   const [current, setCurrent] = useState('');
+  // Which step the field is re-working, or null when it holds a fresh line. A derivation's step
+  // ORDER is part of the work, so editing writes back to the step's own slot — a recall-and-
+  // re-append design would shuffle the argument every time a middle step got fixed.
+  const [editing, setEditing] = useState<number | null>(null);
+
+  /** The step list with the field's content folded in — edited step back to its slot, fresh line
+   *  appended. Every path that leaves the field (add, edit another step, submit) goes through
+   *  this, so typed work is never dropped. Saving an emptied field deletes the step. */
+  const folded = () => (editing !== null
+    ? steps.map((s, i) => (i === editing ? { latex: current } : s))
+    : current ? [...steps, { latex: current }] : steps
+  ).filter((s) => s.latex !== '');
+
+  const saveStep = () => {
+    if (!current && editing === null) return;
+    setSteps(folded()); setCurrent(''); setEditing(null);
+  };
+  const editStep = (i: number) => {
+    const next = folded();
+    setSteps(next); setEditing(i); setCurrent(next[i]?.latex ?? '');
+  };
+  const removeStep = (i: number) => {
+    setSteps(steps.filter((_, j) => j !== i));
+    if (editing === i) { setEditing(null); setCurrent(''); }
+    else if (editing !== null && i < editing) setEditing(editing - 1);
+  };
   return (
     <div className="block math-scratchpad">
       <p>Problem: <Latex tex={args.problemLatex} /></p>
-      <ol>{steps.map((s, i) => <li key={i}><Latex tex={s.latex} /></li>)}</ol>
+      <ol className="scratch-steps">{steps.map((s, i) => (
+        <li key={i} className={editing === i ? 'editing' : undefined}>
+          <Latex tex={s.latex} />
+          <span className="step-tools">
+            <button type="button" aria-label={`edit step ${i + 1}`} onClick={() => editStep(i)}><Pencil size={13} /></button>
+            <button type="button" aria-label={`remove step ${i + 1}`} onClick={() => removeStep(i)}><X size={13} /></button>
+          </span>
+        </li>))}
+      </ol>
       <MathInput value={current} onChange={setCurrent} />
       {args.stepMode && (
-        <button onClick={() => { if (current) { setSteps([...steps, { latex: current }]); setCurrent(''); } }}>
-          Add step
-        </button>
+        <button type="button" onClick={saveStep}>{editing !== null ? `Save step ${editing + 1}` : 'Add step'}</button>
       )}
-      <button onClick={() => {
-        const finalLatex = current || steps[steps.length - 1]?.latex || '';
-        const allSteps = current ? [...steps, { latex: current }] : steps;
-        addResult({ steps: allSteps, finalLatex });
+      <button type="button" onClick={() => {
+        const allSteps = folded();
+        addResult({ steps: allSteps, finalLatex: allSteps[allSteps.length - 1]?.latex ?? '' });
       }}>Submit</button>
     </div>
   );
@@ -56,6 +87,14 @@ export function MathScratchpad(props: { args: any; result: any; addResult: (r: a
       {/* The problem travels into the done card — without it the thread reads as answers to
           invisible questions when scanned later. */}
       <div className="structured-prompt"><Latex tex={props.args.problemLatex ?? ''} /></div>
+      {/* The derivation IS the work: a step-mode card that kept only the final answer read like a
+          bare guess when the thread was scanned later. The last step is the final — shown on the
+          "You:" line — so only the intermediate steps are listed here. */}
+      {Array.isArray(props.result.steps) && props.result.steps.length > 1 && (
+        <ol className="scratch-steps">{props.result.steps.slice(0, -1).map((s: any, i: number) => (
+          <li key={i}><Latex tex={s?.latex ?? ''} /></li>))}
+        </ol>
+      )}
       {/* (?? ''): a server-rejected tool call reaches here with a non-contract output, and
           undefined into katex.renderToString threw (see Quiz for the incident). */}
       <p className="structured-answer">You: <Latex tex={props.result.finalLatex ?? ''} /></p>

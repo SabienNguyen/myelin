@@ -18,6 +18,22 @@ describe('QuickCheck', () => {
   });
 });
 
+describe('QuickCheck submitted/graded tag', () => {
+  afterEach(cleanup);
+
+  // In a multi-block turn grading waits for the LAST block, so this card sits answered-but-
+  // ungraded for a while; the tag is what tells the learner that state is expected.
+  it('says submitted before grading arrives', () => {
+    render(<QuickCheck args={{ question: 'q?' }} result={{ answer: 'power rule' }} addResult={vi.fn()} />);
+    expect(screen.getByText('submitted')).toBeTruthy();
+  });
+  it('says graded once grading exists', () => {
+    render(<QuickCheck args={{ question: 'q?' }}
+      result={{ answer: 'power rule', grading: { verdict: 'correct', detail: 'exact match' } }} addResult={vi.fn()} />);
+    expect(screen.getByText(/graded/)).toBeTruthy();
+  });
+});
+
 describe('QuickCheck graded card with no answer', () => {
   // Scoped to this block: the tests above predate it and render without cleanup, and unmounting
   // between cases here is what keeps the two blank variants from matching each other's output.

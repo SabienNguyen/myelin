@@ -1,3 +1,4 @@
+import { CheckIcon as Check } from '@phosphor-icons/react';
 import { BlockProse } from '../BlockProse.js';
 export function QuickCheck({ args, result, addResult }: {
   args: any; result: any; addResult: (r: any) => void;
@@ -5,6 +6,11 @@ export function QuickCheck({ args, result, addResult }: {
   if (result) {
     return (
       <div className="block quick-check done">
+        {/* Every other answered card carries this tag; here it earns its keep in the multi-block
+            turn, where grading waits for the LAST block — without it this card shows nothing
+            between answering and grading, and a learner can't tell "not graded yet" from
+            "never will be". */}
+        <span className="graded-tag">{result.grading ? <><Check size={12} weight="bold" /> graded</> : 'submitted'}</span>
         <BlockProse text={args.question} />
         {/* QuickText submits whatever is in the field, empty string included, so a learner who
             presses Enter on a blank input got a graded card reading "You:" and nothing else. That

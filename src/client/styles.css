@@ -373,7 +373,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 
 .quiz-item { margin-bottom: 0.8rem; }
 .quiz-item p { margin: 0 0 0.35rem; }
-.quiz > button:last-child, .math-scratchpad button:last-child, .writing-draft button {
+/* Direct children only — the step rows carry their own small edit/remove buttons, and an
+   unscoped :last-child dressed every row's remove button as the Submit button. */
+.quiz > button:last-child, .math-scratchpad > button:last-child, .writing-draft button {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
@@ -381,6 +383,25 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 }
 
 math-field { display: block; width: 100%; margin: 0.5rem 0; border-radius: var(--radius-sm); }
+/* MathLive's default focus ring is its own orange — the one saturated hue nothing else in this
+   palette uses. The component delegates focus, so a host-level outline restores the house ring. */
+math-field:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* Scratchpad step list. The edit/remove tools stay visible rather than hover-revealed — rework
+   is an affordance a learner has to SEE to know the pad allows it. In the done card the same
+   list renders without tools (nothing interactive survives submission). */
+.scratch-steps { margin: 0.4rem 0 0.2rem; padding-left: 1.5rem; }
+.scratch-steps li { padding: 0.1rem 0.3rem; border-radius: var(--radius-sm); }
+.scratch-steps li.editing { background: var(--accent-soft); }
+.step-tools { margin-left: 0.55rem; }
+.step-tools button {
+  padding: 0.1rem 0.3rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  vertical-align: middle;
+}
+.step-tools button:hover { color: var(--text); background: var(--bg-inset); }
 
 .writing-draft textarea { width: 100%; min-height: 7rem; resize: vertical; margin: 0.4rem 0; }
 
