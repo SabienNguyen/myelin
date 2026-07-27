@@ -214,3 +214,19 @@ Written after the sprint that followed the original verdict; each line names its
   authorisation). Both repos now run their suites in GitHub Actions on every push — the harness
   workflow gates on a LOREWEAVER_CI_TOKEN secret (documented in the workflow) because the
   integration tests spawn the real loreweaver server from a second private repo.
+- **Thread history — driven end to end.** The last undriven topbar surface: a cold load restores
+  the persisted default conversation; the history menu lists every conversation titled by its
+  first substantive question with relative times and the active row highlighted; "+ New
+  conversation" resets the transcript (old text provably gone from the DOM); switching threads
+  swaps the full transcript both directions and stamps the deep-link hash (#/t/<id>); and the
+  menu holds APG menu-button behavior under a keyboard-only pass — focus lands on the first item
+  on open, arrows move it, Escape returns it to the trigger. One anomaly chased during the drive
+  (a message apparently duplicated across threads) reproduced only under contaminated test state
+  — a crashed earlier drive had already consumed a scripted turn and persisted its half of the
+  conversation into the same vault; a clean rerun with request logging showed exactly one
+  /api/chat call per user action, each with the right threadId. No product bug.
+- **Video ingest accepts /live and /embed URLs** (unit-tested): recorded livestream lectures
+  share as youtube.com/live/<id>, and copying an iframe src off a course page yields /embed/<id>
+  — both previously misrouted to the git-repo path. The rebuilt AppImage carries this plus the
+  graph and prompt-cost work, and was cold smoke-tested again: boots to a clean first-run
+  screen, detects the existing claude.ai sign-in, serves the SPA.
