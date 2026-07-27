@@ -346,6 +346,24 @@ export function buildRestRoutes(
     return c.json({ current: name });
   });
 
+  /** The teaching-style preference, settable from the student menu. Same in-place +
+   *  read-modify-write persistence as /api/student; empty string clears it. */
+  app.put('/api/voice', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const voice = String(body?.voice ?? '').trim().slice(0, 200);
+    (cfg as any).voice = voice || undefined;
+    try {
+      const path = process.env.HARNESS_CONFIG ?? './harness.config.json';
+      const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+      if (voice) onDisk.voice = voice; else delete onDisk.voice;
+      writeFileSync(path, JSON.stringify(onDisk, null, 2) + '\n');
+    } catch (e: any) {
+      return c.json({ voice, warning: 'set for this run, but not saved: ' + (e?.message ?? e) });
+    }
+    return c.json({ voice });
+  });
+  app.get('/api/voice', (c) => c.json({ voice: (cfg as any).voice ?? '' }));
+
   /**
    * The raw ingested artifact, for the source reader — the surface where "the tutor brings you
    * to a source and you query ON it" happens. Serves only files under vault/raw/ (the ledger's

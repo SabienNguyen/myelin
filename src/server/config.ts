@@ -87,6 +87,10 @@ const configSchema = z.object({
   vault: z.string().default(defaultVaultPath()),
   // The vault records evidence per student id, so this only matters if two people share a vault.
   student: z.string().default(userInfo().username || 'student'),
+  // Free-text teaching-style preference, injected into every session's context: "high school,
+  // no jargon, gentle pace" and "brisk, expert, skip the analogies" are different tutors. One
+  // line, because tone is a preference, not a curriculum.
+  voice: z.string().optional(),
   models: z.object({
     // Sonnet for the roles that write prose the learner reads, Haiku for the mechanical ones.
     // Deliberately not Opus by default: the tutor role runs on every single turn, and choosing to

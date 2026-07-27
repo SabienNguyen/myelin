@@ -86,3 +86,10 @@ describe('prompt assembly', () => {
     expect(ctx).toMatch(/chain-rule.*3 lapses/);
   });
 });
+
+it('a voice preference is injected as a style line — and absent when unset', () => {
+  const base = { mode: 'learn' as const, state: {}, lessons: [], reviewsDue: [], ankiLapses: [] };
+  const styled = buildBootstrapContext({ ...base, voice: 'high school, no jargon' });
+  expect(styled).toContain('Teaching style the student asked for: high school, no jargon');
+  expect(buildBootstrapContext(base)).not.toContain('Teaching style');
+});

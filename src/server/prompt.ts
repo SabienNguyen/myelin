@@ -31,10 +31,14 @@ export function buildBootstrapContext(a: {
   emptyVault?: boolean;
   /** The course bank's contents (courseBank.ts's readBank), when the caller has one. */
   courseBank?: CourseProblem[];
+  /** Free-text teaching-style preference from config (cfg.voice) — tone, pace, jargon level. */
+  voice?: string;
 }): string {
   const lines = [
     'SESSION CONTEXT (auto-injected by harness — not visible to the student):',
     FRAMING[a.mode],
+    ...(a.voice ? [`Teaching style the student asked for: ${a.voice}. Honor it in tone, pace and
+vocabulary — it changes HOW you teach, never what counts as evidence.`] : []),
     `Student state: ${JSON.stringify(a.state)}`,
     `Suggested lessons: ${a.lessons.map((l) => `${l.slug} (${l.reason}: ${l.detail})`).join('; ') || 'none'}`,
     `Reviews due: ${a.reviewsDue.join(', ') || 'none'}`,

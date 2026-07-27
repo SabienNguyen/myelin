@@ -423,6 +423,7 @@ export function createTutorSession(
       }
     }
     const ctx = buildBootstrapContext({
+      voice: cfg.voice,
       mode, state,
       lessons,
       reviewsDue: lessons.filter((l: any) => l.reason === 'review-due').map((l: any) => l.slug),

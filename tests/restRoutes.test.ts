@@ -562,3 +562,34 @@ describe('student profiles — one vault, several learners', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('PUT /api/voice — the teaching-style preference', () => {
+  const { mkdtempSync, writeFileSync, readFileSync, rmSync } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir } = require('node:os') as typeof import('node:os');
+  const { join } = require('node:path') as typeof import('node:path');
+  const lw = { listSlugs: async () => [], call: async () => ({}) } as any;
+  let dir: string; let cfgFile: string; let prevEnv: string | undefined;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'lwh-voice-'));
+    cfgFile = join(dir, 'harness.config.json');
+    writeFileSync(cfgFile, JSON.stringify({ student: 'kid' }));
+    prevEnv = process.env.HARNESS_CONFIG;
+    process.env.HARNESS_CONFIG = cfgFile;
+  });
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.HARNESS_CONFIG;
+    else process.env.HARNESS_CONFIG = prevEnv;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('sets in place, persists, and an empty string clears', async () => {
+    const cfg = { student: 'kid', vault: dir } as unknown as HarnessConfig;
+    const app = buildRestRoutes(lw, cfg);
+    await app.request('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice: 'high school, no jargon' }) });
+    expect((cfg as any).voice).toBe('high school, no jargon');
+    expect(JSON.parse(readFileSync(cfgFile, 'utf8')).voice).toBe('high school, no jargon');
+    await app.request('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice: '' }) });
+    expect((cfg as any).voice).toBeUndefined();
+    expect('voice' in JSON.parse(readFileSync(cfgFile, 'utf8'))).toBe(false);
+  });
+});

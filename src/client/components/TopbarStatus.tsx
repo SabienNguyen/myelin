@@ -81,6 +81,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
   const [open, setOpen] = useState(false);
   const [students, setStudents] = useState<string[]>([]);
   const [fresh, setFresh] = useState('');
+  const [voice, setVoice] = useState('');
   const [note, setNote] = useState('');
   const rootRef = useRef<HTMLSpanElement>(null);
 
@@ -88,6 +89,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
     if (!open) return;
     fetch('/api/students').then((r) => r.json())
       .then((d) => setStudents(d.students ?? [])).catch(() => {});
+    fetch('/api/voice').then((r) => r.json()).then((d) => setVoice(d.voice ?? '')).catch(() => {});
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -125,6 +127,16 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
               {s}{s === current ? ' \u00b7 current' : ''}
             </button>
           ))}
+          {/* Tone is a profile preference, so it lives with the profile: one line the tutor
+              honors in HOW it teaches — never in what counts as evidence. */}
+          <input
+            aria-label="teaching style"
+            placeholder="teaching style — e.g. high school, no jargon"
+            value={voice}
+            onChange={(e) => setVoice(e.target.value)}
+            onBlur={() => { void fetch('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice }) }); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+          />
           <input
             aria-label="new student name"
             placeholder="new student\u2026"
