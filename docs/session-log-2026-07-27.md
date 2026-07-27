@@ -1,0 +1,74 @@
+# What happened on 2026-07-27 (autonomous session)
+
+The short version: the video-learning capability went from idea to fully verified product feature,
+both repos gained CI and self-provisioning for future sessions, the app was hardened (fuzz,
+injection, accessibility, coverage) and scale-tested to 2,000 pages, and all four tutor modes were
+verified live with a real model. Everything below is on master in both repos, with every claim's
+evidence class in `learning-ui-verdict.md`.
+
+## The video-learning arc (from your claude-video pointer)
+
+- **Ingest**: a YouTube URL pasted into the single Add material field becomes a timestamped
+  transcript — captions only, no video download, manual track preferred over auto (6790e86).
+  A missing yt-dlp names its install command; caption-less videos get an honest error naming the
+  parked Whisper path.
+- **Deep links**: every `[1:05]` stamp is a link into the video at that second — in the raw
+  transcript (dce7f0f) and, via a mechanical pass at compile time, in the vault pages built from
+  it (cc9189b). The tutor's prompt rule knows the stamps are clickable (15f10e4).
+- **Verified live**: a real tutor taught the area-of-a-circle argument from the ingested
+  3Blue1Brown transcript — opened the source beside the conversation, grounded each frame in a
+  verbatim quote with its timestamp, and named "[1:05] through [4:18]" as the stretch to rewatch
+  (ebb3bd7). The librarian principle, end to end.
+- **Covered forever**: a browser e2e drives the happy path with a fake yt-dlp shim (e677e9e).
+
+## Live-model verification completed
+
+All four tutor modes now hold their contracts under a real model, each in its own sitting:
+learn (earlier), freeform cold-start (earlier), quiz (d518b97 — honest ✗ chips when this
+container's egress blocked its research, then a good scenario question anyway), and review
+(7850af7 — a genuinely decayed page re-proven through the same code exercise that earned its
+evidence, due badge accurate, zero drift).
+
+## Found-and-fixed while auditing
+
+- A config with explicitly pinned API models made "Use my Claude subscription" a silent no-op —
+  the route now reroutes explicit plain models through the login, keeping the exact model
+  (1e93667). Running as root gets a plain-language hint (4a4d3c9).
+- The reader's select-to-ask was pointer-only (mouseup); a screen reader's selection never
+  surfaced it. Now selectionchange-driven, with a scroll-offset positioning bug fixed en route
+  (28e9ae1).
+- The suite's last unnamed transient failure was root-caused (a test-double fidelity gap) and
+  killed (1e93667); a second race in the e2e gap spec likewise (e677e9e).
+- The graph didn't scale: 10.9s cold at 500 pages (1+2N stdio roundtrips). loreweaver grew
+  `list_pages`; the harness builds the graph in two calls; 16ms on the same fixture (539ed4f,
+  loreweaver a15fe44). Probed to 2,000 pages: no cliff, first-to-degrade surface named
+  (a9a98b3).
+
+## Hardening
+
+Zero axe violations in both themes at two widths (3b89658, 44f1560); markdown rendering pinned
+inert against injected content (e896a68); the /api/source symlink escape got its test (b722d76);
+1,800 seeded-fuzz inputs across six hostile-input parsers, all invariants held (56ec97f);
+coverage-guided tests took setupRoutes/signin/scheduler/notify to full honest coverage
+(5738cda, 6ab1f89, 3c2a074); a tripwire fails the build if the mirrored mastery contract ever
+drifts from loreweaver's (7a8a311).
+
+## Infrastructure
+
+- **CI in both repos** — harness: typecheck + 297 client component tests ungated on every push
+  (980ed42), full integration + e2e suites unlock when you add a `LOREWEAVER_CI_TOKEN` secret
+  (a fine-grained PAT with read access to the loreweaver repo — see the workflow header or
+  README). loreweaver: build + full suite on every push. CI caught one real mistake (a typecheck
+  slip) within a minute of it reaching master.
+- **SessionStart hooks in both repos** (3063711, loreweaver 186f2ad) — future Claude Code web
+  sessions self-provision: dependencies installed, and for the harness the ~/Dev/personal layout
+  its integration suites resolve through.
+- **The AppImage is tip-current** and the packaged binary itself was executed and smoke-tested
+  cold this session (recorded in the verdict addendum).
+
+## Where things stand
+
+Harness: 951 unit tests + 6 runtime-availability skips, 5/5 e2e, everything green.
+Loreweaver: 81/81. Parked with reasons (verdict doc): real screen-reader speech, audio-in,
+Whisper for caption-less videos, CUDA against real hardware, and a linter (typescript-eslint
+does not support TS 7 yet).
