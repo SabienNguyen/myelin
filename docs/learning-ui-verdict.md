@@ -339,3 +339,9 @@ Written after the sprint that followed the original verdict; each line names its
   live SDK grader. The student model now reads exactly as the evidence discipline demands:
   applied-correctly for the two machine-graded computations, explained-correctly (not applied)
   for the model-judged explanation — three pages at exposed, no level inflation anywhere.
+- **Positional encoding, same sitting**: taught from the actual problem (permutation invariance),
+  through sinusoidal PE's additive scheme, to the RoPE rotation argument — sources named
+  (RoFormer, EleutherAI), the vault honestly flagged as still-stub. The tutor's transfer question
+  was genuinely diagnostic (rotate only V — does relative position survive?), and the learner's
+  "no, the m−n dependence lives in q·k" answer graded correct with evidence recorded. Four
+  topics deep, every check graded, every evidence kind honest.
