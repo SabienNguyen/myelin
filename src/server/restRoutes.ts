@@ -279,12 +279,24 @@ export function buildRestRoutes(
     const entries = Object.entries(state).filter(([, m]) => m && typeof m === 'object');
 
     const review = entries
-      .map(([slug, m]) => ({ slug, daysLeft: (m.days_left ?? null) as number | null, slipped: m.slipped === true }))
+      .map(([slug, m]) => ({
+        slug, daysLeft: (m.days_left ?? null) as number | null, slipped: m.slipped === true,
+        level: typeof m.level === 'string' ? m.level : null,
+        effective: typeof m.effective === 'string' ? m.effective : null,
+      }))
       .filter((e) => e.slipped || (e.daysLeft !== null && e.daysLeft <= 5))
       .sort((a, b) => (a.slipped === b.slipped ? (a.daysLeft ?? 0) - (b.daysLeft ?? 0) : a.slipped ? -1 : 1))
       .map((e) => ({
         kind: 'review' as const, slug: e.slug,
-        why: e.slipped ? 'this has slipped — re-earn it' : `${e.daysLeft}d before it slips`,
+        // Name the DEPTH of the slip when the numbers are there: a page that fell to `exposed` needs
+        // reteaching, one still at `practicing` only a probe — so "slipped from practicing to exposed"
+        // is a calibration signal for the tutor, where a flat "this has slipped" is not. Falls back to
+        // the plain line when level/effective aren't both present or don't actually differ.
+        why: e.slipped
+          ? (e.level && e.effective && e.level !== e.effective
+            ? `slipped from ${e.level} to ${e.effective} — re-earn it`
+            : 'this has slipped — re-earn it')
+          : `${e.daysLeft}d before it slips`,
         // The transfer directive TRAVELS WITH THE ITEM. Rule 2a-i in the system prompt says the same
         // thing, but it sits ~40 lines from where the tutor works each plan row; carrying the
         // constraint on the item itself puts it next to the work, where it actually gets honoured.

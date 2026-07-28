@@ -440,6 +440,16 @@ describe('GET /api/due and /api/session-plan', () => {
     }
   });
 
+  it('/api/session-plan names the depth of a slip so the tutor can calibrate', async () => {
+    // spacedLw's `slipped` page fell practicing -> exposed. A page that dropped to exposed needs
+    // reteaching, not just a probe — so the why should say how far it fell, not a flat "slipped".
+    const { plan } = await (await buildRestRoutes(spacedLw(), cfg).request('/api/session-plan')).json();
+    const slipped = plan.find((p: any) => p.slug === 'slipped');
+    expect(slipped.why).toBe('slipped from practicing to exposed — re-earn it');
+    // A due-but-not-slipped page keeps its countdown line.
+    expect(plan.find((p: any) => p.slug === 'soon').why).toBe('2d before it slips');
+  });
+
   describe('interleaveByTopic', () => {
     type Row = { id: string; _topic?: string };
     const key = (xs: Row[]) => xs.map((x) => x.id).join(',');
