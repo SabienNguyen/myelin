@@ -651,3 +651,13 @@ Written after the sprint that followed the original verdict; each line names its
   good), the Revise-this-draft round button, recorded evidence, and feedback prose that teaches
   (the clock-hands analogy for angle difference) all rendered. Every block has now been driven
   live within this session.
+- **The writing revision round closes the loop — 2/4 → 3/4, with two honest behaviors on the
+  way.** "Revise this draft" staged round 2 seeded from the original draft; a drive mishap
+  double-sent the request and exercised the anti-duplication answer ("the round 2 revision block
+  is already up") plus the skip marker when the conversation moved past the unanswered block —
+  healed with the usual honesty ("my screen shows it as skipped"), re-staged fresh. The revision
+  folding in the tutor's own feedback (clock-hands intuition, de-jargoned) moved the rubric to
+  3/4 with every skill grade good and the audience criterion flipped to ✓. The remaining ✗ is
+  itself a design point observed live: the grader failed to address one criterion and the
+  harness scored it unmet with the plain note "the grader did not address this criterion" —
+  fail-closed, the learner never handed unearned credit, the omission named instead of hidden.
