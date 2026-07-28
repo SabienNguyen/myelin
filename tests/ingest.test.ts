@@ -53,6 +53,23 @@ describe('ingestBook', () => {
     });
   });
 
+  it('removes the temp conversion dir (assets and all) instead of leaking it', async () => {
+    // The converter unpacks the source into a mkdtemp scratch dir — pandoc/pdftotext leave images
+    // and intermediates there. It must be removed after every ingest, or /tmp/lwh-convert-* dirs
+    // pile up one-per-document (a real disk leak on a fixed-disk desktop app).
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-'));
+    const cfg = { vault, student: 'kid', models: {} } as unknown as HarnessConfig;
+    let scratch = '';
+    const leakyConverter: Converter = async (_file, outDir) => {
+      scratch = outDir;
+      writeFileSync(join(outDir, 'extracted-image.png'), 'fake asset'); // pandoc-style leftover
+      return { markdown: FIXTURE_MD };
+    };
+    await ingestBook(cfg, '/uploads/Book.pdf', { converter: leakyConverter });
+    expect(scratch).toMatch(/lwh-convert-/);
+    expect(existsSync(scratch)).toBe(false); // whole scratch dir gone, image included
+  });
+
   it('appends to an existing ledger rather than overwriting it', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-'));
     const cfg = { vault, student: 'kid', models: {} } as unknown as HarnessConfig;

@@ -1,6 +1,6 @@
 import { ToolLoopAgent, isStepCount, type LanguageModel, type ToolSet } from 'ai';
 import {
-  mkdirSync, mkdtempSync, readFileSync, writeFileSync,
+  mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, extname, join } from 'node:path';
@@ -65,7 +65,15 @@ export async function ingestBook(
   const converter = opts.converter ?? defaultConverter;
   const mode = opts.mode ?? 'book';
   const outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
-  const { markdown } = await converter(filePath, outDir);
+  // The converter writes the extracted markdown (and any assets it unpacks — pandoc/pdftotext leave
+  // images and intermediate files) into outDir; nothing below needs it once `markdown` is in hand,
+  // so remove it right after rather than leaking a /tmp/lwh-convert-* dir per ingest.
+  let markdown: string;
+  try {
+    ({ markdown } = await converter(filePath, outDir));
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
 
   if (mode === 'paper') {
     const title = opts.title || cleanHeading(markdown.match(H1_LINE)?.[1] ?? '') || basename(filePath, extname(filePath));
@@ -194,8 +202,10 @@ export function startConversion(
 
   activeConversions++;
   void (async () => {
+    // Hoisted so the finally can remove it: the streaming converter uses it for the whole run.
+    let outDir: string | undefined;
     try {
-      const outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
+      outDir = mkdtempSync(join(tmpdir(), 'lwh-convert-'));
       // Set as soon as any cumulative markdown extracts as a problem set (courseBank.ts) — the
       // whole document then goes to the COURSE BANK, not the page-compile queue. A past exam
       // paraphrased into prose pages is the wrong shape; the student wants the professor's actual
@@ -299,6 +309,9 @@ export function startConversion(
       });
     } finally {
       activeConversions--;
+      // The conversion is done (success or error); drop its scratch dir rather than leak a
+      // /tmp/lwh-convert-* per ingest. (ingestBook cleans its own outDir inline.)
+      if (outDir) rmSync(outDir, { recursive: true, force: true });
     }
   })();
 
