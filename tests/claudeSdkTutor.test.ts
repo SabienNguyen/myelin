@@ -177,6 +177,36 @@ describe('evidence guardrail', () => {
     expect(calls[1].prompt).toMatch(/record_evidence/);
     expect(existsSync(join(vault, '.harness', 'guardrail.log'))).toBe(true);
   }, 30_000);
+
+  it('does NOT nudge when the only grade carries no evidence (unavailable code_exercise)', async () => {
+    // Parity with the ai-sdk route: an unavailable code_exercise grades with evidence: [], the tutor
+    // is asked to "record_evidence for: []" and correctly records nothing. Gating the guardrail on
+    // grade COUNT (not evidence) spent an extra query and flashed a false "evidence not recorded"
+    // warning every time the sandbox was down.
+    saveSdkSession(vault, 'thread-noevidence', 'sess-n0');
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      const sid = `sess-n${calls.length}`;
+      yield initMsg(sid);
+      yield assistantMsg(sid, [{ type: 'text', text: 'The coding sandbox is down — try again shortly.' }]);
+      yield resultMsg(sid);
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'let me code' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [{
+          type: 'tool-code_exercise', toolCallId: 'tc9', state: 'output-available',
+          input: { pageSlug: 'streams', rungId: 'stream-consumer:full_body' },
+          output: { unavailable: true },
+        }],
+      },
+    ] as any[];
+    await drain(await session.respond(history, 'learn', 'thread-noevidence'));
+
+    expect(calls.length).toBe(1); // no nudge — there was no evidence to record
+  }, 30_000);
 });
 
 describe('resume-failure fallback', () => {

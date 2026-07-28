@@ -710,7 +710,13 @@ export function createClaudeSdkTutorSession(
         }
         if (runResult.capturedSessionId) saveSdkSession(cfg.vault, threadId, runResult.capturedSessionId);
 
-        if (grades.length && !runResult.sawRecordEvidence) {
+        // Gate on evidence, not grade COUNT — parity with the ai-sdk route (session.ts): a grade can
+        // legitimately carry none (an unavailable code_exercise grades with evidence: [], see
+        // grading.ts), the grades prompt above then asks to "record_evidence for: []", and the tutor
+        // correctly records nothing. Nudging on grade count alone spent a whole extra query() and
+        // surfaced a false "evidence not recorded" warning to the learner every time the sandbox was
+        // down. Nag only when there is real evidence that went unrecorded.
+        if (grades.some((g) => g.evidence.length > 0) && !runResult.sawRecordEvidence) {
           const nudgeResult = await runQuery(
             'HARNESS GUARDRAIL: you did not call record_evidence for the graded block result. Do it now, then continue.',
             runResult.capturedSessionId ?? storedId,
