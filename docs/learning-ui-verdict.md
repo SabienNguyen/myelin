@@ -934,3 +934,8 @@ Written after the sprint that followed the original verdict; each line names its
   page to mastered. Eight block kinds now; 1054 unit + 9 e2e green.
 - **AppImage rebuilt through all three builds** — offer_write button, Telex input, and the
   pronounce block all verified present in the shipped bundle.
+- **The three new surfaces passed the standing UI audit** — offer_write button, Telex field, and
+  the pronounce block (with its contour overlay) all render cleanly in dark mode with correct
+  token contrast, stack without horizontal overflow at 900px, and expose their controls to
+  keyboard focus. No visual or responsive bugs found; the new work sits inside the warm-paper
+  design language rather than regressing out of it.
