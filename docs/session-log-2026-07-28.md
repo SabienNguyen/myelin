@@ -119,3 +119,59 @@ augment-don't-fragment behavior, and the server-side turn persistence saving an 
 in the wild. The AppImage was re-batched after each behavior change and verified by inspection
 every time; final state is current through the write gate. Suite: 999 unit tests + 8 browser
 specs, all green. loreweaver remained private at every check — the flip watch stays armed.
+
+---
+
+## The daytime arc (a new capability, not just fixes)
+
+You came back with two persona briefs — learn Vietnamese, learn the brain from three angles — and
+one instruction that turned into the day's real work: if the app can't do something, research
+open-source options and *add* it. It couldn't let a learner hear or grade tone-language
+pronunciation. By the end it can hear them, and the grading pipeline is built and tested.
+
+**Hearing the tones — shipped.** The `speak` tool attaches a "hear this" button to any word,
+spoken by the browser's own Web Speech API (no dependency, already in Electron). Navigation-class
+like `open_source`; degrades loudly — no installed voice for the language and it says so and points
+to a native recording rather than faking the accent, with the availability receipt returned so the
+tutor adapts. Verified live across a Vietnamese sitting (six tone chips on "ma"; on being told no
+voice existed, the model pointed to native-audio guides and pivoted to spelling checks it could
+verify). Unit + render tests, batched into the AppImage (2c63e9c).
+
+**Grading the tones — the pipeline, in pure tested code.** Tones are pitch contours, so spoken
+tone can be graded the app's honest way — by shape, mechanically. `src/shared/toneContour.ts`
+(normalize → correlate against per-tone templates; `ngang` by flatness; too-little-sound is
+unscorable, not a false fail) and `src/shared/pitchTrack.ts` (McLeod NSDF autocorrelation, waveform
+→ F0) now compose end to end: a synthetic rising glide run through `pitchTrack` then `gradeTone`
+grades as sắc and not huyền, a falling glide as huyền, a steady tone as ngang. 18 tests pin the
+properties that matter — octave-shift and speaking-rate invariance, and the hard sắc-vs-ngã pair
+(smooth rise vs rise-with-glottal-notch). The mic-capture UX and a `tone_contour` checker-kind are
+the one product-design decision left for a human call, not bolted on (a321ad8, 082eca9).
+
+**Two persona runs, concurrent, both closed the loop.** Vietnamese reached a *mastered*
+tones page through a 6/6 matching drill; the brain run taught three lenses and wrote three sourced
+pages in freeform, honestly disclosing a WebFetch outage. Both drew their next step from their own
+vault, both respected the freeform-only write gate (752c3e9).
+
+## Verified clean this arc (no fix needed)
+
+- **Provenance honesty under a real outage + user pressure** — WebFetch down and the learner
+  pushing to mark a draft solid; the tutor refused to advance a status it hadn't earned (84f8244).
+- **Decay → review → re-proof** end to end on real content — a backdated page surfaced in review
+  unprompted, re-proved via cold retrieval, clock reset without over-crediting to mastered (d1c02bd).
+- Thread-history switching (157c379), math_scratchpad MathLive entry — a prior "garble" traced to a
+  drive-script timing miss, not the app (f55cb84), quiz multi-item grading (0d79016), and the Anki
+  backlog badge with its full a11y contract (69a6ad3).
+
+## Honesty note
+
+Running the exact CI sequence locally caught a typecheck error in my *own* new test that vitest
+happily passed — it would have reddened the public-flip CI. Fixed before it shipped (f9b04ca). The
+lesson from yesterday's stale-server proofs held: verify against what CI actually runs, not what's
+convenient.
+
+## State at close of this arc
+
+harness on master through `bb2e6ed`; 1028 unit + integration tests green, typecheck clean, e2e 9
+green; AppImage current through the speak feature. loreweaver still private at every check — the
+flip watch and its full-CI trigger remain armed. The pronunciation capability is one deliberate
+mic-capture UX away from a learner recording their voice and getting an honest tone grade.
