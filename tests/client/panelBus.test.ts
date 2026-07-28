@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { panelBus, wikiPreprocess, scrubModelArtifacts, chatPreprocess, escapeLooseDollars } from '../../src/client/lib/panelBus.js';
+import { panelBus, wikiPreprocess, scrubModelArtifacts, chatPreprocess, escapeLooseDollars, mathDelims } from '../../src/client/lib/panelBus.js';
 
 describe('panelBus', () => {
   it('notifies subscribers of page opens', () => {
@@ -94,6 +94,26 @@ describe('escapeLooseDollars', () => {
 
   it('passes already-escaped dollars through unchanged', () => {
     expect(escapeLooseDollars('literal \\$5 stays')).toBe('literal \\$5 stays');
+  });
+});
+
+describe('mathDelims', () => {
+  it('converts LaTeX \\(inline\\) and \\[display\\] to $-delimiters', () => {
+    expect(mathDelims('the rule \\( f(x) = 3x^2 \\) holds')).toBe('the rule $ f(x) = 3x^2 $ holds');
+    expect(mathDelims('block: \\[ E = mc^2 \\] there')).toBe('block: \n$$\n E = mc^2 \n$$\n there');
+  });
+
+  it('leaves \\[ / \\( verbatim inside a code span — the delimiter shown AS CODE is not math', () => {
+    // A LaTeX-syntax lesson: `\[` must render as the literal delimiter, not be rewritten into a $$
+    // block (which also injected newlines that break the code span).
+    const md = 'To open display math type `\\[` and close with `\\]`.';
+    expect(mathDelims(md)).toBe(md);
+    expect(mathDelims('example `\\[ E = mc^2 \\]` here')).toBe('example `\\[ E = mc^2 \\]` here');
+  });
+
+  it('leaves delimiters verbatim inside a fenced code block', () => {
+    const md = '```latex\n\\[ x^2 \\]\n```';
+    expect(mathDelims(md)).toBe(md);
   });
 });
 

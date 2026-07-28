@@ -27,13 +27,25 @@ export function wikiPreprocess(md: string): string {
     (_, slug, label) => `[${label || slug}](#/page/${slug.trim()})`);
 }
 
+/** Segments a markdown string so a blanket text transform skips what must stay verbatim: fenced
+ * code (```), inline code (`…`), and $$…$$ math blocks. Used with String.split — the capturing
+ * group puts each protected run at an ODD index, so callers transform only the even-index text
+ * segments. Shared by the loose-dollar escaper and the \(…\)/\[…\] delimiter converter: a `\[`
+ * shown INSIDE a code span is the delimiter as content (a LaTeX-syntax lesson, a regex with an
+ * escaped bracket), not math, and neither transform may rewrite it. */
+const PROTECTED_SPANS = /(```[\s\S]*?(?:```|$)|`[^`\n]*`|\$\$[\s\S]*?\$\$)/;
+
 /** Models emit LaTeX with \(inline\) and \[display\] delimiters; remark-math only parses
  * $-delimiters. Without this, react-markdown eats the backslashes and the student sees
- * "( f(x) = 3x^2 )" as broken prose instead of typeset math. */
+ * "( f(x) = 3x^2 )" as broken prose instead of typeset math. Code and $$-blocks are left verbatim
+ * (PROTECTED_SPANS) — a lesson that SHOWS `\[` as code must not have it turned into a math block. */
 export function mathDelims(md: string): string {
   return md
-    .replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => `\n$$\n${tex}\n$$\n`)
-    .replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => `$${tex}$`);
+    .split(PROTECTED_SPANS)
+    .map((seg, i) => (i % 2 ? seg : seg
+      .replace(/\\\[([\s\S]+?)\\\]/g, (_, tex) => `\n$$\n${tex}\n$$\n`)
+      .replace(/\\\(([\s\S]+?)\\\)/g, (_, tex) => `$${tex}$`)))
+    .join('');
 }
 
 /** remark-math treats ANY `$…$` pair as inline math, so verbatim prose with two currency amounts
@@ -47,7 +59,7 @@ export function mathDelims(md: string): string {
  * would surface as a literal backslash. */
 export function escapeLooseDollars(md: string): string {
   return md
-    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`|\$\$[\s\S]*?\$\$)/)
+    .split(PROTECTED_SPANS)
     .map((seg, i) => (i % 2 ? seg : escapeLooseDollarsInText(seg)))
     .join('');
 }
