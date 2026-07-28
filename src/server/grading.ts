@@ -218,6 +218,20 @@ function normKey(s: string): string {
   return s.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').toLowerCase();
 }
 
+/** Fold Unicode super/subscript digits to ASCII ("m/s²" -> "m/s2") so a unit typed in the printed
+ *  form the prompt renders (KaTeX shows m/s², the answer preview echoes it) is not read as different
+ *  from a declared "m/s^2". */
+function foldSup(s: string): string {
+  return s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
+}
+
+/** A unit reduced to a comparison key: superscripts folded, case/space/^ dropped, so "m/s^2",
+ *  "m/s2" and "M/S²" all match. Shared by every checker that verifies a unit — the numeric and
+ *  vector paths drifted apart once and told a vector answer its correctly-typed unit was wrong. */
+function unitKey(s: string): string {
+  return foldSup(normKey(s)).replace(/[\s^]/g, '');
+}
+
 /** Leading number out of free text, tolerating a trailing unit and thousands separators:
  *  "9.81 m/s^2" -> 9.81, "1,024" -> 1024, "6.02e23" -> 6.02e23. NaN when there is no number. */
 export function parseLeadingNumber(s: string): number {
@@ -286,13 +300,8 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     const tol = checker.tolerance ?? 1e-9;
     const limit = checker.relative ? Math.abs(checker.expected) * tol : tol;
     const numOk = Math.abs(got - checker.expected) <= limit;
-    // Unit is checked only when the question asked for one, and only as a normalised substring —
-    // "m/s^2", "m/s2" and "M/S^2" all satisfy a declared "m/s^2". Unicode superscripts fold to
-    // digits first: prompts render units as m/s² (KaTeX) and the answer preview echoes ², so a
-    // learner who copies or types the printed form must not be told their unit is wrong.
-    const foldSup = (s: string) => s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g,
-      (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
-    const unitKey = (s: string) => foldSup(normKey(s)).replace(/[\s^]/g, '');
+    // Unit is checked only when the question asked for one, and only as a normalised substring
+    // (unitKey: "m/s^2", "m/s2" and "M/S²" all satisfy a declared "m/s^2").
     // '%' is formatting, not a unit that changes meaning: a bare "0.1" against an expected-%
     // checker cannot mean anything else (a fraction-vs-percent confusion fails the NUMERIC
     // comparison already). A live check dinged a learner `struggled` for answering "0.1" when
@@ -330,9 +339,10 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     });
     const hits = perItem.filter((p) => p.correct).length;
     const valuesOk = hits === want.length;
-    // Same unit discipline as the numeric checker: normalised substring, only when one was asked.
-    const unitKeyV = (s: string) => normKey(s).replace(/[\s^]/g, '');
-    const unitOk = !checker.unit || unitKeyV(parsed.rest).includes(unitKeyV(checker.unit));
+    // The SAME unit key as the numeric checker (superscripts folded): a vector answer typed as
+    // "(0, -9.8) m/s²" must satisfy a declared "m/s^2", exactly as a scalar one does. This path
+    // used a local key without the fold and told correctly-typed superscript units they were wrong.
+    const unitOk = !checker.unit || unitKey(parsed.rest).includes(unitKey(checker.unit));
     return {
       allCorrect: valuesOk && unitOk,
       anyCorrect: hits > 0,

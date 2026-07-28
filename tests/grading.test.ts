@@ -123,6 +123,11 @@ describe('structured_check checkers (mechanical, any subject)', () => {
     // The "2" in "m/s2" must NOT be read as a third component.
     const c2 = { kind: 'vector', expected: [3, 4], tolerance: 0.01, unit: 'm/s^2' };
     expect((await grade(c2, ['(3, 4) m/s2'])).verdict).toBe('correct');
+    // The PRINTED superscript form must satisfy the same unit — the prompt renders m/s² (KaTeX),
+    // and the vector path used to fold-less-ly reject the ² the learner copied. (Regression.)
+    expect((await grade(c2, ['(3, 4) m/s²'])).verdict).toBe('correct');
+    expect((await grade({ kind: 'vector', expected: [0, -9.8], tolerance: 0.05, unit: 'm/s^2' },
+      ['(0, -9.8) m/s²'])).verdict).toBe('correct');
     // Right components, missing unit -> partial, like numeric.
     expect((await grade(c, ['(3, 4)'])).verdict).toBe('partial');
   });
