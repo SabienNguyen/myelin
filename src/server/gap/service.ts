@@ -28,6 +28,23 @@ import {
   runnableReference, stressCases, type BuiltinRung, type SuiteCase,
 } from './streamConsumer.js';
 
+/** JSON with object keys sorted recursively, so a value comparison is by CONTENT, not by the order
+ *  keys were written. A learner who predicts { b, a } for a function that returns { a, b } is
+ *  right, and must grade right — the same canonicalisation the child runner applies to its own
+ *  comparison (runner.ts). The runner's copy lives inside its self-contained CHILD_SOURCE string
+ *  and can't be imported here, so this is a deliberate second, tiny implementation. */
+export function canonicalJSON(v: unknown): string {
+  const sort = (x: unknown): unknown => {
+    if (x === null || typeof x !== 'object') return x;
+    if (Array.isArray(x)) return x.map(sort);
+    return Object.keys(x as Record<string, unknown>).sort().reduce((o, k) => {
+      o[k] = sort((x as Record<string, unknown>)[k]);
+      return o;
+    }, {} as Record<string, unknown>);
+  };
+  return JSON.stringify(sort(v));
+}
+
 export type BuiltinExercise = {
   ladder: typeof STREAM_CONSUMER_LADDER;
   rungs: BuiltinRung[];
@@ -301,7 +318,9 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
       const typed = String(body.prediction[0] ?? '').trim();
       let predictedVal: unknown = typed;
       try { predictedVal = JSON.parse(typed); } catch { /* a bare string is a fine way to say a string */ }
-      pass = JSON.stringify(predictedVal) === JSON.stringify(expectVal);
+      // Canonical compare: predicting { b, a } for a { a, b } return is correct — grading it wrong
+      // on key order would teach key order, not the subject (the same reason quoting is normalized).
+      pass = canonicalJSON(predictedVal) === canonicalJSON(expectVal);
       actual = [JSON.stringify(expectVal)];
     } else if (ex.family === 'exec') {
       // The prediction is the program's stdout: compare the typed lines against the expected

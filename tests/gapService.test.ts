@@ -8,7 +8,7 @@
 // here pin the child-process answer to that, plus the two invariants carried over from the sidecar.
 
 import { describe, it, expect } from 'vitest';
-import { buildBuiltinGapRoutes, builtinLadderPayload } from '../src/server/gap/service.js';
+import { buildBuiltinGapRoutes, builtinLadderPayload, canonicalJSON } from '../src/server/gap/service.js';
 import { runInChild } from '../src/server/gap/runner.js';
 import {
   STREAM_CONSUMER_CASES, STREAM_CONSUMER_ENTRY, STREAM_CONSUMER_RUNGS,
@@ -185,6 +185,18 @@ describe('the HTTP routes', () => {
 
   it('names an unknown pattern instead of grading against the wrong suite', async () => {
     expect((await post({ rungId: 'quantum-flux:full_body', code: 'x' })).status).toBe(404);
+  });
+});
+
+describe('canonicalJSON — the predict grader compares by value, not key order', () => {
+  it('is insensitive to object key order but not to value or array order', () => {
+    // A learner predicting { b, a } for a function that returns { a, b } is right (this is what the
+    // function-family predict path compares with) — but a wrong value or reordered array is not.
+    expect(canonicalJSON({ b: 2, a: 1 })).toBe(canonicalJSON({ a: 1, b: 2 }));
+    expect(canonicalJSON({ p: { y: 2, x: 1 } })).toBe(canonicalJSON({ p: { x: 1, y: 2 } }));
+    expect(canonicalJSON({ a: 1, b: 9 })).not.toBe(canonicalJSON({ a: 1, b: 2 }));
+    expect(canonicalJSON([1, 2, 3])).not.toBe(canonicalJSON([3, 2, 1]));
+    expect(canonicalJSON('abc')).toBe(canonicalJSON('abc'));
   });
 });
 
