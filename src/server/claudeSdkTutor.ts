@@ -352,9 +352,24 @@ export function createClaudeSdkTutorSession(
       hooks: {
         PreToolUse: [{
           hooks: [async (input) => {
-            if (input.hook_event_name !== 'PreToolUse' || !input.tool_name.startsWith(LOREWEAVER_PREFIX)) {
-              return {};
+            if (input.hook_event_name !== 'PreToolUse') return {};
+            // Grade turns withhold the block tools (rule 1a: land the win — deliver the grade and
+            // stop, don't stage a fresh exercise over it). blockAllowlist() drops them from
+            // allowedTools, but allowedTools does not gate under bypassPermissions — the same reason
+            // the write family below needs a hook deny and not just its allowedTools exclusion — so
+            // without this the withhold was PROMPT-ONLY here, weaker than turnBlockTools' structural
+            // drop on the ai-sdk route. Deny at the hook so the withhold actually holds.
+            if (gradingOnly && input.tool_name.startsWith(BLOCKS_PREFIX)) {
+              return {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: 'This is a grading turn: deliver the grade and end on your '
+                    + 'offer of the next step — the student will answer. Do not stage another block now.',
+                },
+              };
             }
+            if (!input.tool_name.startsWith(LOREWEAVER_PREFIX)) return {};
             const bare = input.tool_name.slice(LOREWEAVER_PREFIX.length);
             // STRUCTURAL enforcement of spec §5's single-writer rule. allowedTools does not gate
             // anything under bypassPermissions (the comment above documents the shadowing), so

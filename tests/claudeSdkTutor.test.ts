@@ -678,3 +678,42 @@ describe('PreToolUse hook enforces freeform-only writes', () => {
     expect(allowed.hookSpecificOutput.permissionDecision).toBe('allow');
   });
 });
+
+describe('grade-turn block-tool withholding is hook-enforced, not just allowedTools', () => {
+  // allowedTools does not gate under bypassPermissions (the write-family hook exists for the same
+  // reason), so a grade turn's blockAllowlist([]) was prompt-only until the hook denied block tools
+  // too — matching turnBlockTools' structural drop on the ai-sdk route.
+  const blockToolCall = { hook_event_name: 'PreToolUse', tool_name: 'mcp__blocks__quick_check', tool_input: {} };
+
+  async function preToolUseHookFor(history: any[], threadId: string): Promise<any> {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      const sid = `sess-bh${calls.length}`;
+      yield initMsg(sid);
+      yield assistantMsg(sid, [{ type: 'text', text: 'ok' }]);
+      yield resultMsg(sid);
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(history, 'learn', threadId));
+    return calls[0].options.hooks.PreToolUse[0].hooks[0];
+  }
+
+  it('denies a block tool on a grade turn but lets it through on a normal turn', async () => {
+    const gradeTurn = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      { id: 'a1', role: 'assistant', parts: [{
+        type: 'tool-quick_check', toolCallId: 'tc', state: 'output-available',
+        input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+        output: { answer: '4' },
+      }] },
+    ] as any[];
+    const gradeHook = await preToolUseHookFor(gradeTurn, 'thread-blockhook-grade');
+    const denied = await gradeHook(blockToolCall);
+    expect(denied.hookSpecificOutput?.permissionDecision).toBe('deny');
+
+    const plainTurn = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me fractions' }] }] as any[];
+    const plainHook = await preToolUseHookFor(plainTurn, 'thread-blockhook-plain');
+    expect(await plainHook(blockToolCall)).toEqual({}); // not a grade turn — passes through
+  }, 30_000);
+});
