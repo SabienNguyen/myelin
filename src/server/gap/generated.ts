@@ -168,9 +168,16 @@ export async function verifyExercise(
   const answersOf = (c: GeneratedCase): string[] => {
     if (family === 'manifest') return [];
     if (family === 'exec') return [(c as ExecCase).expect];
-    return family === 'function'
-      ? [JSON.stringify((c as FnCase).expect) ?? '']
-      : (c as StreamGeneratedCase).expect;
+    if (family === 'function') {
+      const e = (c as FnCase).expect;
+      const json = JSON.stringify(e) ?? '';
+      // A STRING answer also leaks in its bare form: JSON.stringify wraps it in quotes ("Paris"),
+      // which a case name never contains, so a name like "capital of France is Paris" would slip
+      // past a check for the quoted form. Text-processing exercises are a named target of this
+      // family, so check the unquoted string too. Numbers/bools already stringify bare (10, true).
+      return typeof e === 'string' ? [json, e] : [json];
+    }
+    return (c as StreamGeneratedCase).expect;
   };
   // Function and exec answers are often SHORT scalars ("10", "30") — word-boundary matching at
   // length > 1; streams keep the substring rule their tests pin.

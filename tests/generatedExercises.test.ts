@@ -230,6 +230,37 @@ describe('the function family (any-domain exercises)', () => {
     expect(report.ok).toBe(false);
   });
 
+  // A STRING answer is the case the numeric test above misses: JSON.stringify wraps it in quotes,
+  // so a name that contains the bare word used to slip through the leak gate. Text processing is a
+  // named target of this family, so the gate must catch it.
+  const INITIALS = {
+    title: 'Initials',
+    entryPoint: 'initials',
+    statement: 'Return the uppercase initials of a full name (first letter of each space-separated word).',
+    reference: `function initials(name) { return name.split(' ').map((w) => w[0].toUpperCase()).join(''); }`,
+    cases: [
+      { name: 'a two part name', args: ['john doe'], expect: 'JD' },
+      { name: 'a three part name', args: ['mary jane watson'], expect: 'MJW' },
+      { name: 'a single name', args: ['cher'], expect: 'C' },
+    ],
+    prose: { context_line: 'Initials, earned.', hint: 'First letter of each word.', success_line: 'That is string work.' },
+  };
+
+  it('admits a clean string-returning exercise', async () => {
+    expect((await verifyExercise({ ...INITIALS, family: 'function' })).ok).toBe(true);
+  });
+
+  it('rejects a string-returning case whose NAME contains its (unquoted) answer', async () => {
+    const leaky = {
+      ...INITIALS,
+      family: 'function' as const,
+      cases: INITIALS.cases.map((c, i) => (i === 0 ? { ...c, name: 'yields JD for a two part name' } : c)),
+    };
+    const report = await verifyExercise(leaky);
+    expect(report.ok).toBe(false);
+    expect(report.gates.find((g) => g.gate === 'names-do-not-leak-answers')?.detail).toContain('JD');
+  });
+
   it('generate -> approve -> ladder/run/predict, function family end to end', async () => {
     await generateExercise(vault, 'dilution-calculator', 'chemistry: dilutions', { generate: stubModel(DILUTION) }, 'function');
     setGeneratedStatus(vault, 'dilution-calculator', 'approved');
