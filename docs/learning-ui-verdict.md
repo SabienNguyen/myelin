@@ -702,3 +702,6 @@ Written after the sprint that followed the original verdict; each line names its
   ladder earning its keep on live content a day after the fix. The ingestion story now closes
   end to end: file path → book → chapters → the right chapter open beside the chat → taught,
   checked, and recorded.
+- **AppImage re-batched through the open_source resolver** — the asar carries the {path} ingest
+  route and the resolving sentinel, verified by string inspection. No behavior commit outside
+  the artifact.
