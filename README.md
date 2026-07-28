@@ -24,7 +24,10 @@ to it exclusively over stdio MCP.
   (numeric/unit algebra, chemical equations, sets, sequences, matching, note arithmetic), a
   step-aware math scratchpad (MathLive entry, numeric-equivalence grading that understands
   equation chains), diagram labelling for picture subjects, microphone tone-pronunciation grading
-  for spoken languages, rubric'd writing drafts with a one-click revise round, and a built-in
+  for spoken languages, writing drafts checked two ways — mechanical grammar/style linting in the
+  browser via [Harper](https://writewithharper.com/) (WASM, no model, runs as you type with
+  one-click fixes) *and* a model rubric on the argument — with a one-click revise round, and a
+  built-in
   **code sandbox**: exercise ladders, generated exercises
   behind a review gate, and whole-program judging in ten runtimes (node, TypeScript, python3,
   bash, ruby, sqlite, C, Rust, CUDA where a toolkit exists; Go/Java via Docker) plus
@@ -50,9 +53,12 @@ to it exclusively over stdio MCP.
   browser. The learner sees their pitch drawn over the target, and it mints mastery only after
   several clean attempts. Both Vietnamese (six tones) and Mandarin (four) are wired end to end
   ([`docs/pronunciation-roadmap.md`](docs/pronunciation-roadmap.md)).
-- **The loop closes visibly.** Spaced review with decay, an interleaved one-click session plan,
-  misconception record → surface → repair → resolve (repair history kept), per-student profiles,
-  and two-way Anki sync.
+- **The loop closes visibly.** Spaced review with decay, an interleaved one-click session plan
+  (rotated by kind *and* topic so no two adjacent items drill the same thing; review items carry a
+  transfer directive and name how far a slipped page fell), an honest progress card at the top of
+  the library — what you can do right now, what you earned this week, what's slipping — counted by
+  *decayed* level so it moves down as well as up, misconception record → surface → repair → resolve
+  (repair history kept), per-student profiles, and two-way Anki sync.
 
 ## Quick start
 
