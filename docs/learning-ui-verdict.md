@@ -602,3 +602,13 @@ Written after the sprint that followed the original verdict; each line names its
   after the last '=' (every derivation's final-answer convention, and "x = 4"), then a lone
   number token in prose ("about 0.02"); genuine ambiguity ("between 3 and 5") still refuses to
   guess. Suite crossed 1000 tests with the five new cases.
+- **Loreweaver decay-semantics fix: confusion no longer extends trust.** Chasing the grader-bug
+  fallout showed applyEvidence stamped last_reinforced=today for EVERY evidence kind — including
+  'misconception', which changes no level and demonstrates the opposite of standing, so recording
+  a learner's confusion about a practicing page handed it a whole fresh decay window.
+  last_reinforced now means "the date the current standing was established": level-changing kinds
+  still restart it ('struggled' correctly starts the demoted level's clock at the demotion);
+  'misconception' keeps the previous date while its evidence entry still records the day. Two new
+  tests; loreweaver suite 86 green. ('struggled' demoting the page out of the due queue and into
+  next_lessons as a re-teach target was examined and left alone — fail → reset → relearn is the
+  right spaced-repetition shape.)
