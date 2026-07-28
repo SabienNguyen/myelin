@@ -11,6 +11,38 @@ function seedLedger(entries: QueueEntry[]): string {
   return vault;
 }
 
+describe('readQueue — a corrupt ledger degrades to empty, never throws', () => {
+  // readQueue runs on a chat turn and inside updateQueue's mutex, so a raw parse throw would 500
+  // the conversation and wedge every queue mutation. A ledger truncated mid-write, disk-full, or
+  // hand-edited must read as an empty queue instead — updateQueue then rebuilds a clean file.
+  const write = (contents: string): string => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-queuestore-'));
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    writeFileSync(join(vault, '.harness', 'compile-queue.json'), contents);
+    return vault;
+  };
+
+  it('returns [] on truncated/invalid JSON rather than throwing', () => {
+    expect(readQueue(write('[{"chapter":"raw/a.md","status":"pend'))).toEqual([]); // partial write
+    expect(readQueue(write('not json at all'))).toEqual([]);
+  });
+
+  it('returns [] when the JSON is valid but not an array — .find/.some would throw downstream', () => {
+    expect(readQueue(write('{}'))).toEqual([]);
+    expect(readQueue(write('null'))).toEqual([]);
+  });
+
+  it('a corrupt ledger recovers: the next updateQueue rewrites a clean file', async () => {
+    const vault = write('{ truncated');
+    await updateQueue(vault, (q) => {
+      q.push({ chapter: 'raw/uploads/x/ch-01.md', status: 'pending' } as QueueEntry);
+      return q;
+    });
+    expect(readQueue(vault)).toHaveLength(1);
+    expect(readQueue(vault)[0].chapter).toBe('raw/uploads/x/ch-01.md');
+  });
+});
+
 describe('updateQueue — the lost-update regression', () => {
   it(
     'interleaves two async flows (one adding rows, one patching an existing row after an await) — '

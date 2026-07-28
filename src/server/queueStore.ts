@@ -58,10 +58,24 @@ function ledgerPath(vault: string): string {
 
 /** The full compile queue ledger — a pure reader, safe to call any time from anywhere (ingest REST
  * routes, tests, updateQueue's own mutator below). Never pair this with a later writeQueue call
- * yourself in production code — see updateQueue. */
+ * yourself in production code — see updateQueue.
+ *
+ * "Safe to call any time from anywhere" is a real contract: readQueue runs on a chat turn
+ * (session.ts's goal detection) and inside updateQueue's mutex, so a raw JSON.parse throw here does
+ * not stay contained — it 500s the learner's conversation and wedges every queue mutation until the
+ * file is hand-repaired. A machine-written bookkeeping ledger truncated by a crash mid-write, a
+ * disk-full, or a manual edit must therefore degrade to "empty queue" (updateQueue then rewrites a
+ * clean ledger from the still-present raw/ sources), the same graceful-read the goal and generated
+ * -exercise stores already use — not fail loud like a user-authored config. */
 export function readQueue(vault: string): QueueEntry[] {
   const p = ledgerPath(vault);
-  return existsSync(p) ? (JSON.parse(readFileSync(p, 'utf8')) as QueueEntry[]) : [];
+  if (!existsSync(p)) return [];
+  try {
+    const parsed = JSON.parse(readFileSync(p, 'utf8'));
+    return Array.isArray(parsed) ? (parsed as QueueEntry[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 /** Low-level whole-array writer — a synchronous writeFileSync, so no interleaved partial writes.
