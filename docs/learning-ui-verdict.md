@@ -524,3 +524,16 @@ Written after the sprint that followed the original verdict; each line names its
   full-page capture) was chased to ground truth and found FALSE: computed background #24221c and
   raw pixels [43,53,71] = the dark --accent-soft token, exactly right. Lesson kept: judge dark
   theming by computed styles or element crops, not by eyeballing a scaled full-page PNG.
+- **Quiz multi-item flow driven live, keyboard-only — and an interrupted-stream divergence found
+  with a working self-heal.** A mid-stream browser close (my own drive error, the documented
+  onFinish hazard) lost the quiz turn client-side while the server-side SDK session kept it: on
+  the next ask the tutor said the quiz was "still open above" — true in its history, false on
+  the learner's screen — and refused to stack a duplicate. It also refused, unprompted, to quiz
+  on backprop material it hadn't taught yet ("quizzing you on it now would just be me handing
+  you answers"). Telling it the honest thing — "my browser reloaded and the quiz vanished" —
+  healed the divergence completely: same four questions re-staged, with "that happens sometimes
+  with a refresh." The re-staged quiz was then completed KEYBOARD-ONLY: all four inputs reached
+  in five tabs (clean tab order), Submit reached and fired by Enter, 4/4 model-judged, two
+  evidence records landing on the vault. The divergence hazard is recorded here as known
+  behavior with a working conversational recovery; a transport-level replay of unsaved turns is
+  the eventual fix if it ever bites harder.
