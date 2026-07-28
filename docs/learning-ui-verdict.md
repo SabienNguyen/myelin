@@ -752,3 +752,7 @@ Written after the sprint that followed the original verdict; each line names its
   should do" — before the new hook was ever consulted; the page body stayed byte-identical.
   Defense now stacks: model restraint first, the PreToolUse deny (unit-tested) behind it for
   the multi-turn case that actually broke it. AppImage re-batched through the gate.
+- **Fix #9 pinned as a browser spec.** The file-path ingest case now lives in the e2e suite
+  (inside video-ingest.e2e.ts to inherit its runs-last compile-ordering guarantee): a temp
+  markdown file's path through the one Add-material field asserts the 200, the Library takeover,
+  and the on-disk chapter split. Suite is 9 browser specs.
