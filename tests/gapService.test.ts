@@ -87,6 +87,31 @@ describe('running code in the child', () => {
     expect(out.syntaxError).toMatch(/SyntaxError/);
   });
 
+  it('function family deep-compares object returns: key order is incidental, value and array order are not', async () => {
+    // The family promises a DEEP compare, but it string-compared JSON — so a learner who built
+    // { b, a } was failed against an expected { a, b }. Keys are sorted before comparison now.
+    const reordered = await runInChild({
+      kind: 'suite', family: 'function', entryPoint: 'f',
+      code: 'function f(){ return { b: 2, a: 1, nested: { y: 2, x: 1 } }; }',
+      cases: [{ name: 'reordered keys', args: [], expect: { a: 1, b: 2, nested: { x: 1, y: 2 } } }],
+    });
+    expect(reordered.pass).toBe(true);
+    // …but sorting keys must not launder a WRONG value into a pass.
+    const wrongValue = await runInChild({
+      kind: 'suite', family: 'function', entryPoint: 'f',
+      code: 'function f(){ return { a: 1, b: 9 }; }',
+      cases: [{ name: 'wrong value', args: [], expect: { a: 1, b: 2 } }],
+    });
+    expect(wrongValue.pass).toBe(false);
+    // …and array order is meaning, not incidental — a reordered array still fails.
+    const arrayOrder = await runInChild({
+      kind: 'suite', family: 'function', entryPoint: 'f',
+      code: 'function f(){ return [1, 2, 3]; }',
+      cases: [{ name: 'array order', args: [], expect: [3, 2, 1] }],
+    });
+    expect(arrayOrder.pass).toBe(false);
+  });
+
   it('KILLS an unbounded synchronous loop from outside the child', async () => {
     // THE test this architecture exists for. In-process vm + Promise.race cannot catch this —
     // the busy loop blocks the event loop the race timer lives on. A child process dies to a

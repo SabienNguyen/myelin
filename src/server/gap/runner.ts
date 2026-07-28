@@ -96,10 +96,19 @@ process.stdin.on('end', async () => {
     await Promise.race([collect, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000))]);
     return out;
   };
-  // ser, not JSON.stringify directly: stringify(undefined) is undefined-the-value, and undefined is
-  // precisely what a do-nothing implementation returns — it must compare UNEQUAL to every JSON
-  // expectation, not disappear into one.
-  const ser = (v) => JSON.stringify(v === undefined ? '\\u0000undefined' : v);
+  // ser, not JSON.stringify directly, for two reasons:
+  //  (1) stringify(undefined) is undefined-the-value, and undefined is precisely what a do-nothing
+  //      implementation returns — it must compare UNEQUAL to every JSON expectation, not disappear.
+  //  (2) object keys are sorted recursively, so the comparison is by VALUE — the 'deep-compares' the
+  //      function family promises — not by the order the learner happened to BUILD the object in.
+  //      { b, a } must pass against { a, b }. Arrays keep their order; nested undefined is still
+  //      omitted by stringify exactly as before (sortKeys leaves values untouched).
+  const sortKeys = (v) => {
+    if (v === null || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map(sortKeys);
+    return Object.keys(v).sort().reduce((o, k) => { o[k] = sortKeys(v[k]); return o; }, {});
+  };
+  const ser = (v) => JSON.stringify(v === undefined ? '\\u0000undefined' : sortKeys(v));
   const raceCall = async (args) => {
     const result = Promise.resolve(fn(...args));
     return Promise.race([result, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 2000))]);
