@@ -619,3 +619,13 @@ Written after the sprint that followed the original verdict; each line names its
   misconception-decay fix. All confirmed by string inspection of the asar and bundle rather than
   trust in the build script; binary smoke-passed with --appimage-extract-and-run. Both repos'
   worktrees stayed clean through the build (the npm-ci bundling rule earning its keep).
+- **"Set as goal" driven live for the first time — pass, plus a degrade-loudly path proven in the
+  wild.** The Library's set-as-goal writes the goal (kind/slug/setOn persisted, GOAL tag + clear
+  goal rendered), and a brand-new sitting opened oriented to it unprompted: "I'm back — where
+  were we?" got the goal path's resume point probed first, no re-teaching. Mid-turn the tutor
+  hallucinated a block under the wrong MCP prefix (mcp__loreweaver__quick_check) with the
+  required `mode` field also missing: the SDK refused the nonexistent tool, the client's schema
+  re-validation rendered the honest "✗ quick check could not be shown — the tutor sent it
+  malformed", and the model retried correctly in the same turn. Examined and deliberately left
+  alone: the ✗ path is what PREVENTS a duplicate-probe mess (a defaulted-mode rescue would have
+  rendered the broken call as a live block right before the retry staged its twin).
