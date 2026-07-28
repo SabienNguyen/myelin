@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Loreweaver } from '../src/server/mcp.js';
 import { courseMcpTools, createClaudeSdkTutorSession } from '../src/server/claudeSdkTutor.js';
 import { getGraphCached, invalidateGraphCache } from '../src/server/graphCache.js';
-import { loadSdkSession, saveSdkSession } from '../src/server/sessionStore.js';
+import { loadSdkSession, loadThread, saveSdkSession } from '../src/server/sessionStore.js';
 
 const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 let lw: Loreweaver; let vault: string; let cfg: any;
@@ -582,5 +582,28 @@ describe('mid-thread mode switch re-injects session context', () => {
     // Turn 4, still review: quiet again.
     await drain(await session.respond(history(4), 'review', 'thread-modeswitch'));
     expect(calls[3].prompt).not.toMatch(/SESSION CONTEXT/);
+  });
+});
+
+// The client persists the thread only when ITS stream finishes — so a tab closed mid-answer lost
+// the assistant turn the server had completed (this session's quiz sitting hit it three times:
+// tutor and learner ended up with different histories). The server now saves the turn itself on
+// stream end; the client's own PUT converges via saveThread's union-by-id because
+// generateId makes both sides name the response message identically.
+describe('server-side thread persistence', () => {
+  it('the assistant turn is on disk after the stream ends, with no client PUT', async () => {
+    async function* fakeQuery() {
+      yield initMsg('sess-serversave');
+      yield assistantMsg('sess-serversave', [{ type: 'text', text: 'saved server-side' }]);
+      yield resultMsg('sess-serversave');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any,
+      'learn', 'thread-serversave'));
+    const saved = loadThread(vault, 'thread-serversave') as any[];
+    expect(saved.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(saved[1].id).toBeTruthy(); // named — the client's copy will carry the same id
+    expect(JSON.stringify(saved[1].parts)).toContain('saved server-side');
   });
 });

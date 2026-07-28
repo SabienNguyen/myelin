@@ -1,6 +1,6 @@
 import {
   ToolLoopAgent, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse,
-  isStepCount, toUIMessageStream, tool, type LanguageModel, type ModelMessage, type ToolSet, type UIMessage,
+  generateId, isStepCount, toUIMessageStream, tool, type LanguageModel, type ModelMessage, type ToolSet, type UIMessage,
 } from 'ai';
 import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
@@ -17,7 +17,7 @@ import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
-import { logGuardrail } from './sessionStore.js';
+import { logGuardrail, saveThread } from './sessionStore.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated } from './gap/generated.js';
 import { builtinPatterns } from './gap/service.js';
@@ -543,6 +543,19 @@ export function createTutorSession(
       // client falls back to pushing the snapshot-plus-new-content as an extra sibling message, and
       // the turn-1 content (e.g. "Let's warm up.") ends up rendered twice.
       originalMessages: messages,
+      // Same server-side persistence as claudeSdkTutor.ts (see its onEnd comment): the client's
+      // own PUT only happens when ITS stream finishes, so a disconnect mid-answer lost the
+      // assistant turn the server had completed. generateId makes both sides name the
+      // response message identically, so this save and the client's PUT converge in
+      // saveThread's union-by-id.
+      generateId,
+      onEnd: ({ messages: finalMessages }) => {
+        try {
+          saveThread(cfg.vault, threadId, finalMessages as unknown[]);
+        } catch (e) {
+          console.error('[server-side thread save]', e);
+        }
+      },
       // Surface failures to the learner ("degrade loudly") — and to journalctl. NOTE: model
       // errors surface through the MERGED agent stream, so the same handler must also be passed
       // to toUIMessageStream below — this outer one only catches execute()-level throws.

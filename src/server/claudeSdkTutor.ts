@@ -2,7 +2,7 @@ import {
   createSdkMcpServer, query, tool,
   type Options, type SDKMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { createUIMessageStream, createUIMessageStreamResponse, type UIMessage } from 'ai';
+import { createUIMessageStream, createUIMessageStreamResponse, generateId, type UIMessage } from 'ai';
 import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
 import { UI_TOOLS } from '../shared/uiTools.js';
@@ -15,7 +15,7 @@ import { invalidateGraphCache } from './graphCache.js';
 import type { Loreweaver } from './mcp.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { availableBlocks, sanitizeToolArgs, slugListLine, vaultGap, type VaultGap } from './session.js';
-import { loadSdkSession, logGuardrail, saveSdkSession } from './sessionStore.js';
+import { loadSdkSession, logGuardrail, saveSdkSession, saveThread } from './sessionStore.js';
 
 /**
  * T43: tutor role on the Agent SDK. Same external contract as session.ts's createTutorSession
@@ -344,6 +344,51 @@ export function createClaudeSdkTutorSession(
       originalMessages: messages,
       onError: turnError,
       execute: async ({ writer }) => {
+        // ---- Server-side turn persistence (the disconnect fix). The client persists the thread
+        // only when ITS stream finishes, so a tab closed mid-answer lost the whole assistant turn
+        // even though the server completed it — tutor and learner ended up with different
+        // histories (this session's quiz sitting hit exactly that). An onEnd tap on the response
+        // stream was tried first and failed the same way it was meant to fix: it only sees the
+        // chunks a dying stream still delivers (the drive that proved it saved a lone step-start).
+        // So the parts are accumulated HERE, beside every chunk written, and saved when the query
+        // work finishes — nothing about the save depends on the response stream surviving. The
+        // message id is announced to the client in an explicit 'start' chunk so the client's own
+        // later PUT names the same message, and saveThread's union-by-id converges instead of
+        // duplicating the turn (verified live: without the id handshake, a reload rendered the
+        // assistant turn twice). Grade turns continue the LAST assistant message (ai@7 replaces
+        // it in place), so they seed the accumulator from that message's parts and keep its id.
+        const isContinuation = pending.length > 0;
+        const respId: string = isContinuation ? (messages[messages.length - 1] as any).id : generateId();
+        const respParts: any[] = isContinuation
+          ? structuredClone((messages[messages.length - 1] as any).parts ?? [])
+          : [];
+        const textAcc = new Map<string, any>();
+        const record = (chunk: any) => {
+          if (chunk.type === 'start-step') respParts.push({ type: 'step-start' });
+          else if (chunk.type === 'text-start') {
+            const part = { type: 'text', text: '', state: 'streaming' };
+            textAcc.set(chunk.id, part);
+            respParts.push(part);
+          } else if (chunk.type === 'text-delta') {
+            const part = textAcc.get(chunk.id);
+            if (part) part.text += chunk.delta;
+          } else if (chunk.type === 'text-end') {
+            const part = textAcc.get(chunk.id);
+            if (part) part.state = 'done';
+          } else if (chunk.type === 'tool-input-available') {
+            respParts.push({
+              type: `tool-${chunk.toolName}`, toolCallId: chunk.toolCallId,
+              state: 'input-available', input: chunk.input,
+            });
+          } else if (chunk.type === 'tool-output-available') {
+            const part = respParts.find((p) => p?.toolCallId === chunk.toolCallId);
+            if (part) { part.output = chunk.output; part.state = 'output-available'; }
+          }
+          // Everything else (start, data-guardrail transients) is stream plumbing, not history.
+        };
+        const emit = (chunk: any) => { record(chunk); writer.write(chunk); };
+        emit({ type: 'start', messageId: respId });
+
         const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
         for (const p of pending) {
           const grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
@@ -351,7 +396,7 @@ export function createClaudeSdkTutorSession(
           grades.push(grading);
         }
         for (const p of pending) {
-          writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
+          emit({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
         }
         // Step boundary before this turn's own content. streamText gives the ai-sdk route one of
         // these per step; this hand-rolled stream never did, so on a grade turn (which ai@7
@@ -360,8 +405,9 @@ export function createClaudeSdkTutorSession(
         // watched the resumed session receive the stale user text ~40 times. Rule 1a's structural
         // withhold exposed this: previously the model staging a fresh block over the win
         // falsified the predicate by accident.
-        writer.write({ type: 'start-step' });
+        emit({ type: 'start-step' });
 
+        try {
         const slugs = await lw.listSlugs();
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
         // A block submission is a continuation, not a new ask — pendingBlockOutputs only matches
@@ -481,17 +527,17 @@ export function createClaudeSdkTutorSession(
                   blockKind.set(event.index, 'text');
                   textIds.set(event.index, id);
                   partialsStreamedText = true;
-                  writer.write({ type: 'text-start', id });
+                  emit({ type: 'text-start', id });
                 } else if (block?.type === 'tool_use') {
                   blockKind.set(event.index, 'tool_use');
                 }
               } else if (event.type === 'content_block_delta') {
                 if (blockKind.get(event.index) === 'text' && event.delta?.type === 'text_delta') {
-                  writer.write({ type: 'text-delta', id: textIds.get(event.index)!, delta: event.delta.text });
+                  emit({ type: 'text-delta', id: textIds.get(event.index)!, delta: event.delta.text });
                 }
               } else if (event.type === 'content_block_stop') {
                 if (blockKind.get(event.index) === 'text') {
-                  writer.write({ type: 'text-end', id: textIds.get(event.index)! });
+                  emit({ type: 'text-end', id: textIds.get(event.index)! });
                 }
               }
             } else if (message.type === 'assistant') {
@@ -504,21 +550,21 @@ export function createClaudeSdkTutorSession(
                   // work against the real per-block envelope cadence.
                   if (!partialsStreamedText) {
                     const id = `sdk-text-${++textCounter}`;
-                    writer.write({ type: 'text-start', id });
-                    if (block.text) writer.write({ type: 'text-delta', id, delta: block.text });
-                    writer.write({ type: 'text-end', id });
+                    emit({ type: 'text-start', id });
+                    if (block.text) emit({ type: 'text-delta', id, delta: block.text });
+                    emit({ type: 'text-end', id });
                   }
                 } else if (block.type === 'tool_use') {
                   const name = block.name as string;
                   if (name.startsWith(BLOCKS_PREFIX)) {
-                    writer.write({
+                    emit({
                       type: 'tool-input-available', toolCallId: block.id,
                       toolName: name.slice(BLOCKS_PREFIX.length), input: block.input,
                     });
                   } else if (name.startsWith(LOREWEAVER_PREFIX)) {
                     if (name === RECORD_EVIDENCE_TOOL) sawRecordEvidence = true;
                     pendingLoreweaverCalls.add(block.id);
-                    writer.write({
+                    emit({
                       type: 'tool-input-available', toolCallId: block.id,
                       toolName: name.slice(LOREWEAVER_PREFIX.length), input: block.input,
                     });
@@ -526,7 +572,7 @@ export function createClaudeSdkTutorSession(
                     // Research must be visible: the sourcing honesty story rests on the learner
                     // seeing "searched the web" in the transcript when (and only when) it happened.
                     pendingLoreweaverCalls.add(block.id);
-                    writer.write({
+                    emit({
                       type: 'tool-input-available', toolCallId: block.id,
                       toolName: name, input: block.input,
                     });
@@ -553,7 +599,7 @@ export function createClaudeSdkTutorSession(
                     if (block.is_error && !(output && typeof output === 'object' && (output as any).isError)) {
                       output = { isError: true, content: output };
                     }
-                    writer.write({ type: 'tool-output-available', toolCallId: block.tool_use_id, output });
+                    emit({ type: 'tool-output-available', toolCallId: block.tool_use_id, output });
                   }
                 }
               }
@@ -591,7 +637,19 @@ export function createClaudeSdkTutorSession(
           if (nudgeResult.capturedSessionId) saveSdkSession(cfg.vault, threadId, nudgeResult.capturedSessionId);
           if (!nudgeResult.sawRecordEvidence) {
             logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
-            writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true } as any);
+            emit({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true } as any);
+          }
+        }
+        } finally {
+          // The save itself — in a finally so a turn that errors mid-way still persists what the
+          // learner saw (the user's message plus any partial answer beats a hole in the history).
+          try {
+            saveThread(cfg.vault, threadId, [
+              ...(isContinuation ? messages.slice(0, -1) : messages),
+              { id: respId, role: 'assistant', parts: respParts },
+            ] as unknown[]);
+          } catch (e) {
+            console.error('[server-side thread save]', e);
           }
         }
       },

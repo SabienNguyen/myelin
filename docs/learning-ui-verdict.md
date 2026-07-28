@@ -565,3 +565,20 @@ Written after the sprint that followed the original verdict; each line names its
   re-proof → correct answer graded, evidence recorded, and chain-rule left the due queue. Also
   re-proved twice over that drive scripts must wait on the thread-save PUT, not the working
   indicator — two turns were lost to early browser closes before the third drive keyed on the PUT.
+- **The onFinish data-loss hazard is fixed at the server — a turn now survives the tab closing on
+  it.** The client persisted the thread only when ITS stream finished, so a disconnect mid-answer
+  lost the whole assistant turn even though the server completed it — the exact divergence behind
+  the quiz sitting's "still open above" episode, and it bit three drive scripts in one day. First
+  attempt (an onEnd tap on the response stream) failed the same way it was meant to fix: it only
+  sees chunks a dying stream still delivers — the drive proved it by persisting a lone step-start.
+  The shipped fix accumulates the assistant message's parts server-side beside every chunk
+  written and saves in a finally when the query work completes, independent of stream survival;
+  an explicit 'start' chunk announces the message id so the client's own later PUT names the same
+  message and the union-by-id merge converges. Verified live both ways: a full turn + reload
+  renders once (no duplicate), and a turn whose tab was closed four seconds in is complete on
+  reconnect. Also caught during this iteration: kill-by-config-path misses node children whose
+  config lives in env vars — two "live verifications" earlier today ran against a stale server
+  (the fixes were sound and unit-tested, but the live proofs were void until re-run against a
+  clean boot; both were re-proven). The ai-sdk route keeps the lighter onEnd-based save (its
+  stream emits real start chunks, so ids converge; full disconnect hardening there is future
+  work if that route ever carries live traffic).
