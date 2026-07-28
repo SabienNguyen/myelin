@@ -13,6 +13,7 @@
 
 import { loadAll } from 'js-yaml';
 import type { RunnerResult } from './runner.js';
+import { canonicalJSON } from './canonical.js';
 
 /** One graded requirement: a dot-path into the parsed document and an expectation about what
  *  lives there. Paths use dots and [n] for arrays ('spec.template.spec.containers[0].image');
@@ -88,7 +89,10 @@ export function gradeManifest(yamlText: string, assertions: ManifestAssertion[])
         break;
       case 'eq':
       default:
-        ok = found && JSON.stringify(value) === JSON.stringify(a.value);
+        // canonicalJSON, not raw stringify: a YAML map is unordered, so a learner whose labels read
+        // { tier, app } must match an expected { app, tier }. Arrays keep their order (a container
+        // list or args sequence is meaning), which canonicalJSON preserves.
+        ok = found && canonicalJSON(value) === canonicalJSON(a.value);
         expected = show(a.value);
         actual = found ? show(value) : 'missing';
         break;

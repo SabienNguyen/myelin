@@ -8,7 +8,9 @@
 // here pin the child-process answer to that, plus the two invariants carried over from the sidecar.
 
 import { describe, it, expect } from 'vitest';
-import { buildBuiltinGapRoutes, builtinLadderPayload, canonicalJSON } from '../src/server/gap/service.js';
+import { buildBuiltinGapRoutes, builtinLadderPayload } from '../src/server/gap/service.js';
+import { canonicalJSON } from '../src/server/gap/canonical.js';
+import { gradeManifest } from '../src/server/gap/manifest.js';
 import { runInChild } from '../src/server/gap/runner.js';
 import {
   STREAM_CONSUMER_CASES, STREAM_CONSUMER_ENTRY, STREAM_CONSUMER_RUNGS,
@@ -197,6 +199,20 @@ describe('canonicalJSON — the predict grader compares by value, not key order'
     expect(canonicalJSON({ a: 1, b: 9 })).not.toBe(canonicalJSON({ a: 1, b: 2 }));
     expect(canonicalJSON([1, 2, 3])).not.toBe(canonicalJSON([3, 2, 1]));
     expect(canonicalJSON('abc')).toBe(canonicalJSON('abc'));
+  });
+
+  it('manifest eq assertion matches a map regardless of key order (YAML maps are unordered)', () => {
+    const yaml = 'metadata:\n  labels:\n    app: web\n    tier: frontend\n';
+    // Expected labels written in the OPPOSITE order — same map, must pass.
+    const passed = gradeManifest(yaml, [
+      { name: 'labels', path: 'metadata.labels', op: 'eq', value: { tier: 'frontend', app: 'web' } },
+    ] as any);
+    expect(passed.pass).toBe(true);
+    // A genuinely different value still fails — canonicalising keys must not launder a wrong answer.
+    const failed = gradeManifest(yaml, [
+      { name: 'labels', path: 'metadata.labels', op: 'eq', value: { app: 'web', tier: 'backend' } },
+    ] as any);
+    expect(failed.pass).toBe(false);
   });
 });
 

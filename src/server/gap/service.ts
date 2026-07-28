@@ -27,23 +27,7 @@ import {
   STREAM_CONSUMER_CASES, STREAM_CONSUMER_ENTRY, STREAM_CONSUMER_LADDER, STREAM_CONSUMER_RUNGS,
   runnableReference, stressCases, type BuiltinRung, type SuiteCase,
 } from './streamConsumer.js';
-
-/** JSON with object keys sorted recursively, so a value comparison is by CONTENT, not by the order
- *  keys were written. A learner who predicts { b, a } for a function that returns { a, b } is
- *  right, and must grade right — the same canonicalisation the child runner applies to its own
- *  comparison (runner.ts). The runner's copy lives inside its self-contained CHILD_SOURCE string
- *  and can't be imported here, so this is a deliberate second, tiny implementation. */
-export function canonicalJSON(v: unknown): string {
-  const sort = (x: unknown): unknown => {
-    if (x === null || typeof x !== 'object') return x;
-    if (Array.isArray(x)) return x.map(sort);
-    return Object.keys(x as Record<string, unknown>).sort().reduce((o, k) => {
-      o[k] = sort((x as Record<string, unknown>)[k]);
-      return o;
-    }, {} as Record<string, unknown>);
-  };
-  return JSON.stringify(sort(v));
-}
+import { canonicalJSON } from './canonical.js';
 
 export type BuiltinExercise = {
   ladder: typeof STREAM_CONSUMER_LADDER;
