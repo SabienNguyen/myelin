@@ -66,6 +66,27 @@ describe('Loreweaver client', () => {
     const parsed = JSON.parse(raw.content[0].text);
     expect(parsed.page.meta.title).toBe('Derivatives');
   });
+
+  it('respawns the child ONCE when the transport dies under concurrent calls, not once per call', async () => {
+    // The compile path runs several tool calls at once (concurrency workers). If the child dies,
+    // they all hit the transport error together — each used to spawn its own replacement and orphan
+    // all but the last. Count spawns across three concurrent recoveries: it must be exactly one.
+    await (lw as any).client.close();
+    const realSpawn = (Loreweaver as any).spawn.bind(Loreweaver);
+    let spawns = 0;
+    (Loreweaver as any).spawn = (cfg: any) => { spawns += 1; return realSpawn(cfg); };
+    try {
+      const pages = await Promise.all([
+        lw.call('read_page', { slug: 'derivatives' }),
+        lw.call('read_page', { slug: 'derivatives' }),
+        lw.call('read_page', { slug: 'derivatives' }),
+      ]);
+      expect(pages.every((p) => p.page.meta.title === 'Derivatives')).toBe(true);
+      expect(spawns).toBe(1); // one shared respawn — three before this fix
+    } finally {
+      (Loreweaver as any).spawn = realSpawn;
+    }
+  });
 }, 60_000);
 
 describe('isTransportError', () => {

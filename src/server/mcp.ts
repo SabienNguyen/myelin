@@ -18,6 +18,9 @@ export function isTransportError(e: unknown): boolean {
 }
 
 export class Loreweaver {
+  // A respawn in flight, shared by every caller that hits the dead client at once. null when none.
+  private respawning: Promise<MCPClient> | null = null;
+
   private constructor(private client: MCPClient, private cfg: HarnessConfig) {}
 
   static async connect(cfg: HarnessConfig): Promise<Loreweaver> {
@@ -53,10 +56,24 @@ export class Loreweaver {
       return await fn(this.client);
     } catch (e) {
       if (!isTransportError(e)) throw e;
-      await new Promise((r) => setTimeout(r, 100)); // single respawn with backoff
-      this.client = await Loreweaver.spawn(this.cfg);
-      return fn(this.client);
+      return fn(await this.respawn());
     }
+  }
+
+  // Respawn the child, deduped: when the child dies mid-compile, all `concurrency` in-flight tool
+  // calls hit the transport error at once. Without sharing, each one ran `this.client = await
+  // spawn()` — spawning a fresh loreweaver process per failed call and orphaning every one but the
+  // last (never closed, a leaked child). A shared in-flight promise means one death → one respawn,
+  // and every waiter retries against that same fresh client.
+  private respawn(): Promise<MCPClient> {
+    if (!this.respawning) {
+      this.respawning = (async () => {
+        await new Promise((r) => setTimeout(r, 100)); // short backoff
+        this.client = await Loreweaver.spawn(this.cfg);
+        return this.client;
+      })().finally(() => { this.respawning = null; });
+    }
+    return this.respawning;
   }
 
   // Stale-closure hazard: tool objects returned by client.tools() have execute() bound to
