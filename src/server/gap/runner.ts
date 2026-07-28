@@ -238,6 +238,11 @@ export function runInChild(job: RunnerJob, killAfterMs = KILL_AFTER_MS): Promise
       }
     });
 
+    // A child that exits before reading its stdin makes this write emit EPIPE on the pipe. An
+    // unhandled stream 'error' throws — and would take down the very harness process this child
+    // exists to shield from learner-code accidents. Swallow it: child.on('close'/'error') already
+    // turns an abnormal exit into a graded failure result.
+    child.stdin.on('error', () => {});
     child.stdin.write(JSON.stringify(job));
     child.stdin.end();
   });
