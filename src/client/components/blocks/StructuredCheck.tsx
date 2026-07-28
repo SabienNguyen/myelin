@@ -207,11 +207,14 @@ export function StructuredCheck({ args, result, addResult }: {
         </>
       )}
 
-      {checker.kind === 'matching' && (
-        <ul className="structured-matching">
-          {checker.items.map((it, i) => {
-            const options = stableShuffle(checker.options ?? checker.items.map((x) => x.right));
-            return (
+      {checker.kind === 'matching' && (() => {
+        // One shuffle for the whole list — every row offers the SAME option set, so this does not
+        // depend on the row index. It was computed inside the .map(), re-shuffling (deterministically,
+        // so identically) once per item on every render; hoisting it is a pure O(N²)->O(N) cleanup.
+        const options = stableShuffle(checker.options ?? checker.items.map((x) => x.right));
+        return (
+          <ul className="structured-matching">
+            {checker.items.map((it, i) => (
               <li key={it.left}>
                 <span className="structured-left">{it.left}</span>
                 <select
@@ -223,10 +226,10 @@ export function StructuredCheck({ args, result, addResult }: {
                   {options.map((o) => <option key={o} value={o}>{o}</option>)}
                 </select>
               </li>
-            );
-          })}
-        </ul>
-      )}
+            ))}
+          </ul>
+        );
+      })()}
 
       <button type="button" onClick={submit}>Submit</button>
     </div>
