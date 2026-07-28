@@ -3,8 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execPath } from 'node:process';
 import {
-  consumeContiguousSlices, defaultConverter, isMarkerBatchAvailable, pdfPageCount, splitChapters,
+  consumeContiguousSlices, defaultConverter, isMarkerBatchAvailable, pdfPageCount, runCapture, splitChapters,
   splitPdfSlices, type SliceInfo, cleanHeading,
 } from '../src/server/convert.js';
 
@@ -32,6 +33,21 @@ function makeTestPdf(path: string, pages: number): void {
   out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
   writeFileSync(path, out);
 }
+
+describe('runCapture — captures the whole of a large stdout, resolves on close not exit', () => {
+  // splitPdfSlices JSON-parses runCapture's stdout, and that JSON grows with a book's slice count.
+  // Resolving on 'exit' truncates a large stdout mid-read (the exact bug ingestRepo.ts fixed), which
+  // would then fail JSON.parse and drop the ingest to a non-incremental fallback. 200KB in one write
+  // spans several stdout 'data' events, so an 'exit'-based resolve loses the tail; 'close' keeps it.
+  it('returns a 200KB payload intact', async () => {
+    const out = await runCapture(execPath, ['-e', 'process.stdout.write("x".repeat(200000))']);
+    expect(out.length).toBe(200000);
+  });
+  it('rejects with the exit code and a stderr tail on failure', async () => {
+    await expect(runCapture(execPath, ['-e', 'process.stderr.write("boom"); process.exit(3)']))
+      .rejects.toThrow(/code 3.*boom/);
+  });
+});
 
 describe('splitChapters', () => {
   it('splits on H1 headings', () => {

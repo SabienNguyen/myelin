@@ -35,13 +35,28 @@ function run(cmd: string, args: string[], env: Record<string, string> = {}): Pro
   });
 }
 
-function runCapture(cmd: string, args: string[]): Promise<string> {
+/**
+ * Spawn `cmd`, capture its stdout, resolve it once the process is done — exported so the
+ * capture-completeness contract below is directly testable (like ingestRepo's runCommand).
+ *
+ * Resolves on 'close', NOT 'exit': 'exit' fires when the process ends but BEFORE its piped stdout
+ * is necessarily drained, so a large output (splitPdfSlices' JSON grows with a book's slice count)
+ * could be truncated mid-read and then fail JSON.parse — the same 'exit'-truncates-output bug
+ * ingestRepo.ts already fixed. 'close' fires only after both pipes have flushed. stderr is drained
+ * too: an unread piped stderr that fills its 64KB OS buffer would BLOCK the child forever (it never
+ * exits, so neither event fires); reading it also lets a failure name what went wrong.
+ */
+export function runCapture(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
+    let err = '';
     child.stdout.on('data', (d) => { out += d; });
+    child.stderr.on('data', (d) => { err += d; });
     child.on('error', reject);
-    child.on('exit', (code) => (code === 0 ? resolve(out) : reject(new Error(`${cmd} exited with code ${code}`))));
+    child.on('close', (code) => (code === 0
+      ? resolve(out)
+      : reject(new Error(`${cmd} exited with code ${code}${err.trim() ? `: ${err.trim().slice(0, 500)}` : ''}`))));
   });
 }
 
