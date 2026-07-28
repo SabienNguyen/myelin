@@ -97,7 +97,7 @@ export function SidePanel() {
           >
             {t}
             {t === 'library' && dueCount > 0 && (
-              <span className="tab-due-badge" aria-label={`${dueCount} pages due for review`}>{dueCount}</span>
+              <span className="tab-due-badge" aria-label={`${dueCount} ${dueCount === 1 ? 'page' : 'pages'} due for review`}>{dueCount}</span>
             )}
           </button>
         ))}
