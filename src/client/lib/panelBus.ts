@@ -22,18 +22,22 @@ export const panelBus = {
   setFocusMode(on: boolean) { this.emit({ type: 'focusMode', on }); },
 };
 
-export function wikiPreprocess(md: string): string {
-  return md.replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g,
-    (_, slug, label) => `[${label || slug}](#/page/${slug.trim()})`);
-}
-
 /** Segments a markdown string so a blanket text transform skips what must stay verbatim: fenced
  * code (```), inline code (`…`), and $$…$$ math blocks. Used with String.split — the capturing
  * group puts each protected run at an ODD index, so callers transform only the even-index text
- * segments. Shared by the loose-dollar escaper and the \(…\)/\[…\] delimiter converter: a `\[`
- * shown INSIDE a code span is the delimiter as content (a LaTeX-syntax lesson, a regex with an
- * escaped bracket), not math, and neither transform may rewrite it. */
+ * segments. Shared by ALL THREE chat text-preprocessors — the wiki-link rewriter, the loose-dollar
+ * escaper, and the \(…\)/\[…\] delimiter converter — because syntax shown INSIDE code is content,
+ * not markup: `[[note]]`, `\[`, or a bare `$` displayed AS CODE (a wiki-syntax lesson, a LaTeX
+ * tutorial, a regex) must render literally, so no preprocessor may rewrite it. */
 const PROTECTED_SPANS = /(```[\s\S]*?(?:```|$)|`[^`\n]*`|\$\$[\s\S]*?\$\$)/;
+
+export function wikiPreprocess(md: string): string {
+  return md
+    .split(PROTECTED_SPANS)
+    .map((seg, i) => (i % 2 ? seg : seg.replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g,
+      (_, slug, label) => `[${label || slug}](#/page/${slug.trim()})`)))
+    .join('');
+}
 
 /** Models emit LaTeX with \(inline\) and \[display\] delimiters; remark-math only parses
  * $-delimiters. Without this, react-markdown eats the backslashes and the student sees

@@ -16,6 +16,11 @@ describe('wikiPreprocess', () => {
     expect(wikiPreprocess('see [[chain-rule]] and [[loss-functions|losses]]'))
       .toBe('see [chain-rule](#/page/chain-rule) and [losses](#/page/loss-functions)');
   });
+  it('leaves [[…]] verbatim inside code — the wiki-link syntax shown AS CODE is not a link', () => {
+    // A lesson about wiki/Obsidian markup shows `[[note]]` literally; it must not become a link.
+    expect(wikiPreprocess('link with `[[note-name]]` syntax')).toBe('link with `[[note-name]]` syntax');
+    expect(wikiPreprocess('```\nsee [[x]]\n```')).toBe('```\nsee [[x]]\n```');
+  });
 });
 
 describe('scrubModelArtifacts', () => {
