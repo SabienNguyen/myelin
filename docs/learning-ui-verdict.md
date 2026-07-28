@@ -837,3 +837,13 @@ Written after the sprint that followed the original verdict; each line names its
   syncing to #/t/default; switching back restored all 6 chips and the graded block exactly — no
   bleed between threads, no lost work, no stale render. Not every audit finds a bug; this surface
   holds.
+- **math_scratchpad MathLive entry: verified clean — the earlier "garble" was a harness artifact,
+  not a product bug.** MathScratchpad.tsx line 68 documents that MathLive drops keystrokes for
+  ~100ms after a focus-gaining click while it wires its hidden keyboard sink, and that automation
+  must wait ≥150ms after clicking before typing. The √dₖ sitting's mangled multi-field entry was
+  that exact caveat unmet by the drive script. Re-driven correctly (250ms post-click wait): the
+  field captured "3x^2" verbatim, submitted, and graded correct (d/dx x³ = 3x², numerically
+  equivalent), with clean KaTeX throughout — no \differentialD dialect leaking into the render,
+  correct problem→You→verdict done-card grammar. The component's folded() also guarantees typed
+  work is never dropped across add/edit/submit. Surface holds; the open question from the √dₖ
+  sitting is closed as "my automation, not the app."
