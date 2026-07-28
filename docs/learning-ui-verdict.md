@@ -678,3 +678,6 @@ Written after the sprint that followed the original verdict; each line names its
   for a worked problem." Both graphs render fitted; the marathon graph's five labels turned out
   to be the contextual scope working as designed (2 hops around the open page, Whole-vault
   toggle present), not a regression — checked before judging.
+- **AppImage re-batched current through the rubric-retry fix** — grading.js inside the asar
+  carries both extractAnswerNumber and the omission-retry path, verified by string inspection as
+  before. No behavior commit is outside the artifact.
