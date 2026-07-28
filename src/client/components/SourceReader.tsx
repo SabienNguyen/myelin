@@ -7,13 +7,7 @@
 // stays open beside the conversation — reading and querying are one surface, not two apps.
 
 import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
-import { escapeLooseDollars } from '../lib/panelBus.js';
-import { CodeOrDiagram } from './MarkdownText.js';
+import { RichMarkdown } from './RichMarkdown.js';
 import { ArrowLeftIcon as ArrowLeft } from '@phosphor-icons/react';
 import { useThreadRuntime } from '@assistant-ui/react';
 
@@ -97,16 +91,10 @@ export function SourceReader({ path, title, onClose }: {
       {markdown === null && !error && <p className="source-reader-loading">opening the source…</p>}
       {markdown !== null && (
         <div className="source-reader-body" ref={bodyRef}>
-          {/* Same rich rendering as the chat and the Page reader — an ingested paper carries math,
-              and the tutor sends the learner here to read §3.2; raw LaTeX would defeat that. No
-              wiki-link handling, though: a source is external, not part of the vault graph. */}
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
-            components={{ code: CodeOrDiagram }}
-          >
-            {escapeLooseDollars(markdown)}
-          </ReactMarkdown>
+          {/* The app's one markdown renderer (RichMarkdown): an ingested paper carries maths and
+              the tutor sends the learner here to read §3.2, so raw LaTeX would defeat it. No
+              wiki-links — a source is external, not part of the vault graph. */}
+          <RichMarkdown text={markdown} />
           {ask && (
             <button
               type="button"

@@ -1,10 +1,5 @@
 import { memo } from 'react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
-import { escapeLooseDollars } from '../lib/panelBus.js';
+import { RichMarkdown } from './RichMarkdown.js';
 
 /**
  * Markdown and maths for a block's own prompt text.
@@ -15,29 +10,12 @@ import { escapeLooseDollars } from '../lib/panelBus.js';
  * characters, in the same screenshot, inches apart. A learner reading a physics or maths question
  * cannot be asked to parse LaTeX source.
  *
- * Deliberately NOT `MarkdownText`: that component renders the assistant-ui message part it is
- * mounted inside, so it cannot be pointed at an arbitrary string. Same plugin set, so the two agree
- * on what `$…$` means.
- *
- * `inline` renders without the wrapping `<p>` — for the places a prompt sits inside a sentence (a
- * graded-answer summary line, say) rather than as its own paragraph.
+ * A thin wrapper over RichMarkdown — the app's one markdown-string renderer — so a block prompt
+ * agrees with the page reader and the source reader on maths and diagrams. `inline` renders without
+ * the wrapping `<p>` for the places a prompt sits inside a sentence (a graded-answer summary line).
  */
 export const BlockProse = memo(function BlockProse(
   { text, inline = false }: { text: string; inline?: boolean },
 ) {
-  return (
-    <Markdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
-      components={inline
-        // A prompt spliced into a sentence must not open a block element mid-line.
-        ? { p: ({ children }) => <>{children}</> }
-        : undefined}
-    >
-      {/* Course-bank problems are drilled VERBATIM, and real exam text says things like "bought
-          for $12,000 is sold for $19,500" — which remark-math would typeset as one math span.
-          The same guard runs in chatPreprocess, so chat and block still agree on what $…$ means. */}
-      {escapeLooseDollars(text)}
-    </Markdown>
-  );
+  return <RichMarkdown text={text} inline={inline} />;
 });

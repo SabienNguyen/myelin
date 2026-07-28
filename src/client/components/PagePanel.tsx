@@ -1,13 +1,8 @@
 import { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
-import 'katex/dist/katex.min.css';
 import { getGraph, getPage } from '../lib/api.js';
 import { POLL_MS } from './GraphPanel.js';
-import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
-import { panelBus, wikiPreprocess, escapeLooseDollars } from '../lib/panelBus.js';
+import { RichMarkdown } from './RichMarkdown.js';
+import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
 import { DECAY } from '../../shared/loreweaver.js';
 
 // The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
@@ -318,16 +313,10 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
         </ul>
       )}
 
-      {/* Math renders here as it does in the chat and in blocks (BlockProse) — a page body carries
-          as much `$…$` as the tutor's prose, and until this it showed the raw LaTeX source. Same
-          plugin set and the same loose-dollar guard, so all three agree on what `$…$` means. */}
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
-        components={{ a: WikiLink, code: CodeOrDiagram }}
-      >
-        {escapeLooseDollars(wikiPreprocess(page.page.body))}
-      </ReactMarkdown>
+      {/* The app's one markdown renderer (RichMarkdown): maths, diagrams, and the loose-dollar
+          guard, same as the chat and the source reader. `wikiLinks` because a vault page's
+          `[[links]]` (wikiPreprocess turns them into `#/page/` anchors) open other pages in-app. */}
+      <RichMarkdown text={wikiPreprocess(page.page.body)} wikiLinks />
 
       {groups.length > 0 && (
         <div className="page-edges">
