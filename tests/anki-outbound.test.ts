@@ -245,3 +245,44 @@ describe('syncOutbound — one page failing generation does not abort the run', 
     await lw.close();
   }, 30_000);
 });
+
+// The push to Anki can fail for one note the same way generation can fail for one page — most
+// often a duplicate front, which addNote's `allowDuplicate: false` turns into a thrown error. That
+// one throw must not abort the whole run and strand every page ordered after it.
+describe('syncOutbound — one page failing to PUSH does not abort the run', () => {
+  it('counts the push failure and still pushes the other page', async () => {
+    const { vault, cfg, lw } = await makeVaultLoreweaver('kid7', 'ok-page', 'OK Page');
+    writeFileSync(join(vault, 'pages', 'dupe-page.md'),
+      '---\ntitle: Dupe Page\ndifficulty: 1\nstatus: solid\n---\ncontent for the dupe page');
+    await bringToPracticing(lw, 'kid7', 'ok-page');
+    await bringToPracticing(lw, 'kid7', 'dupe-page');
+
+    // A dedicated mock that rejects addNote for the dupe page's card the way AnkiConnect rejects a
+    // duplicate, and succeeds for everything else.
+    const app = new Hono();
+    let nextId = 5000;
+    app.post('/', async (c) => {
+      const body = await c.req.json();
+      if (body.action === 'addNote') {
+        return String(body.params?.note?.fields?.Front).includes('DUPE')
+          ? c.json({ result: null, error: 'cannot create note because it is a duplicate' })
+          : c.json({ result: nextId++, error: null });
+      }
+      const results: Record<string, unknown> = { version: 6, createDeck: 1, updateNoteFields: null };
+      return c.json({ result: results[body.action] ?? null, error: null });
+    });
+    let dupUrl = '';
+    const s = await new Promise<ReturnType<typeof serve>>((resolve) => {
+      const srv = serve({ fetch: app.fetch, port: 0 }, (info) => { dupUrl = `http://127.0.0.1:${info.port}`; resolve(srv); });
+    });
+
+    const result = await syncOutbound(lw, new AnkiClient(dupUrl), cfg, {
+      generateCards: async (slug) => [slug === 'dupe-page'
+        ? { front: 'DUPE front', back: 'a' } : { front: `q-${slug}`, back: `a-${slug}` }],
+    });
+    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0, failed: 1 });
+
+    s.close();
+    await lw.close();
+  }, 30_000);
+});

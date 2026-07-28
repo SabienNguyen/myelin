@@ -164,45 +164,58 @@ export async function syncOutbound(
     }
     if (cards.length === 0) continue;
 
-    const domain = page.domain || 'general';
-    const deck = `Loreweaver::${domain}`;
-    await anki.invoke('createDeck', { deck });
+    // The push to Anki is guarded for the same reason generation is (above) and read_page is
+    // (below): AnkiConnect returns an error — thrown by client.invoke — for a single bad note, the
+    // commonest being a duplicate front that addNote's `allowDuplicate: false` rejects. Unguarded,
+    // that one throw aborts the WHOLE run, so every page ordered after the offending one goes
+    // unsynced, and re-aborts at the same spot on every future tick. Isolate it to the one page.
+    try {
+      const domain = page.domain || 'general';
+      const deck = `Loreweaver::${domain}`;
+      await anki.invoke('createDeck', { deck });
 
-    const existingIds = Object.entries(ledger)
-      .filter(([, v]) => v.slug === slug)
-      .map(([id]) => id)
-      .sort((a, b) => Number(a) - Number(b));
+      const existingIds = Object.entries(ledger)
+        .filter(([, v]) => v.slug === slug)
+        .map(([id]) => id)
+        .sort((a, b) => Number(a) - Number(b));
 
-    for (let i = 0; i < cards.length; i++) {
-      const { front, back } = cards[i];
-      const hash = contentHash(front, back);
-      const existingId = existingIds[i];
+      for (let i = 0; i < cards.length; i++) {
+        const { front, back } = cards[i];
+        const hash = contentHash(front, back);
+        const existingId = existingIds[i];
 
-      if (existingId && ledger[existingId].hash === hash) {
-        result.skipped++;
-        continue;
+        if (existingId && ledger[existingId].hash === hash) {
+          result.skipped++;
+          continue;
+        }
+
+        if (existingId) {
+          await anki.invoke('updateNoteFields', {
+            note: { id: Number(existingId), fields: { Front: front, Back: back } },
+          });
+          ledger[existingId] = { slug, hash };
+          result.updated++;
+        } else {
+          const noteId = await anki.invoke('addNote', {
+            note: {
+              deckName: deck,
+              modelName: 'Basic',
+              fields: { Front: front, Back: back },
+              options: { allowDuplicate: false, duplicateScope: 'deck' },
+              tags: [`loreweaver::${slug}`],
+            },
+          });
+          ledger[String(noteId)] = { slug, hash };
+          result.pushed++;
+        }
+        writeLedger(cfg.vault, ledger); // persist after each push — crash-safe
       }
-
-      if (existingId) {
-        await anki.invoke('updateNoteFields', {
-          note: { id: Number(existingId), fields: { Front: front, Back: back } },
-        });
-        ledger[existingId] = { slug, hash };
-        result.updated++;
-      } else {
-        const noteId = await anki.invoke('addNote', {
-          note: {
-            deckName: deck,
-            modelName: 'Basic',
-            fields: { Front: front, Back: back },
-            options: { allowDuplicate: false, duplicateScope: 'deck' },
-            tags: [`loreweaver::${slug}`],
-          },
-        });
-        ledger[String(noteId)] = { slug, hash };
-        result.pushed++;
-      }
-      writeLedger(cfg.vault, ledger); // persist after each push — crash-safe
+    } catch (e) {
+      // Cards already pushed for this page stay pushed (their ledger writes persisted mid-loop);
+      // this page counts as failed and the run moves on to the next.
+      console.error(`[anki] push failed for ${slug}: ${(e as Error).message}`);
+      result.failed++;
+      continue;
     }
   }
 
