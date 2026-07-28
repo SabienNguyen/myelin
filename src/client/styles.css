@@ -517,6 +517,43 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
 
+/* speak — the "hear this" pronunciation control (Speak.tsx). A pill the tutor drops inline in a
+   tone lesson; clicking speaks the word through the browser's voice. */
+.speak-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.15rem 0.4rem 0.15rem 0;
+  padding: 0.28rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-family: var(--font-prose);
+  font-size: 1.02rem;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.speak-chip:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.speak-chip.is-speaking { border-color: var(--accent); background: var(--accent-soft); }
+.speak-chip svg { color: var(--accent); flex: none; }
+.speak-text { font-weight: 600; }
+.speak-gloss { color: var(--text-muted); font-size: 0.85em; }
+/* Unavailable: not a button — a quiet honest label that no voice exists for this language. */
+.speak-chip.speak-unavailable {
+  cursor: default;
+  flex-wrap: wrap;
+  background: transparent;
+  border-style: dashed;
+}
+.speak-chip.speak-unavailable svg { color: var(--text-muted); }
+.speak-note {
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-family: system-ui, sans-serif;
+}
+
 /* ── Side panel ──────────────────────────────────────── */
 .side-panel { display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
 

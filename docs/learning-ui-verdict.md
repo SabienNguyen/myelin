@@ -789,3 +789,17 @@ Written after the sprint that followed the original verdict; each line names its
   this, the session's contract-read sweep covers every harness server module that carries
   learner-facing logic, plus loreweaver's three logic modules — four real fixes came out of the
   reads (decay, empty-title, course-bank ids, and the earlier percent rule).
+- **A new capability, learner-driven: the `speak` "hear this" tool.** The user asked for a
+  Vietnamese-learner run and, if the audio capability was missing, to research open-source
+  options and add one. The live sitting confirmed the gap (the tutor teaches the tone map but
+  said plainly it "can't close the pronunciation loop"). Shipped: a `speak` UI tool
+  (uiTools.ts → Speak.tsx) on both tutor routes that attaches a "hear this" button spoken by the
+  browser's Web Speech API — zero dependencies, already in Electron. Navigation-class like
+  open_source (hearing mints no evidence), and degrade-loudly: no OS voice for the language → an
+  honest "use a native recording" chip, with the availability receipt travelling back so the
+  tutor adapts (verified live — six tone chips rendered on "ma", and when told no voice existed
+  the model pointed to native-audio guides and pivoted to spelling checks it could verify).
+  pickVoice BCP-47 matching unit-tested; rule-1a whitelist tests updated (speak joins open_source
+  as navigation). The pronunciation-GRADING half — a tone-contour mechanical checker via
+  CREPE/pyin pitch tracking, which fits the app's grading thesis exactly — is designed against
+  real open-source components in docs/pronunciation-roadmap.md, deliberately not half-wired.

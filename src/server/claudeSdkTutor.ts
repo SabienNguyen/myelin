@@ -47,6 +47,7 @@ export function blockAllowlist(gradingOnly: boolean): string[] {
   return [
     ...(gradingOnly ? [] : availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`)),
     `${BLOCKS_PREFIX}open_source`,
+    `${BLOCKS_PREFIX}speak`, // navigation-class UI tool, allowed in every turn like open_source
   ];
 }
 const COURSE_PREFIX = 'mcp__course__';
@@ -134,6 +135,25 @@ function blockMcpTools(vault: string) {
         return { content: [{ type: 'text' as const, text: 'Opening beside the conversation. Continue teaching — direct their reading.' }] };
       }
     },
+  ));
+  // speak rides the same bridge — a "hear this" button spoken by the browser. Navigation-class
+  // (hearing a word is not evidence you can say it), so its sentinel keeps the tutor teaching.
+  // The client reports back whether a voice was actually available; the tutor must not promise
+  // audio it can't know landed, so the sentinel says to await that receipt.
+  blocks.push(tool(
+    'speak',
+    'Attach a "hear this" button to a word or short phrase, spoken aloud by the browser\'s speech '
+      + 'engine — essential for tone languages (Vietnamese, Mandarin, Thai) where text cannot '
+      + 'convey the sound. Pass `text`, a BCP-47 `lang` (e.g. "vi", "zh-CN"), and an optional '
+      + '`gloss`. If the device has no voice for the language, the button says so — fall back to '
+      + 'the tone map and a native recording.',
+    UI_TOOLS.speak.input.shape,
+    async ({ text }: { text: string }) => ({
+      content: [{ type: 'text' as const, text:
+        `A "hear this" control for "${text}" is beside the conversation. Keep teaching — the `
+        + 'client will report whether a voice was available; do not claim the learner heard it '
+        + 'until they confirm or that receipt says so.' }],
+    }),
   ));
   return blocks;
 }

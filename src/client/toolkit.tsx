@@ -10,6 +10,7 @@ import { MathScratchpad } from './components/blocks/MathScratchpad.js';
 import { WritingDraft } from './components/blocks/WritingDraft.js';
 import { CodeExercise } from './components/blocks/CodeExercise.js';
 import { LabelDiagram } from './components/blocks/LabelDiagram.js';
+import { Speak } from './components/blocks/Speak.js';
 
 /** Two different failures wear the error flag: a call the server REJECTED (schema mismatch —
  *  the tutor's mistake) and a call that was CANCELLED because the conversation moved on (the
@@ -92,5 +93,15 @@ export const toolkit = defineToolkit({
       isError
         ? <span className="tool-note failed">✗ source could not be opened</span>
         : <OpenSource args={args} result={result} addResult={addResult} />,
+  },
+  // UI tool: speak a word/phrase via the browser's speech engine (src/shared/uiTools.ts).
+  speak: {
+    type: 'human' as const,
+    description: 'Speak a word or phrase aloud in a target language',
+    parameters: UI_TOOLS.speak.input,
+    render: ({ args, result, addResult, isError }: any) =>
+      isError
+        ? <span className="tool-note failed">✗ could not attach audio</span>
+        : <Speak args={args} result={result} addResult={addResult} />,
   },
 });

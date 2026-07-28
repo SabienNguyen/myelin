@@ -16,5 +16,27 @@ export const UI_TOOLS = {
       error: z.string().optional(),
     }),
   },
+  // Attach a "hear this" control to a word or phrase, spoken by the browser's own speech engine
+  // (Web Speech API — in Electron/Chromium already, zero deps). Built for the tone languages a
+  // text-only tutor could teach the MAP of but never let the learner HEAR (a live Vietnamese
+  // sitting named exactly this gap). Navigation-class, never graded: hearing a word is not
+  // evidence you can produce it. Honestly gated client-side — no voice for the language, no
+  // fake playback in the wrong accent (the app's degrade-loudly rule).
+  speak: {
+    input: z.object({
+      /** The exact text to speak — a syllable, word, or short phrase in the target language. */
+      text: z.string(),
+      /** BCP-47 language tag picking the voice (e.g. "vi" or "vi-VN" for Vietnamese, "zh-CN",
+       *  "ja-JP"). The client matches it against the OS's installed voices. */
+      lang: z.string(),
+      /** Optional gloss shown beside the control ("ma = ghost") so the button teaches in place. */
+      gloss: z.string().optional(),
+    }),
+    result: z.object({
+      /** Whether a matching voice was found and playback is available. */
+      available: z.boolean().optional(),
+      spoke: z.string().optional(),
+    }),
+  },
 } as const;
 export type UiToolName = keyof typeof UI_TOOLS;

@@ -162,7 +162,8 @@ export function availableBlocks(): BlockToolName[] {
 export function turnBlockTools(gradingOnly: boolean): ToolSet {
   const tools = { ...blockTools() };
   if (gradingOnly) {
-    for (const name of Object.keys(tools)) if (name !== 'open_source') delete tools[name];
+    const keep = new Set(['open_source', 'speak']); // navigation, not staging work
+    for (const name of Object.keys(tools)) if (!keep.has(name)) delete tools[name];
   }
   return tools;
 }
@@ -180,6 +181,15 @@ export function blockTools(): ToolSet {
       + 'beside the conversation — BRING the student to the artifact instead of describing it. '
       + 'Pass the source title as the Library shows it. Then direct their reading and probe on it.',
     inputSchema: UI_TOOLS.open_source.input as z.ZodTypeAny,
+  });
+  blocks.speak = tool({
+    description: 'Attach a "hear this" button to a word or short phrase, spoken aloud by the '
+      + "browser's speech engine. Use for pronunciation in ANY language the learner is studying — "
+      + 'essential for tone languages (Vietnamese, Mandarin, Thai) where the text alone cannot '
+      + 'convey the sound. Pass `text`, a BCP-47 `lang` (e.g. "vi", "zh-CN"), and an optional '
+      + '`gloss`. The client reports whether a voice was available; if not, teach from the tone '
+      + 'map and point the learner to a native recording.',
+    inputSchema: UI_TOOLS.speak.input as z.ZodTypeAny,
   });
   return blocks;
 }
