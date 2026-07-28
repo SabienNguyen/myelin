@@ -57,4 +57,20 @@ describe('ImeInput — Telex typing submits the transliterated value', () => {
     fireEvent.click(screen.getByText(/Telex on/));
     expect(screen.getByText(/Telex off/)).toBeTruthy();
   });
+
+  it('toggling off carries the typed text into the plain field, with no React warning', () => {
+    // Regression: the plain input used to be the SAME DOM node as the transliterating one, so the
+    // toggle transitioned it controlled→uncontrolled and logged a warning; distinct keys + a
+    // defaultValue seed fix that while preserving the learner's work (the "covers mid-edit" promise).
+    const errs: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((m: any) => { errs.push(String(m)); });
+    render(<ImeInput name="a" lang="vi" onSubmit={vi.fn()} />);
+    const input = screen.getByLabelText(/answer/i) as HTMLInputElement;
+    for (const k of 'vieejt') fireEvent.keyDown(input, { key: k });
+    expect(input.value).toBe('việt');
+    fireEvent.click(screen.getByText(/Telex on/)); // toggle the method OFF
+    expect((screen.getByLabelText('answer') as HTMLInputElement).value).toBe('việt'); // carried over
+    expect(errs.filter((e) => /controlled|uncontrolled/i.test(e))).toHaveLength(0);
+    spy.mockRestore();
+  });
 });
