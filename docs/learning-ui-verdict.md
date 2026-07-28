@@ -545,3 +545,9 @@ Written after the sprint that followed the original verdict; each line names its
   one read_page per path, parallel, null on failure so the client degrades back to the slug),
   and the button reads "resume at The Forward Pass: What a Neural Network Computes" — verified
   live on the newcomer vault.
+- **Anki backlog badge driven into its live state: correct in both themes.** Crafted the real
+  trigger (a sync cursor five days stale with Anki-Connect down) in the newcomer vault:
+  /api/status flips to `anki: "backlog"` and the topbar grows the amber-dot "anki" chip with
+  "Anki has a review backlog" as both title and aria-label — light and dark verified. The
+  fresh-install guard holds too: with no cursor at all the status reads `down` and the topbar
+  stays quiet (no badge about work that never existed). State cleaned up after the drive.
