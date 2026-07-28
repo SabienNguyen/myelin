@@ -416,8 +416,13 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
   }
 
   if (checker.kind === 'matching') {
+    // POSITION-aligned, not `clean`: the block sends one pick per left item, in item order, with an
+    // empty string for an unselected row (StructuredCheck.tsx picks[]). `clean` strips the blanks
+    // off the TOP of gradeStructured, which shifts every later pick up a slot — so a learner who
+    // left one dropdown blank had their remaining CORRECT matches compared against the wrong items
+    // and marked ✗. Read values[i] directly so a blank fails only its own row.
     const perItem = checker.items.map((it: any, i: number) => ({
-      id: it.left, correct: normKey(clean[i] ?? '') === normKey(it.right),
+      id: it.left, correct: normKey(String(values[i] ?? '')) === normKey(it.right),
     }));
     const hits = perItem.filter((p: any) => p.correct).length;
     return {

@@ -200,6 +200,19 @@ describe('structured_check checkers (mechanical, any subject)', () => {
     expect(half.verdict).toBe('partial');
     expect(half.perItem).toEqual([{ id: 'tonic', correct: true }, { id: 'dominant', correct: false }]);
   });
+  it('matching: a blank row fails only itself, not the correct picks after it', async () => {
+    // The block sends one pick per left item, in order, '' for an unselected row. A blank must not
+    // shift the later picks up a slot and mark correct matches wrong — the learner matched a and c
+    // right and left b blank, so exactly b is wrong.
+    const c = { kind: 'matching', items: [
+      { left: 'a', right: 'ra' }, { left: 'b', right: 'rb' }, { left: 'c', right: 'rc' },
+    ] };
+    const g = await grade(c, ['ra', '', 'rc']);
+    expect(g.perItem).toEqual([
+      { id: 'a', correct: true }, { id: 'b', correct: false }, { id: 'c', correct: true },
+    ]);
+    expect(g.verdict).toBe('partial'); // 2/3, and never a false 'correct'
+  });
   it('pattern: normalises case, spacing and stray quotes', async () => {
     const c = { kind: 'pattern', expected: 'sodium chloride' };
     expect((await grade(c, ['  Sodium   Chloride '])).verdict).toBe('correct');
