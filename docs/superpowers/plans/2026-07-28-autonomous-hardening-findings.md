@@ -66,10 +66,16 @@ The fix is bounded: the exercise logic (`generateExercise`) is shared, so portin
 tool in the Agent SDK's `tool(name, desc, schema, handler)` shape (the `course_problems` port at
 `claudeSdkTutor.ts:201` is the template — handler returns MCP content blocks), adding it to the
 freeform `allowedTools`, and naming it in the prompt. Not a pedagogy call — the intent (parity) is
-unambiguous. Held for greenlight only because it edits the tutor query pipeline that subscription
-users depend on, and a subtly-wrong port there is the kind of thing an absent owner shouldn't inherit
-unverified. **On your word I'll port it, with tsc + the route's tests + a live drive confirming the
-tool is callable.** (Separately: `ingest_paper` is also absent, but that one IS covered by the
+unambiguous. Held for greenlight for a SPECIFIC reason, not blanket caution: the route is unit-testable
+(`createClaudeSdkTutorSession` takes a `queryImpl` injection, so `claudeSdkTutor.test.ts` mocks the
+Agent SDK), but it cannot be verified end-to-end WITHOUT A REAL CLAUDE SUBSCRIPTION — the scripted
+e2e stack drives the ai-sdk route, not this one. So the parts a unit test can't reach (does the real
+Agent SDK accept the tool registration; does the freeform-only gating behave under a real login —
+`generate_exercise` must gate like the write tools, not always-on like `course_problems`) stay
+unproven here. A subscription-pipeline change whose failure mode is silent breakage for exactly the
+affected users is not something to ship on unit tests alone. **On your word I'll port it — mirroring
+the `course_problems` tool shape, freeform-gated, covered by a `queryImpl` unit test — and you run the
+one thing I can't: a real-subscription drive confirming the tool is offered and callable.** (Separately: `ingest_paper` is also absent, but that one IS covered by the
 prompt's deliberate "use WebFetch" note — read-vs-ingest is a real capability gap but a documented,
 arguably-intended one; flagging for completeness, lower priority.)
 
