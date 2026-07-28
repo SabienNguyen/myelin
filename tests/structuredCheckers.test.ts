@@ -108,6 +108,17 @@ describe('chem_equation — conservation per element and per charge', () => {
     expect(gradeChemEquation('Fe^2+ -> Fe^3+', {}).ok).toBe(false);
   });
 
+  it('reads the printed ion form — subscript counts (H₂O) and superscript charges (Fe²⁺)', () => {
+    // How ions appear in a textbook or a rendered equation the learner copies; the ASCII form works
+    // too, so both must grade the same.
+    expect(gradeChemEquation('Fe²⁺ -> Fe³⁺ + e-', {}).ok).toBe(true);
+    expect(gradeChemEquation('2H₂ + O₂ -> 2H₂O', {}).ok).toBe(true);
+    expect(gradeChemEquation('Ca²⁺ + 2OH⁻ -> Ca(OH)₂', {}).ok).toBe(true);
+    // superscript charge + state symbols together, and an unbalanced charge still caught.
+    expect(gradeChemEquation('NaCl(s) -> Na⁺(aq) + Cl⁻(aq)', {}).ok).toBe(true);
+    expect(gradeChemEquation('Fe²⁺ -> Fe³⁺', {}).ok).toBe(false);
+  });
+
   it('refuses a DIFFERENT balanced equation when the reaction is pinned', () => {
     // "H2 + H2 -> 2H2" is balanced; without the species pin it would grade as chemistry.
     const pin = { reactants: ['CH4', 'O2'], products: ['CO2', 'H2O'] };

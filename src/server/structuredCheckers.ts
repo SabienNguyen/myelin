@@ -131,6 +131,18 @@ export function parseFormula(formula: string): Record<string, number> {
   return out;
 }
 
+const SUB = '₀₁₂₃₄₅₆₇₈₉';
+const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻';
+/** Fold the printed/typeset form of a formula to ASCII: subscript element counts (H₂O → H2O) and
+ *  superscript charges (Ca²⁺ → Ca2+, SO₄²⁻ → SO42-) — how ions actually appear in textbooks and in
+ *  a rendered equation a learner copies. A charge always ENDS in its sign, so folding both to plain
+ *  digits leaves parseSpecies' trailing-sign charge match intact. */
+function foldChemGlyphs(s: string): string {
+  return s
+    .replace(/[₀₁₂₃₄₅₆₇₈₉]/g, (c) => String(SUB.indexOf(c)))
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, (c) => '0123456789+-'[SUP.indexOf(c)]);
+}
+
 /** One term of an equation side: `2H2O`, `SO4^2-`, `3 Fe`, `e-` (a bare electron). */
 export function parseSpecies(term: string): Species {
   // Strip state symbols — (s), (l), (g), (aq) — which annotate phase and are in essentially every
@@ -138,7 +150,7 @@ export function parseSpecies(term: string): Species {
   // Unambiguous vs a multiplier group like Ca(OH)2: those exact letters can't be an element group,
   // and a real multiplier group is never one of them. Done before charge/formula parsing so
   // "Na+(aq)" reads its "+" charge and "H2O(l)" its formula.
-  const t = term.trim().replace(/\s+/g, '').replace(/\((?:s|l|g|aq)\)/gi, '');
+  const t = foldChemGlyphs(term.trim().replace(/\s+/g, '')).replace(/\((?:s|l|g|aq)\)/gi, '');
   const coeffMatch = t.match(/^(\d+)/);
   const coeff = coeffMatch ? Number(coeffMatch[1]) : 1;
   let rest = coeffMatch ? t.slice(coeffMatch[1].length) : t;
