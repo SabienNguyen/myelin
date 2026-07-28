@@ -805,3 +805,17 @@ Written after the sprint that followed the original verdict; each line names its
   real open-source components in docs/pronunciation-roadmap.md, deliberately not half-wired.
 - **AppImage re-batched through the speak feature** — the SPA bundle carries the hear-this
   control, verified by inspection. Artifact current with the new capability.
+- **Two brand-new subjects, driven concurrently, both closed the full loop — the system's source
+  of truth held across languages and neuroscience at once.** Vietnamese (new `speak` tool):
+  tones taught → six hear-this audio chips (degrade-loudly, no OS voice) → a 6-diacritic→tone
+  matching drill graded 6/6 mechanically past two decoys → the `vietnamese-tones` page reached
+  *mastered* (exposed → explained-correctly → applied-correctly), with a first-phrases page
+  drafted. Brain (neuroscience+biology+AI): three lenses taught, the synaptic-cleft and
+  real-vs-artificial-neuron probes graded, and three sourced pages written once switched to
+  freeform (neuron-biology, neural-signaling, artificial-vs-biological-neurons) — with an honest
+  disclosure that WebFetch failed so verification leaned on search summaries. Both runs hit the
+  new write-gate correctly (learn-mode page-writes deferred to freeform) and both drew what to
+  teach from their own vault's next_lessons, not from thin air. Nuance noted, not a bug: a
+  diacritic-matching drill is a *mechanical* grade so it can reach mastered, but recognizing the
+  map is not producing the tones — the roadmap's tone-contour checker is the truer "applied" for
+  speech, which is exactly why it's designed as the grading half.
