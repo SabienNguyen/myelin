@@ -885,3 +885,15 @@ Written after the sprint that followed the original verdict; each line names its
   chips repeat the same native-recording note; on a device with a Vietnamese voice they are play
   buttons with no note, so the repetition only appears in the degraded state and each chip is
   independently honest — left as designed.)
+- **code_exercise gap ladder: navigation and the predict gate verified clean live.** Drove the
+  stream-consumer ladder on the main vault: it staged as a chip, opened into focus mode with the
+  left rail's "back to tutor", walked the read-only WORKED EXAMPLE rung (move 1 of 5, syntax-
+  highlighted, "nothing graded here"), and advanced via "skip ahead" to the FULL BODY rung — which
+  correctly opens with the comprehension-before-production PREDICT gate ("Before you write it —
+  read it": shows the SSE input, asks what the function yields, "check my prediction"/"skip"),
+  the editor staying behind it, with a thorough spec and constraints (chunk boundaries, split
+  multi-byte UTF-8, blank/non-data lines, DONE sentinel) and a worked-example cross-link. All
+  rungs, tabs (Task/Input/Help/Plan), and the progress rail render cleanly. The graded solve path
+  itself (editor → real test suite → applied-correctly evidence) is covered by the green
+  gap-exercise.e2e.ts, so this live pass confirms the rendering and rung navigation the e2e can't
+  screenshot. No visual or navigation bug.
