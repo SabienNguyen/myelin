@@ -1008,3 +1008,9 @@ Written after the sprint that followed the original verdict; each line names its
   says to judge ARGUMENT and structure, not the grammar Harper owns. Verified live: a draft with
   "too/watter/alot" drew three located lints with fixes. This is the concrete lever that moves the
   "feedback quality" category toward an A. 1076 unit + 10 e2e green.
+- **Transfer, encoded at the review boundary (prompt).** Added a rule (2a-i): on REVIEW, the
+  retrieval probe must change the surface — fresh numbers, a new scenario, the concept applied to a
+  domain it wasn't taught in — so a review pass demonstrates transfer, not memory of the one
+  problem. The page's original example is reserved for first teaching. A behaviour nudge (soft,
+  model-dependent) rather than a mechanical guarantee, but it encodes the right principle where
+  far-transfer is won or lost.
