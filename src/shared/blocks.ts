@@ -177,6 +177,18 @@ const structuredCheck = {
         expected: z.array(z.string()).min(1),
         ordered: z.boolean().optional(),
       }),
+      // An ORDERED tuple of numbers — a coordinate (3, 4), a vector ⟨1, 0, -2⟩, a complex number as
+      // (re, im), an interval's endpoints. Compared componentwise with tolerance: order matters
+      // (unlike `set`) and the parts are numeric (unlike `sequence`, which is exact strings), so
+      // "(3, 4)", "3,4" and "⟨3 4⟩" all read the same. Physics, linear algebra, graphics. Any
+      // trailing `unit` is checked as a normalised substring, exactly like the numeric checker.
+      z.object({
+        kind: z.literal('vector'),
+        expected: z.array(z.number()).min(1),
+        tolerance: z.number().optional(),  // per-component; absolute by default
+        relative: z.boolean().optional(),  // compare against |component| instead
+        unit: z.string().optional(),
+      }),
     ]),
   }),
   result: z.object({

@@ -101,6 +101,32 @@ describe('structured_check checkers (mechanical, any subject)', () => {
     expect((await grade(c, ['0.001'])).verdict).toBe('incorrect'); // fraction confusion → numeric miss
   });
 
+  it('vector: ordered components with tolerance, any bracket notation, optional unit', async () => {
+    const c = { kind: 'vector', expected: [3, 4], tolerance: 0.01 };
+    expect((await grade(c, ['(3, 4)'])).verdict).toBe('correct');
+    expect((await grade(c, ['3, 4'])).verdict).toBe('correct');
+    expect((await grade(c, ['⟨3 4⟩'])).verdict).toBe('correct');
+    expect((await grade(c, ['[3.004, 3.997]'])).verdict).toBe('correct'); // within tolerance
+    // Order matters — (4, 3) is a different vector, unlike `set`.
+    expect((await grade(c, ['(4, 3)'])).verdict).toBe('incorrect');
+    // Wrong arity is named, not silently wrong.
+    const arity = await grade(c, ['3']);
+    expect(arity.verdict).toBe('incorrect');
+    expect(arity.detail).toContain('expected 2 components');
+    // Partial: one component right, one wrong.
+    expect((await grade(c, ['(3, 9)'])).verdict).toBe('partial');
+  });
+
+  it('vector: a digit-bearing unit is not mistaken for a component', async () => {
+    const c = { kind: 'vector', expected: [3, 4], tolerance: 0.01, unit: 'm/s' };
+    expect((await grade(c, ['(3, 4) m/s'])).verdict).toBe('correct');
+    // The "2" in "m/s2" must NOT be read as a third component.
+    const c2 = { kind: 'vector', expected: [3, 4], tolerance: 0.01, unit: 'm/s^2' };
+    expect((await grade(c2, ['(3, 4) m/s2'])).verdict).toBe('correct');
+    // Right components, missing unit -> partial, like numeric.
+    expect((await grade(c, ['(3, 4)'])).verdict).toBe('partial');
+  });
+
   it('numeric: tolerance, units, and non-numeric input', async () => {
     const c = { kind: 'numeric', expected: 9.81, tolerance: 0.01, unit: 'm/s^2' };
     expect((await grade(c, ['9.81 m/s^2'])).verdict).toBe('correct');

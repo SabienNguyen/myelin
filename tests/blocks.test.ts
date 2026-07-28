@@ -20,6 +20,7 @@ describe('block schemas', () => {
       { kind: 'set', expected: ['a', 'b'] },
       { kind: 'sequence', expected: ['a', 'b'] },
       { kind: 'matching', items: [{ left: 'l', right: 'r' }] },
+      { kind: 'vector', expected: [3, 4], tolerance: 0.01 },
       { kind: 'pattern', expected: 'sodium chloride' },
     ];
     for (const checker of kinds) {

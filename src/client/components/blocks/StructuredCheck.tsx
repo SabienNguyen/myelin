@@ -19,6 +19,7 @@ type Checker =
   | { kind: 'unit'; expected: number; unit: string }
   | { kind: 'chem_equation'; reactants?: string[]; products?: string[] }
   | { kind: 'notes'; expected: string[]; ordered?: boolean }
+  | { kind: 'vector'; expected: number[]; tolerance?: number; relative?: boolean; unit?: string }
   | { kind: 'pattern'; expected: string };
 
 interface Args { prompt: string; pageSlug: string; hint?: string; checker: Checker }
@@ -72,7 +73,7 @@ export function StructuredCheck({ args, result, addResult }: {
     ? (prettyAnswer(args.prompt) ?? args.prompt) : args.prompt;
   // Everything the learner answers in ONE input. `unit` includes its unit in the answer (that is
   // the point of the checker), `chem_equation` is one equation, `notes` split server-side.
-  const isSingle = ['numeric', 'pattern', 'unit', 'chem_equation', 'notes'].includes(checker.kind);
+  const isSingle = ['numeric', 'pattern', 'unit', 'chem_equation', 'notes', 'vector'].includes(checker.kind);
   const [single, setSingle] = useState('');
   const [lines, setLines] = useState('');
   const [picks, setPicks] = useState<string[]>(
@@ -132,7 +133,8 @@ export function StructuredCheck({ args, result, addResult }: {
             inputMode={checker.kind === 'numeric' ? 'decimal' : 'text'}
             placeholder={checker.kind === 'unit' ? 'value with unit — e.g. 20 m/s'
               : checker.kind === 'chem_equation' ? 'e.g. CH4 + 2O2 -> CO2 + 2H2O'
-                : checker.kind === 'notes' ? 'note names — e.g. C E G' : undefined}
+                : checker.kind === 'notes' ? 'note names — e.g. C E G'
+                  : checker.kind === 'vector' ? 'e.g. (3, 4)' : undefined}
             value={single}
             onChange={(e) => setSingle(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}

@@ -988,3 +988,12 @@ Written after the sprint that followed the original verdict; each line names its
   legitimate no-bug result. Added tests/client/richMarkdown.test.tsx (6 tests) for the shared
   renderer four surfaces now depend on: maths typeset, mermaid fence → diagram, non-mermaid fence →
   code, the loose-dollar guard, the wikiLinks toggle, and the inline toggle.
+- **A new mechanical checker: `vector`, closing a self-identified grading gap.** Grading the system
+  as a learning tool surfaced a real hole — a STEM answer that's an ordered tuple (a coordinate, a
+  vector, a complex number, an interval's endpoints) had no clean mechanical path: `set` is
+  unordered, `sequence` is exact strings, `numeric` is a single value, so such answers fell to
+  model judgment. The new `vector` checker parses "(3, 4)", "3,4", "⟨3 4⟩" alike, compares
+  componentwise with per-component tolerance, and honours a trailing unit — with a parser that
+  stops at the unit so a digit-bearing unit (m/s²) can't be misread as a component. More applied
+  answers now earn mechanical applied-correctly rather than a model's opinion, which is the whole
+  honesty thesis. Verified live: tutor staged it, "(3, 4)" graded correct; 1073 unit + 10 e2e green.

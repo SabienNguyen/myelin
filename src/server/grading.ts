@@ -247,6 +247,24 @@ export function extractAnswerNumber(s: string): number {
   return tokens?.length === 1 ? Number(tokens[0]) : NaN;
 }
 
+/** Split "(3, 4) m/s" into its leading numeric components and whatever trails them (a unit). Walks
+ *  comma/space-separated tokens after stripping the bracket characters a vector is written with,
+ *  collecting the LEADING run that parses as numbers and treating the first non-number token as the
+ *  start of the unit — so a unit that contains a digit (m/s2, cm3) can't be mistaken for a
+ *  component. Returns null when no leading number is found. */
+function parseVector(s: string): { nums: number[]; rest: string } | null {
+  const tokens = s.replace(/[()[\]{}⟨⟩<>|]/g, ' ').split(/[\s,]+/).filter(Boolean);
+  const nums: number[] = [];
+  let i = 0;
+  for (; i < tokens.length; i++) {
+    const n = Number(tokens[i]);
+    if (Number.isNaN(n)) break;
+    nums.push(n);
+  }
+  if (nums.length === 0) return null;
+  return { nums, rest: tokens.slice(i).join(' ') };
+}
+
 interface StructuredGrade {
   allCorrect: boolean;
   anyCorrect: boolean;
@@ -293,6 +311,37 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
         : unitOk ? 'value and unit match' : `value matches but the unit should be ${checker.unit}`)
       : `expected ${checker.expected}${checker.unit ? ` ${checker.unit}` : ''}`;
     return { allCorrect: ok, anyCorrect: numOk, detail };
+  }
+
+  if (checker.kind === 'vector') {
+    const parsed = parseVector(clean[0] ?? '');
+    if (!parsed) return { allCorrect: false, anyCorrect: false, detail: 'no numbers found in the answer' };
+    const want = checker.expected as number[];
+    if (parsed.nums.length !== want.length) {
+      return {
+        allCorrect: false, anyCorrect: false,
+        detail: `expected ${want.length} component${want.length === 1 ? '' : 's'}, got ${parsed.nums.length}`,
+      };
+    }
+    const tol = checker.tolerance ?? 1e-9;
+    const perItem = want.map((w, i) => {
+      const limit = checker.relative ? Math.abs(w) * tol : tol;
+      return { id: `comp-${i}`, correct: Math.abs(parsed.nums[i] - w) <= limit };
+    });
+    const hits = perItem.filter((p) => p.correct).length;
+    const valuesOk = hits === want.length;
+    // Same unit discipline as the numeric checker: normalised substring, only when one was asked.
+    const unitKeyV = (s: string) => normKey(s).replace(/[\s^]/g, '');
+    const unitOk = !checker.unit || unitKeyV(parsed.rest).includes(unitKeyV(checker.unit));
+    return {
+      allCorrect: valuesOk && unitOk,
+      anyCorrect: hits > 0,
+      detail: valuesOk
+        ? (!checker.unit ? 'all components match'
+          : unitOk ? 'components and unit match' : `components match but the unit should be ${checker.unit}`)
+        : `${hits}/${want.length} components match; expected (${want.join(', ')})`,
+      perItem,
+    };
   }
 
   if (checker.kind === 'set') {

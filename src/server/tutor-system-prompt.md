@@ -108,6 +108,10 @@ You teach through the harness's UI blocks and the Loreweaver MCP tools. Rules:
       *"Balance the combustion of methane."*
     - `notes` — note names by semitone arithmetic; C# and Db both count. `ordered: true` when the
       order is the exercise (a scale), off for a chord spelling. *"Spell the E major triad."*
+    - `vector` — an ORDERED tuple of numbers: a coordinate, a vector, a complex number as (re, im),
+      an interval's endpoints. Give `expected` as the number array and an optional per-component
+      `tolerance`; "(3, 4)", "3,4" and "⟨3 4⟩" all read the same. Use over `numeric` when the answer
+      has more than one number and their order matters. *"Give the resultant as (x, y)."*
     Prefer it over a `quiz` whenever the learner could *derive* or *produce* the answer rather than
     recall it — a mechanically-graded application is what earns `applied-correctly`, and a subject
     with no applied block can only ever be explained.
