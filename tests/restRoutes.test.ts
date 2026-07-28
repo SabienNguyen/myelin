@@ -426,6 +426,20 @@ describe('GET /api/due and /api/session-plan', () => {
     expect(plan.find((p: any) => p.kind === 'misconception').why).toContain('mixes up X with Y');
   });
 
+  it('/api/session-plan carries a transfer directive on review and fix items, not on new/course', async () => {
+    // The retrieval constraint travels WITH the item so it reaches the tutor next to the row it
+    // works — not only as a distant system-prompt rule. Review = probe in a new context; fix =
+    // show the repair generalises. New and course items teach/drill verbatim, so they carry none.
+    const { plan } = await (await buildRestRoutes(spacedLw(), cfg).request('/api/session-plan')).json();
+    for (const p of plan.filter((x: any) => x.kind === 'review')) {
+      expect(p.transfer).toMatch(/new context/i);
+    }
+    expect(plan.find((p: any) => p.kind === 'misconception').transfer).toMatch(/generalises/i);
+    for (const p of plan.filter((x: any) => x.kind === 'new' || x.kind === 'course')) {
+      expect(p.transfer).toBeUndefined();
+    }
+  });
+
   it('/api/session-plan never offers an untouched boot-seeded stub as "new"', async () => {
     // The cold-start audit: a fresh install's plan opened with "Consuming SSE token streams" —
     // the pattern-page seed — as "next on your frontier". Seeded stubs are practice inventory;

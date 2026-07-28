@@ -243,6 +243,12 @@ export function buildRestRoutes(
    * blocked practice (all review, then all new) is exactly what the rotation exists to prevent.
    * Capped at 6 — a session plan, not a syllabus.
    */
+  // Per-item retrieval constraints, carried on the plan so they reach the tutor NEXT TO the row
+  // being worked (see the comment where they're attached). Phrased as the concrete method, not a
+  // reminder to consult the rulebook: "probe in a new context" is actionable inline.
+  const TRANSFER_REVIEW = 'probe in a NEW context — fresh numbers or a different scenario, never the page’s own example — so a pass proves transfer, not memory of one problem';
+  const TRANSFER_FIX = 'test the corrected idea somewhere new — a pass has to show the repair generalises, not that they can recite the fix';
+
   app.get('/api/session-plan', async (c) => {
     const CAP = 6;
     const state = await lw.call('get_student_state', { student: cfg.student }).catch(() => ({})) as Record<string, any>;
@@ -252,7 +258,16 @@ export function buildRestRoutes(
       .map(([slug, m]) => ({ slug, daysLeft: (m.days_left ?? null) as number | null, slipped: m.slipped === true }))
       .filter((e) => e.slipped || (e.daysLeft !== null && e.daysLeft <= 5))
       .sort((a, b) => (a.slipped === b.slipped ? (a.daysLeft ?? 0) - (b.daysLeft ?? 0) : a.slipped ? -1 : 1))
-      .map((e) => ({ kind: 'review' as const, slug: e.slug, why: e.slipped ? 'this has slipped — re-earn it' : `${e.daysLeft}d before it slips` }));
+      .map((e) => ({
+        kind: 'review' as const, slug: e.slug,
+        why: e.slipped ? 'this has slipped — re-earn it' : `${e.daysLeft}d before it slips`,
+        // The transfer directive TRAVELS WITH THE ITEM. Rule 2a-i in the system prompt says the same
+        // thing, but it sits ~40 lines from where the tutor works each plan row; carrying the
+        // constraint on the item itself puts it next to the work, where it actually gets honoured.
+        // This is mechanical DELIVERY of the constraint, not mechanical generation of the exercise —
+        // the tutor still mints the probe, but it can no longer silently re-ask the taught example.
+        transfer: TRANSFER_REVIEW,
+      }));
 
     const inReview = new Set(review.map((r) => r.slug));
     const misconception = entries
@@ -260,6 +275,9 @@ export function buildRestRoutes(
       .map(([slug, m]) => ({
         kind: 'misconception' as const, slug,
         why: `recorded misconception: “${String(m.misconceptions[m.misconceptions.length - 1]).slice(0, 80)}”`,
+        // A fix is a re-prove: confirm the repair GENERALISES, not that they can recite the
+        // correction. Same co-location argument as review above.
+        transfer: TRANSFER_FIX,
       }));
 
     const taken = new Set([...inReview, ...misconception.map((m) => m.slug)]);
