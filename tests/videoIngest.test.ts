@@ -118,6 +118,19 @@ describe('linkifyTimestamps — compiled-page stamps become deep links', () => {
     const text = 'a citation [12] and a matrix [1,2] and prose [see below]';
     expect(linkifyTimestamps(text, URL)).toBe(text);
   });
+
+  it('leaves a [1:30]-style slice in code alone — a coding video is not a timestamp mine', () => {
+    // A programming video compiles to a page with code; `arr[1:30]` and `x[0:10]` are slices, not
+    // moments. Fenced and inline code must pass through verbatim while prose stamps still link.
+    const fenced = 'Prose stamp [1:05]:\n```python\nchunk = arr[1:30]\nrow = m[0:10]\n```\nback to [2:40].';
+    const out = linkifyTimestamps(fenced, URL);
+    expect(out).toContain('chunk = arr[1:30]');   // code untouched
+    expect(out).toContain('row = m[0:10]');
+    expect(out).toContain('[\\[1:05\\]](');        // prose stamps still linked
+    expect(out).toContain('[\\[2:40\\]](');
+    // inline code too
+    expect(linkifyTimestamps('use `arr[1:30]` to slice', URL)).toBe('use `arr[1:30]` to slice');
+  });
 });
 
 /** Fake yt-dlp: answers --print with metadata, and "writes" captions by dropping a .vtt beside

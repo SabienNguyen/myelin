@@ -100,17 +100,25 @@ export function atTime(url: string, seconds: number): string {
  * video-sourced compile (the same seam that guarantees citations — ingest.ts's withCitation), so
  * a learner reading the COMPILED page can jump into the video exactly like a learner reading the
  * raw transcript. Stamps that are already link text (\[0:12\]) or link labels stay untouched.
+ *
+ * Fenced and inline code are skipped: a video ABOUT programming compiles to a page carrying code,
+ * and `arr[1:30]` / `list[0:10]` are slice literals, not timestamps — linkifying them would turn
+ * the code into broken deep links. The split keeps each code run (odd index) verbatim and only
+ * rewrites the prose between (even index), the same code-protection the chat preprocessors use.
  */
 export function linkifyTimestamps(markdown: string, videoUrl: string): string {
-  return markdown.replace(
-    /(\\?)\[(\d{1,2}):(\d{2})(?::(\d{2}))?\](\]\(|\()?/g,
-    (whole, escaped, a, b, c, tail) => {
-      if (escaped || tail === '](' || tail === '(') return whole; // already a link, or link syntax
-      const seconds = c ? Number(a) * 3600 + Number(b) * 60 + Number(c) : Number(a) * 60 + Number(b);
-      const label = c ? `${a}:${b}:${c}` : `${a}:${b}`;
-      return `[\\[${label}\\]](${atTime(videoUrl, seconds)})`;
-    },
-  );
+  return markdown
+    .split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/)
+    .map((seg, i) => (i % 2 ? seg : seg.replace(
+      /(\\?)\[(\d{1,2}):(\d{2})(?::(\d{2}))?\](\]\(|\()?/g,
+      (whole, escaped, a, b, c, tail) => {
+        if (escaped || tail === '](' || tail === '(') return whole; // already a link, or link syntax
+        const seconds = c ? Number(a) * 3600 + Number(b) * 60 + Number(c) : Number(a) * 60 + Number(b);
+        const label = c ? `${a}:${b}:${c}` : `${a}:${b}`;
+        return `[\\[${label}\\]](${atTime(videoUrl, seconds)})`;
+      },
+    )))
+    .join('');
 }
 
 /** Cues grouped into readable timestamped paragraphs. One [M:SS] per ~500 characters of speech —
