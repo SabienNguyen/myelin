@@ -997,3 +997,14 @@ Written after the sprint that followed the original verdict; each line names its
   stops at the unit so a digit-bearing unit (m/s²) can't be misread as a component. More applied
   answers now earn mechanical applied-correctly rather than a model's opinion, which is the whole
   honesty thesis. Verified live: tutor staged it, "(3, 4)" graded correct; 1073 unit + 10 e2e green.
+- **Real mechanical grading for writing: Harper baked into the writing block.** The one applied
+  subject whose feedback was a model's OPINION now gets deterministic, located, mechanical grammar
+  and style grading — Harper (writewithharper.com), an open-source English checker compiled to WASM,
+  running entirely in the browser. As the learner writes, a debounced review lists each issue by
+  kind (Spelling, Agreement, Redundancy, Word Choice, …) with the offending text and a one-click
+  fix; the count rides into the grade so the record shows the machine-checked mechanics beside the
+  model-judged argument. The WASM is a lazy dynamic-import chunk (no cost until a writing block
+  opens) and degrades to model-only feedback if it fails to load. The tutor's rubric guidance now
+  says to judge ARGUMENT and structure, not the grammar Harper owns. Verified live: a draft with
+  "too/watter/alot" drew three located lints with fixes. This is the concrete lever that moves the
+  "feedback quality" category toward an A. 1076 unit + 10 e2e green.

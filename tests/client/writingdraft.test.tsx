@@ -16,7 +16,9 @@ describe('WritingDraft', () => {
     render(<WritingDraftInner args={{ prompt: 'Argue X', round: 1, pageSlug: 'thesis' }} result={undefined} addResult={addResult} />);
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'My argument.' } });
     fireEvent.click(screen.getByRole('button', { name: /submit/i }));
-    expect(addResult).toHaveBeenCalledExactlyOnceWith({ draft: 'My argument.' });
+    // mechanicalIssues rides along from the live Harper review (0 here — the WASM never loaded in
+    // jsdom, so the debounced lint leaves the count at its initial 0).
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({ draft: 'My argument.', mechanicalIssues: 0 });
   });
   it('renders annotations as highlighted spans', () => {
     render(<WritingDraftInner args={{ prompt: 'Argue X', round: 1, pageSlug: 'thesis' }}

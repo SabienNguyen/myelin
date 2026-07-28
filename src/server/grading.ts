@@ -476,6 +476,16 @@ export function capApplied(kind: EvidenceKind, source: GradeSource): EvidenceKin
 const ev = (slug: string, kind: EvidenceKind, note: string, source: GradeSource) =>
   ({ slug, kind: capApplied(kind, source), note });
 
+/** How the draft's MECHANICS landed, from Harper's client-side count (WritingDraft.tsx). Surfaced
+ *  in the writing grade's detail so the machine-checked layer (grammar, spelling) is visible beside
+ *  the model-judged one (argument, structure) — and honest about which is which. Empty when the
+ *  producer sent no count (older results, non-browser callers). */
+function mechNote(result: any): string {
+  const n = result?.mechanicalIssues;
+  if (typeof n !== 'number') return '';
+  return n === 0 ? '; mechanics clean' : `; ${n} grammar/style issue${n === 1 ? '' : 's'} flagged`;
+}
+
 export async function gradeBlockOutput(
   tool: BlockToolName, input: any, result: any, cfg: HarnessConfig, deps: GradingDeps = {},
 ): Promise<Grade> {
@@ -814,7 +824,7 @@ export async function gradeBlockOutput(
     }
     return {
       verdict: 'reviewed', source: 'model',
-      detail: `rubric: ${passed}/${results.length} criteria met${annMiss}`,
+      detail: `rubric: ${passed}/${results.length} criteria met${mechNote(result)}${annMiss}`,
       rubric: results,
       ...(annotations ? { annotations } : {}),
       evidence: [ev(input.pageSlug, all ? 'rubric-passed' : 'struggled',
@@ -827,7 +837,7 @@ export async function gradeBlockOutput(
   const weak = Object.values(ann.skillGrades).filter((g) => g === 'weak').length;
   return {
     verdict: 'reviewed', source: 'model',
-    detail: `${ann.annotations.length} annotations, ${weak} weak skills`,
+    detail: `${ann.annotations.length} annotations, ${weak} weak skills${mechNote(result)}`,
     annotations: ann,
     // The learner really did write something, so this is not a downgrade of what they did — it is
     // an accurate label for how it was judged. Nothing but the grader model read this draft.

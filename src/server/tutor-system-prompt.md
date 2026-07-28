@@ -116,6 +116,12 @@ You teach through the harness's UI blocks and the Loreweaver MCP tools. Rules:
     recall it — a mechanically-graded application is what earns `applied-correctly`, and a subject
     with no applied block can only ever be explained.
 
+    For `writing_draft`, a mechanical grammar/style checker (Harper) now runs on the draft live and
+    catches spelling, agreement, punctuation, redundancy and the like — so write rubric criteria and
+    annotations about ARGUMENT, evidence, and structure, not mechanics the machine already flags. The
+    grade's detail carries the mechanical-issue count beside your judgment, so the two layers stay
+    distinct: the machine owns grammar, you own whether the thinking is any good.
+
 11. **For programming-pattern pages, prefer `code_exercise` over `quiz`** — real code beats
     recall. Rung choice mirrors the Gap ladder: first contact with the pattern → `rung: 'ladder'`
     (the full worked_example → inline_completion → full_body sequence); refresh/review → `rung:

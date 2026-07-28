@@ -448,6 +448,29 @@ math-field:focus-within { outline: 2px solid var(--accent); outline-offset: -1px
 
 .writing-draft textarea { width: 100%; min-height: 7rem; resize: vertical; margin: 0.4rem 0; }
 
+/* harper — live mechanical grammar/style review under the draft (WritingDraft.tsx). Deliberately
+   quiet: these are corrections, not grades, and they should read as help while writing. */
+.harper-review { margin: 0.2rem 0 0.6rem; }
+.harper-count { margin: 0 0 0.4rem; font-size: 0.8rem; color: var(--text-muted); font-weight: 600; }
+.harper-lints { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.harper-lint {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.4rem;
+  font-size: 0.85rem; line-height: 1.4;
+}
+.harper-kind {
+  flex: none; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  padding: 0.1rem 0.4rem; border-radius: 4px; background: var(--bg-inset); color: var(--text-muted);
+}
+.harper-kind.kind-spelling, .harper-kind.kind-agreement, .harper-kind.kind-grammar,
+.harper-kind.kind-typo { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.harper-message { color: var(--text); }
+.harper-problem { color: var(--text-muted); font-style: italic; }
+.harper-apply {
+  flex: none; border: 1px solid var(--accent); background: transparent; color: var(--accent);
+  border-radius: 999px; padding: 0.1rem 0.55rem; font-size: 0.78rem; cursor: pointer;
+}
+.harper-apply:hover { background: var(--accent-soft); }
+
 /* grader annotations. color: inherit overrides the UA's marktext default (near-black), which
    survived the background override and rendered annotated spans DARKER than the prose around
    them in dark mode — a highlight that reads as a redaction. */

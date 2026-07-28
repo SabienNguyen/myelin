@@ -62,7 +62,10 @@ const writingDraft = {
     priorDraft: z.string().optional(),
     pageSlug: z.string(),
   }),
-  result: z.object({ draft: z.string() }),
+  // mechanicalIssues: how many grammar/style lints Harper (harperLinter.ts) still found in the
+  // submitted draft — a deterministic mechanics signal the grader can weigh instead of the model's
+  // read of the same. Optional: older results and any non-browser producer omit it.
+  result: z.object({ draft: z.string(), mechanicalIssues: z.number().int().optional() }),
 };
 
 // The Gap inside the Stage (docs/superpowers/plans/2026-07-20-gap-integration.md, Pinned

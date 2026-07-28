@@ -1,10 +1,43 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useThreadRuntime } from '@assistant-ui/react';
 import { PenNibIcon as PenNib } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 import { BlockProse } from '../BlockProse.js';
 import { Mark, Verdict } from './Verdict.js';
+import { lintDraft, type DraftLint } from '../../lib/harperLinter.js';
+
+/** The live grammar/style review under the draft — Harper's mechanical lints (harperLinter.ts),
+ *  each located and with a one-click fix. This is the part of writing feedback that is a definite
+ *  error, not a judgment: the model still weighs argument and structure, but "their/there" and
+ *  subject–verb disagreement are caught here, deterministically, the way every other subject's
+ *  mechanics are graded by machine. */
+export function HarperReview({ lints, onApply }: { lints: DraftLint[]; onApply: (l: DraftLint) => void }) {
+  if (lints.length === 0) return null;
+  return (
+    <div className="harper-review">
+      <p className="harper-count">
+        {lints.length} grammar &amp; style {lints.length === 1 ? 'issue' : 'issues'} — checked mechanically
+      </p>
+      <ul className="harper-lints">
+        {lints.map((l, i) => (
+          <li key={`${l.start}-${l.end}-${i}`} className="harper-lint">
+            <span className={`harper-kind kind-${l.kind.toLowerCase().replace(/\W+/g, '-')}`}>{l.kind}</span>
+            <span className="harper-message">
+              {l.message}
+              {l.problem && <> — <span className="harper-problem">“{l.problem}”</span></>}
+            </span>
+            {l.suggestion != null && (
+              <button type="button" className="harper-apply" onClick={() => onApply(l)}>
+                fix{l.suggestion ? <>: “{l.suggestion}”</> : ''}
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 type Annotation = { span: string; category: string; note: string };
 type Segment = { text: string; category?: string; note?: string };
@@ -38,7 +71,25 @@ export function WritingDraftInner({ args, result, addResult }: {
   args: any; result: any; addResult: (r: any) => void;
 }) {
   const [draft, setDraft] = useState(args.priorDraft ?? '');
+  const [lints, setLints] = useState<DraftLint[]>([]);
   const threadRuntime = useThreadRuntime();
+
+  // Live Harper linting while the learner writes, debounced so the WASM runs on a pause, not a
+  // keystroke. Only in the writing view (no result yet). A cancelled flag drops a stale async
+  // result if the draft moved on before it returned.
+  useEffect(() => {
+    if (result) return;
+    let cancelled = false;
+    const t = setTimeout(() => { void lintDraft(draft).then((ls) => { if (!cancelled) setLints(ls); }); }, 600);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [draft, result]);
+
+  // Apply a suggestion by splicing it over the located span; the debounced effect re-lints the new
+  // text, so offsets stay honest without hand-tracking them.
+  const applyLint = (l: DraftLint) => {
+    if (l.suggestion == null) return;
+    setDraft((d: string) => d.slice(0, l.start) + l.suggestion + d.slice(l.end));
+  };
   // A rubric note that QUOTES the draft can point at its evidence: clicking the quote adds an
   // ephemeral 'cite' annotation over the quoted text, so the criterion and the passage that
   // earned it light up together. Toggles off on a second click; never stored.
@@ -166,7 +217,10 @@ export function WritingDraftInner({ args, result, addResult }: {
         </div>
       )}
       <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
-      <button onClick={() => addResult({ draft })}>Submit</button>
+      <HarperReview lints={lints} onApply={applyLint} />
+      {/* The mechanical-issue count rides into the result so grading can weigh the draft's mechanics
+          on a machine signal, not the model's read of them. */}
+      <button onClick={() => addResult({ draft, mechanicalIssues: lints.length })}>Submit</button>
     </div>
   );
 }
