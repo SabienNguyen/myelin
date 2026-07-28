@@ -671,3 +671,10 @@ Written after the sprint that followed the original verdict; each line names its
   other criterion could pass a draft by omission, and the pre-existing forgetful-grader
   guarantee test caught my first draft of the merge doing exactly that. Fail-closed remains the
   backstop for anything still unanswered.
+- **Render pass over today's new content: all clean.** The RoPE-augmented positional-encoding
+  page renders in the Page tab with zero red KaTeX in both themes and no overflow — and its
+  standing copy is the applied-route honesty doing its job in the wild: "Earned by 2
+  explanations, judged by the tutor. No exercise has confirmed it. To confirm it, ask your tutor
+  for a worked problem." Both graphs render fitted; the marathon graph's five labels turned out
+  to be the contextual scope working as designed (2 hops around the open page, Whole-vault
+  toggle present), not a regression — checked before judging.
