@@ -730,3 +730,6 @@ Written after the sprint that followed the original verdict; each line names its
   practicing with both evidence kinds: explained-correctly from the routing probe,
   applied-correctly from the mechanical 8/8 diagram. Research → page → taught → probed →
   applied → recorded, thirteenth deep-LLM topic on the marathon vault.
+- **Responsive + dark pass over this window's newest surfaces: clean.** The MoE diagram done
+  card and the annotated-writing card at 900px and in dark mode — zero horizontal overflow,
+  zero red KaTeX, the 8/8 verdict in the good token on a properly dark card. Nothing found.
