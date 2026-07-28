@@ -733,3 +733,16 @@ Written after the sprint that followed the original verdict; each line names its
 - **Responsive + dark pass over this window's newest surfaces: clean.** The MoE diagram done
   card and the annotated-writing card at 900px and in dark mode — zero horizontal overflow,
   zero red KaTeX, the 8/8 verdict in the good token on a properly dark card. Nothing found.
+- **The single-writer rule was a soft gate on the live route — found broken, now structural.**
+  The MoE sitting's later turns ran in learn mode (each reload resets the selector via the
+  cold-start rule), and a direct "update the page NOW" overrode the prompt-only restraint:
+  write_page executed and promoted the page draft→solid from a learn turn. allowedTools gates
+  nothing under bypassPermissions (the code's own comment documents the shadowing), so spec §5
+  existed on this route only as an instruction the model could be talked out of. The PreToolUse
+  hook — the one seam bypassPermissions honors — now denies the write family
+  (write_page/link_pages/compile_source/create_path) outside freeform, with a reason that tells
+  the model to point the learner at the mode selector. Two grace notes from the incident: the
+  tutor's transparency was impeccable ("I promoted based on content that was already there...
+  not fresh research"), and the body it declined to expand stayed byte-identical — the
+  violation was minimal even before the gate. The status promotion itself was left standing
+  (the content was genuinely sourced); the enforcement stops the NEXT one.

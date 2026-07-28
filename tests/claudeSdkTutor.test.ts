@@ -607,3 +607,40 @@ describe('server-side thread persistence', () => {
     expect(JSON.stringify(saved[1].parts)).toContain('saved server-side');
   });
 });
+
+// Spec §5's single-writer rule was held back by PROMPT alone on this route — allowedTools gates
+// nothing under bypassPermissions — and a live sitting watched "update the page NOW" override
+// the prompt and write_page succeed in learn mode. The PreToolUse hook is the seam
+// bypassPermissions honors; it must deny the write family outside freeform.
+describe('PreToolUse hook enforces freeform-only writes', () => {
+  async function hookFor(mode: string) {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-hook');
+      yield assistantMsg('sess-hook', [{ type: 'text', text: 'ok' }]);
+      yield resultMsg('sess-hook');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any,
+      mode as any, `thread-hook-${mode}`));
+    return calls[0].options.hooks.PreToolUse[0].hooks[0];
+  }
+  const call = (hook: any, tool: string) => hook({
+    hook_event_name: 'PreToolUse', tool_name: `mcp__loreweaver__${tool}`, tool_input: { student: 'kid' },
+  });
+
+  it('denies write_page in learn, allows it in freeform, always allows teach tools', async () => {
+    const learnHook = await hookFor('learn');
+    const denied = await call(learnHook, 'write_page');
+    expect(denied.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(denied.hookSpecificOutput.permissionDecisionReason).toMatch(/freeform/);
+    const teach = await call(learnHook, 'record_evidence');
+    expect(teach.hookSpecificOutput.permissionDecision).toBe('allow');
+
+    const freeHook = await hookFor('freeform');
+    const allowed = await call(freeHook, 'write_page');
+    expect(allowed.hookSpecificOutput.permissionDecision).toBe('allow');
+  });
+});

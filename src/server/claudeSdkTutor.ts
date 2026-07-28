@@ -317,6 +317,24 @@ export function createClaudeSdkTutorSession(
               return {};
             }
             const bare = input.tool_name.slice(LOREWEAVER_PREFIX.length);
+            // STRUCTURAL enforcement of spec §5's single-writer rule. allowedTools does not gate
+            // anything under bypassPermissions (the comment above documents the shadowing), so
+            // the freeform-only write tools were held back by PROMPT alone — and a live sitting
+            // watched a direct "update the page NOW" override the prompt and write_page succeed
+            // in learn mode. The hook is the one seam bypassPermissions honors: deny the write
+            // family outside freeform, with a reason that names the fix the learner can take.
+            if (mode !== 'freeform' && FREEFORM_EXTRA_TOOLS.includes(bare)) {
+              console.error('[sdk-mode-deny]', input.tool_name, `mode=${mode}`);
+              return {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason:
+                    `${bare} is only available in freeform mode (the vault's single-writer rule); the current mode is ${mode}. `
+                    + 'Tell the student to switch the mode selector to freeform if they want this saved.',
+                },
+              };
+            }
             const updatedInput = sanitizeToolArgs(input.tool_input, bare, cfg.student, slugs);
             console.error('[sdk-sanitize]', input.tool_name);
             return {
