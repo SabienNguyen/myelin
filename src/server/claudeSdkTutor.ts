@@ -11,6 +11,7 @@ import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput } from './grading.js';
+import { readQueue } from './ingest.js';
 import { invalidateGraphCache } from './graphCache.js';
 import type { Loreweaver } from './mcp.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
@@ -88,7 +89,7 @@ function lastUserText(messages: UIMessage[]): string {
  * sentinel telling the model to stop talking — the student's answer arrives as the NEXT message
  * (there is no HITL pause primitive in the Agent SDK's query() loop, so the sentinel + system
  * prompt instruction together stand in for one). */
-function blockMcpTools() {
+function blockMcpTools(vault: string) {
   // Heterogeneous schemas (blocks union vs open_source) — collected as an array literal so the
   // element type unions instead of pinning to the first map's generic.
   const blocks: ReturnType<typeof tool<any>>[] = availableBlocks().map((name) => tool(
@@ -100,16 +101,39 @@ function blockMcpTools() {
     }),
   ));
   // open_source rides the same bridge but is NAVIGATION, not graded work: the client opens the
-  // reader and the tutor keeps teaching — its sentinel says so instead of ending the turn.
+  // reader and the tutor keeps teaching — its sentinel says so instead of ending the turn. The
+  // sentinel RESOLVES the title the same way OpenSource.tsx will (keep the matcher in sync by
+  // hand), because the model narrates in the SAME turn as the call: a static sentinel let it
+  // describe "the momentum chapter" over a reader that had resolved its book-title argument to
+  // chapter 1 (live find on the notes sitting) — the model must know what actually opens.
   blocks.push(tool(
     'open_source',
     'Open an ingested source (book chapter, paper, notes) in the reading surface beside the '
-      + 'conversation — bring the student to the artifact. Pass the source title as the Library '
+      + 'conversation — bring the student to the artifact. Pass the CHAPTER title as the Library '
       + 'shows it.',
     UI_TOOLS.open_source.input.shape,
-    async () => ({
-      content: [{ type: 'text' as const, text: 'Opening beside the conversation. Continue teaching — direct their reading.' }],
-    }),
+    async ({ title }: { title: string }) => {
+      try {
+        const queue = readQueue(vault) as any[];
+        const want = String(title ?? '').trim().toLowerCase();
+        const hit = (queue ?? []).find((e) => e.chapter?.startsWith('raw/')
+          && (e.title?.toLowerCase().includes(want) || e.book?.toLowerCase().includes(want)
+            || want.includes(e.title?.toLowerCase() ?? ' ')));
+        if (!hit) {
+          const titles = (queue ?? []).filter((e) => e.chapter?.startsWith('raw/')).map((e) => e.title).filter(Boolean);
+          return { content: [{ type: 'text' as const, text:
+            `No ingested source matches ${JSON.stringify(title)} — nothing opened. Available: ${titles.join(', ') || '(none)'}.` }] };
+        }
+        const siblings = (queue ?? []).filter((e) => e.book === hit.book && e.chapter?.startsWith('raw/'))
+          .map((e) => e.title).filter(Boolean);
+        return { content: [{ type: 'text' as const, text:
+          `Opening “${hit.title}” beside the conversation`
+          + (siblings.length > 1 ? ` (chapters in ${hit.book}: ${siblings.join(', ')})` : '')
+          + '. Direct their reading by THIS chapter — if you meant a different one, call open_source again with its exact title.' }] };
+      } catch {
+        return { content: [{ type: 'text' as const, text: 'Opening beside the conversation. Continue teaching — direct their reading.' }] };
+      }
+    },
   ));
   return blocks;
 }
@@ -271,7 +295,7 @@ export function createClaudeSdkTutorSession(
             LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
           },
         },
-        blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools() }),
+        blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools(cfg.vault) }),
         course: createSdkMcpServer({ name: 'course', tools: courseMcpTools(cfg.vault) }),
       },
       // Block/loreweaver tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK

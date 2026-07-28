@@ -690,3 +690,15 @@ Written after the sprint that followed the original verdict; each line names its
   there. Re-driven live: the same sgd-notes.md path now converts, splits on its headings into
   three DONE chapters, and sits in the Library as a book. URLs, git remotes, and videos still
   route exactly as before (8/8 e2e including the video-URL spec).
+- **The tutor can no longer narrate a chapter it didn't open.** The notes sitting asked for the
+  momentum chapter; the model passed the BOOK title to open_source, the client resolved that to
+  chapter 1, and the static sentinel let the model say "I've opened the momentum chapter — take
+  a look at chapter 3" over a reader showing "Why minibatches". The SDK route's open_source
+  sentinel now resolves the title exactly as OpenSource.tsx will (matcher kept in sync by hand)
+  and tells the model what actually opens, listing the book's sibling chapters so a wrong pick
+  self-corrects in the same turn. Re-driven live: the same ask now opens "Momentum" with the
+  narration matching the screen, and the Nesterov look-ahead check answered WITH SHOWN WORK
+  ("theta_look = 4.0 + 0.9 * 2.5 = 6.25") graded correct — extractAnswerNumber's after-last-'='
+  ladder earning its keep on live content a day after the fix. The ingestion story now closes
+  end to end: file path → book → chapters → the right chapter open beside the chat → taught,
+  checked, and recorded.
