@@ -82,6 +82,50 @@ describe('splitChapters', () => {
     expect(chapters[0].title).toBeTruthy();
     expect(chapters[0].body).toBe(md);
   });
+
+  it('does not split on a `#`/`##` comment inside a fenced code block', () => {
+    // A programming book's chapter carries code whose comments start a line with # — those are not
+    // chapter or section boundaries. Before the fence mask this split into four chapters titled
+    // after the code comments, shattering the chapter mid-code-block.
+    const md = [
+      '# Chapter One',
+      'Intro prose about Python.',
+      '',
+      '```python',
+      '# Initialize the model',
+      'model = load()',
+      '## Train it',
+      'model.fit()',
+      '```',
+      '',
+      'More prose.',
+      '',
+      '# Chapter Two',
+      'Second chapter.',
+    ].join('\n');
+    const chapters = splitChapters(md);
+    expect(chapters).toHaveLength(2);
+    expect(chapters.map((c) => c.title)).toEqual(['Chapter One', 'Chapter Two']);
+    // byte-fidelity: the code comments survive verbatim in the body, only the SPLIT ignored them.
+    expect(chapters[0].body).toContain('# Initialize the model');
+    expect(chapters[0].body).toContain('## Train it');
+  });
+
+  it('ignores fenced headings in the H2 fallback branch too', () => {
+    const md = [
+      '# Book Title',
+      '## Real Section One',
+      'Body one.',
+      '```yaml',
+      '# a yaml comment that looks like a heading',
+      'key: value',
+      '```',
+      '## Real Section Two',
+      'Body two.',
+    ].join('\n');
+    const chapters = splitChapters(md);
+    expect(chapters.map((c) => c.title)).toEqual(['Real Section One', 'Real Section Two']);
+  });
 });
 
 // Skipped when the marker-venv python isn't present on this machine (CI / other environments) —

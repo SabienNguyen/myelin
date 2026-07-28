@@ -441,6 +441,17 @@ describe('chunkChapter (context-budget splitting)', async () => {
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.join('')).toBe(md);
   });
+  it('does not treat a `##` comment inside a code fence as a chunk boundary', () => {
+    // Two real H2 sections, each comfortably under budget so the split is purely on H2 boundaries
+    // (no giant-section hard-cut). The fenced `## not a section` between them must not add a third
+    // chunk starting mid-code; byte-fidelity still holds.
+    const md = `## One\n${'a'.repeat(40)}\n\`\`\`sh\n## not a section\n${'b'.repeat(10)}\n\`\`\`\n## Two\n${'c'.repeat(40)}`;
+    const parts = chunkChapter(md, 100);
+    expect(parts.join('')).toBe(md);
+    expect(parts).toHaveLength(2);
+    expect(parts.slice(1).every((p) => p.startsWith('## '))).toBe(true);
+    expect(parts.some((p) => p.startsWith('## not a section'))).toBe(false);
+  });
 });
 
 describe('mechanical citation on write_page', async () => {

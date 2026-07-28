@@ -472,6 +472,36 @@ const H2 = /^##\s+(.+)$/gm;
 const PROMOTABLE_CHAPTER_HEADING = /^(\d{1,2}|[A-Z])\s+\S/;
 
 /**
+ * A copy of `md` with the INTERIOR of every fenced code block blanked to spaces (newlines kept), so
+ * the heading regexes below never mistake a line-initial `#`/`##` inside code — a Python/shell/YAML
+ * comment, a Markdown example — for a chapter or section boundary. This is not hypothetical: a
+ * programming book whose chapter contains `# initialise the model` split into a bogus extra chapter
+ * titled "initialise the model" (reproduced before this fix).
+ *
+ * Length- and newline-preserving BY CONTRACT: callers match headings against the mask but slice the
+ * chapter bodies out of the ORIGINAL string, so every match index has to line up byte-for-byte.
+ * Only interior lines are blanked (to an equal run of spaces); the ``` / ~~~ delimiter lines are
+ * left intact — they start with a backtick or tilde, never `#`, so they can't match a heading
+ * anyway. Fences are the CommonMark run of >=3 backticks or tildes, up to 3 spaces of indent; a
+ * closing fence is a standalone run of the same character.
+ */
+export function maskFences(md: string): string {
+  const lines = md.split('\n');
+  let fenceChar: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const opener = lines[i].match(/^\s{0,3}(`{3,}|~{3,})/);
+    if (fenceChar === null) {
+      if (opener) fenceChar = opener[1][0];
+    } else if (/^\s{0,3}(`{3,}|~{3,})\s*$/.test(lines[i]) && lines[i].trimStart()[0] === fenceChar) {
+      fenceChar = null; // closing delimiter — leave intact
+    } else {
+      lines[i] = ' '.repeat(lines[i].length); // interior — blank it, same length
+    }
+  }
+  return lines.join('\n');
+}
+
+/**
  * Within one already-H1-split chapter's body, promotes any H2 matching PROMOTABLE_CHAPTER_HEADING
  * into its own chapter — some Murphy PML chapters got merged into a neighbor by the H1 split
  * because marker rendered their heading at H2 (the same level as an ordinary section) instead of
@@ -489,7 +519,9 @@ const PROMOTABLE_CHAPTER_HEADING = /^(\d{1,2}|[A-Z])\s+\S/;
  * the promotion logic, which is what a re-split of an already-isolated chapter file actually needs.
  */
 export function promoteEmbeddedChapters(chapter: { title: string; body: string }): { title: string; body: string }[] {
-  const promotions = [...chapter.body.matchAll(H2)]
+  // Match against the fence-masked body (a `## 3 ways` code comment must not promote to a chapter),
+  // but slice the pieces out of the real body — maskFences keeps indices aligned.
+  const promotions = [...maskFences(chapter.body).matchAll(H2)]
     .map((m) => ({ index: m.index!, title: cleanHeading(m[1]) }))
     .filter((m) => PROMOTABLE_CHAPTER_HEADING.test(m.title));
   if (promotions.length === 0) return [chapter];
@@ -514,7 +546,10 @@ export function promoteEmbeddedChapters(chapter: { title: string; body: string }
  * I/O.
  */
 export function splitChapters(markdown: string): { title: string; body: string }[] {
-  const h1Matches = [...markdown.matchAll(H1)];
+  // Headings are located in the fence-masked copy so a `#`/`##` inside a code block is never read
+  // as a chapter boundary; every body is still sliced from the real markdown (indices align).
+  const masked = maskFences(markdown);
+  const h1Matches = [...masked.matchAll(H1)];
   if (h1Matches.length >= 2) {
     return h1Matches.flatMap((m, i) => {
       const start = m.index!;
@@ -523,9 +558,9 @@ export function splitChapters(markdown: string): { title: string; body: string }
       return promoteEmbeddedChapters({ title, body: markdown.slice(start, end).trim() });
     });
   }
-  const h2Matches = [...markdown.matchAll(H2)];
+  const h2Matches = [...masked.matchAll(H2)];
   if (h2Matches.length < 2) {
-    const first = [...markdown.matchAll(/^#{1,2}\s+(.+)$/gm)][0];
+    const first = [...masked.matchAll(/^#{1,2}\s+(.+)$/gm)][0];
     return [{ title: cleanHeading(first?.[1] ?? '') || 'Chapter 1', body: markdown.trim() }];
   }
   return h2Matches.map((m, i) => {

@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
 import {
-  cleanHeading, defaultConverter, defaultIncrementalConverter, splitChapters, type Converter, type IncrementalConverter,
+  cleanHeading, defaultConverter, defaultIncrementalConverter, maskFences, splitChapters,
+  type Converter, type IncrementalConverter,
 } from './convert.js';
 import { extractProblems, saveProblems } from './courseBank.js';
 import type { Loreweaver } from './mcp.js';
@@ -378,7 +379,12 @@ export const CHAPTER_CHUNK_CHARS = 24_000;
 
 export function chunkChapter(markdown: string, budget = CHAPTER_CHUNK_CHARS): string[] {
   if (markdown.length <= budget) return [markdown];
-  const sections = markdown.split(/^(?=##\s)/m); // keep each H2 heading with its section body
+  // Split before each H2 that is a real section heading — locate them in the fence-masked copy so a
+  // `## ...` inside a code block doesn't cut a chunk mid-code, then slice the real markdown at those
+  // offsets (indices align). Each section keeps its H2 heading with its body.
+  const starts = [...maskFences(markdown).matchAll(/^##\s/gm)].map((m) => m.index!);
+  const cuts = starts[0] === 0 ? starts : [0, ...starts];
+  const sections = cuts.map((c, i) => markdown.slice(c, cuts[i + 1] ?? markdown.length));
   const parts: string[] = [];
   let cur = '';
   const flush = () => { if (cur.trim()) parts.push(cur); cur = ''; };
