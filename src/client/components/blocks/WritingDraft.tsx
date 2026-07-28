@@ -39,6 +39,18 @@ export function HarperReview({ lints, onApply }: { lints: DraftLint[]; onApply: 
   );
 }
 
+/** Splice a lint's suggestion over its span — but only when the span still covers exactly the text
+ *  Harper flagged. A lint's offsets are absolute and go stale the moment an earlier fix changes the
+ *  draft's length, and stale lints linger on screen until the debounced re-lint lands; applying one
+ *  then would corrupt the draft. Returns the draft unchanged when the offsets no longer match, so
+ *  the pending re-lint can refresh them. Pure and exported for the unit test. */
+export function applyLintToDraft(draft: string, l: DraftLint): string {
+  if (l.suggestion == null) return draft;
+  return draft.slice(l.start, l.end) === l.problem
+    ? draft.slice(0, l.start) + l.suggestion + draft.slice(l.end)
+    : draft;
+}
+
 type Annotation = { span: string; category: string; note: string };
 type Segment = { text: string; category?: string; note?: string };
 
@@ -85,11 +97,13 @@ export function WritingDraftInner({ args, result, addResult }: {
   }, [draft, result]);
 
   // Apply a suggestion by splicing it over the located span; the debounced effect re-lints the new
-  // text, so offsets stay honest without hand-tracking them.
-  const applyLint = (l: DraftLint) => {
-    if (l.suggestion == null) return;
-    setDraft((d: string) => d.slice(0, l.start) + l.suggestion + d.slice(l.end));
-  };
+  // text, so offsets stay honest without hand-tracking them. The guard matters: a lint's start/end
+  // are absolute offsets that go STALE the instant an earlier fix changes the draft's length, and
+  // the stale lints stay on screen for the ~600ms until the re-lint lands. Clicking a second fix in
+  // that window would splice at the wrong place and corrupt the draft — so apply only when the span
+  // still covers exactly the text Harper flagged; otherwise no-op and let the pending re-lint
+  // refresh every offset, after which the learner can click the (now-accurate) fix again.
+  const applyLint = (l: DraftLint) => setDraft((d: string) => applyLintToDraft(d, l));
   // A rubric note that QUOTES the draft can point at its evidence: clicking the quote adds an
   // ephemeral 'cite' annotation over the quoted text, so the criterion and the passage that
   // earned it light up together. Toggles off on a second click; never stored.
