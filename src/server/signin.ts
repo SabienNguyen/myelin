@@ -111,3 +111,24 @@ export function applyRoute(
     }
   }
 }
+
+/**
+ * Reset every model role to its config-file value, undoing any in-place subscription rewrite
+ * applyRoute made earlier in the same session.
+ *
+ * applyRoute mutates cfg.models in place and never reverts, and chatRoute picks the tutor
+ * implementation per request from cfg.models.tutor.model — so a learner who tried "use my Claude
+ * subscription" and then pasted an API key would keep riding claude-sdk:* on the shared cfg, the
+ * tutor ignoring the very key it just validated (and, if the subscription login was stale, failing
+ * every turn). Only the config file still holds the original key-billed ids, so the api-key route
+ * calls this with a freshly loaded config to take effect on the next turn, no restart — the same
+ * promise the subscription route already makes.
+ */
+export function resetRouteModels(
+  cfg: { models: Record<string, { model: string }> },
+  base: { models: Record<string, { model: string }> },
+): void {
+  for (const [role, entry] of Object.entries(cfg.models)) {
+    if (base.models[role]) entry.model = base.models[role].model;
+  }
+}

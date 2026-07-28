@@ -4,7 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import { displayPath } from '../src/server/setupRoutes.js';
 import { modelLabel } from '../src/client/components/TopbarStatus.js';
-import { applyRoute } from '../src/server/signin.js';
+import { applyRoute, resetRouteModels } from '../src/server/signin.js';
 
 describe('displayPath', () => {
   it('shortens a path under home to the form a person would say', () => {
@@ -94,5 +94,42 @@ describe('applyRoute', () => {
       applyRoute(c, new Set(), route);
       expect(c.models.tutor.model).toBe('claude-sonnet-5');
     }
+  });
+});
+
+describe('resetRouteModels — switching back off the subscription route', () => {
+  const cfg = () => ({
+    models: {
+      tutor: { model: 'claude-sonnet-5' },
+      grader: { model: 'claude-haiku-4-5' },
+      quiz_gen: { model: 'claude-sonnet-5' },
+      card_gen: { model: 'claude-haiku-4-5' },
+      compile: { model: 'claude-sonnet-5' },
+    },
+  });
+
+  it('reverts an in-place subscription rewrite back to the config-file ids', () => {
+    // The scenario the api-key route hits: the learner tried the subscription (mutating cfg.models
+    // to claude-sdk:* in place), then pasted a key. Without reverting, the tutor keeps routing to
+    // claude-sdk: and the pasted key is ignored.
+    const c = cfg();
+    applyRoute(c, new Set(['grader']), 'subscription');
+    expect(c.models.tutor.model).toBe('claude-sdk:sonnet');            // defaulted role rewritten
+    expect(c.models.grader.model).toBe('claude-sdk:claude-haiku-4-5'); // explicit id rerouted
+    resetRouteModels(c, cfg()); // base = pristine config file
+    expect(c.models.tutor.model).toBe('claude-sonnet-5');
+    expect(c.models.grader.model).toBe('claude-haiku-4-5');
+    expect(Object.values(c.models).some((r) => r.model.startsWith('claude-sdk:'))).toBe(false);
+  });
+
+  it('restores an explicit local model to exactly what the config named', () => {
+    const c = cfg();
+    c.models.grader.model = 'ollama:qwen';
+    applyRoute(c, new Set(['grader']), 'subscription'); // ollama:qwen untouched; others -> claude-sdk:
+    const base = cfg();
+    base.models.grader.model = 'ollama:qwen';
+    resetRouteModels(c, base);
+    expect(c.models.grader.model).toBe('ollama:qwen');
+    expect(c.models.tutor.model).toBe('claude-sonnet-5');
   });
 });

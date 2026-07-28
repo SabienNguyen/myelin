@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Hono } from 'hono';
-import { configSource, explicitModelRoles, type HarnessConfig } from './config.js';
+import { configSource, explicitModelRoles, loadConfig, type HarnessConfig } from './config.js';
 import {
   applyCredentials, credentialsPath, looksLikeAnthropicKey, readCredentials, writeCredentials,
 } from './credentials.js';
-import { applyRoute, readRoute, subscriptionStatus, writeRoute } from './signin.js';
+import { applyRoute, readRoute, resetRouteModels, subscriptionStatus, writeRoute } from './signin.js';
 
 /** A path as a person would say it. The absolute form of a vault path is four lines of monospace on
  *  a first-run card and nobody reads it; `~/Documents/Loreweaver` is the same information in six
@@ -138,6 +138,11 @@ export function buildSetupRoutes(
     // Straight into the environment, so the very next turn works without a restart.
     process.env.ANTHROPIC_API_KEY = key;
     applyCredentials();
+    // Undo any subscription-route rewrite from earlier this session: applyRoute mutated cfg.models
+    // to claude-sdk:* in place, and chatRoute reads that per turn, so without this the tutor would
+    // keep riding the (possibly dead) local login and ignore the key just validated. The config
+    // file still holds the key-billed ids — re-derive from it so the switch takes effect now.
+    resetRouteModels(cfg, loadConfig());
     return c.json(await state());
   });
 
