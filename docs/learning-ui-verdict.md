@@ -982,3 +982,9 @@ Written after the sprint that followed the original verdict; each line names its
 - **Pronounce overlay gained a legend** — the contour chart drew the learner's pitch (solid accent)
   over the target (dashed) but never said which was which; two squiggles teach nothing unnamed. A
   small keyed legend now labels them, shown once a contour is actually drawn. Verified live.
+- **Interactive-flow audit clean; RichMarkdown locked in with tests.** The history menu (New
+  conversation + past threads with relative times) and the Add-material dialog (git URL / YouTube /
+  local path, browse, drop) both render clean in dark mode, no overflow, no console errors — a
+  legitimate no-bug result. Added tests/client/richMarkdown.test.tsx (6 tests) for the shared
+  renderer four surfaces now depend on: maths typeset, mermaid fence → diagram, non-mermaid fence →
+  code, the loose-dollar guard, the wikiLinks toggle, and the inline toggle.
