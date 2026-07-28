@@ -503,3 +503,16 @@ Written after the sprint that followed the original verdict; each line names its
   quick check — the graph exists after minute one. Established 10-page vault verified still
   opening in `learn`; 8/8 e2e unaffected (all-stub fixture vaults flip to freeform, which the
   scripted model never notices — mode only changes tool mounting it doesn't use).
+- **math_scratchpad's first live MathLive sitting: the field's own dialect broke the render.**
+  Chain-rule derivation on the newcomer vault (which correctly opened its second sitting in
+  `learn` — seven real pages now). Typing du/dx makes MathLive emit its private `\differentialD`
+  macro, and KaTeX painted it as red literal error text in the learner's own step list and done
+  card — the app defacing the student's correct work. The Latex component now carries KaTeX
+  macros for the MathLive dialect (`\differentialD`, `\exponentialE`, `\imaginaryI`,
+  `\imaginaryJ`, `\placeholder`, `\mleft/\mright`), spread per render so a model-authored `\def`
+  can't leak between expressions. The grader never had the problem — it parses through MathLive's
+  own converter. Everything else in the sitting held: step add/edit/save wrote back to the right
+  slots, the deliberate sin→cos edit landed, the final `2x\cos(x^2)` graded mechanically
+  equivalent, applied-correctly evidence landed on chain-rule, and the honest "step 1
+  unparseable" was my own robot typing leaving `=2x` inside the denominator — visually obvious
+  to a human, faithfully rendered, correctly not blocking the final-answer grade.

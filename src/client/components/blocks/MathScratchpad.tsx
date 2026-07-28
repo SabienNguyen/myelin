@@ -6,6 +6,26 @@ import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 import { Verdict } from './Verdict.js';
 
+/** MathLive writes its private dialect into the LaTeX it emits — typing du/dx produces
+ * `\differentialD x`, the keypad's constants are `\exponentialE`/`\imaginaryI`, empty slots are
+ * `\placeholder{}`, sized delimiters are `\mleft`/`\mright` — and KaTeX renders every one of
+ * them as red literal error text (seen live: a chain-rule derivation whose step list showed
+ * "\differentialD" in red). These macros translate the dialect at render time. The grader never
+ * needed this: it parses through MathLive's own convertLatexToAsciiMath, which speaks it. */
+const MATHLIVE_MACROS = {
+  '\\differentialD': 'd',
+  '\\exponentialE': 'e',
+  '\\imaginaryI': 'i',
+  '\\imaginaryJ': 'j',
+  '\\placeholder': '#1',
+  '\\mleft': '\\left',
+  '\\mright': '\\right',
+};
+
+// Spread per render: KaTeX writes \def-defined macros back into the object it is handed, so a
+// shared literal would let one model-authored expression leak definitions into every later one.
+const kopts = () => ({ throwOnError: false, macros: { ...MATHLIVE_MACROS } });
+
 export function Latex({ tex }: { tex: string }) {
   // String coercion, not trust: throwOnError:false only suppresses PARSE errors — a non-string
   // (a malformed call's missing field) throws before parsing starts, and this throw once
@@ -21,12 +41,12 @@ export function Latex({ tex }: { tex: string }) {
     return (
       <span>
         {parts.map((part, i) => (i % 2 === 1
-          ? <span key={i} dangerouslySetInnerHTML={{ __html: katex.renderToString(part, { throwOnError: false }) }} />
+          ? <span key={i} dangerouslySetInnerHTML={{ __html: katex.renderToString(part, kopts()) }} />
           : <span key={i}>{part}</span>))}
       </span>
     );
   }
-  return <span dangerouslySetInnerHTML={{ __html: katex.renderToString(s, { throwOnError: false }) }} />;
+  return <span dangerouslySetInnerHTML={{ __html: katex.renderToString(s, kopts()) }} />;
 }
 
 /** LaTeX flattened to words for the field's accessible name. Not a speech engine — MathLive's own

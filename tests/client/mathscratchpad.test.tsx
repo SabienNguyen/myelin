@@ -30,6 +30,23 @@ describe('Latex — mixed prose and math', () => {
   it('a non-string never throws (the crash that unmounted the app)', () => {
     expect(() => render(<Latex tex={undefined as any} />)).not.toThrow();
   });
+
+  // A live chain-rule sitting: MathLive turned typed du/dx into its private `\differentialD`
+  // macro, and KaTeX painted it as red literal text in the learner's own step list. KaTeX has no
+  // katex-error class for an unsupported macro under throwOnError:false — it colors it #cc0000 —
+  // so that is what must be absent.
+  it("MathLive's private dialect renders as math, not red error text", () => {
+    for (const tex of [
+      '\\frac{du}{\\differentialD x}',
+      '\\exponentialE^{\\imaginaryI\\pi}',
+      '\\placeholder{}+2',
+      '\\mleft(x+1\\mright)^2',
+    ]) {
+      const { container } = render(<Latex tex={tex} />);
+      expect(container.querySelector('[style*="cc0000"]'), tex).toBeNull();
+      cleanup();
+    }
+  });
 });
 
 describe('MathScratchpad', () => {
