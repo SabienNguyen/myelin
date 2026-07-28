@@ -105,6 +105,25 @@ describe('MathScratchpad', () => {
     });
   });
 
+  // stepMode:false is a first-class path — the tutor picks it for a simple single-answer problem
+  // ("derivative of x^2?" → just "2x"). There is no Add-step button, so the field content must
+  // still be captured on Submit (via folded()), or a plain numeric answer would submit empty.
+  it('non-step mode: no Add-step button, and the typed answer submits as the final', () => {
+    const addResult = vi.fn();
+    render(<MathScratchpadInner args={{ ...args, stepMode: false }} addResult={addResult} MathInput={TextInput} />);
+    expect(screen.queryByRole('button', { name: /add step/i })).toBeNull();
+    type('2x');
+    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({ steps: [{ latex: '2x' }], finalLatex: '2x' });
+  });
+
+  it('non-step mode: submitting an empty field yields empty steps and final, not a crash', () => {
+    const addResult = vi.fn();
+    render(<MathScratchpadInner args={{ ...args, stepMode: false }} addResult={addResult} MathInput={TextInput} />);
+    fireEvent.click(screen.getByRole('button', { name: /submit/i }));
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({ steps: [], finalLatex: '' });
+  });
+
   it('done card lists the intermediate steps but not the final twice', () => {
     const { container } = render(<MathScratchpad args={args} addResult={vi.fn()}
       result={{ steps: [{ latex: 'x^9' }, { latex: '2x' }], finalLatex: '2x',
