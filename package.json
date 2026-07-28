@@ -58,6 +58,7 @@
     "mathlive": "^0.110.0",
     "mermaid": "^11.16.0",
     "node-cron": "^4.6.0",
+    "pitchy": "^4.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",

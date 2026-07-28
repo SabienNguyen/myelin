@@ -1,76 +1,49 @@
 // Turns a mono audio waveform into the frame-by-frame F0 (Hz) array that toneContour.gradeTone
-// consumes — the missing middle of the pronunciation pipeline (capture → THIS → grade). Pure DSP,
-// no dependency: autocorrelation pitch detection via McLeod's Normalized Square Difference
-// Function (NSDF), which is octave-error-resistant where a plain ACF is not. A browser mic feeds
-// getFloatTimeDomainData into these functions; nothing here touches an audio device, so it is
-// tested with synthetic tones instead. Consumed today by tests/pitchTrack.test.ts.
+// consumes — the missing middle of the pronunciation pipeline (capture → THIS → grade).
+//
+// Per-frame pitch detection is delegated to `pitchy` (MIT), the maintained implementation of
+// McLeod's Normalized Square Difference Function — the exact octave-error-resistant algorithm this
+// module used to hand-roll. Leveraging the library rather than our own NSDF was a deliberate call
+// (the "use OSS where it exists" rule): pitchy is single-purpose, TypeScript, and battle-tested as
+// a real-time tuner. What stays ours is the part no library covers: the window/hop sweep that
+// turns a whole utterance into a contour, and the voiced-frame gating tuned for speech F0.
 //
 // Voiced speech F0 sits roughly 70–500 Hz; frames without strong periodicity (silence, noise,
-// consonants) return 0 so normalizeContour drops them as unvoiced.
+// consonants) or out of that band return 0 so normalizeContour drops them as unvoiced.
+import { PitchDetector } from 'pitchy';
 
 export interface PitchOpts {
   minF0?: number;
   maxF0?: number;
-  /** Fraction of the strongest NSDF peak a candidate peak must reach — and the floor below which a
-   *  frame is called unvoiced. Higher = stricter (fewer false pitches, more dropped frames). */
+  /** Minimum NSDF clarity [0,1] for a frame to count as voiced — pitchy's clarityThreshold.
+   *  Higher = stricter (fewer false pitches, more dropped frames). */
   clarity?: number;
 }
 
-/** Estimate the fundamental of one frame, in Hz. Returns 0 when the frame has no strong periodicity
- *  (unvoiced). NSDF ranges [-1, 1]; a clean periodic frame peaks near 1 at the period's lag. */
+// One detector per frame length; making one allocates FFT scratch, so reuse across frames.
+const detectors = new Map<number, PitchDetector<Float32Array>>();
+function detectorFor(n: number): PitchDetector<Float32Array> {
+  let d = detectors.get(n);
+  if (!d) { d = PitchDetector.forFloat32Array(n); detectors.set(n, d); }
+  return d;
+}
+
+function toFloat32(frame: Float32Array | number[]): Float32Array {
+  return frame instanceof Float32Array ? frame : Float32Array.from(frame);
+}
+
+/** Estimate the fundamental of one frame, in Hz. Returns 0 when the frame is unvoiced (clarity
+ *  below threshold) or the pitch falls outside the speech band. */
 export function detectPitchHz(
   frame: Float32Array | number[], sampleRate: number, opts: PitchOpts = {},
 ): number {
   const { minF0 = 70, maxF0 = 500, clarity = 0.6 } = opts;
-  const n = frame.length;
-  const minLag = Math.max(2, Math.floor(sampleRate / maxF0));
-  const maxLag = Math.min(n - 1, Math.floor(sampleRate / minF0));
-  if (maxLag <= minLag) return 0;
-
-  // DC removal — a nonzero mean biases the autocorrelation toward lag 0.
-  let mean = 0;
-  for (let i = 0; i < n; i++) mean += frame[i];
-  mean /= n;
-  const x = new Float64Array(n);
-  for (let i = 0; i < n; i++) x[i] = frame[i] - mean;
-
-  // NSDF: 2·Σ x[i]x[i+τ] / Σ (x[i]² + x[i+τ]²), which normalizes each lag by its own windows'
-  // energy so a decaying signal doesn't bias short lags upward the way a raw ACF does.
-  const nsdf = new Float64Array(maxLag + 1);
-  for (let tau = minLag; tau <= maxLag; tau++) {
-    let ac = 0; let m = 0;
-    for (let i = 0; i + tau < n; i++) {
-      ac += x[i] * x[i + tau];
-      m += x[i] * x[i] + x[i + tau] * x[i + tau];
-    }
-    nsdf[tau] = m > 0 ? (2 * ac) / m : 0;
-  }
-
-  // First NSDF peak reaching `clarity`·(global max): the first peak is the true period, later peaks
-  // are its multiples — picking the tallest instead would drop an octave on some voices.
-  let globalMax = 0;
-  for (let tau = minLag + 1; tau < maxLag; tau++) {
-    if (nsdf[tau] > nsdf[tau - 1] && nsdf[tau] >= nsdf[tau + 1] && nsdf[tau] > globalMax) {
-      globalMax = nsdf[tau];
-    }
-  }
-  if (globalMax < clarity) return 0; // no strong periodicity → unvoiced
-
-  const cut = clarity * globalMax;
-  let chosen = -1;
-  for (let tau = minLag + 1; tau < maxLag; tau++) {
-    if (nsdf[tau] > nsdf[tau - 1] && nsdf[tau] >= nsdf[tau + 1] && nsdf[tau] >= cut) {
-      chosen = tau; break;
-    }
-  }
-  if (chosen < 0) return 0;
-
-  // Parabolic interpolation around the chosen lag for sub-sample accuracy — without it, F0
-  // resolution is quantized to integer lags and a steady tone reads as a tiny staircase.
-  const y0 = nsdf[chosen - 1]; const y1 = nsdf[chosen]; const y2 = nsdf[chosen + 1];
-  const denom = y0 - 2 * y1 + y2;
-  const shift = denom !== 0 ? (0.5 * (y0 - y2)) / denom : 0;
-  return sampleRate / (chosen + shift);
+  const buf = toFloat32(frame);
+  const detector = detectorFor(buf.length);
+  detector.clarityThreshold = clarity;
+  const [hz, clar] = detector.findPitch(buf, sampleRate);
+  if (!hz || clar < clarity || hz < minF0 || hz > maxF0) return 0;
+  return hz;
 }
 
 /** Slide a window across the waveform and emit one F0 per hop — the contour array gradeTone wants.
@@ -80,16 +53,14 @@ export function pitchTrack(
   samples: Float32Array | number[], sampleRate: number, opts: PitchOpts = {},
 ): number[] {
   const minF0 = opts.minF0 ?? 70;
-  const win = Math.min(samples.length, Math.ceil((sampleRate / minF0) * 4));
+  const all = toFloat32(samples);
+  const win = Math.min(all.length, Math.ceil((sampleRate / minF0) * 4));
   const hop = Math.max(1, Math.floor(win / 4));
   const out: number[] = [];
-  for (let start = 0; start + win <= samples.length; start += hop) {
-    const frame = Array.prototype.slice.call(samples, start, start + win) as number[];
-    out.push(detectPitchHz(frame, sampleRate, opts));
+  for (let start = 0; start + win <= all.length; start += hop) {
+    out.push(detectPitchHz(all.subarray(start, start + win), sampleRate, opts));
   }
   // A signal shorter than one window still deserves a single estimate rather than an empty track.
-  if (out.length === 0 && samples.length > 0) {
-    out.push(detectPitchHz(Array.prototype.slice.call(samples), sampleRate, opts));
-  }
+  if (out.length === 0 && all.length > 0) out.push(detectPitchHz(all, sampleRate, opts));
   return out;
 }
