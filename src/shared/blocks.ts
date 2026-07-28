@@ -6,6 +6,11 @@ const quickCheck = {
     mode: z.enum(['text', 'choice']),
     choices: z.array(z.string()).optional(),
     expected: z.string().optional(), // exact-match target for mechanical grading
+    // BCP-47 tag when the ANSWER should be typed in a specific language — the text field then
+    // offers that language's input method (e.g. "vi" → Vietnamese Telex, ImeInput.tsx) so the
+    // learner can type diacritics from an ASCII keyboard. Per-block, not a sticky global, so a
+    // later math answer never transliterates. Omit for ordinary answers.
+    lang: z.string().optional(),
     pageSlug: z.string(),
   }),
   result: z.object({ answer: z.string() }),

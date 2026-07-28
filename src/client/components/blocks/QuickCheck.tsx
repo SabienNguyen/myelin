@@ -1,6 +1,7 @@
 import { CheckIcon as Check } from '@phosphor-icons/react';
 import { BlockProse } from '../BlockProse.js';
 import { Verdict } from './Verdict.js';
+import { ImeInput } from './ImeInput.js';
 export function QuickCheck({ args, result, addResult }: {
   args: any; result: any; addResult: (r: any) => void;
 }) {
@@ -26,18 +27,13 @@ export function QuickCheck({ args, result, addResult }: {
   return (
     <div className="block quick-check">
       <BlockProse text={args.question} />
+      {/* `lang` (e.g. "vi") turns the text field into that language's input method — Vietnamese
+          Telex today, so a learner types diacritics from an ASCII keyboard (ImeInput.tsx). */}
       {args.mode === 'choice'
         ? args.choices?.map((ch: string) => (
             <button key={ch} onClick={() => addResult({ answer: ch })}>{ch}</button>
           ))
-        : <QuickText onSubmit={(answer) => addResult({ answer })} />}
+        : <ImeInput name="a" lang={args.lang} onSubmit={(answer) => addResult({ answer })} />}
     </div>
-  );
-}
-function QuickText({ onSubmit }: { onSubmit: (v: string) => void }) {
-  return (
-    <form onSubmit={(e) => { e.preventDefault(); onSubmit(new FormData(e.currentTarget).get('a') as string); }}>
-      <input name="a" autoFocus /><button type="submit">Answer</button>
-    </form>
   );
 }

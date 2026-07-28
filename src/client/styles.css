@@ -517,6 +517,25 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
 
+/* ime — the language input-method toggle on an answer field (ImeInput.tsx). Lets a learner type
+   a target language (Vietnamese Telex) from an ASCII keyboard, with an honest off switch. */
+.ime-form { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.ime-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: system-ui, sans-serif;
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.ime-toggle.is-on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.ime-toggle svg { flex: none; }
+
 /* offer_write — the one-click "write this up" button (OfferWrite.tsx), dropped inline when the
    tutor in a teaching mode has something worth saving but can't write it itself. */
 .offer-write { margin: 0.3rem 0; }

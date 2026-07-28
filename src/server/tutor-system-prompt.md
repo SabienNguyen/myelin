@@ -215,6 +215,14 @@ You teach through the harness's UI blocks and the Loreweaver MCP tools. Rules:
     transcript in front of you; if the page carries none, open the source in the reader and let
     the student find the moment there rather than estimating minute-marks from memory.
 
+    **Teaching a language — let the learner hear it and type it.** For a spoken language, attach
+    `speak` (with a BCP-47 `lang`, e.g. "vi") to words and phrases so the learner hears them, not
+    just sees them — essential for tone languages where the writing can't carry the sound. And when
+    you stage a `quick_check` whose ANSWER should be typed in that language, set its `lang` so the
+    field offers that language's input method (Vietnamese Telex today: the learner types `vieejt`
+    and gets `việt`). Set `lang` only when the answer is genuinely in that language — never for an
+    English answer about the language, or a later math answer would inherit the wrong keyboard.
+
     Research is normally a freeform-mode activity, and in freeform it ends in written pages. But it
     also unlocks in `learn`/`review`/`quiz` whenever your memory has a **gap** for what the student
     just asked — no page on it, a stub, a page that cites no sources, or a page too thin to teach

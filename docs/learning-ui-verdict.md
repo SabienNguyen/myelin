@@ -909,3 +909,16 @@ Written after the sprint that followed the original verdict; each line names its
   draft (WebFetch had failed, so it derived tones mechanically rather than paraphrasing unverified
   text). 1032 unit + 9 e2e green; rule-1a whitelist tests updated (offer_write joins open_source
   and speak as navigation that survives the grading withhold).
+- **Type the language, not just read it: a Telex input method on answer fields.** Building the
+  learner's request — "when writing in a different language, bring the correct keyboard." For
+  Vietnamese the correct keyboard is an input method, not an on-screen layout (tapping tone marks
+  is clumsier than typing them), and there's no maintained JS library for it (the good ones are
+  Rust or browser extensions), so `src/shared/telex.ts` is a compact hand-rolled Telex engine —
+  a stateful replay of raw keystrokes (`vieejt`→`việt`, `nhaf`→`nhà`, `dduwowcj`→`được`, with the
+  ươ-cluster tone landing on ơ), 8 tests. `ImeInput.tsx` wraps a field, holds the raw buffer,
+  shows the transliteration, and carries an honest toggle back to a system IME. The tutor opts a
+  `quick_check` into it per-block via a new `lang` field (never a sticky global, so a later math
+  answer can't transliterate `sin`→`sín`). Verified live: the tutor set `lang: vi`, the Telex
+  field rendered, typing `mas` produced `má`, and it graded correct with evidence recorded.
+  Non-Latin scripts (Cyrillic, Arabic, CJK) would layer on `simple-keyboard` (MIT) as a later
+  step — noted, not bundled, to keep the warm-paper surface and avoid a heavy dep for v1.
