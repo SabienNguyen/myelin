@@ -8,25 +8,63 @@
 // Consumed today by tests/toneContour.test.ts. Not yet wired into a block — deliberately, until the
 // mic-capture UX is designed.
 
-/** The six Vietnamese tones, keyed by their diacritic name. */
+/** The six Vietnamese tones, keyed by their diacritic name. Kept as the default tone type. */
 export type Tone = 'ngang' | 'huyen' | 'sac' | 'hoi' | 'nga' | 'nang';
+
+/** A tone LANGUAGE. Vietnamese and Mandarin both make tone-from-pitch-contour, so the same grader
+ *  serves both — only the template set and which tone is "level" differ. */
+export type ToneSystem = 'vi' | 'zh';
 
 /** Number of samples every contour is resampled to. Coarse on purpose: tone identity lives in the
  *  gross shape (rise / fall / dip), not fine detail, and a learner's mic is noisy. */
 export const CONTOUR_LEN = 16;
 
-/** Reference SHAPES, already in the normalized space normalizeContour produces (median-centered
- *  semitones, CONTOUR_LEN samples). Hand-drawn from the standard descriptions rather than measured
- *  — a v1 template good enough to tell the tones apart; a corpus-fit template is a later upgrade.
- *  Values are relative, so only their shape matters, not their magnitude. */
-export const TONE_TEMPLATES: Record<Tone, number[]> = {
-  ngang: ramp(0, 0),               // level, held flat
-  huyen: ramp(2, -3),              // starts mid, drifts steadily down
-  sac: ramp(-2, 4),                // rises sharply
-  hoi: dip(-1, -4, 1),             // dips low, then curls back up
-  nga: brokenRise(),               // rises, but with a glottal catch (a notch) partway
-  nang: ramp(-1, -4).map((v, i) => (i > CONTOUR_LEN * 0.6 ? -8 : v)), // low, then cut off abruptly
+interface ToneSystemDef {
+  /** Reference SHAPES in normalizeContour's space (median-centered semitones, CONTOUR_LEN). */
+  templates: Record<string, number[]>;
+  /** Tones defined by the ABSENCE of movement — judged by flatness, not correlation. */
+  levelTones: string[];
+  /** Display names for the UI. */
+  names: Record<string, string>;
+}
+
+/** Per-language reference templates, hand-drawn from the standard descriptions (a v1 good enough to
+ *  tell the tones apart; corpus-fit templates are a later upgrade). Values are relative — only the
+ *  shape matters. Vietnamese: the six diacritic tones. Mandarin: the four tones, T1 high-level (so
+ *  judged by flatness like ngang), T2 rising, T3 low-dipping, T4 sharp falling. */
+export const TONE_SYSTEMS: Record<ToneSystem, ToneSystemDef> = {
+  vi: {
+    templates: {
+      ngang: ramp(0, 0),               // level, held flat
+      huyen: ramp(2, -3),              // starts mid, drifts steadily down
+      sac: ramp(-2, 4),                // rises sharply
+      hoi: dip(-1, -4, 1),             // dips low, then curls back up
+      nga: brokenRise(),               // rises, but with a glottal catch (a notch) partway
+      nang: ramp(-1, -4).map((v, i) => (i > CONTOUR_LEN * 0.6 ? -8 : v)), // low, cut off abruptly
+    },
+    levelTones: ['ngang'],
+    names: {
+      ngang: 'ngang (level)', huyen: 'huyền (falling)', sac: 'sắc (rising)',
+      hoi: 'hỏi (dip-rise)', nga: 'ngã (broken rise)', nang: 'nặng (heavy)',
+    },
+  },
+  zh: {
+    templates: {
+      tone1: ramp(0, 0),               // first tone: high and level
+      tone2: ramp(-2, 4),              // second tone: rising
+      tone3: dip(-1, -5, 0),           // third tone: dips low, small recovery
+      tone4: ramp(4, -5),              // fourth tone: sharp fall from high
+    },
+    levelTones: ['tone1'],
+    names: {
+      tone1: '1st — high level (mā)', tone2: '2nd — rising (má)',
+      tone3: '3rd — dipping (mǎ)', tone4: '4th — falling (mà)',
+    },
+  },
 };
+
+/** Vietnamese templates, kept as a named export for callers that predate tone systems. */
+export const TONE_TEMPLATES = TONE_SYSTEMS.vi.templates as Record<Tone, number[]>;
 
 /** A straight line from `start` to `end` over CONTOUR_LEN samples. */
 function ramp(start: number, end: number): number[] {
@@ -105,8 +143,8 @@ export interface ToneGrade {
   /** True when the learner's contour matches the intended tone well enough to count. */
   pass: boolean;
   /** The tone their contour actually looks most like — equals `target` on a pass. */
-  closest: Tone;
-  /** Correlation with the target template, [-1, 1] (or the flatness verdict for ngang). */
+  closest: string;
+  /** Correlation with the target template, [-1, 1] (or the flatness verdict for a level tone). */
   similarity: number;
   /** Human-readable result, naming the miss the way the pattern checker names its expected value. */
   detail: string;
@@ -114,15 +152,19 @@ export interface ToneGrade {
   unscorable: boolean;
 }
 
-/** Flatness threshold (semitones) below which a contour reads as level (ngang). */
+/** Flatness threshold (semitones) below which a contour reads as a level tone. */
 const FLAT_RANGE = 2.5;
 /** Minimum correlation with the target template to count as that tone. */
 const MATCH_THRESHOLD = 0.6;
 
-/** Grade a learner's pitch track against the intended tone. A pass requires that the intended tone
- *  is BOTH the best-matching template AND clears the threshold — matching the equation grader's
- *  spirit that being close to the right shape isn't enough if you're closer to a wrong one. */
-export function gradeTone(f0Hz: number[], target: Tone): ToneGrade {
+/** Grade a learner's pitch track against the intended tone of a tone system (Vietnamese by
+ *  default). A pass requires that the intended tone is BOTH the best-matching template AND clears
+ *  the threshold — matching the equation grader's spirit that being close to the right shape isn't
+ *  enough if you're closer to a wrong one. A level tone (ngang, Mandarin T1) is judged by flatness
+ *  instead of correlation, since a flat line has no shape to correlate. */
+export function gradeTone(f0Hz: number[], target: string, system: ToneSystem = 'vi'): ToneGrade {
+  const def = TONE_SYSTEMS[system];
+  const name = (t: string) => def.names[t] ?? t;
   const c = normalizeContour(f0Hz);
   if (!c) {
     return { pass: false, closest: target, similarity: 0, unscorable: true,
@@ -130,31 +172,30 @@ export function gradeTone(f0Hz: number[], target: Tone): ToneGrade {
   }
   const range = contourRange(c);
 
-  // ngang is the flat tone: judged by absence of movement, not by correlating a flat line.
-  if (target === 'ngang') {
+  if (def.levelTones.includes(target)) {
     const pass = range < FLAT_RANGE;
-    return { pass, closest: pass ? 'ngang' : bestMatch(c).tone, similarity: -range, unscorable: false,
-      detail: pass ? 'Level and steady — that\'s ngang.'
-        : `That contour moved ${range.toFixed(1)} semitones; ngang should stay level.` };
+    return { pass, closest: pass ? target : bestMatch(c, def).tone, similarity: -range, unscorable: false,
+      detail: pass ? `Level and steady — that's ${name(target)}.`
+        : `That contour moved ${range.toFixed(1)} semitones; ${name(target)} should stay level.` };
   }
 
-  const { tone: closest, score } = bestMatch(c);
-  const targetScore = contourSimilarity(c, TONE_TEMPLATES[target]);
+  const { tone: closest } = bestMatch(c, def);
+  const targetScore = contourSimilarity(c, def.templates[target]);
   const pass = closest === target && targetScore >= MATCH_THRESHOLD && range >= FLAT_RANGE;
   const detail = pass
-    ? `Correct — your pitch traced the ${target} contour.`
+    ? `Correct — your pitch traced the ${name(target)} contour.`
     : range < FLAT_RANGE
-      ? `That came out nearly level (like ngang); ${target} needs a clear pitch movement.`
-      : `That contour looks more like ${closest} than ${target}.`;
+      ? `That came out nearly level; ${name(target)} needs a clear pitch movement.`
+      : `That contour looks more like ${name(closest)} than ${name(target)}.`;
   return { pass, closest, similarity: targetScore, unscorable: false, detail };
 }
 
-/** The template most correlated with `c`, among the non-level tones. */
-function bestMatch(c: number[]): { tone: Tone; score: number } {
-  let best: { tone: Tone; score: number } = { tone: 'sac', score: -Infinity };
-  for (const tone of Object.keys(TONE_TEMPLATES) as Tone[]) {
-    if (tone === 'ngang') continue;
-    const score = contourSimilarity(c, TONE_TEMPLATES[tone]);
+/** The template most correlated with `c`, among the system's non-level tones. */
+function bestMatch(c: number[], def: ToneSystemDef): { tone: string; score: number } {
+  let best = { tone: '', score: -Infinity };
+  for (const tone of Object.keys(def.templates)) {
+    if (def.levelTones.includes(tone)) continue;
+    const score = contourSimilarity(c, def.templates[tone]);
     if (score > best.score) best = { tone, score };
   }
   return best;

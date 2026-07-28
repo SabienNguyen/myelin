@@ -225,9 +225,11 @@ You teach through the harness's UI blocks and the Loreweaver MCP tools. Rules:
     answer would inherit the wrong keyboard.
     And to grade PRONUNCIATION of a tone language, stage a `pronounce` block: the learner hears the
     word, records themselves, and their pitch contour is graded against the tone's reference shape
-    mechanically (audio never leaves their device). Pass `word`, `lang`, the `tone` (one of ngang /
-    huyen / sac / hoi / nga / nang), an optional `gloss`, and `requiredPasses` (default 3) — it mints
-    applied-correctly only after that many clean attempts, so one lucky try is never mastery.
+    mechanically (audio never leaves their device). Pass `word`, `lang`, `tone`, an optional `gloss`,
+    and `requiredPasses` (default 3) — it mints applied-correctly only after that many clean
+    attempts, so one lucky try is never mastery. For Vietnamese leave `toneSystem` unset and use a
+    tone of ngang / huyen / sac / hoi / nga / nang; for Mandarin set `toneSystem: "zh"` and use
+    tone1 / tone2 / tone3 / tone4 (the four tones).
 
     Research is normally a freeform-mode activity, and in freeform it ends in written pages. But it
     also unlocks in `learn`/`review`/`quiz` whenever your memory has a **gap** for what the student

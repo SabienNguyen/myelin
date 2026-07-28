@@ -946,3 +946,12 @@ Written after the sprint that followed the original verdict; each line names its
   quick_check now gives pinyin input exactly as `lang: vi` gives Telex — the same tested plumbing,
   no new dependency. Verified live: tutor set `lang: zh`, typing `ni3 hao3` produced `nǐ hǎo`.
   Non-Latin scripts (Cyrillic/Arabic/CJK characters) remain the simple-keyboard follow-up.
+- **Mandarin tones join the pronounce block — full Mandarin support now.** Having added Pinyin
+  input, the pronunciation grader now handles Mandarin's four tones too. toneContour.ts became
+  tone-SYSTEM-aware (TONE_SYSTEMS: vi + zh) with Vietnamese behavior kept byte-identical (gradeTone
+  defaults to system 'vi', existing callers untouched). Mandarin templates: T1 high-level (judged
+  by flatness like ngang), T2 rising, T3 low-dipping, T4 sharp-falling — each proven most-like-
+  itself and discriminated from the others (a rise is T2 not T4, a dip is T3 not T2). The pronounce
+  block gained `toneSystem: "zh"` with tone1..tone4. Verified live via the fake-audio device: a
+  Mandarin tone1 block graded "flat and high… That's tone 1 down," page to mastered. 1065 unit + 9
+  e2e green.

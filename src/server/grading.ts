@@ -2,6 +2,7 @@ import { convertLatexToAsciiMath } from 'mathlive';
 import { create, all } from 'mathjs';
 import { generateText, Output } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
+import { TONE_SYSTEMS, type ToneSystem } from '../shared/toneContour.js';
 import type { EvidenceKind } from '../shared/loreweaver.js';
 import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import { modelFor } from './models.js';
@@ -587,14 +588,16 @@ export async function gradeBlockOutput(
     const passes = Number(result.passes ?? 0);
     const required = Number(result.required ?? input.requiredPasses ?? 3);
     const kind: EvidenceKind = applied ? 'applied-correctly' : passes > 0 ? 'exposed' : 'struggled';
+    const system: ToneSystem = input.toneSystem === 'zh' ? 'zh' : 'vi';
+    const toneName = TONE_SYSTEMS[system].names[input.tone] ?? input.tone;
     return {
       verdict: applied ? 'correct' : passes > 0 ? 'partial' : 'incorrect',
       source: 'mechanical',
       detail: applied
-        ? `said “${input.word}” with the right ${input.tone} tone ${passes}/${required} times`
-        : `${passes}/${required} clean — ${input.tone} needs ${required} to count`,
+        ? `said “${input.word}” with the right ${toneName} tone ${passes}/${required} times`
+        : `${passes}/${required} clean — ${toneName} needs ${required} to count`,
       evidence: [ev(input.pageSlug, kind,
-        `pronounced “${input.word}” (${input.tone} tone)`, 'mechanical')],
+        `pronounced “${input.word}” (${toneName})`, 'mechanical')],
     };
   }
 

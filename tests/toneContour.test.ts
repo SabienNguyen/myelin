@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  gradeTone, normalizeContour, contourSimilarity, TONE_TEMPLATES, CONTOUR_LEN, type Tone,
+  gradeTone, normalizeContour, contourSimilarity, TONE_TEMPLATES, TONE_SYSTEMS, CONTOUR_LEN, type Tone,
 } from '../src/shared/toneContour.js';
 
 // Synthetic pitch tracks in Hz, shaped like the tone they name. A tone grader that works must
@@ -50,7 +50,7 @@ describe('gradeTone — a rising utterance is sắc, not huyền', () => {
     const g = gradeTone(rising(), 'huyen'); // rose when huyền should fall
     expect(g.pass).toBe(false);
     expect(g.closest).toBe('sac');
-    expect(g.detail).toMatch(/more like sac than huyen/);
+    expect(g.detail).toMatch(/more like sắc .* than huyền/); // named by their display forms
   });
 
   it('speaker pitch does not change the grade: a high voice saying sắc still passes', () => {
@@ -87,6 +87,36 @@ describe('TONE_TEMPLATES — each template is most like itself', () => {
     for (const t of tones) {
       const scores = tones.map((u) => ({ u, s: contourSimilarity(TONE_TEMPLATES[t], TONE_TEMPLATES[u]) }));
       const top = scores.sort((a, b) => b.s - a.s)[0];
+      expect(top.u).toBe(t);
+    }
+  });
+});
+
+describe('Mandarin (system "zh") — the four tones grade by the same contour logic', () => {
+  it('rising is 2nd tone, falling is 4th, and neither passes as the other', () => {
+    expect(gradeTone(rising(), 'tone2', 'zh').pass).toBe(true);
+    expect(gradeTone(falling(), 'tone4', 'zh').pass).toBe(true);
+    expect(gradeTone(rising(), 'tone4', 'zh').pass).toBe(false);
+    expect(gradeTone(falling(), 'tone2', 'zh').pass).toBe(false);
+  });
+
+  it('a high-level tone (1st) is judged by flatness, like ngang', () => {
+    expect(gradeTone(level(), 'tone1', 'zh').pass).toBe(true);
+    expect(gradeTone(rising(), 'tone1', 'zh').pass).toBe(false);
+  });
+
+  it('the dipping 3rd tone matches a dip and not a pure rise', () => {
+    expect(gradeTone(dipping(), 'tone3', 'zh').pass).toBe(true);
+    expect(gradeTone(dipping(), 'tone2', 'zh').pass).toBe(false);
+  });
+
+  it('every non-level Mandarin template is most like itself', () => {
+    const { templates, levelTones } = TONE_SYSTEMS.zh;
+    const tones = Object.keys(templates).filter((t) => !levelTones.includes(t));
+    for (const t of tones) {
+      const top = tones
+        .map((u) => ({ u, s: contourSimilarity(templates[t], templates[u]) }))
+        .sort((a, b) => b.s - a.s)[0];
       expect(top.u).toBe(t);
     }
   });

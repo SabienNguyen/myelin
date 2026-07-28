@@ -236,8 +236,11 @@ const labelDiagram = {
 const pronounce = {
   input: z.object({
     word: z.string(),                    // the syllable/word to say, in the target script
-    lang: z.string(),                    // BCP-47 tag for the hear-it voice (e.g. "vi")
-    tone: z.enum(['ngang', 'huyen', 'sac', 'hoi', 'nga', 'nang']),
+    lang: z.string(),                    // BCP-47 tag for the hear-it voice (e.g. "vi", "zh-CN")
+    // Which tone system, and which of its tones. Vietnamese (default): ngang/huyen/sac/hoi/nga/nang.
+    // Mandarin (toneSystem "zh"): tone1..tone4.
+    toneSystem: z.enum(['vi', 'zh']).optional(),
+    tone: z.enum(['ngang', 'huyen', 'sac', 'hoi', 'nga', 'nang', 'tone1', 'tone2', 'tone3', 'tone4']),
     gloss: z.string().optional(),        // meaning, shown beside the word
     requiredPasses: z.number().int().min(1).max(5).optional(), // clean attempts to mint applied; default 3
     pageSlug: z.string(),

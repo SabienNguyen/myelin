@@ -12,12 +12,7 @@ import { StagePortal } from '../StagePortal.js';
 import { panelBus } from '../../lib/panelBus.js';
 import { pickVoice } from './Speak.js';
 import { gradePronunciation } from '../../../shared/pronounceGrade.js';
-import { TONE_TEMPLATES, CONTOUR_LEN, type Tone, type ToneGrade } from '../../../shared/toneContour.js';
-
-const TONE_NAMES: Record<Tone, string> = {
-  ngang: 'ngang (level)', huyen: 'huyền (falling)', sac: 'sắc (rising)',
-  hoi: 'hỏi (dip-rise)', nga: 'ngã (broken rise)', nang: 'nặng (heavy)',
-};
+import { TONE_SYSTEMS, CONTOUR_LEN, type ToneSystem, type ToneGrade } from '../../../shared/toneContour.js';
 
 /** Decode a recorded blob to mono PCM at the AudioContext's rate — the array pitchTrack wants. */
 async function decodeMono(blob: Blob): Promise<{ samples: Float32Array; sampleRate: number }> {
@@ -46,9 +41,13 @@ function Overlay({ template, learner }: { template: number[]; learner: number[] 
 }
 
 export function Pronounce({ args, result, addResult }: {
-  args: { word: string; lang: string; tone: Tone; gloss?: string; requiredPasses?: number; pageSlug: string };
+  args: { word: string; lang: string; tone: string; toneSystem?: ToneSystem; gloss?: string; requiredPasses?: number; pageSlug: string };
   result: any; addResult: (r: any) => void;
 }) {
+  const system: ToneSystem = args.toneSystem ?? 'vi';
+  const def = TONE_SYSTEMS[system];
+  const toneName = def.names[args.tone] ?? args.tone;
+  const template = def.templates[args.tone];
   const required = Math.min(5, Math.max(1, args.requiredPasses ?? 3));
   const [passes, setPasses] = useState(0);
   const [attempts, setAttempts] = useState(0);
@@ -89,7 +88,7 @@ export function Pronounce({ args, result, addResult }: {
         stream.getTracks().forEach((t) => t.stop());
         try {
           const { samples, sampleRate } = await decodeMono(new Blob(chunks));
-          const { grade, contour } = gradePronunciation(samples, sampleRate, args.tone);
+          const { grade, contour } = gradePronunciation(samples, sampleRate, args.tone, system);
           setLast({ grade, contour });
           setAttempts((a) => a + 1);
           if (grade.unscorable) return;
@@ -117,7 +116,7 @@ export function Pronounce({ args, result, addResult }: {
     <div className="block pronounce">
       <h2><Microphone size={16} weight="duotone" /> Say it</h2>
       <p className="pronounce-word">{args.word}{args.gloss && <span className="pronounce-gloss"> — {args.gloss}</span>}</p>
-      <p className="pronounce-tone">target tone: <strong>{TONE_NAMES[args.tone]}</strong></p>
+      <p className="pronounce-tone">target tone: <strong>{toneName}</strong></p>
 
       <div className="pronounce-controls">
         <button type="button" onClick={hear} className="pronounce-hear">
@@ -130,14 +129,14 @@ export function Pronounce({ args, result, addResult }: {
 
       {last && (
         <div className="pronounce-feedback">
-          <Overlay template={TONE_TEMPLATES[args.tone]} learner={last.contour} />
+          <Overlay template={template} learner={last.contour} />
           <p className={last.grade.pass ? 'pronounce-ok' : 'pronounce-miss'}>{last.grade.detail}</p>
         </div>
       )}
       {error && <p className="pronounce-error" role="status">{error}</p>}
 
       <p className="pronounce-progress" role="status">
-        {passes}/{required} clean {passes >= required ? '— done ✓' : `— say it ${TONE_NAMES[args.tone]} cleanly ${required - passes} more time${required - passes === 1 ? '' : 's'}`}
+        {passes}/{required} clean {passes >= required ? '— done ✓' : `— say it ${toneName} cleanly ${required - passes} more time${required - passes === 1 ? '' : 's'}`}
       </p>
       {/* Stop early with an honest partial — passes < required means it won't mint mastery. */}
       {passes < required && attempts > 0 && (
