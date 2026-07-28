@@ -64,3 +64,28 @@ describe('toolkit block guards', () => {
     spy.mockRestore();
   });
 });
+
+// Coverage guard: every tool the SERVER can call — graded blocks plus the navigation UI tools —
+// must have a renderer in the client toolkit, or the SDK bridge forwards a call the client can't
+// draw (a blank in the transcript). Pins the wiring so a new tool can't ship half-connected.
+describe('toolkit covers every server-callable tool', () => {
+  it('has a render entry for each block and UI tool', async () => {
+    const { BLOCK_TOOLS } = await import('../../src/shared/blocks.js');
+    const { UI_TOOLS } = await import('../../src/shared/uiTools.js');
+    for (const name of [...Object.keys(BLOCK_TOOLS), ...Object.keys(UI_TOOLS)]) {
+      const entry = (toolkit as any)[name];
+      expect(entry, `toolkit missing tool "${name}"`).toBeTruthy();
+      expect(typeof entry.render, `toolkit "${name}" has no render`).toBe('function');
+    }
+  });
+
+  it('speak renders a hear-this control (or the honest no-voice fallback), never a crash', () => {
+    // jsdom has no speechSynthesis, so the component treats it as "no voice" — the degrade-loudly
+    // path — and must render the honest fallback rather than throw.
+    renderTool('speak', {
+      args: { text: 'má', lang: 'vi', gloss: 'mother' },
+      result: undefined,
+    });
+    expect(document.body.textContent).toContain('má');
+  });
+});
