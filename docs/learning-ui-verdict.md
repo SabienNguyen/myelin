@@ -725,3 +725,8 @@ Written after the sprint that followed the original verdict; each line names its
   persistence saved the whole turn — prose and block — where yesterday it would have vanished;
   the auto-skipped block plus one honest re-ask completed the exercise. The tutor also held its
   probe-before-production contract (routing check first, diagram second) unprompted.
+- **MoE arc coda:** the sitting's full product loop verified in the vault — a mixture-of-experts
+  page written with two real sources (draft status, honestly marked), and the student record at
+  practicing with both evidence kinds: explained-correctly from the routing probe,
+  applied-correctly from the mechanical 8/8 diagram. Research → page → taught → probed →
+  applied → recorded, thirteenth deep-LLM topic on the marathon vault.
