@@ -206,7 +206,14 @@ export function shapeCue(template: number[]): string {
   const lowIdx = template.indexOf(low);
   const dips = lowIdx > CONTOUR_LEN * 0.2 && lowIdx < CONTOUR_LEN * 0.8
     && low < head - 1 && low < tail - 1;
-  if (dips) return 'dip low through the middle, then lift the end back up';
+  if (dips) {
+    // A mid-contour trough. If the line still climbs strongly overall, this is a broken RISE
+    // (ngã's glottal catch), not a smooth dip-and-return (hỏi / Mandarin third) — and ngã vs sắc is
+    // the exact pair beginners miss, so coaching ngã as a dip would send them the wrong way.
+    return tail - head > 3.5
+      ? 'rise overall, but with a distinct catch or break in the middle'
+      : 'dip low through the middle, then lift the end back up';
+  }
   if (tail - head > 1.5) return 'start low and finish clearly higher';
   if (head - tail > 1.5) return 'start high and let the pitch fall away';
   return 'keep a clear, steady pitch movement';

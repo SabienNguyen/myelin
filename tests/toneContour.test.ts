@@ -93,6 +93,17 @@ describe('gradeTone — a rising utterance is sắc, not huyền', () => {
     expect(shapeCue(TONE_SYSTEMS.zh.templates.tone2)).toMatch(/higher/);
   });
 
+  it('the sắc/ngã pair gets DISTINCT coaching — ngã is a rise WITH a catch, not a dip', () => {
+    const sac = shapeCue(TONE_SYSTEMS.vi.templates.sac);
+    const nga = shapeCue(TONE_SYSTEMS.vi.templates.nga);
+    const hoi = shapeCue(TONE_SYSTEMS.vi.templates.hoi);
+    // ngã must be told about the mid-contour catch/break, not smooth-rise or dip coaching.
+    expect(nga).toMatch(/catch|break/);
+    // and it must differ from BOTH the smooth rise (sắc) and the dip-rise (hỏi) it's confused with.
+    expect(nga).not.toBe(sac);
+    expect(nga).not.toBe(hoi);
+  });
+
   it('too little voiced sound is unscorable — no grade, not a failure', () => {
     const g = gradeTone([0, 0, 150], 'sac');
     expect(g.unscorable).toBe(true);
