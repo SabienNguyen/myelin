@@ -37,6 +37,12 @@ to it exclusively over stdio MCP.
 - **The tutor is a librarian first.** Live literature search (newest and most-cited), citation
   chasing through an ingested paper's own references, and prompt rules that route learning through
   real human artifacts — research claims must match what was actually read.
+- **Languages get to be heard.** For tone languages especially (Vietnamese, Mandarin, Thai) the
+  tutor can attach a *hear this* button to any word, spoken by the browser's own speech engine —
+  no dependency, works offline. It degrades loudly: with no installed voice for the language it
+  says so and points to a native recording rather than faking the accent. Grading a learner's own
+  pronunciation (a tone-contour checker built on open-source pitch tracking) is designed in
+  [`docs/pronunciation-roadmap.md`](docs/pronunciation-roadmap.md), not yet wired.
 - **The loop closes visibly.** Spaced review with decay, an interleaved one-click session plan,
   misconception record → surface → repair → resolve (repair history kept), per-student profiles,
   and two-way Anki sync.
