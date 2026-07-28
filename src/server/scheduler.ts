@@ -68,5 +68,12 @@ export async function runDigestTick(
 }
 
 export function startScheduler(lw: Loreweaver, cfg: HarnessConfig) {
-  return cron.schedule(`0 ${cfg.schedule.digestHour} * * *`, async () => { await runDigestTick(lw, cfg); }, { noOverlap: true });
+  // .catch for the same reason ankiTick has one (index.ts): runDigestTick awaits MCP calls, a
+  // notifier, and a ledger read, any of which can reject — an unhandled rejection in a background
+  // cron tick has no business reaching the process. A logged miss retries on the next tick.
+  return cron.schedule(
+    `0 ${cfg.schedule.digestHour} * * *`,
+    () => { runDigestTick(lw, cfg).catch(console.error); },
+    { noOverlap: true },
+  );
 }
