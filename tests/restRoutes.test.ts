@@ -350,6 +350,25 @@ describe('GET /api/page/:slug neighbours', () => {
     // Losing mastery is a degraded panel; losing the page is a broken one. Titles still resolve.
     expect((await res.json()).neighbors).toEqual({ derivatives: { title: 'Derivatives', mastery: null } });
   });
+
+  it('standing carries the memory layer\'s own countdown (daysLeft, slipped) — not re-derived here', async () => {
+    const lw = {
+      listSlugs: async () => ['chain-rule'],
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') {
+          // The per-slug shape get_student_state returns: detail now carries days_left/slipped.
+          return { detail: { level: 'mastered', effective: 'practicing', last_reinforced: '2026-07-01', days_left: null, slipped: true, evidence: [{ kind: 'applied-correctly' }], misconceptions: [] } };
+        }
+        if (name === 'read_page' && args.slug === 'chain-rule') {
+          return { page: { slug: 'chain-rule', meta: { title: 'Chain Rule' }, body: 'b', warnings: [] }, edges: { in: [], out: [] } };
+        }
+        throw new Error(`unexpected ${name}`);
+      },
+    } as any;
+    const body = await (await buildRestRoutes(lw, cfg).request('/api/page/chain-rule')).json();
+    expect(body.standing.daysLeft).toBeNull();
+    expect(body.standing.slipped).toBe(true);
+  });
 });
 
 describe('GET /api/page/:slug for a page that does not exist', () => {

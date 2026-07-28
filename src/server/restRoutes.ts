@@ -197,17 +197,13 @@ export function buildRestRoutes(
       applied: count('applied-correctly'),
       explained: count('explained-correctly'),
       rubric: count('rubric-passed'),
-      // Mirrors loreweaver's restsOnRubric walk, so the panel's decay countdown uses the SAME
-      // window the memory layer will actually decay on. Without this the countdown promised 21
-      // days to a page that rots in 14.
-      restsOnRubric: (() => {
-        for (let i = evidence.length - 1; i >= 0; i--) {
-          const k = evidence[i].kind;
-          if (k === 'applied-correctly' || k === 'explained-correctly') return false;
-          if (k === 'rubric-passed') return true;
-        }
-        return false;
-      })(),
+      // The decay countdown, reported BY the memory layer (get_student_state's detail) rather than
+      // re-derived here or in the client: daysLeft is null once the standing has slipped or the
+      // level has no clock, and slipped says it already dropped a rung. This is the same authority
+      // the graph rings (graphLayout) and the review queue read — the page reader is no longer the
+      // odd one out re-computing DECAY windows and the rubric walk client-side.
+      daysLeft: (d.days_left ?? null) as number | null,
+      slipped: !!d.slipped,
       struggled: count('struggled'),
       misconceptions: (d.misconceptions ?? []) as string[],
       // The repairs, from the evidence log's `resolved` field — the misconceptions list correctly

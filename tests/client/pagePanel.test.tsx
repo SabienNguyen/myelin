@@ -4,12 +4,15 @@ import { render, screen, cleanup } from '@testing-library/react';
 
 const { PagePanel } = await import('../../src/client/components/PagePanel.js');
 
-const payload = (misconceptions: string[]) => ({
+const payload = (misconceptions: string[], decay: { daysLeft?: number | null; slipped?: boolean } = {}) => ({
   page: { slug: 'stream-consumer', meta: { title: 'Stream consumer', status: 'solid' }, body: 'body text' },
   edges: {}, neighbors: {}, routes: [], noLadder: false,
   standing: {
     level: 'practicing', effective: 'practicing', lastReinforced: '2026-07-27',
-    applied: 1, explained: 0, rubric: 0, struggled: 0, restsOnRubric: false, misconceptions,
+    applied: 1, explained: 0, rubric: 0, struggled: 0, misconceptions,
+    // The panel reads the countdown straight from these server fields (get_student_state's own
+    // decayDaysLeft), never re-deriving DECAY windows client-side.
+    daysLeft: decay.daysLeft ?? null, slipped: decay.slipped ?? false,
   },
 });
 
@@ -35,6 +38,29 @@ describe('PagePanel standing misconceptions', () => {
     stubPage(payload(['confuses buffer size with decoder state', 'thinks chunks align to characters']));
     render(<PagePanel slug="stream-consumer" />);
     expect(await screen.findByText(/recorded misconceptions — the tutor will re-test them/)).toBeTruthy();
+  });
+
+  // The countdown is the memory layer's own days_left, not a client re-derivation of DECAY windows
+  // (the graph rings and review queue already read it; the page reader was the last re-deriver).
+  it('shows the server-reported days_left verbatim, without re-deriving the window', async () => {
+    stubPage(payload([], { daysLeft: 13, slipped: false }));
+    render(<PagePanel slug="stream-consumer" />);
+    expect(await screen.findByText('Holds for 13 more days without practice.')).toBeTruthy();
+  });
+
+  it('says "Due for review now." when the memory layer reports the standing has slipped', async () => {
+    stubPage(payload([], { daysLeft: null, slipped: true }));
+    render(<PagePanel slug="stream-consumer" />);
+    await screen.findByText('Stream consumer');
+    expect(screen.getByText('Due for review now.')).toBeTruthy();
+    expect(screen.queryByText(/Holds for/)).toBeNull();
+  });
+
+  it('shows no countdown line when nothing is decaying (daysLeft null, not slipped)', async () => {
+    stubPage(payload([], { daysLeft: null, slipped: false }));
+    render(<PagePanel slug="stream-consumer" />);
+    await screen.findByText('Stream consumer');
+    expect(screen.queryByText(/Holds for|Due for review/)).toBeNull();
   });
 
   it('renders no misconception label when none are recorded', async () => {

@@ -3,7 +3,6 @@ import { getGraph, getPage } from '../lib/api.js';
 import { POLL_MS } from './GraphPanel.js';
 import { RichMarkdown } from './RichMarkdown.js';
 import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
-import { DECAY } from '../../shared/loreweaver.js';
 
 // The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
 // system whose whole thesis is a JUSTIFIED TYPED GRAPH — every edge carries a rationale someone had
@@ -65,15 +64,6 @@ function standingLine(st: { applied: number; explained: number; rubric?: number;
   }
   if (st.struggled > 0) return 'You have attempted this and not landed it yet.';
   return 'Seen, but nothing recorded yet.';
-}
-
-/** Days until this level decays, using the same windows the graph's rings use. */
-function daysUntilDecay(effective: string, lastReinforced: string, restsOnRubric = false, now = new Date()): number | null {
-  const window = effective === 'mastered' ? DECAY.masteredDays
-    : effective === 'practicing' ? (restsOnRubric ? DECAY.rubricDays : DECAY.practicingDays) : null;
-  if (window == null) return null;
-  const elapsed = Math.floor((now.getTime() - new Date(lastReinforced).getTime()) / 86_400_000);
-  return Math.max(0, window - elapsed);
 }
 
 const MASTERY_LABEL: Record<string, string> = {
@@ -210,7 +200,11 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
   const neighbors = page.neighbors ?? {};
   const warnings: string[] = page.page.warnings ?? [];
   const standing = page.standing ?? null;
-  const decayIn = standing ? daysUntilDecay(standing.effective, standing.lastReinforced, (standing as any).restsOnRubric) : null;
+  // The countdown comes straight from the memory layer (via /api/page's standing) — no client-side
+  // DECAY re-derivation. daysLeft is null once the level has slipped a rung or has no clock; slipped
+  // is the memory layer's own "already dropped" signal, which drives the due-now line below.
+  const decayIn: number | null = standing?.daysLeft ?? null;
+  const slipped: boolean = !!standing?.slipped;
   // The applied-route hint must not depend on HAVING a standing: a page never attempted is
   // exactly where "how would I confirm this" matters most, and the audit found the hint silently
   // absent there because it only rendered inside the standing section.
@@ -261,13 +255,13 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
               could — "you have not done the exercise" and "no exercise exists" must stop sharing
               one ambiguous sentence. Routes are derived server-side from what exists. */}
           {routeHint}
-          {decayIn != null && (
+          {decayIn != null ? (
             <p className="page-standing-decay">
-              {decayIn === 0
-                ? 'Due for review now.'
-                : `Holds for ${decayIn} more day${decayIn === 1 ? '' : 's'} without practice.`}
+              Holds for {decayIn} more day{decayIn === 1 ? '' : 's'} without practice.
             </p>
-          )}
+          ) : slipped ? (
+            <p className="page-standing-decay">Due for review now.</p>
+          ) : null}
           {standing.misconceptions.length > 0 && (
             <>
               {/* Named, not just colored: without this line the list rendered as bare red bullets,
