@@ -21,3 +21,4 @@ blob-report/
 dist-server/
 vendor/
 release/
+*.mts
