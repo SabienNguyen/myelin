@@ -64,12 +64,15 @@ the browser, no new runtime dependency — or CREPE server-side for higher accur
 `tone_contour` checker-kind wired into `structured_check` so a pass mints `applied-correctly`
 evidence. The template set is a hand-drawn v1; a corpus-fit upgrade is a later step.
 
-### Why it isn't wired yet
+### Why it isn't fully wired yet
 
-The grading half needs a pitch-analysis service (CREPE is Python/ONNX; pYIN is Python) — a new
-runtime dependency and a mic-capture UX, which is a feature-sized build, not a session's audit
-fix. Wiring it half-way would violate the very honesty rule that made `speak` degrade loudly. The
-design is committed here so the next builder starts from grounded components, not a blank page.
+The grading *math* is done and needs no new dependency (above). What remains is the I/O around it,
+and one genuine design decision: the mic-capture UX — how a "say this" prompt records, plays back,
+and re-tries — plus a pitch tracker to feed the F0 array. That tracker can be pure-JS Web Audio
+autocorrelation (no new runtime dependency, browser-only) for a v1, with CREPE server-side as a
+later accuracy upgrade if noisy mics warrant it; Python is an option, not a requirement. Wiring a
+half-built version would violate the honesty rule that made `speak` degrade loudly, so the mic UX
+is left for a deliberate build rather than bolted on. The grounded components are all here now.
 
 **Prior art for non-tone languages:** [speechocean762](https://www.researchgate.net/publication/354221406)
 is an open corpus for phoneme/word/sentence pronunciation scoring, and CMUSphinx documented an
