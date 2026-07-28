@@ -11,6 +11,7 @@ import { WritingDraft } from './components/blocks/WritingDraft.js';
 import { CodeExercise } from './components/blocks/CodeExercise.js';
 import { LabelDiagram } from './components/blocks/LabelDiagram.js';
 import { Speak } from './components/blocks/Speak.js';
+import { OfferWrite } from './components/blocks/OfferWrite.js';
 
 /** Two different failures wear the error flag: a call the server REJECTED (schema mismatch —
  *  the tutor's mistake) and a call that was CANCELLED because the conversation moved on (the
@@ -93,6 +94,16 @@ export const toolkit = defineToolkit({
       isError
         ? <span className="tool-note failed">✗ source could not be opened</span>
         : <OpenSource args={args} result={result} addResult={addResult} />,
+  },
+  // UI tool: a one-click "write this up" button from a teaching mode (src/shared/uiTools.ts).
+  offer_write: {
+    type: 'human' as const,
+    description: 'Offer a one-click button to write the current topic up as a page',
+    parameters: UI_TOOLS.offer_write.input,
+    render: ({ args, result, addResult, isError }: any) =>
+      isError
+        ? <span className="tool-note failed">✗ could not offer the write</span>
+        : <OfferWrite args={args} result={result} addResult={addResult} />,
   },
   // UI tool: speak a word/phrase via the browser's speech engine (src/shared/uiTools.ts).
   speak: {

@@ -48,6 +48,7 @@ export function blockAllowlist(gradingOnly: boolean): string[] {
     ...(gradingOnly ? [] : availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`)),
     `${BLOCKS_PREFIX}open_source`,
     `${BLOCKS_PREFIX}speak`, // navigation-class UI tool, allowed in every turn like open_source
+    `${BLOCKS_PREFIX}offer_write`, // navigation-class: a one-click "write this up" button
   ];
 }
 const COURSE_PREFIX = 'mcp__course__';
@@ -153,6 +154,24 @@ function blockMcpTools(vault: string) {
         `A "hear this" control for "${text}" is beside the conversation. Keep teaching — the `
         + 'client will report whether a voice was available; do not claim the learner heard it '
         + 'until they confirm or that receipt says so.' }],
+    }),
+  ));
+  // offer_write rides the same bridge — a one-click "write this up" button for teaching modes,
+  // where the tutor can't write pages itself. Navigation-class. The learner's click sends the
+  // actual write request (as a freeform-promoted turn), so the sentinel just tells the tutor the
+  // button is placed and not to pretend the page exists yet.
+  blocks.push(tool(
+    'offer_write',
+    'Offer the learner a one-click "write this up" button. Use ONLY in a teaching mode when you '
+      + 'have taught something worth keeping but cannot write it yourself — instead of telling '
+      + 'them to switch to freeform, call this. Pass `title` (the page name) and optional `why`. '
+      + 'Not in freeform (you can just write there), and not for something a solid page already '
+      + 'covers.',
+    UI_TOOLS.offer_write.input.shape,
+    async ({ title }: { title: string }) => ({
+      content: [{ type: 'text' as const, text:
+        `A "write this up" button for "${title}" is beside the conversation. Nothing is saved `
+        + 'until the learner clicks it — do not refer to the page as written yet. Keep teaching.' }],
     }),
   ));
   return blocks;

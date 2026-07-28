@@ -51,7 +51,9 @@ export function Speak({ args, result, addResult }: {
   }, []);
 
   const voice = voices ? pickVoice(voices, args.lang) : null;
-  const available = voices !== null && voice !== null;
+  // voice is null whenever voices is null (derived above), so a non-null voice already implies
+  // discovery finished — no need to re-check voices here.
+  const available = voice !== null;
 
   // Report availability ONCE, so the tutor's next turn knows whether the learner could actually
   // hear it — and can fall back to "find a native recording" honestly when they couldn't.

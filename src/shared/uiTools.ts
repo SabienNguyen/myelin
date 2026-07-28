@@ -16,6 +16,22 @@ export const UI_TOOLS = {
       error: z.string().optional(),
     }),
   },
+  // Offer a one-click "write this up" button from a teaching mode, where the tutor can't write
+  // pages itself (the single-writer rule keeps writing freeform-only). Instead of telling the
+  // learner to find the mode selector and switch to freeform, the tutor calls this; the button
+  // arms a one-shot write and the server promotes just that turn to freeform. Navigation-class,
+  // never graded.
+  offer_write: {
+    input: z.object({
+      /** What the page would be called — shown on the button ("Write “Vietnamese tones” up"). */
+      title: z.string(),
+      /** Optional one-line reason, shown under the button ("so your progress here sticks"). */
+      why: z.string().optional(),
+    }),
+    result: z.object({
+      requested: z.string().optional(),
+    }),
+  },
   // Attach a "hear this" control to a word or phrase, spoken by the browser's own speech engine
   // (Web Speech API — in Electron/Chromium already, zero deps). Built for the tone languages a
   // text-only tutor could teach the MAP of but never let the learner HEAR (a live Vietnamese

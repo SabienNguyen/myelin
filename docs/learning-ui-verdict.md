@@ -897,3 +897,15 @@ Written after the sprint that followed the original verdict; each line names its
   itself (editor → real test suite → applied-correctly evidence) is covered by the green
   gap-exercise.e2e.ts, so this live pass confirms the rendering and rung navigation the e2e can't
   screenshot. No visual or navigation bug.
+- **The freeform-write friction is gone: a one-click "write this up" button.** The seam both
+  persona runs stalled on — a learner in a teaching mode had to know to flip the mode selector to
+  freeform to get a page written — is closed. The tutor now calls `offer_write` (navigation-class
+  UI tool, both routes) when it has taught something worth keeping but can't write it itself; the
+  learner clicks one button. Under the hood the click arms a one-shot `writeUp` flag that the chat
+  transport folds into that single request; the server promotes just that turn to freeform so the
+  single-writer vault path unlocks. The learner's visible mode never changes and the next turn
+  reverts on its own — verified live: clicked in learn mode, `vietnamese-numbers` was written and
+  linked into the graph, mode still read "learn" after, and the tutor honestly marked the page
+  draft (WebFetch had failed, so it derived tones mechanically rather than paraphrasing unverified
+  text). 1032 unit + 9 e2e green; rule-1a whitelist tests updated (offer_write joins open_source
+  and speak as navigation that survives the grading withhold).

@@ -435,12 +435,14 @@ describe('structural rule 1a — grading turns withhold the block tools', () => 
     const { blockAllowlist } = await import('../src/server/claudeSdkTutor.js');
     const grading = blockAllowlist(true);
     const user = blockAllowlist(false);
-    // open_source and speak are navigation, not graded work — both survive the grading withhold.
-    expect(grading.sort()).toEqual(['mcp__blocks__open_source', 'mcp__blocks__speak']);
+    // open_source, speak, offer_write are navigation, not graded work — all survive the withhold.
+    expect(grading.sort()).toEqual(
+      ['mcp__blocks__offer_write', 'mcp__blocks__open_source', 'mcp__blocks__speak']);
     expect(user).toContain('mcp__blocks__quiz');
     expect(user).toContain('mcp__blocks__writing_draft');
     expect(user).toContain('mcp__blocks__open_source');
     expect(user).toContain('mcp__blocks__speak');
+    expect(user).toContain('mcp__blocks__offer_write');
   });
 });
 

@@ -4,6 +4,7 @@ import type { UIMessage } from 'ai';
 import { useEffect, useState, type PropsWithChildren } from 'react';
 import { BLOCK_TOOL_NAMES } from '../shared/blocks.js';
 import { dedupeById } from '../shared/messages.js';
+import { consumeWriteIntent } from './lib/writeIntent.js';
 import { toolkit } from './toolkit.js';
 
 /**
@@ -58,7 +59,13 @@ function RuntimeInner(
   { mode, threadId, initial, children }: PropsWithChildren<{ mode: string; threadId: string; initial: UIMessage[] }>,
 ) {
   const runtime = useChatRuntime({
-    transport: new AssistantChatTransport({ api: '/api/chat', body: { mode, threadId } }),
+    // body is a function so `writeUp` is resolved per REQUEST, not captured once at mount: the
+    // "write this up" button (OfferWrite.tsx) arms a one-shot flag just before it sends, and only
+    // that single request should carry it. mode/threadId are stable for the transport's life.
+    transport: new AssistantChatTransport({
+      api: '/api/chat',
+      body: () => ({ mode, threadId, writeUp: consumeWriteIntent() }),
+    }),
     // Cast: react-ai-sdk types ChatInit against its BUNDLED ai@6; our messages are ai@7.
     // Identical wire shape, incompatible type identities (the repo-wide rule: never let ai
     // types flow through react-ai-sdk's surface without a boundary cast).

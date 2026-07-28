@@ -34,11 +34,18 @@ export function buildChatRoute(lw: Loreweaver, cfg: HarnessConfig) {
   };
 
   app.post('/api/chat', async (c) => {
-    const body = await c.req.json() as { messages: UIMessage[]; mode?: Mode; threadId?: string };
+    const body = await c.req.json() as {
+      messages: UIMessage[]; mode?: Mode; threadId?: string; writeUp?: boolean;
+    };
     const mode: Mode = MODES.includes(body.mode as Mode) ? (body.mode as Mode) : 'learn';
+    // One-shot "write this up" from a teaching mode (OfferWrite.tsx): promote THIS turn to
+    // freeform so the single-writer vault path unlocks — the client's visible mode never changed,
+    // and because writeUp rides one request only, the next turn reverts to the real mode. Writing
+    // still happens under freeform's rules, so the single-writer invariant holds.
+    const effectiveMode: Mode = body.writeUp && mode !== 'freeform' ? 'freeform' : mode;
     const threadId = body.threadId ?? 'default';
     saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
-    return respond(body.messages, mode, threadId);
+    return respond(body.messages, effectiveMode, threadId);
   });
   app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
   app.get('/api/thread/:id', (c) => c.json(loadThread(cfg.vault, c.req.param('id'))));

@@ -517,6 +517,29 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
 
+/* offer_write — the one-click "write this up" button (OfferWrite.tsx), dropped inline when the
+   tutor in a teaching mode has something worth saving but can't write it itself. */
+.offer-write { margin: 0.3rem 0; }
+.offer-write-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--font-prose);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s, opacity 0.12s;
+}
+.offer-write-btn:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+.offer-write-btn:disabled { cursor: default; opacity: 0.65; }
+.offer-write-btn svg { flex: none; }
+.offer-write-why { margin: 0.3rem 0 0; font-size: 0.83rem; color: var(--text-muted); }
+
 /* speak — the "hear this" pronunciation control (Speak.tsx). A pill the tutor drops inline in a
    tone lesson; clicking speaks the word through the browser's voice. */
 .speak-chip {

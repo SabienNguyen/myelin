@@ -162,7 +162,7 @@ export function availableBlocks(): BlockToolName[] {
 export function turnBlockTools(gradingOnly: boolean): ToolSet {
   const tools = { ...blockTools() };
   if (gradingOnly) {
-    const keep = new Set(['open_source', 'speak']); // navigation, not staging work
+    const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
     for (const name of Object.keys(tools)) if (!keep.has(name)) delete tools[name];
   }
   return tools;
@@ -181,6 +181,14 @@ export function blockTools(): ToolSet {
       + 'beside the conversation — BRING the student to the artifact instead of describing it. '
       + 'Pass the source title as the Library shows it. Then direct their reading and probe on it.',
     inputSchema: UI_TOOLS.open_source.input as z.ZodTypeAny,
+  });
+  blocks.offer_write = tool({
+    description: 'Offer the learner a one-click "write this up" button. Use ONLY in a teaching '
+      + 'mode (learn/review/quiz) when you have taught something worth keeping but cannot write '
+      + 'it yourself — instead of telling them to switch to freeform, call this so one click '
+      + 'saves it. Pass `title` (the page name) and an optional `why`. Do not call it in freeform '
+      + '(you can just write there) or for something already covered by a solid page.',
+    inputSchema: UI_TOOLS.offer_write.input as z.ZodTypeAny,
   });
   blocks.speak = tool({
     description: 'Attach a "hear this" button to a word or short phrase, spoken aloud by the '
