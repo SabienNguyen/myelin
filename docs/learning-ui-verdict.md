@@ -612,3 +612,10 @@ Written after the sprint that followed the original verdict; each line names its
   tests; loreweaver suite 86 green. ('struggled' demoting the page out of the due queue and into
   next_lessons as a re-teach target was examined and left alone — fail → reset → relearn is the
   right spaced-repetition shape.)
+- **AppImage rebuilt current (340 MB, gitignored artifact).** The distributed build now carries
+  everything this window shipped: the cold-start freeform default, the MathLive-dialect KaTeX
+  macros, the mode-switch context re-injection, server-side turn persistence, extractAnswerNumber,
+  the resume-title resolution, and — verified inside the bundled loreweaver's dist — the
+  misconception-decay fix. All confirmed by string inspection of the asar and bundle rather than
+  trust in the build script; binary smoke-passed with --appimage-extract-and-run. Both repos'
+  worktrees stayed clean through the build (the npm-ci bundling rule earning its keep).
