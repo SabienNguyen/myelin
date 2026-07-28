@@ -199,6 +199,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   color: var(--text-muted);
   font-size: 0.8rem;
 }
+/* When a badge is a BUTTON (the student switcher), the shared `button:hover` rule swaps in
+   var(--accent-soft) — a background the badge's muted text was never meant to sit on: in dark mode
+   --text-muted on --accent-soft is 4.1:1, under WCAG AA (axe caught it). The hover background is
+   designed to pair with the full-strength --text (9.45:1 dark, 13:1 light), so restore that on
+   hover. Span badges never get the hover background, so this only affects the button. */
+button.badge:hover { color: var(--text); }
 .statusdot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); }
 .anki-up .statusdot { background: var(--good); }
 .anki-backlog .statusdot { background: var(--warn); }
