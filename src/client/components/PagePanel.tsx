@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 import { getGraph, getPage } from '../lib/api.js';
 import { POLL_MS } from './GraphPanel.js';
 import { WikiLink } from './MarkdownText.js';
-import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
+import { panelBus, wikiPreprocess, escapeLooseDollars } from '../lib/panelBus.js';
 import { DECAY } from '../../shared/loreweaver.js';
 
 // The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
@@ -315,8 +318,15 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
         </ul>
       )}
 
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: WikiLink }}>
-        {wikiPreprocess(page.page.body)}
+      {/* Math renders here as it does in the chat and in blocks (BlockProse) — a page body carries
+          as much `$…$` as the tutor's prose, and until this it showed the raw LaTeX source. Same
+          plugin set and the same loose-dollar guard, so all three agree on what `$…$` means. */}
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
+        components={{ a: WikiLink }}
+      >
+        {escapeLooseDollars(wikiPreprocess(page.page.body))}
       </ReactMarkdown>
 
       {groups.length > 0 && (

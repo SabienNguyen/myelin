@@ -955,3 +955,12 @@ Written after the sprint that followed the original verdict; each line names its
   block gained `toneSystem: "zh"` with tone1..tone4. Verified live via the fake-audio device: a
   Mandarin tone1 block graded "flat and high… That's tone 1 down," page to mastered. 1065 unit + 9
   e2e green.
+- **Audit find: the Page reader showed raw LaTeX; now it renders math like the chat.** A fresh-eyes
+  pass over the side panels (Graph, Library, Page — all otherwise clean in dark mode and at 900px)
+  caught the Page reader displaying `$\mathrm{softmax}(QK^T/\sqrt{d_k})V$` and `$d_{\text{model}}$`
+  as literal source: PagePanel's ReactMarkdown carried only remark-gfm, while the chat (MarkdownText)
+  and blocks (BlockProse) both render `$…$` through remark-math + rehype-katex. A learner reading a
+  math-heavy page saw LaTeX source inches from where the same notation renders in chat. Fixed by
+  giving PagePanel the same plugin set and the same escapeLooseDollars guard, so all three surfaces
+  agree on what `$…$` means. Verified: 12 KaTeX spans render on the multi-head-attention page, no
+  raw source left.
