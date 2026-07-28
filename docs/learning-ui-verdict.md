@@ -1014,3 +1014,13 @@ Written after the sprint that followed the original verdict; each line names its
   problem. The page's original example is reserved for first teaching. A behaviour nudge (soft,
   model-dependent) rather than a mechanical guarantee, but it encodes the right principle where
   far-transfer is won or lost.
+- **Honest progress surface — the motivation category, done the tool's way.** A ProgressCard at the
+  top of the Library shows three TRUE things and nothing else: how many pages you can do right now
+  (counted by DECAYED level, so it falls when you let things slip, not only rises), how many graded
+  checks you earned this week (positive evidence only — learning shown, not time spent), and how
+  many pages are slipping (the decay reframed as a review opportunity, with the review list right
+  below). No points, no streaks, no vanity "0 mastered" for an empty vault — the card hides until
+  there's something real. New /api/progress endpoint reads decay-aware levels from get_student_state
+  and this-week evidence from the student ledger directly (the bulk state call sends only a count).
+  Verified live on the marathon vault: "6 pages you can do right now · 5 seen · 20 graded checks
+  this week", clean in light and dark. 1078 unit green.

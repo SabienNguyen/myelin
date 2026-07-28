@@ -446,6 +446,21 @@ math-field:focus-within { outline: 2px solid var(--accent); outline-offset: -1px
 }
 .step-tools button:hover { color: var(--text); background: var(--bg-inset); }
 
+/* progress — the honest motivation card at the top of the Library (ProgressCard.tsx). */
+.progress-card {
+  margin: 0 0 1rem; padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel);
+}
+.progress-title {
+  margin: 0 0 0.4rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.progress-known { margin: 0.1rem 0; font-size: 0.95rem; color: var(--text); }
+.progress-known strong { font-size: 1.15rem; }
+.progress-sub { color: var(--text-muted); font-size: 0.86rem; }
+.progress-earned { margin: 0.2rem 0; font-size: 0.9rem; color: var(--good); }
+.progress-slipping { margin: 0.3rem 0 0; font-size: 0.86rem; color: var(--text-muted); }
+
 .writing-draft textarea { width: 100%; min-height: 7rem; resize: vertical; margin: 0.4rem 0; }
 
 /* harper — live mechanical grammar/style review under the draft (WritingDraft.tsx). Deliberately

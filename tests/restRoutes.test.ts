@@ -57,6 +57,48 @@ const cfg = { student: 'kid' } as HarnessConfig;
 beforeEach(() => { invalidateGraphCache(); });
 afterEach(() => { vi.useRealTimers(); });
 
+describe('GET /api/progress — honest progress aggregation', () => {
+  it('counts levels/slipping from state and this-week positive evidence from the ledger', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-progress-'));
+    mkdirSync(join(vault, 'students'), { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // Ledger: two positive this week (counted), one positive but OLD (not), one 'struggled' this
+    // week (not — only positive kinds count).
+    writeFileSync(join(vault, 'students', 'kid.json'), JSON.stringify({
+      a: { level: 'mastered', evidence: [{ date: today, kind: 'applied-correctly' }, { date: old, kind: 'applied-correctly' }] },
+      b: { level: 'practicing', evidence: [{ date: today, kind: 'explained-correctly' }, { date: today, kind: 'struggled' }] },
+      c: { level: 'exposed', evidence: [{ date: today, kind: 'exposed' }] },
+    }));
+    const lw = {
+      call: async (name: string) => {
+        if (name === 'get_student_state') {
+          return {
+            a: { effective: 'mastered', slipped: false },
+            b: { effective: 'practicing', slipped: true },
+            c: { effective: 'exposed', slipped: false },
+          };
+        }
+        throw new Error(`unexpected ${name}`);
+      },
+    } as any;
+    const app = buildRestRoutes(lw, { student: 'kid', vault } as HarnessConfig);
+    const body = await (await app.request('/api/progress')).json();
+    expect(body.byLevel).toEqual({ mastered: 1, practicing: 1, exposed: 1 });
+    expect(body.slipping).toBe(1);
+    expect(body.earnedThisWeek).toBe(2); // two positive-this-week; the old one and the struggle excluded
+  });
+
+  it('no ledger file yet → earnedThisWeek 0, the rest still computed', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-progress-empty-'));
+    const lw = { call: async () => ({ a: { effective: 'practicing', slipped: false } }) } as any;
+    const app = buildRestRoutes(lw, { student: 'kid', vault } as HarnessConfig);
+    const body = await (await app.request('/api/progress')).json();
+    expect(body).toEqual({ byLevel: { mastered: 0, practicing: 1, exposed: 0 }, slipping: 0, earnedThisWeek: 0 });
+  });
+});
+
 describe('GET /api/graph caching', () => {
   it('cold call hits lw once', async () => {
     const { lw, listSlugsCalls } = fakeLw();

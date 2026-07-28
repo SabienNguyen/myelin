@@ -50,6 +50,15 @@ export const getGraph = () => getJson<any>('/api/graph', 'the concept graph');
 export const getPage = (slug: string) => getJson<any>(`/api/page/${slug}`, `“${slug}”`);
 export const getStatus = () => getJson<any>('/api/status', 'the harness status');
 
+// Honest progress (restRoutes.ts /api/progress): what you know now by decayed level, positive
+// graded evidence earned in the last 7 days, and how many pages are slipping (a review opportunity).
+export interface Progress {
+  byLevel: { mastered: number; practicing: number; exposed: number };
+  earnedThisWeek: number;
+  slipping: number;
+}
+export const getProgress = () => getJson<Progress>('/api/progress', 'your progress');
+
 // Paths + goal (goalStore.ts / restRoutes.ts). `known` counts EFFECTIVE practicing-or-better, so
 // these numbers move down when mastery decays, not only up.
 export interface PathRow {

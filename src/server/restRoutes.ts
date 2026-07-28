@@ -444,6 +444,44 @@ export function buildRestRoutes(
     })));
     return c.json({ due, total });
   });
+  // An HONEST progress read — no points, no streaks, just what's true and what it implies. Three
+  // numbers a learner can act on: what they actually know now (by decayed level), what they earned
+  // recently (motivating BECAUSE it's real graded evidence, not activity), and what's slipping (the
+  // decay framed as a 10-minute opportunity to lock gains back in, not a punishment).
+  app.get('/api/progress', async (c) => {
+    // Level breakdown + slipping come from get_student_state, which applies the decay rules — so
+    // "mastered/practicing/exposed" here mean what the learner knows NOW, not what they once did.
+    const state = await lw.call('get_student_state', { student: cfg.student }) as Record<string, any>;
+    const byLevel = { mastered: 0, practicing: 0, exposed: 0 };
+    let slipping = 0;
+    for (const m of Object.values(state)) {
+      if (!m || typeof m !== 'object') continue;
+      const eff = (m as any).effective as string;
+      if (eff === 'mastered') byLevel.mastered += 1;
+      else if (eff === 'practicing') byLevel.practicing += 1;
+      else if (eff === 'exposed') byLevel.exposed += 1;
+      if ((m as any).slipped === true) slipping += 1;
+    }
+    // "Earned this week" needs per-evidence DATES, which the bulk get_student_state omits (it sends
+    // evidenceCount, not the array — that's only in the per-slug detail). Read the student ledger
+    // file directly, the same vault the source reader already reads from, and count only POSITIVE
+    // graded evidence in the last 7 days — the kinds that move mastery, so the number means
+    // learning shown, not time spent. Format drift or no ledger yet → 0, and the card still shows
+    // the level/slipping it got from the state call.
+    let earnedThisWeek = 0;
+    try {
+      const ledgerPath = resolve(cfg.vault, 'students', `${cfg.student}.json`);
+      const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')) as Record<string, any>;
+      const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const POSITIVE = new Set(['applied-correctly', 'explained-correctly', 'rubric-passed']);
+      for (const m of Object.values(ledger)) {
+        for (const e of ((m as any)?.evidence ?? []) as any[]) {
+          if (POSITIVE.has(e?.kind) && e?.date && new Date(`${e.date}T00:00:00Z`) >= cutoff) earnedThisWeek += 1;
+        }
+      }
+    } catch { /* no ledger yet, or a format change — 0 earned, the rest of the card still stands */ }
+    return c.json({ byLevel, slipping, earnedThisWeek });
+  });
   app.get('/api/status', async (c) => {
     // Read the tutor model from cfg HERE, not from the snapshot passed in at boot. Signing in with a
     // Claude subscription rewrites it while the app is running (signin.ts's applyRoute), and a

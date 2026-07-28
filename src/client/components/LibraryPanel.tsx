@@ -2,6 +2,7 @@ import { panelBus } from '../lib/panelBus.js';
 import { useEffect, useRef, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 import { PracticePanel } from './PracticePanel.js';
+import { ProgressCard } from './ProgressCard.js';
 import { ReviewQueue } from './ReviewQueue.js';
 import { PathsSection } from './PathsSection.js';
 import { CoursePractice } from './CoursePractice.js';
@@ -186,6 +187,9 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   if (queue.length === 0) {
     return (
       <div className="library-panel">
+        {/* Honest progress first — what you know, earned, and are about to lose — then the review
+            that acts on the slipping count it names. */}
+        <ProgressCard visible={visible} />
         {/* Review first in BOTH branches — what is about to slip outranks adding new material,
             which is the whole argument of spaced repetition. */}
         <ReviewQueue visible={visible} />
@@ -205,6 +209,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
 
   return (
     <div className="library-panel">
+      <ProgressCard visible={visible} />
       <ReviewQueue visible={visible} />
       {/* Paths next — the syllabus is the frame the books and practice rows sit inside. */}
       <PathsSection visible={visible} />
