@@ -629,3 +629,15 @@ Written after the sprint that followed the original verdict; each line names its
   malformed", and the model retried correctly in the same turn. Examined and deliberately left
   alone: the ✗ path is what PREVENTS a duplicate-probe mess (a defaulted-mode rescue would have
   rendered the broken call as a live block right before the retry staged its twin).
+- **Persona deep-dive: RoPE on the marathon vault — a clean full-loop pass, including page
+  AUGMENTATION.** Freeform ask ("my transformer pages don't cover how position gets into
+  attention") produced researched teaching with clean KaTeX rotation math — today's MathLive
+  macro work holding on fresh live content — a real conceptual probe (why q'_m·k'_n depends only
+  on n−m), a correct grade on the orthogonality-plus-additive-composition answer, and evidence
+  recorded. The notable behavior: asked to "write up everything we covered," the tutor did NOT
+  mint a new rope page — it had already folded the RoPE sections into the existing
+  positional-encoding page (now solid, 6.5k chars, 8 RoPE mentions) and said so plainly ("sitting
+  there already, properly linked, not something I need to author fresh"). Sources on the page are
+  exactly canonical: the Transformer paper, the RoFormer paper (arXiv 2104.09864), and
+  EleutherAI's rotary-embeddings post. Augment-don't-fragment is the vault behavior a knowledge
+  graph needs, observed unprompted.
