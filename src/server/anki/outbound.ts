@@ -144,7 +144,13 @@ export async function syncOutbound(
   const ledger = readLedger(cfg.vault);
 
   for (const slug of slugs) {
-    const { page } = await lw.call('read_page', { slug });
+    // Student evidence outlives its page — get_student_state still lists a slug whose page was
+    // deleted, and read_page THROWS on a missing slug (lw.call rejects on an isError result). Left
+    // unguarded this one call aborts the whole outbound run for every OTHER page too, the same way
+    // a single bad card generation used to (see the try below). A page-less slug has nothing to turn
+    // into cards, so skip it.
+    const page = await lw.call('read_page', { slug }).then((r: any) => r?.page).catch(() => null);
+    if (!page) continue; // page gone; skipped silently (skipped counts up-to-date CARDS, not this)
     const misconceptions = state[slug]?.misconceptions ?? [];
     // One page's bad generation must not abort the run for every other page — a live probe saw
     // the sdk card_gen emit unparseable JSON for one math-heavy page and the whole sync die.

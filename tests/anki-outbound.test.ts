@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AnkiClient } from '../src/server/anki/client.js';
@@ -142,6 +142,23 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
     expect(called).toBe(false);
     expect(result).toEqual({ pushed: 0, updated: 0, skipped: 0, failed: 0 });
 
+    await lw.close();
+  }, 30_000);
+
+  it('a slug with evidence but a since-deleted page is skipped, not fatal for the whole run', async () => {
+    const { vault, cfg, lw } = await makeVaultLoreweaver('kid6', 'derivatives', 'Derivatives');
+    // A second page earns evidence, then its file is deleted — student state persists, so it stays
+    // in get_student_state while read_page now throws for it. Before the guard, that aborted the
+    // entire run and NO page synced.
+    writeFileSync(join(vault, 'pages', 'ghost.md'),
+      '---\ntitle: Ghost\ndifficulty: 1\nstatus: solid\n---\nsoon gone');
+    await bringToPracticing(lw, 'kid6', 'derivatives');
+    await bringToPracticing(lw, 'kid6', 'ghost');
+    rmSync(join(vault, 'pages', 'ghost.md')); // snapshot re-reads disk, so read_page('ghost') now errs
+    const anki = new AnkiClient(url);
+    const res = await syncOutbound(lw, anki, cfg, { generateCards: async () => [{ front: 'Q', back: 'A' }] });
+    expect(res.failed).toBe(0);
+    expect(res.pushed).toBe(1); // derivatives synced; ghost skipped without throwing
     await lw.close();
   }, 30_000);
 });
