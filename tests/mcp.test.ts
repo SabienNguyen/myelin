@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Loreweaver, isTransportError } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 let lw: Loreweaver;
 let vault: string;
 

@@ -6,8 +6,8 @@ import { Loreweaver } from '../src/server/mcp.js';
 import { courseMcpTools, createClaudeSdkTutorSession } from '../src/server/claudeSdkTutor.js';
 import { getGraphCached, invalidateGraphCache } from '../src/server/graphCache.js';
 import { loadSdkSession, loadThread, saveSdkSession } from '../src/server/sessionStore.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 let lw: Loreweaver; let vault: string; let cfg: any;
 
 beforeAll(async () => {

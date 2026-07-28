@@ -1,5 +1,5 @@
 {
-  "vault": "~/Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-pronounce",
+  "vault": "${E2E_DIR}/.tmp-vault-pronounce",
   "student": "e2e",
   "models": {
     "tutor":    { "model": "scripted" },
@@ -8,7 +8,7 @@
     "card_gen": { "model": "scripted" },
     "compile":  { "model": "scripted" }
   },
-  "loreweaver": { "command": "npx", "args": ["tsx", "~/Dev/personal/loreweaver/src/server.ts"], "embeddings": "fake" },
+  "loreweaver": { "command": "npx", "args": ["tsx", "${LOREWEAVER_SRC}"], "embeddings": "fake" },
   "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
   "port": 4823
 }

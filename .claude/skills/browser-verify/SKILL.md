@@ -33,15 +33,16 @@ cd <harness> && npm install
 cd <loreweaver> && npm install
 ```
 
-**2. The e2e configs hardcode `~/Dev/personal/...` paths.** `tests/e2e/e2e.config.json`,
-`gap.config.json`, and `tests/e2e/global-setup.ts` all resolve the vault and the Loreweaver
-entrypoint under `~/Dev/personal/`. If your checkouts live elsewhere, symlink rather than editing
-those files:
+**2. Loreweaver must be a sibling checkout.** The e2e configs and integration tests no longer bake
+in one machine's home directory — they resolve the vault relative to the repo (`${E2E_DIR}`, set by
+`playwright.config.ts`) and the Loreweaver entrypoint as `../loreweaver/src/server.ts` (via
+`tests/lwRepo.ts` and `${LOREWEAVER_SRC}`). So the only requirement is that `loreweaver` sits
+alongside `loreweaver-harness`; no `~/Dev/personal` symlink is needed. If your Loreweaver lives
+elsewhere, either place a sibling symlink or set `LOREWEAVER_ENTRY` (see `src/server/config.ts`):
 
 ```bash
-mkdir -p ~/Dev/personal
-ln -sfn /path/to/loreweaver          ~/Dev/personal/loreweaver
-ln -sfn /path/to/loreweaver-harness  ~/Dev/personal/loreweaver-harness
+# only if loreweaver is NOT already a sibling of loreweaver-harness
+ln -sfn /path/to/loreweaver ../loreweaver
 ```
 
 **3. Pinned-Chromium sandboxes.** If the image ships a Chromium build under

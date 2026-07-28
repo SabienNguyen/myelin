@@ -6,8 +6,8 @@ import { MockLanguageModelV3 } from 'ai/test';
 import { simulateReadableStream } from 'ai';
 import { Loreweaver } from '../src/server/mcp.js';
 import { createTutorSession } from '../src/server/session.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 let lw: Loreweaver; let vault: string;
 
 // Stream chunks for: a text-only reply (no record_evidence) — used to trip the guardrail.

@@ -27,6 +27,33 @@ describe('loadConfig', () => {
     expect(cfg.models.tutor.model).toBe('claude-sonnet-5');
     expect(cfg.autoCompile).toBe(true); // defaults on when unset
   });
+  it('expands a ${VAR} in the vault path from the environment', () => {
+    // The portable-fixtures mechanism the e2e configs use: a path computed at launch and handed in
+    // by env, so nothing bakes one machine's absolute layout into the committed file.
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'harness.config.json');
+    writeFileSync(p, JSON.stringify({ ...valid, vault: '${E2E_DIR}/.tmp-vault' }));
+    process.env.E2E_DIR = '/somewhere/e2e';
+    try {
+      expect(loadConfig(p).vault).toBe('/somewhere/e2e/.tmp-vault');
+    } finally {
+      delete process.env.E2E_DIR;
+    }
+  });
+  it('expands a ${VAR} inside a loreweaver arg too', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'harness.config.json');
+    writeFileSync(p, JSON.stringify({
+      ...valid,
+      loreweaver: { command: 'npx', args: ['tsx', '${LOREWEAVER_SRC}'], embeddings: 'fake' },
+    }));
+    process.env.LOREWEAVER_SRC = '/checkout/loreweaver/src/server.ts';
+    try {
+      expect(loadConfig(p).loreweaver.args).toEqual(['tsx', '/checkout/loreweaver/src/server.ts']);
+    } finally {
+      delete process.env.LOREWEAVER_SRC;
+    }
+  });
   it('fills in a role the file leaves out', () => {
     // This test used to assert the opposite — that an omitted role was a boot error. That was the
     // right rule when config was mandatory and every field had to be stated; it is the wrong rule

@@ -8,8 +8,8 @@ import { AnkiClient } from '../src/server/anki/client.js';
 import { syncOutbound } from '../src/server/anki/outbound.js';
 import { Loreweaver } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 
 const received: any[] = [];
 let server: ReturnType<typeof serve>;

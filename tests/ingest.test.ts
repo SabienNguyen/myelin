@@ -7,8 +7,8 @@ import { Loreweaver } from '../src/server/mcp.js';
 import { ingestBook, compileNext, readQueue } from '../src/server/ingest.js';
 import type { Converter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 
 const FIXTURE_MD = [
   '# Photosynthesis Basics',

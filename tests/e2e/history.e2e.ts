@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Same navigation-safe backend+frontend pair graph-contextual.e2e.ts uses (:4174/:4821 — see
 // playwright.config.ts's webServer comment). This file sends NO /api/chat requests on purpose:
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 test.use({ baseURL: 'http://localhost:4174' });
 
 const SESSIONS = join(
-  homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-gap', '.harness', 'sessions',
+  dirname(fileURLToPath(import.meta.url)), '.tmp-vault-gap', '.harness', 'sessions',
 );
 
 const msg = (id: string, role: 'user' | 'assistant', text: string) =>

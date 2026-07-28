@@ -10,8 +10,8 @@ import { AnkiClient } from '../src/server/anki/client.js';
 import { syncInbound, recentLapses } from '../src/server/anki/inbound.js';
 import { Loreweaver } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 
 // Scripted AnkiConnect fixture: `reviews` is mutated between phases of the test to simulate
 // new cardReviews arriving over time. cardsInfo resolves cardID -> noteId per NOTE_OF_CARD.

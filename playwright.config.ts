@@ -1,9 +1,21 @@
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
 
+// Everything the e2e suite touches is derived from THIS file's location — the repo root — so a
+// fresh clone runs the suite wherever it sits, instead of only on the one machine whose home dir
+// the paths used to be baked against (`~/Dev/personal/…`). E2E_DIR/LOREWEAVER_SRC are handed to the
+// backend servers via each webServer's `env` and expanded by the harness config loader's `${VAR}`
+// rule; global-setup.ts and the specs derive the same paths from their own import.meta.url.
+const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
+const E2E_DIR = join(REPO_ROOT, 'tests', 'e2e');
+// Sibling checkout — the same layout resolveLoreweaver() falls back to when no config names it.
+const LOREWEAVER_SRC = join(REPO_ROOT, '..', 'loreweaver', 'src', 'server.ts');
+// The env the harness backends read the portable fixture paths from (config `${E2E_DIR}` etc.).
+const backendEnv = { E2E_DIR, LOREWEAVER_SRC };
+
 // Where global-setup.ts writes the fake microphone WAV, and where the launch args point Chromium.
-export const FAKE_AUDIO_WAV = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-fake-audio.wav');
+export const FAKE_AUDIO_WAV = join(E2E_DIR, '.tmp-fake-audio.wav');
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -54,6 +66,7 @@ export default defineConfig({
       port: 4820,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
+      env: backendEnv,
     },
     {
       // Build then serve the SPA; vite.config.ts's server.proxy is inherited by `vite preview`
@@ -82,6 +95,7 @@ export default defineConfig({
       port: 4821,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
+      env: backendEnv,
     },
     // label-diagram.e2e.ts gets its own pair for the same turn-counter reason as I3 above.
     {
@@ -90,6 +104,7 @@ export default defineConfig({
       port: 4822,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
+      env: backendEnv,
     },
     {
       // Separate --outDir (dist-gap, not dist) so this build never races the other frontend
@@ -119,6 +134,7 @@ export default defineConfig({
       port: 4823,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
+      env: backendEnv,
     },
     {
       command:

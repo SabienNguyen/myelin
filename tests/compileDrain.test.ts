@@ -9,8 +9,8 @@ import {
 } from '../src/server/ingest.js';
 import type { Converter, IncrementalConverter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 
 describe('canCompileNow', () => {
   it('allows a cloud (non-ollama) compile model regardless of active conversions', () => {

@@ -7,7 +7,13 @@ import { z } from 'zod';
 
 const roleSchema = z.object({ model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() });
 
-const expand = (p: string) => p.replace(/^~(?=$|\/)/, homedir());
+// `~` for the home dir, and `${VAR}` for an environment variable — the latter so a config that
+// must be portable across checkouts (the e2e fixtures, chiefly) can point at a path computed at
+// launch rather than baking one machine's absolute layout into the file. An unset `${VAR}` expands
+// to empty, the same as a shell would; no existing config uses `$`, so this is purely additive.
+const expand = (p: string) => p
+  .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, v) => process.env[v] ?? '')
+  .replace(/^~(?=$|\/)/, homedir());
 
 /**
  * Where a fresh install puts the vault.

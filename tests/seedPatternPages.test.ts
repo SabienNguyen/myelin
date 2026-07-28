@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { Loreweaver } from '../src/server/mcp.js';
 import { seedPatternPages } from '../src/server/seedPatternPages.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { LW_REPO } from './lwRepo.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
 let lw: Loreweaver;
 let vault: string;
 let cfg: HarnessConfig;

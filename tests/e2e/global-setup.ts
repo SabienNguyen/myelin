@@ -1,14 +1,16 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { FAKE_AUDIO_WAV } from '../../playwright.config.js';
 
-// Same absolute path baked into tests/e2e/e2e.config.json's "vault" (~ expansion resolves to
-// this). Playwright runs globalSetup after webServer processes have already started but before
-// any test executes; Loreweaver's VaultStore re-globs pages/ on every call (no startup cache —
-// see ~/Dev/personal/loreweaver/src/vault/vaultStore.ts loadPages()), so it's safe for this
-// fixture to be written after the harness/Loreweaver servers have booted.
-const VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault');
+// The same directory the config files resolve `${E2E_DIR}` to (this file lives in tests/e2e), so
+// the fixture vaults written here and the vaults the harness backends read stay in lockstep no
+// matter where the repo is checked out. Playwright runs globalSetup after webServer processes have
+// already started but before any test executes; Loreweaver's VaultStore re-globs pages/ on every
+// call (no startup cache — see its vaultStore.ts loadPages()), so it's safe for these fixtures to
+// be written after the harness/Loreweaver servers have booted.
+const E2E_DIR = dirname(fileURLToPath(import.meta.url));
+const VAULT = join(E2E_DIR, '.tmp-vault');
 
 // I3's gap-exercise.e2e.ts fixture vault (tests/e2e/gap.config.json's "vault"). No page fixture
 // is written here on purpose: the harness backend booting against this vault has cfg.gap set, so
@@ -20,10 +22,10 @@ const VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-va
 // the per-run reset below is surgical: remove only students/ (so the evidence assertion can never
 // pass on a stale file from a previous run) and leave the freshly-seeded pages/ alone. No
 // pre-created skeleton is needed for a first run from a clean checkout either — Loreweaver's
-// writes mkdir recursively (~/Dev/personal/loreweaver/src/vault/vaultStore.ts dir()).
-const GAP_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-gap');
-const LABEL_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-label');
-const PRONOUNCE_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-pronounce');
+// writes mkdir recursively (loreweaver's vaultStore.ts dir()).
+const GAP_VAULT = join(E2E_DIR, '.tmp-vault-gap');
+const LABEL_VAULT = join(E2E_DIR, '.tmp-vault-label');
+const PRONOUNCE_VAULT = join(E2E_DIR, '.tmp-vault-pronounce');
 
 /** A mono 16-bit PCM WAV of a steady tone — the fake microphone input for the pronounce spec.
  *  A steady pitch reads as the level tone (ngang) no matter where Chromium's loop starts it, so the
