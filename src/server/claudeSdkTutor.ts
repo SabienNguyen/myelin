@@ -35,7 +35,14 @@ const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidenc
 // create_path is here because the bootstrap prompt orders it in freeform (goal line + cold start);
 // before it was listed, the call only ever succeeded by accident of bypassPermissions ignoring
 // allowedTools for auto-approval.
-const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'compile_source', 'create_path'];
+//
+// unlink_pages belongs here too: it rewrites the page to DELETE an edge (graphTools.ts —
+// list.splice + store.writePage), a vault mutation exactly like link_pages, so spec §5's
+// single-writer rule confines it to freeform. It was the one write-family loreweaver tool this
+// list forgot, and because the hook below only denies names IN this list, the SDK route was
+// auto-allowing unlink_pages in learn/review/quiz — able to prune graph edges mid-lesson, the
+// very thing the ai-sdk route blocks by leaving it out of TEACH_TOOLS.
+const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'unlink_pages', 'compile_source', 'create_path'];
 
 const LOREWEAVER_PREFIX = 'mcp__loreweaver__';
 const BLOCKS_PREFIX = 'mcp__blocks__';

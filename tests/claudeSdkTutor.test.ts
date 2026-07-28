@@ -363,6 +363,51 @@ describe('Bug B: loreweaver arg sanitization is wired through a live seam, not s
   }, 30_000);
 });
 
+describe('single-writer rule: the SDK hook confines every vault-mutating loreweaver tool to freeform', () => {
+  // unlink_pages rewrites the page to delete an edge — a vault mutation like write_page/link_pages.
+  // allowedTools does not gate under bypassPermissions (see the hook's own comment), so if the hook
+  // does not name unlink_pages it is auto-allowed in learn/review/quiz — the drift this locks out.
+  async function hookFor(mode: any) {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-sw');
+      yield assistantMsg('sess-sw', [{ type: 'text', text: 'ok' }]);
+      yield resultMsg('sess-sw');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any,
+      mode, `thread-sw-${mode}`,
+    ));
+    return calls[0].options.hooks.PreToolUse[0].hooks[0];
+  }
+  const call = (hookFn: any, tool: string) => hookFn(
+    { hook_event_name: 'PreToolUse', session_id: 'sess-sw', transcript_path: '/tmp/x', cwd: '/tmp',
+      tool_name: `mcp__loreweaver__${tool}`, tool_input: { src: 'a', dst: 'b', type: 'prereq' }, tool_use_id: 't' },
+    't', { signal: new AbortController().signal },
+  );
+
+  it('denies unlink_pages in learn mode (it prunes graph edges — a write)', async () => {
+    const res = await call(await hookFor('learn'), 'unlink_pages');
+    expect(res.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(res.hookSpecificOutput.permissionDecisionReason).toMatch(/freeform/i);
+  }, 30_000);
+
+  it('allows unlink_pages in freeform mode (where the single-writer rule permits edits)', async () => {
+    const res = await call(await hookFor('freeform'), 'unlink_pages');
+    expect(res.hookSpecificOutput.permissionDecision).toBe('allow');
+  }, 30_000);
+
+  it('denies the whole write family (write_page, link_pages, unlink_pages, compile_source, create_path) in review mode', async () => {
+    const hookFn = await hookFor('review');
+    for (const tool of ['write_page', 'link_pages', 'unlink_pages', 'compile_source', 'create_path']) {
+      const res = await call(hookFn, tool);
+      expect(res.hookSpecificOutput.permissionDecision, tool).toBe('deny');
+    }
+  }, 30_000);
+});
+
 describe('graph-cache invalidation on the SDK route', () => {
   it('exposes a PostToolUse hook that drops the cached graph after record_evidence, and only then', async () => {
     const calls: any[] = [];
