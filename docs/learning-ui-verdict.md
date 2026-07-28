@@ -932,3 +932,5 @@ Written after the sprint that followed the original verdict; each line names its
   to end in a real browser via Chromium's fake-audio device: recorded → decoded → graded "Level
   and steady — that's ngang" with the overlay drawn, 2/2 clean passes minted applied-correctly,
   page to mastered. Eight block kinds now; 1054 unit + 9 e2e green.
+- **AppImage rebuilt through all three builds** — offer_write button, Telex input, and the
+  pronounce block all verified present in the shipped bundle.
