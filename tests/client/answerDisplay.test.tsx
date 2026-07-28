@@ -24,6 +24,16 @@ describe('prettyAnswer', () => {
     expect(prettyAnswer('x^2')).toBe('x²');
   });
 
+  it('renders e-notation as the printed scientific form, not an e-subscript', () => {
+    // The grader reads "6.02e23"; the preview must show the same number, not the "6.02e₂₃" the
+    // subscript rule used to make. Matches how "6.02 × 10^23" already renders.
+    expect(prettyAnswer('6.02e23')).toBe('6.02 × 10²³');
+    expect(prettyAnswer('1.6e-19')).toBe('1.6 × 10⁻¹⁹');
+    expect(prettyAnswer('6.02 × 10^23')).toBe('6.02 × 10²³');
+    // "2e-" is a bare electron, not e-notation (no exponent digits) — left untouched.
+    expect(prettyAnswer('2e-')).toBeNull();
+  });
+
   it('renders a typed equation with a real reaction arrow', () => {
     expect(prettyAnswer('CH4 + 2O2 -> CO2 + 2H2O')).toBe('CH₄ + 2O₂ → CO₂ + 2H₂O');
     // The arrow rule needs its delimiting spaces — a cramped -> is a parse error the checker

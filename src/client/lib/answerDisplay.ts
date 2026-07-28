@@ -26,6 +26,10 @@ const SUP: Record<string, string> = {
  *     A digit after a space or at the start stays full size, which is also chemically right:
  *     the coefficient in `2H2O` is not a subscript.
  *   * `^` followed by digits/signs superscripts — `SO4^2-` → SO₄²⁻, `x^2` → x².
+ *   * e-notation reads as the printed scientific form — `6.02e23` → 6.02 × 10²³, `1.6e-19` →
+ *     1.6 × 10⁻¹⁹. This runs BEFORE the subscript rule: otherwise the `e`-then-digits was mangled
+ *     into an e-with-subscript (`6.02e₂₃`), and now that the grader reads e-notation, the preview
+ *     must show the same number rather than a chemical-looking nonsense.
  *   * ` -> ` becomes a real reaction arrow — the typed form of an equation reads as the printed
  *     one, matching what the equation parser itself accepts (`->` and `→` are the same arrow).
  *     Space-delimited so a bare `->` inside prose or notation stays untouched.
@@ -33,11 +37,14 @@ const SUP: Record<string, string> = {
  * Strings containing `$` are LaTeX territory and are left to BlockProse (the caller checks);
  * mixing the two transforms would mangle real TeX like `x_1`.
  */
+const toSuper = (s: string) => [...s].map((c) => SUP[c] ?? c).join('');
+
 export function prettyAnswer(raw: string): string | null {
   if (raw.includes('$')) return null;
   const out = raw
     .replace(/ -> /g, ' → ')
-    .replace(/\^([0-9+-]+)/g, (_, sup: string) => [...sup].map((c) => SUP[c] ?? c).join(''))
+    .replace(/(\d+(?:\.\d+)?)[eE]([+-]?\d+)/g, (_, mant: string, exp: string) => `${mant} × 10${toSuper(exp)}`)
+    .replace(/\^([0-9+-]+)/g, (_, sup: string) => toSuper(sup))
     .replace(/([A-Za-z)])(\d+)/g, (_, head: string, digits: string) =>
       head + [...digits].map((c) => SUB[c] ?? c).join(''));
   return out === raw ? null : out;
