@@ -41,6 +41,18 @@ describe('WritingDraft', () => {
     const notes = [...container.querySelectorAll('.footnotes li')].map((e) => e.textContent);
     expect(notes).toEqual(['strong good hook', 'wordy tighten']);
   });
+  it('drops an empty-span annotation instead of anchoring a footnote to nothing', () => {
+    const { container } = render(<WritingDraftInner args={{ prompt: 'Argue X', round: 1, pageSlug: 'thesis' }}
+      result={{ draft: 'A strong claim here.', grading: { verdict: 'reviewed', detail: '', annotations: {
+        annotations: [
+          { span: 'strong claim', category: 'strong', note: 'good' },
+          { span: '   ', category: 'ghost', note: 'no anchor' }, // whitespace-only span
+        ], skillGrades: {} } } }}
+      addResult={vi.fn()} />);
+    // Only the real annotation gets a footnote; the empty one is skipped, not rendered blank.
+    expect([...container.querySelectorAll('sup.fn-ref')].map((e) => e.textContent)).toEqual(['1']);
+    expect(container.querySelector('.ann-ghost')).toBeNull();
+  });
 });
 
 describe('revise round', () => {

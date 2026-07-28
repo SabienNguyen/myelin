@@ -58,6 +58,10 @@ type Segment = { text: string; category?: string; note?: string };
 function annotateDraft(draft: string, annotations: Annotation[]): Segment[] {
   let segments: Segment[] = [{ text: draft }];
   for (const ann of annotations) {
+    // An empty/whitespace span would indexOf('')===0 and splice in a zero-length highlighted
+    // segment — a footnote number anchored to nothing. Skip it: a grader that quotes no text has
+    // nothing to point at.
+    if (!ann.span.trim()) continue;
     const next: Segment[] = [];
     let placed = false;
     for (const seg of segments) {
