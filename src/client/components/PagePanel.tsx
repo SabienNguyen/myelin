@@ -6,7 +6,7 @@ import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { getGraph, getPage } from '../lib/api.js';
 import { POLL_MS } from './GraphPanel.js';
-import { WikiLink } from './MarkdownText.js';
+import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
 import { panelBus, wikiPreprocess, escapeLooseDollars } from '../lib/panelBus.js';
 import { DECAY } from '../../shared/loreweaver.js';
 
@@ -324,7 +324,7 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[rehypeKatex]}
-        components={{ a: WikiLink }}
+        components={{ a: WikiLink, code: CodeOrDiagram }}
       >
         {escapeLooseDollars(wikiPreprocess(page.page.body))}
       </ReactMarkdown>

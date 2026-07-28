@@ -964,3 +964,10 @@ Written after the sprint that followed the original verdict; each line names its
   giving PagePanel the same plugin set and the same escapeLooseDollars guard, so all three surfaces
   agree on what `$…$` means. Verified: 12 KaTeX spans render on the multi-head-attention page, no
   raw source left.
+- **Same audit, second find: the Page reader also swallowed Mermaid diagrams.** The LaTeX gap had
+  a sibling — a page with a ```mermaid fence rendered it as a raw code block, because PagePanel had
+  no `code` component while the chat (MarkdownText) routes mermaid fences through the Mermaid
+  renderer. Fixed by exporting the chat's `CodeOrDiagram` and reusing it in PagePanel (one source
+  of truth, not a copy). Verified live: a page with a `graph LR` fence and `$a^2+b^2=c^2$` beside
+  it now shows a rendered Input→Attention→Output diagram and typeset math, no raw source. The Page
+  reader now matches the chat and blocks on all rich content — math and diagrams alike.

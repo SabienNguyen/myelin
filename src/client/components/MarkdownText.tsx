@@ -17,8 +17,9 @@ export function WikiLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
 }
 
 /** ```mermaid fences render as diagrams (Mermaid.tsx); every other code block stays code. The
- *  language class is how react-markdown says which fence this is. */
-function CodeOrDiagram(props: React.HTMLAttributes<HTMLElement> & { className?: string }) {
+ *  language class is how react-markdown says which fence this is. Exported so the Page reader
+ *  (PagePanel) renders a page's diagrams the same way the chat does. */
+export function CodeOrDiagram(props: React.HTMLAttributes<HTMLElement> & { className?: string }) {
   const source = typeof props.children === 'string' ? props.children
     : Array.isArray(props.children) ? props.children.join('') : '';
   if (props.className?.includes('language-mermaid')) return <Mermaid chart={source} />;
