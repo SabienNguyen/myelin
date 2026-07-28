@@ -762,3 +762,9 @@ Written after the sprint that followed the original verdict; each line names its
   decayed prereqs and falls back to easiest-first without embeddings, dedup and caps are sane.
   Nothing to fix. The dangling attention-scaling probe was also answered (√d_k growth →
   softmax saturation) — correct, evidence recorded.
+- **loreweaver linking audited — one edge-case hardened.** proposeLinks' lexical pass is
+  verify-gated noise by design (short generic titles produce candidates the VERIFY_CONTRACT
+  drops), but includes('') is always true: one explicitly-empty frontmatter title — which the
+  vault loader passes through, it only checks typeof — would have lexically proposed against
+  the entire vault in both directions. Guarded: no title, no lexical signal. loreweaver suite
+  87 green; the loreweaver correctness sweep (student model, queries, linking) is complete.
