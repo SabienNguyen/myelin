@@ -971,3 +971,11 @@ Written after the sprint that followed the original verdict; each line names its
   of truth, not a copy). Verified live: a page with a `graph LR` fence and `$a^2+b^2=c^2$` beside
   it now shows a rendered Input→Attention→Output diagram and typeset math, no raw source. The Page
   reader now matches the chat and blocks on all rich content — math and diagrams alike.
+- **Third surface, same class, swept to completion: the source reader.** A systematic grep of every
+  markdown renderer showed SourceReader was the last one still on bare remark-gfm — so an ingested
+  paper's math rendered as raw LaTeX, exactly where the tutor sends the learner to "read §3.2." Gave
+  it the same math + diagram rendering (remark-math/rehype-katex + the shared CodeOrDiagram +
+  escapeLooseDollars; no wiki links, since a source isn't a vault page). All four rich renderers —
+  chat, blocks, page reader, source reader — now agree on math and diagrams. Verified by parity with
+  the two live-confirmed Page-reader fixes (identical plugins/components, tsc + build clean); the
+  source reader opens only through a panelBus event with no hash route to deep-link in a drive.
