@@ -26,16 +26,38 @@ export interface ManifestAssertion {
   value?: unknown;
 }
 
-/** Resolve a dot/[n] path against a parsed document. Returns { found } so a legitimately-null
+/** Tokenize a path into keys and array indices. Dotted segments (a.b), array indices (a[0]), and —
+ *  the addition — BRACKET-QUOTED keys for names that themselves contain dots or slashes:
+ *  metadata.labels['app.kubernetes.io/name']. Those keys are everywhere in Kubernetes (the whole
+ *  recommended-label set is dotted), and a plain dot-split can't address them — so an assertion on
+ *  one used to make the reference fail its OWN gate, quietly barring a big slice of CKA/CKAD tasks. */
+export function tokenizePath(path: string): (string | number)[] {
+  const parts: (string | number)[] = [];
+  let i = 0;
+  while (i < path.length) {
+    if (path[i] === '.') { i++; continue; }
+    if (path[i] === '[') {
+      const close = path.indexOf(']', i);
+      if (close === -1) { parts.push(path.slice(i + 1)); break; } // malformed — best-effort
+      const inner = path.slice(i + 1, close);
+      if (/^(['"]).*\1$/.test(inner)) parts.push(inner.slice(1, -1)); // ['dotted.key']
+      else if (/^\d+$/.test(inner)) parts.push(Number(inner));        // [0] array index
+      else parts.push(inner);                                          // [bareword] — lenient
+      i = close + 1;
+      continue;
+    }
+    let j = i;
+    while (j < path.length && path[j] !== '.' && path[j] !== '[') j++;
+    parts.push(path.slice(i, j));
+    i = j;
+  }
+  return parts;
+}
+
+/** Resolve a dot/[n]/['key'] path against a parsed document. Returns { found } so a legitimately-null
  *  value is distinguishable from a missing one. */
 export function resolvePath(root: unknown, path: string): { found: boolean; value?: unknown } {
-  const parts = path.split('.').flatMap((p) => {
-    const out: (string | number)[] = [];
-    const re = /([^[\]]+)|\[(\d+)\]/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(p)) !== null) out.push(m[2] !== undefined ? Number(m[2]) : m[1]);
-    return out;
-  });
+  const parts = tokenizePath(path);
   let cur: any = root;
   for (const part of parts) {
     if (cur == null || typeof cur !== 'object') return { found: false };

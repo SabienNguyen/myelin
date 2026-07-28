@@ -235,9 +235,11 @@ const MANIFEST_PROMPT = (pattern: string, description: string) => `Author a mani
 ${description ? `Context from the tutor: ${description}\n` : ''}
 The exercise family is: the learner is given an imperative task (the style of a CKA/CKAD exam
 task) and writes a YAML manifest from scratch. Grading is mechanical: assertions resolve dot-paths
-into the parsed YAML (arrays as [n], multi-document files as docs[n].path) and check them with one
-of four operations: "eq" (deep equality against a JSON value), "exists", "absent", "matches" (a
-regex against the string at the path). Include enough assertions to pin the task's real
+into the parsed YAML (arrays as [n], multi-document files as docs[n].path, and a key that itself
+contains dots or slashes — a Kubernetes recommended label like app.kubernetes.io/name — as a
+bracket-quoted segment: metadata.labels['app.kubernetes.io/name']) and check them with one of four
+operations: "eq" (deep equality against a JSON value), "exists", "absent", "matches" (a regex
+against the string at the path). Include enough assertions to pin the task's real
 requirements — kind, names, labels/selectors agreeing, the fields the task demands — and nothing
 stylistic.
 

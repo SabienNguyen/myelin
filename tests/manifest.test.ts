@@ -51,6 +51,13 @@ describe('resolvePath', () => {
     expect(resolvePath(doc, 'n')).toEqual({ found: true, value: null });
     expect(resolvePath(doc, 'missing.path')).toEqual({ found: false });
   });
+  it('addresses a dotted/slashed key via a bracket-quoted segment (K8s recommended labels)', () => {
+    const k8s = { metadata: { labels: { 'app.kubernetes.io/name': 'web', tier: 'frontend' } } };
+    // Plain dot-splitting would look for metadata.labels.app.kubernetes.io/name and miss.
+    expect(resolvePath(k8s, "metadata.labels['app.kubernetes.io/name']")).toEqual({ found: true, value: 'web' });
+    expect(resolvePath(k8s, 'metadata.labels["tier"]')).toEqual({ found: true, value: 'frontend' });
+    expect(resolvePath(k8s, "metadata.labels['absent.io/x']")).toEqual({ found: false });
+  });
 });
 
 describe('gradeManifest', () => {
