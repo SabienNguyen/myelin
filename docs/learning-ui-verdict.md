@@ -516,3 +516,11 @@ Written after the sprint that followed the original verdict; each line names its
   equivalent, applied-correctly evidence landed on chain-rule, and the honest "step 1
   unparseable" was my own robot typing leaving `=2x` inside the denominator — visually obvious
   to a human, faithfully rendered, correctly not blocking the final-answer grade.
+- **Thread-history switching driven live: clean pass.** On the newcomer vault: the history menu
+  lists the backprop conversation with ellipsised title and relative time; "+ New conversation"
+  lands on the empty hero with a fresh `#/t/<id>` hash; switching back restores the full thread —
+  graded scratchpad card included — under `#/t/default`. Zero horizontal overflow at 1360 and
+  900 with the menu open. A dark-mode suspicion (the panel looked white in a downscaled
+  full-page capture) was chased to ground truth and found FALSE: computed background #24221c and
+  raw pixels [43,53,71] = the dark --accent-soft token, exactly right. Lesson kept: judge dark
+  theming by computed styles or element crops, not by eyeballing a scaled full-page PNG.
