@@ -236,6 +236,13 @@ function unitKey(s: string): string {
  *  "9.81 m/s^2" -> 9.81, "1,024" -> 1024, "6.02e23" -> 6.02e23. NaN when there is no number. */
 export function parseLeadingNumber(s: string): number {
   const cleaned = normalizeSciNotation(s.trim().replace(/,(?=\d{3}\b)/g, ''));
+  // A leading simple fraction is its quotient: exact answers — probabilities (1/6), coefficients
+  // (1/2 m v²), ratios (22/7) — are written this way, and reading only the numerator marked "3/4"
+  // wrong unless the learner happened to mean 3. Guarded to DIGIT / DIGIT so a unit with a slash is
+  // never mistaken for one: "9.81 m/s" has letters around the slash and cannot match here, while
+  // "3/4 m" (fraction then unit) still does. Denominator can't run into a longer number ((?![\d.])).
+  const frac = cleaned.match(/^([+-]?(?:\d+\.?\d*|\.\d+))\s*\/\s*(\d+\.?\d*|\.\d+)(?![\d.])/);
+  if (frac) { const d = Number(frac[2]); if (d !== 0) return Number(frac[1]) / d; }
   const m = cleaned.match(/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/);
   return m ? Number(m[0]) : NaN;
 }

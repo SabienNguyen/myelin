@@ -583,6 +583,16 @@ describe('extractAnswerNumber — the number a free-text answer means', () => {
     // "× 10^n" is scientific notation; a unit exponent (no "× 10") must stay ignored.
     expect(extractAnswerNumber('9.81 m/s^2')).toBe(9.81);
   });
+  it('reads a leading fraction as its quotient (probabilities, coefficients, exact ratios)', () => {
+    expect(extractAnswerNumber('1/2')).toBe(0.5);
+    expect(extractAnswerNumber('3/4')).toBe(0.75);
+    expect(extractAnswerNumber('-3/4')).toBe(-0.75);
+    expect(extractAnswerNumber('1 / 2')).toBe(0.5);
+    expect(extractAnswerNumber('3/4 m')).toBe(0.75);          // fraction then a unit
+    expect(extractAnswerNumber('22/7')).toBeCloseTo(3.142857, 5);
+    // A unit with a slash is NOT a fraction — letters around the slash, so it stays the leading value.
+    expect(extractAnswerNumber('9.81 m/s^2')).toBe(9.81);
+  });
   it('a lone number anywhere in prose', () => {
     expect(extractAnswerNumber('about 0.02')).toBe(0.02);
     expect(extractAnswerNumber('answer: 42')).toBe(42);
