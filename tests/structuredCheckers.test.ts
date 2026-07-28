@@ -187,6 +187,17 @@ describe('notes — pitch arithmetic, enharmonic-aware', () => {
     expect(v.ok).toBe(false);
     expect(v.detail).toContain('H');
   });
+
+  // An enharmonic that crosses the octave boundary: B#4 IS C5 and Cb4 IS B3 — the accidental pushes
+  // the pitch into the next octave. This works only because parseNote keeps the RAW (un-mod-12)
+  // pitch in `absolute`, so B#4 computes as 72 (C5), not 71 (B4). A "simplify to pitch-class first"
+  // refactor would silently reject a correct answer here; this pins that it must not.
+  it('an octave-crossing enharmonic matches the octave it actually sounds in (B#4 = C5, Cb4 = B3)', () => {
+    expect(gradeNotes(['B#4'], { expected: ['C5'], ordered: true }).ok).toBe(true);
+    expect(gradeNotes(['Cb4'], { expected: ['B3'], ordered: true }).ok).toBe(true);
+    // and it does NOT collapse the octave: B#4 is C5, not C4.
+    expect(gradeNotes(['B#4'], { expected: ['C4'], ordered: true }).ok).toBe(false);
+  });
 });
 
 describe('through gradeStructured, where the block actually calls them', () => {
