@@ -19,7 +19,10 @@ export interface PaperReference {
 
 const MAX_REFS = 40;
 
-const DOI = /\b(10\.\d{4,9}\/[^\s"<>,;]+)/;
+// `)` and `]` are excluded for the same reason URL_RE excludes them: a DOI written in parentheses
+// or brackets — "(10.1234/abcd)" or "[10.1234/abcd]" — would otherwise capture the closing bracket
+// and mint a broken doi.org URL. The trailing-punctuation strip below still handles a sentence `.`.
+const DOI = /\b(10\.\d{4,9}\/[^\s"<>,;)\]]+)/;
 const ARXIV = /\barXiv:\s*(\d{4}\.\d{4,5})(v\d+)?/i;
 const URL_RE = /\bhttps?:\/\/[^\s"<>)\]]+/;
 

@@ -46,4 +46,18 @@ describe('extractReferences', () => {
   it('yields nothing for a section that is not really references', () => {
     expect(extractReferences('## References\n\nSee above.')).toEqual([]);
   });
+
+  it('does not swallow a closing bracket into a DOI URL (parenthetical / bracketed ids)', () => {
+    // A DOI written in parens or brackets used to keep the closing character, producing a dead
+    // doi.org link — the "follow this citation" offer pointing at a URL that never resolves.
+    const md = [
+      '## References',
+      '',
+      '[1] Smith, A. A paper. Journal. (10.1234/abcd.2020)',
+      '[2] Jones, B. Another. See [10.5555/xyzzy] for details.',
+    ].join('\n');
+    const refs = extractReferences(md);
+    expect(refs[0].url).toBe('https://doi.org/10.1234/abcd.2020');
+    expect(refs[1].url).toBe('https://doi.org/10.5555/xyzzy');
+  });
 });
