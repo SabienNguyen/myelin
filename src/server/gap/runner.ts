@@ -171,6 +171,9 @@ process.stdin.on('end', async () => {
     let ok = false; let threw = null; let out = [];
     try {
       out = await raceCollect(c.chunks);
+      // Raw JSON.stringify is right here: a stream case's expected value is typed string[]
+      // (SuiteCase), so there are no object keys to canonicalise — the key-order fix lives only
+      // where objects can actually be returned, the function family.
       ok = JSON.stringify(out) === JSON.stringify(c.expect);
     } catch (e) {
       threw = e instanceof Error ? e.message : String(e);
