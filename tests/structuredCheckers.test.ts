@@ -76,6 +76,16 @@ describe('chem_equation — conservation per element and per charge', () => {
     expect(gradeChemEquation('2H2 + O2 → 2H2O', {}).ok).toBe(true);
   });
 
+  it('ignores state symbols (g)/(l)/(s)/(aq) — they annotate phase, not balance', () => {
+    // Every textbook equation carries these; they must not turn a correct answer into a parse error.
+    expect(gradeChemEquation('2H2(g) + O2(g) -> 2H2O(l)', {}).ok).toBe(true);
+    expect(gradeChemEquation('NaCl(s) -> Na+(aq) + Cl-(aq)', {}).ok).toBe(true);
+    // A real multiplier group Ca(OH)2 is NOT a state symbol and stays intact.
+    expect(gradeChemEquation('Ca(OH)2 -> Ca^2+ + 2OH-', {}).ok).toBe(true);
+    // …and an unbalanced equation is still caught, state symbols or not.
+    expect(gradeChemEquation('H2(g) + O2(g) -> H2O(g)', {}).ok).toBe(false);
+  });
+
   it('accepts the equilibrium arrow and common variants — balancing is arrow-agnostic', () => {
     // A chemistry learner balancing an equilibrium writes ⇌ (or an ASCII form); balancing both
     // sides is identical to a one-way reaction, so these must not be turned away as "no arrow".
