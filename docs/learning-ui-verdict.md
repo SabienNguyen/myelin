@@ -776,3 +776,10 @@ Written after the sprint that followed the original verdict; each line names its
   came first and the second holder was unreachable to spacing forever. Repeats now carry a
   stable occurrence suffix (deterministic extraction order keeps re-ingest idempotence), and the
   interface comment that PROMISED disambiguation finally has the code to match.
+- **appliedRoutes audited clean; AppImage re-batched through the course-bank fix.** The
+  applied-route derivations hold (ladder by slug, math by the page's own notation, the
+  always-mechanical structured_check, rubric deliberately last and capped). One tolerance
+  reviewed and accepted rather than fixed: the $…$ math signal can false-positive on prose
+  money amounts, but routes are advisory, numbers are gradeable, and a stricter regex risks
+  false negatives on real math pages. The artifact carries the occurrence-suffix ids, verified
+  by inspection.
