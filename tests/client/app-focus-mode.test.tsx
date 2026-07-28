@@ -147,4 +147,17 @@ describe('App-level wiring — P1 focus-mode remount regression', () => {
 
     consoleErrorSpy.mockRestore();
   });
+
+  it('the transcript viewport is keyboard-scrollable (WCAG 2.1.1)', async () => {
+    // The thread is its OWN scroll region (the side panel scrolls independently) and most turns are
+    // plain prose with no focusable child, so the viewport carries tabIndex + an accessible name or
+    // a keyboard-only user cannot scroll back through the conversation (commit 2ab8e25). Pinned
+    // here because this is the one test that mounts the real App -> Thread -> ThreadPrimitive.Viewport
+    // wiring — an isolated Viewport can't confirm the props survive the primitive's prop-forwarding.
+    await act(async () => { render(<App />); });
+    const viewport = document.querySelector('.thread-viewport');
+    expect(viewport).not.toBeNull();
+    expect(viewport?.getAttribute('tabindex')).toBe('0');
+    expect(viewport?.getAttribute('aria-label')).toBeTruthy();
+  });
 });
