@@ -126,10 +126,21 @@ export function saveProblems(
 ): CourseProblem[] {
   mkdirSync(join(vault, '.harness'), { recursive: true });
   const added = new Date().toISOString().slice(0, 10);
-  const fresh: CourseProblem[] = problems.map((p) => ({
-    id: `${source}#${p.n}`, source, n: p.n, text: p.text,
-    ...(p.answer ? { answer: p.answer } : {}), added,
-  }));
+  // Ids must be unique or spacing lies: real psets repeat printed numbers across sections (two
+  // "Problem 1"s), and parseFloat collapses "2.10" into 2.1 — either way markCorrect would mark
+  // the FIRST holder of the id and mark_course_problem could never reach the second. Repeats get
+  // a stable occurrence suffix (extraction order is deterministic, so re-ingesting reproduces
+  // the same ids and the replace-per-source idempotence keeps holding).
+  const counts = new Map<string, number>();
+  const fresh: CourseProblem[] = problems.map((p) => {
+    const base = `${source}#${p.n}`;
+    const seen = counts.get(base) ?? 0;
+    counts.set(base, seen + 1);
+    return {
+      id: seen === 0 ? base : `${base}~${seen + 1}`, source, n: p.n, text: p.text,
+      ...(p.answer ? { answer: p.answer } : {}), added,
+    };
+  });
   const others = readBank(vault).filter((e) => e.source !== source);
   const all = [...others, ...fresh];
   writeFileSync(bankPath(vault), all.map((e) => JSON.stringify(e)).join('\n') + (all.length ? '\n' : ''));

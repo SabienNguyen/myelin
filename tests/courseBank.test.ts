@@ -88,6 +88,30 @@ describe('bank storage', () => {
     expect(next.map((p) => p.n)).toEqual([2, 3, 4, 1]);
   });
 
+  // Real psets repeat printed numbers across sections (two "Problem 1"s), and parseFloat
+  // collapses "2.10" into 2.1 — colliding ids let markCorrect mark the wrong problem and made
+  // the second holder unreachable. Repeats now carry a stable occurrence suffix.
+  it('repeated printed numbers get distinct, stable ids', () => {
+    const problems = [
+      { n: 1, text: 'Section A problem one' },
+      { n: 2, text: 'Section A problem two' },
+      { n: 1, text: 'Section B problem one' },
+      { n: 1, text: 'Section C problem one' },
+    ];
+    const saved = saveProblems(vault, 'two-part-exam', problems);
+    expect(saved.map((p) => p.id)).toEqual([
+      'two-part-exam#1', 'two-part-exam#2', 'two-part-exam#1~2', 'two-part-exam#1~3',
+    ]);
+    // The suffixed id is individually markable — the collision made this impossible before.
+    expect(markCorrect(vault, 'two-part-exam#1~2')).toBe(true);
+    const bank = readBank(vault);
+    expect(bank.find((e) => e.text === 'Section B problem one')!.lastCorrect).toBeTruthy();
+    expect(bank.find((e) => e.text === 'Section A problem one')!.lastCorrect).toBeUndefined();
+    // Re-ingesting reproduces the same ids (deterministic extraction order).
+    expect(saveProblems(vault, 'two-part-exam', problems).map((p) => p.id))
+      .toEqual(['two-part-exam#1', 'two-part-exam#2', 'two-part-exam#1~2', 'two-part-exam#1~3']);
+  });
+
   it('markCorrect on an unknown id reports failure rather than inventing an entry', () => {
     saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
     expect(markCorrect(vault, 'nope#9')).toBe(false);

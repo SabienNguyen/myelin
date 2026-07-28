@@ -770,3 +770,9 @@ Written after the sprint that followed the original verdict; each line names its
   87 green; the loreweaver correctness sweep (student model, queries, linking) is complete.
 - **AppImage re-batched through the linking guard** — the bundled loreweaver's propose.js carries
   the empty-title fix, verified by inspection. Artifact current with all eighteen fixes.
+- **courseBank audited — id collisions fixed.** The bank's "stable id" contract broke on real
+  document shapes: psets repeat printed numbers across sections (two "Problem 1"s) and
+  parseFloat collapses "2.10" into 2.1 — colliding ids meant markCorrect marked whichever entry
+  came first and the second holder was unreachable to spacing forever. Repeats now carry a
+  stable occurrence suffix (deterministic extraction order keeps re-ingest idempotence), and the
+  interface comment that PROMISED disambiguation finally has the code to match.
