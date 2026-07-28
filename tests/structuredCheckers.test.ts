@@ -59,6 +59,16 @@ describe('chem_equation — conservation per element and per charge', () => {
     expect(gradeChemEquation('2H2 + O2 → 2H2O', {}).ok).toBe(true);
   });
 
+  it('accepts the equilibrium arrow and common variants — balancing is arrow-agnostic', () => {
+    // A chemistry learner balancing an equilibrium writes ⇌ (or an ASCII form); balancing both
+    // sides is identical to a one-way reaction, so these must not be turned away as "no arrow".
+    expect(gradeChemEquation('N2 + 3H2 ⇌ 2NH3', {}).ok).toBe(true);
+    expect(gradeChemEquation('N2 + 3H2 <=> 2NH3', {}).ok).toBe(true);
+    expect(gradeChemEquation('N2 + 3H2 <-> 2NH3', {}).ok).toBe(true);
+    // Still exactly one arrow required: two of them is an error, not a three-way split.
+    expect(gradeChemEquation('N2 ⇌ H2 ⇌ NH3', {}).ok).toBe(false);
+  });
+
   it('rejects an unbalanced equation and names the element, never the count', () => {
     const v = gradeChemEquation('CH4 + O2 -> CO2 + H2O', {});
     expect(v.ok).toBe(false);

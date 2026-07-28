@@ -128,8 +128,12 @@ export function parseSpecies(term: string): Species {
 }
 
 export function parseEquation(text: string): { left: Species[]; right: Species[] } {
-  const arrow = text.split(/->|→|⟶|=/);
-  if (arrow.length !== 2) throw new Error('write one arrow (-> or →) between reactants and products');
+  // Accept the equilibrium arrow (⇌ and friends) and the common ASCII forms too: balancing an
+  // equilibrium is identical to balancing a one-way reaction, so a chemistry learner who writes
+  // "N2 + 3H2 ⇌ 2NH3" must not be turned away with "write one arrow". Multi-char ASCII forms come
+  // first in the alternation so "<=>" matches whole rather than splitting on its inner "=".
+  const arrow = text.split(/<=>|<->|->|→|⟶|⇌|⇋|↔|=/);
+  if (arrow.length !== 2) throw new Error('write one arrow (-> , → or ⇌) between reactants and products');
   // A separator plus must have whitespace on BOTH sides. Anything cleverer guesses wrong on
   // charges: "Fe^3+ + e-" has a charge-plus followed by a space, and a one-sided-space rule split
   // the species at the charge. Cramped writing ("CH4+2O2") surfaces as a parse error below whose
