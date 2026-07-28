@@ -847,3 +847,11 @@ Written after the sprint that followed the original verdict; each line names its
   correct problem→You→verdict done-card grammar. The component's folded() also guarantees typed
   work is never dropped across add/edit/submit. Surface holds; the open question from the √dₖ
   sitting is closed as "my automation, not the app."
+- **Quiz multi-item flow: verified clean.** A four-item transformer-attention quiz mixing
+  multiple-choice and short-answer. Two deliberate wrong answers (choosing "speed up the matrix
+  multiplication" for the √dₖ scaling question, typing "softmax" for the QKV-roles question) both
+  came back ✗; the correct multi-head choice came back ✓; each free-text item carried the "judged"
+  badge (model-judged, distinct from the mechanical choice marks), score 1/4. Four per-item
+  evidence records minted, inline KaTeX (QK⊤, √dₖ) rendered cleanly, and the tutor's follow-up
+  named exactly what was wrong on each miss and offered to rework them one at a time. Per-item
+  grading, mixed item types, and the model/mechanical grading-source split all hold.
