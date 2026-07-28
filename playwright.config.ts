@@ -1,4 +1,9 @@
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { defineConfig } from '@playwright/test';
+
+// Where global-setup.ts writes the fake microphone WAV, and where the launch args point Chromium.
+export const FAKE_AUDIO_WAV = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-fake-audio.wav');
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -26,9 +31,18 @@ export default defineConfig({
     // the browser they DO ship — `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
     // Unset (a normal dev machine, browsers installed by playwright itself) -> no launchOptions
     // override at all, so the default resolution is untouched.
-    ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
-      ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
-      : {}),
+    // Fake microphone for the pronounce spec: Chromium plays a WAV file as the mic input, so the
+    // recorded audio is deterministic. global-setup.ts writes that WAV (a steady tone) before any
+    // test runs. `use-fake-ui-for-media-stream` auto-accepts the mic permission prompt. Harmless to
+    // every other spec — they never call getUserMedia. FAKE_AUDIO_WAV is the agreed path.
+    launchOptions: {
+      ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}),
+      args: [
+        '--use-fake-device-for-media-stream',
+        '--use-fake-ui-for-media-stream',
+        `--use-file-for-fake-audio-capture=${FAKE_AUDIO_WAV}`,
+      ],
+    },
   },
   webServer: [
     {
@@ -94,6 +108,23 @@ export default defineConfig({
         'HARNESS_API=http://localhost:4822 sh -c "npx vite build --outDir dist-label '
         + '&& npx vite preview --outDir dist-label --port 4175 --strictPort"',
       port: 4175,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
+    // pronounce.e2e.ts gets its own pair for the same turn-counter reason as the specs above.
+    // Backend port 4823 comes from pronounce.config.json; the frontend proxies /api there.
+    {
+      command:
+        'LW_MOCK_MODEL=tests/e2e/pronounce-script.json HARNESS_CONFIG=tests/e2e/pronounce.config.json npx tsx src/server/index.ts',
+      port: 4823,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+    },
+    {
+      command:
+        'HARNESS_API=http://localhost:4823 sh -c "npx vite build --outDir dist-pronounce '
+        + '&& npx vite preview --outDir dist-pronounce --port 4177 --strictPort"',
+      port: 4177,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { FAKE_AUDIO_WAV } from '../../playwright.config.js';
 
 // Same absolute path baked into tests/e2e/e2e.config.json's "vault" (~ expansion resolves to
 // this). Playwright runs globalSetup after webServer processes have already started but before
@@ -22,6 +23,25 @@ const VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-va
 // writes mkdir recursively (~/Dev/personal/loreweaver/src/vault/vaultStore.ts dir()).
 const GAP_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-gap');
 const LABEL_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-label');
+const PRONOUNCE_VAULT = join(homedir(), 'Dev/personal/loreweaver-harness/tests/e2e/.tmp-vault-pronounce');
+
+/** A mono 16-bit PCM WAV of a steady tone — the fake microphone input for the pronounce spec.
+ *  A steady pitch reads as the level tone (ngang) no matter where Chromium's loop starts it, so the
+ *  grade is deterministic; a glide would depend on loop phase. Built here, not committed, so there
+ *  is no binary in the repo. */
+function writeSteadyToneWav(path: string, hz = 180, seconds = 2, sampleRate = 16000): void {
+  const n = seconds * sampleRate;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8);
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sampleRate, 24); buf.writeUInt32LE(sampleRate * 2, 28);
+  buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) {
+    buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * hz * i) / sampleRate) * 0.5 * 32767), 44 + i * 2);
+  }
+  writeFileSync(path, buf);
+}
 
 
 export default async function globalSetup() {
@@ -41,6 +61,17 @@ export default async function globalSetup() {
     join(LABEL_VAULT, 'pages', 'water-cycle.md'),
     '---\ntitle: The Water Cycle\ndifficulty: 1\nstatus: solid\n---\nEvaporation, condensation, precipitation.',
   );
+
+  // pronounce.e2e.ts's vault + the fake microphone WAV it records. Same fresh-sessions reset as
+  // the label vault, and the page its applied-correctly evidence lands on.
+  rmSync(join(PRONOUNCE_VAULT, 'students'), { recursive: true, force: true });
+  rmSync(join(PRONOUNCE_VAULT, '.harness', 'sessions'), { recursive: true, force: true });
+  mkdirSync(join(PRONOUNCE_VAULT, 'pages'), { recursive: true });
+  writeFileSync(
+    join(PRONOUNCE_VAULT, 'pages', 'vietnamese-tones.md'),
+    '---\ntitle: Vietnamese Tones\ndifficulty: 1\nstatus: solid\n---\nThe six tones: ngang, huyền, sắc, hỏi, ngã, nặng.',
+  );
+  writeSteadyToneWav(FAKE_AUDIO_WAV);
 
   rmSync(join(GAP_VAULT, 'students'), { recursive: true, force: true });
   // Also reset persisted chat threads: the SPA's default thread id is literally 'default'

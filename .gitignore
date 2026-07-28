@@ -22,3 +22,6 @@ dist-server/
 vendor/
 release/
 *.mts
+dist-pronounce/
+tests/e2e/.tmp-vault-pronounce/
+tests/e2e/.tmp-fake-audio.wav

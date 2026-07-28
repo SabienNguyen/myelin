@@ -1,0 +1,21 @@
+{
+  "turns": [
+    {
+      "toolCalls": [
+        {
+          "toolName": "pronounce",
+          "input": {
+            "word": "ma",
+            "lang": "vi",
+            "tone": "ngang",
+            "gloss": "ghost",
+            "requiredPasses": 1,
+            "pageSlug": "vietnamese-tones"
+          }
+        }
+      ],
+      "text": "Say it flat and level — that's ngang."
+    },
+    { "text": "Level and steady — ngang is yours." }
+  ]
+}
