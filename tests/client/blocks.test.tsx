@@ -81,6 +81,46 @@ describe('blocks survive a server-rejected (non-contract) result', () => {
   });
 });
 
+describe('matching renders its labels and options as notation, not raw source', () => {
+  // The block prompt goes through KaTeX and the learner's answer through the prettifier; the
+  // matching left column and dropdown were the one spot left showing raw `x^2` — and worse, a
+  // `$…$` label leaked its delimiters literally. Grading must stay byte-identical: the <option>'s
+  // value stays the raw string even when its visible text is prettified.
+  it('a `$…$` left label renders through KaTeX, not as literal dollar signs', () => {
+    const { container } = render(<StructuredCheck
+      args={{ prompt: 'Match them', pageSlug: 's', checker: {
+        kind: 'matching',
+        items: [{ left: '$\\sin x$', right: 'cos x' }],
+        options: ['cos x', '-sin x'],
+      } }}
+      result={null}
+      addResult={vi.fn()}
+    />);
+    const left = container.querySelector('.structured-left');
+    expect(left?.querySelector('.katex')).toBeTruthy();
+    expect(left?.textContent).not.toContain('$');
+  });
+
+  it('an ASCII-maths option shows prettified text but submits its raw value', () => {
+    const { container } = render(<StructuredCheck
+      args={{ prompt: 'Match them', pageSlug: 's', checker: {
+        kind: 'matching',
+        items: [{ left: 'f', right: 'x^2' }],
+        options: ['x^2', '2x'],
+      } }}
+      result={null}
+      addResult={vi.fn()}
+    />);
+    // The learner reads x²…
+    const pretty = Array.from(container.querySelectorAll('option')).find((o) => o.textContent === 'x²');
+    expect(pretty).toBeTruthy();
+    // …but the value the grader receives is the raw string it graded against.
+    expect((pretty as HTMLOptionElement).value).toBe('x^2');
+    // The left label is also prettified (no raw `x^2` caret anywhere in the card).
+    expect(container.querySelector('.structured-matching')?.textContent).not.toContain('x^2');
+  });
+});
+
 describe('toolkit rejects a fabricated submission for an errored call', () => {
   // The layer above the survival tests: when assistant-ui marks the part isError, the toolkit
   // must not hand the error to the block at all — audit 41 caught a rejected quick_check

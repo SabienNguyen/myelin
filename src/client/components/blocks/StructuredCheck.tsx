@@ -216,14 +216,21 @@ export function StructuredCheck({ args, result, addResult }: {
           <ul className="structured-matching">
             {checker.items.map((it, i) => (
               <li key={it.left}>
-                <span className="structured-left">{it.left}</span>
+                {/* Same notation treatment as the prompt and the learner's own answer: `$…$` is real
+                    KaTeX, ASCII maths (`x^2`, `SO4^2-`) gets the mechanical prettifier. Without this
+                    the one place inside the block that showed raw `x^2` / leaked a `$…$` label was
+                    the matching left column. */}
+                <span className="structured-left"><AnswerText value={it.left} /></span>
                 <select
                   aria-label={`match for ${it.left}`}
                   value={picks[i]}
                   onChange={(e) => setPicks((p) => p.map((v, j) => (j === i ? e.target.value : v)))}
                 >
                   <option value="">—</option>
-                  {options.map((o) => <option key={o} value={o}>{o}</option>)}
+                  {/* A native <option> can't host KaTeX, so `$…$` options fall back to raw — but the
+                      plain-Unicode prettifier still turns `x^2` into x². `value` stays the raw string
+                      so the submitted pick and grading are byte-for-byte unchanged. */}
+                  {options.map((o) => <option key={o} value={o}>{prettyAnswer(o) ?? o}</option>)}
                 </select>
               </li>
             ))}
