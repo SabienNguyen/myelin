@@ -593,6 +593,15 @@ describe('extractAnswerNumber — the number a free-text answer means', () => {
     // A unit with a slash is NOT a fraction — letters around the slash, so it stays the leading value.
     expect(extractAnswerNumber('9.81 m/s^2')).toBe(9.81);
   });
+  it('reads unicode vulgar fractions and mixed numbers', () => {
+    expect(extractAnswerNumber('½')).toBe(0.5);
+    expect(extractAnswerNumber('¾')).toBe(0.75);
+    expect(extractAnswerNumber('⅓')).toBeCloseTo(1 / 3, 12);
+    expect(extractAnswerNumber('1½')).toBe(1.5);       // mixed number, glyph
+    expect(extractAnswerNumber('1 1/2')).toBe(1.5);    // mixed number, typed
+    expect(extractAnswerNumber('2¾')).toBe(2.75);
+    expect(extractAnswerNumber('-1½')).toBe(-1.5);     // negative mixed number
+  });
   it('a lone number anywhere in prose', () => {
     expect(extractAnswerNumber('about 0.02')).toBe(0.02);
     expect(extractAnswerNumber('answer: 42')).toBe(42);

@@ -234,13 +234,29 @@ function unitKey(s: string): string {
 
 /** Leading number out of free text, tolerating a trailing unit and thousands separators:
  *  "9.81 m/s^2" -> 9.81, "1,024" -> 1024, "6.02e23" -> 6.02e23. NaN when there is no number. */
+/** Unicode vulgar-fraction glyphs → their "a/b" form, so "½", "1½", "2¾" reduce to the same fraction
+ *  path as a typed "1/2". A learner who copies one from printed material must not be told "no number
+ *  found". */
+const VULGAR_AB: Record<string, string> = {
+  '½': '1/2', '⅓': '1/3', '⅔': '2/3', '¼': '1/4', '¾': '3/4',
+  '⅕': '1/5', '⅖': '2/5', '⅗': '3/5', '⅘': '4/5', '⅙': '1/6', '⅚': '5/6',
+  '⅐': '1/7', '⅛': '1/8', '⅜': '3/8', '⅝': '5/8', '⅞': '7/8', '⅑': '1/9', '⅒': '1/10',
+};
+
 export function parseLeadingNumber(s: string): number {
-  const cleaned = normalizeSciNotation(s.trim().replace(/,(?=\d{3}\b)/g, ''));
-  // A leading simple fraction is its quotient: exact answers — probabilities (1/6), coefficients
-  // (1/2 m v²), ratios (22/7) — are written this way, and reading only the numerator marked "3/4"
-  // wrong unless the learner happened to mean 3. Guarded to DIGIT / DIGIT so a unit with a slash is
-  // never mistaken for one: "9.81 m/s" has letters around the slash and cannot match here, while
-  // "3/4 m" (fraction then unit) still does. Denominator can't run into a longer number ((?![\d.])).
+  let cleaned = normalizeSciNotation(s.trim().replace(/,(?=\d{3}\b)/g, ''));
+  // Expand a vulgar glyph to " a/b" — the leading space splits a mixed number ("1½" → "1 1/2") and
+  // a bare "½" trims back to "1/2".
+  for (const [g, ab] of Object.entries(VULGAR_AB)) if (cleaned.includes(g)) cleaned = cleaned.replaceAll(g, ` ${ab}`).trim();
+  // Fractions are how exact answers are written across math and physics — probabilities (1/6),
+  // coefficients (1/2), ratios (22/7), mixed numbers (1 1/2). Reading only the numerator marked
+  // "3/4" wrong unless the learner meant 3. All guarded to DIGIT / DIGIT, so a unit with a slash
+  // ("9.81 m/s") — letters around the slash — can never be mistaken for one.
+  const mixed = cleaned.match(/^([+-]?\d+)\s+(\d+)\s*\/\s*(\d+)(?![\d./])/);
+  if (mixed) {
+    const d = Number(mixed[3]);
+    if (d !== 0) return Number(mixed[1]) + (mixed[1].startsWith('-') ? -1 : 1) * (Number(mixed[2]) / d);
+  }
   const frac = cleaned.match(/^([+-]?(?:\d+\.?\d*|\.\d+))\s*\/\s*(\d+\.?\d*|\.\d+)(?![\d.])/);
   if (frac) { const d = Number(frac[2]); if (d !== 0) return Number(frac[1]) / d; }
   const m = cleaned.match(/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/);
