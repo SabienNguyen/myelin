@@ -23,7 +23,12 @@ interface CheckerVerdict { ok: boolean; detail: string }
 function normalizeQuantity(s: string): string {
   return s.trim()
     .replace(/[·×]/g, '*')
-    .replace(/²/g, '^2').replace(/³/g, '^3')
+    // Superscript exponents in the printed form → caret notation mathjs parses. The old two-line
+    // version only caught ² and ³; this also folds s⁻¹ (inverse second — dimensionally Hz), m⁻²,
+    // and powers above 3, so a learner who copies the rendered unit grades the same as one who
+    // types "^". Runs fold together: "⁻¹" → "^-1".
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+/g, (sup) =>
+      `^${[...sup].map((c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]).join('')}`)
     .replace(/μ/g, 'u') // micro sign vs mathjs's 'u' prefix
     .replace(/,(?=\d{3}\b)/g, '');
 }

@@ -21,6 +21,14 @@ describe('unit — quantity equivalence, not digit equality', () => {
     expect(gradeUnitAnswer('1000 mJ', { expected: 1, unit: 'J' }).ok).toBe(true);
   });
 
+  it('accepts superscript exponents in the printed form — s⁻¹ is Hz, m⁻² a per-area', () => {
+    // The rendered unit uses superscripts; a learner who copies "10 s⁻¹" must grade the same as
+    // one who types "10 s^-1". Previously only ²/³ folded, so negative and higher powers failed.
+    expect(gradeUnitAnswer('10 s⁻¹', { expected: 10, unit: 'Hz' }).ok).toBe(true);
+    expect(gradeUnitAnswer('10 Hz', { expected: 10, unit: 's⁻¹' }).ok).toBe(true);
+    expect(gradeUnitAnswer('5 kg·m⁻³', { expected: 5, unit: 'kg/m^3' }).ok).toBe(true);
+  });
+
   it('rejects the right digits in the wrong unit — 20 km/h is not 20 m/s', () => {
     const v = gradeUnitAnswer('20 km/h', twentyMs);
     expect(v.ok).toBe(false);
