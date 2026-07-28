@@ -41,8 +41,10 @@ to it exclusively over stdio MCP.
   tutor can attach a *hear this* button to any word, spoken by the browser's own speech engine —
   no dependency, works offline. It degrades loudly: with no installed voice for the language it
   says so and points to a native recording rather than faking the accent. Grading a learner's own
-  pronunciation (a tone-contour checker built on open-source pitch tracking) is designed in
-  [`docs/pronunciation-roadmap.md`](docs/pronunciation-roadmap.md), not yet wired.
+  pronunciation is underway: tones are pitch contours, so the mechanical grader
+  (`src/shared/toneContour.ts`) and an autocorrelation pitch tracker (`src/shared/pitchTrack.ts`)
+  are built and tested end to end — a rising glide grades as *sắc*, not *huyền* — with only the
+  mic-capture UX left to wire ([`docs/pronunciation-roadmap.md`](docs/pronunciation-roadmap.md)).
 - **The loop closes visibly.** Spaced review with decay, an interleaved one-click session plan,
   misconception record → surface → repair → resolve (repair history kept), per-student profiles,
   and two-way Anki sync.
