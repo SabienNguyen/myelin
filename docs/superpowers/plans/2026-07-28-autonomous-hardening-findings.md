@@ -44,9 +44,27 @@ live — scratch cleaned, learner's file preserved); SourceReader + select-to-as
 prose; graph/page/library/review/student-switcher/cold-start/Anki-badge; a full multi-step journey
 with zero console warnings. Both suites green (harness full, core 101).
 
-## Confirmed feature drift — highest priority (bounded fix, needs greenlight)
+## Confirmed feature drift — FIXED (`0d55b78`), one owner verification step remains
 
-### 0. `generate_exercise` is missing from the Claude-subscription tutor route
+### 0. `generate_exercise` was missing from the Claude-subscription tutor route — now ported
+
+**Status: shipped in `0d55b78`.** Re-read of the code comment settled the earlier hesitation:
+"keep in sync by hand" is the maintenance MECHANISM (the two SDKs' tool shapes are incompatible, so
+no shared source), not a claim of deliberate per-route curation — the comment mandates parity, so the
+gap was a bug. And the port's downside turned out bounded: the existing tests construct the session
+and build every `mcpServer`, so a malformed registration FAILS those tests; the only thing a unit
+test can't reach — the live Agent SDK offering/gating the tool under a real subscription — has, as its
+worst case, the status quo (the tool simply not appearing), never a regression to existing behavior.
+
+Ported by mirroring `courseMcpTools`: a `generate` MCP server whose handler wraps the SAME shared
+`generateExercise` call session.ts uses, freeform-gated in `buildOptions`'s `allowedTools`. Verified:
+tsc; a direct-handler unit test (the dup-guard fires before any model call); full harness suite
+(1187) and e2e browser suite (10/10) green. **The one step this environment can't run — a
+real-Claude-subscription drive confirming the live SDK offers `generate_exercise` in freeform and
+withholds it in teaching modes — is yours.** It's de-risked (mirrors `course_problems`, proven in
+production) but is the honest last mile.
+
+Original description, kept for context:
 
 The two tutor routes must offer the same tools — `claudeSdkTutor.ts:30-32` says so outright: "keep in
 sync by hand; a divergence here means the two tutor routes disagree on tool access." They have
