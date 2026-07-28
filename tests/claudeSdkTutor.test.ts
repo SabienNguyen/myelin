@@ -605,6 +605,25 @@ describe('generate_exercise — ported to the Agent-SDK route (parity with sessi
     const out = JSON.parse(res.content[0].text);
     expect(out.error).toContain('already exists');
   });
+
+  // The one novel bit beyond the handler: session.ts gates generate_exercise to freeform (a
+  // content-creating tool rides with the write tools, not the teaching set). Verify the Agent-SDK
+  // route's allowedTools does the same — the options handed to the SDK are exactly what the fake
+  // query captures, so this proves the gating without a live subscription.
+  async function allowedToolsFor(mode: string): Promise<string[]> {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) { calls.push(params); yield initMsg('sess-gate'); yield resultMsg('sess-gate'); }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any, mode as any, `thread-gate-${mode}`,
+    ));
+    return calls[0].options.allowedTools as string[];
+  }
+
+  it('is offered in freeform and withheld in teaching modes, matching session.ts', async () => {
+    expect(await allowedToolsFor('freeform')).toContain('mcp__generate__generate_exercise');
+    expect(await allowedToolsFor('learn')).not.toContain('mcp__generate__generate_exercise');
+  }, 30_000);
 });
 
 describe('structural rule 1a — grading turns withhold the block tools', () => {
