@@ -127,3 +127,12 @@ page looks like and what the grading model + graph see. **Decision: accept / rej
   "use WebFetch" note — a documented, arguably-intended read-vs-ingest gap.
 - Minor: core `reviewDue` is unsorted, so `nextLessons`' "top 2 review" is arbitrary order — harmless,
   the harness session-plan sorts its own review queue.
+- **`npm audit`**: core is fully clean (0, prod + dev); harness production is clean (0), with 16
+  high-severity DEV-only advisories, all one transitive dep — `brace-expansion` (a
+  DoS-via-unbounded-expansion, GHSA-mh99-v99m-4gvg) pulled in under `electron-builder`'s packaging
+  chain (@electron/asar, dmg-builder, electron-winstaller, …). It ships nothing to users, and the DoS
+  is fed by the developer's own build-config globs, not remote input — low priority. The fix is an npm
+  `override` forcing a patched `brace-expansion`, OR `npm audit fix --force` (a breaking
+  `electron-builder` bump). Left for you: it can only be validated by a full `electron-builder`
+  packaging run (tests/tsc/vite/e2e don't exercise that path), so forcing it unverified could break
+  release packaging.
