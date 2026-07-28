@@ -56,6 +56,10 @@ export function Pronounce({ args, result, addResult }: {
   const [last, setLast] = useState<{ grade: ToneGrade; contour: number[] | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  // The block submits exactly once, when the required passes are reached. A ref guards it because
+  // addResult is a side effect and must not live inside a state updater (StrictMode double-invokes
+  // updaters, and updaters must be pure).
+  const submitted = useRef(false);
 
   if (result) {
     return (
@@ -92,15 +96,15 @@ export function Pronounce({ args, result, addResult }: {
           setLast({ grade, contour });
           setAttempts((a) => a + 1);
           if (grade.unscorable) return;
-          setBest((b) => Math.max(b, grade.similarity));
+          const bestSim = Math.max(best, grade.similarity);
+          setBest(bestSim);
           if (grade.pass) {
-            setPasses((p) => {
-              const next = p + 1;
-              if (next >= required) {
-                addResult({ passes: next, required, applied: true, attempts: attempts + 1, bestSimilarity: Math.max(best, grade.similarity) });
-              }
-              return next;
-            });
+            const next = passes + 1; // this recording's start() captured the current passes
+            setPasses(next);
+            if (next >= required && !submitted.current) {
+              submitted.current = true;
+              addResult({ passes: next, required, applied: true, attempts: attempts + 1, bestSimilarity: bestSim });
+            }
           }
         } catch { setError('Could not read that recording — try again.'); }
       };
@@ -141,7 +145,7 @@ export function Pronounce({ args, result, addResult }: {
       {/* Stop early with an honest partial — passes < required means it won't mint mastery. */}
       {passes < required && attempts > 0 && (
         <button type="button" className="pronounce-give-up"
-          onClick={() => addResult({ passes, required, applied: false, attempts, bestSimilarity: best })}>
+          onClick={() => { if (!submitted.current) { submitted.current = true; addResult({ passes, required, applied: false, attempts, bestSimilarity: best }); } }}>
           I'll come back to this
         </button>
       )}
