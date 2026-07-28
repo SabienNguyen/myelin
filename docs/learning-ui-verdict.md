@@ -661,3 +661,13 @@ Written after the sprint that followed the original verdict; each line names its
   itself a design point observed live: the grader failed to address one criterion and the
   harness scored it unmet with the plain note "the grader did not address this criterion" —
   fail-closed, the learner never handed unearned credit, the omission named instead of hidden.
+- **The unaddressed-criterion point is no longer lost to grader sloppiness — without weakening
+  the no-credit-by-omission rule.** Two changes to rubric judging: a same-length grader reply
+  now zips by index (the prompt enumerates the criteria, so a one-for-one reply is answering
+  them in order even under paraphrased names — the live round-2 loss was exactly this), and a
+  criterion the grader genuinely left out gets ONE narrowed retry naming just the missing ones.
+  The retry is deliberately stricter than the first pass: its verdict lands only if it NAMES the
+  criterion it answers — pass-by-position on a retry is precisely how a grader echoing some
+  other criterion could pass a draft by omission, and the pre-existing forgetful-grader
+  guarantee test caught my first draft of the merge doing exactly that. Fail-closed remains the
+  backstop for anything still unanswered.

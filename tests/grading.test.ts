@@ -521,3 +521,64 @@ describe('extractAnswerNumber — the number a free-text answer means', () => {
     expect(g.allCorrect).toBe(true);
   });
 });
+
+// A live revision round lost a rubric point to "the grader did not address this criterion" when
+// the verdict actually existed under a paraphrased name — and a genuine omission cost a point to
+// grader laziness. Same-length replies now zip by index (the prompt enumerates); true omissions
+// get one narrowed retry; anything still unanswered keeps the fail-closed verdict.
+describe('rubric judging — paraphrase tolerance and the omission retry', () => {
+  const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
+  const twoCriteria = {
+    prompt: 'Explain it.', round: 1, pageSlug: 'writing-1',
+    rubric: ['states the mechanism accurately', 'gives an intuitive reason why'],
+  };
+  const annJson = JSON.stringify({ annotations: [], skillGrades: { claim: 'good' } });
+
+  it('a same-length reply with paraphrased names matches by index', async () => {
+    const judged = JSON.stringify({ criteria: [
+      { criterion: 'mechanism correctness', pass: true, note: 'right' },
+      { criterion: 'intuition provided', pass: true, note: 'clock hands' },
+    ] });
+    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> =>
+      ({ text: /rubric criterion/i.test(prompt) ? judged : annJson, toolCallNames: [] });
+    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { sdkGenerate });
+    expect(g.rubric?.map((r: any) => r.pass)).toEqual([true, true]);
+    expect(g.evidence.map((e) => e.kind)).toEqual(['rubric-passed']);
+  });
+
+  it('an omitted criterion gets one narrowed retry, and the retry verdict lands', async () => {
+    const rubricCalls: string[] = [];
+    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
+      if (!/rubric criterion/i.test(prompt)) return { text: annJson, toolCallNames: [] };
+      rubricCalls.push(prompt);
+      // First call: answers only criterion 1. Retry (names only the missing one): answers it.
+      const first = rubricCalls.length === 1;
+      return {
+        text: JSON.stringify({ criteria: first
+          ? [{ criterion: 'states the mechanism accurately', pass: true, note: 'right' }]
+          : [{ criterion: 'gives an intuitive reason why', pass: false, note: 'no intuition offered' }] }),
+        toolCallNames: [],
+      };
+    };
+    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { sdkGenerate });
+    expect(rubricCalls).toHaveLength(2);
+    expect(rubricCalls[1]).toContain('gives an intuitive reason why');
+    expect(rubricCalls[1]).not.toContain('states the mechanism accurately');
+    expect(g.rubric?.[1]).toEqual({ criterion: 'gives an intuitive reason why', pass: false, note: 'no intuition offered' });
+  });
+
+  it('a retry that fails leaves the fail-closed verdict standing', async () => {
+    let rubricCalls = 0;
+    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
+      if (!/rubric criterion/i.test(prompt)) return { text: annJson, toolCallNames: [] };
+      rubricCalls++;
+      if (rubricCalls === 1) {
+        return { text: JSON.stringify({ criteria: [{ criterion: 'states the mechanism accurately', pass: true, note: 'right' }] }), toolCallNames: [] };
+      }
+      return { text: 'not json', toolCallNames: [] };
+    };
+    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { sdkGenerate });
+    expect(g.rubric?.[1].pass).toBe(false);
+    expect(g.rubric?.[1].note).toMatch(/did not address/);
+  });
+});

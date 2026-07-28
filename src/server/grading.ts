@@ -657,14 +657,14 @@ export async function gradeBlockOutput(
   // window). It is deliberately NOT 'applied-correctly' — a rubric is a model applying criteria,
   // and naming it keeps it from ever laundering into the evidence that gates 'mastered'.
   if (Array.isArray(input.rubric) && input.rubric.length > 0) {
-    const rubricPrompt = `Judge this draft against each rubric criterion. Prompt: "${input.prompt}"\n`
-      + `Draft:\n${result.draft}\n\nCriteria:\n${input.rubric.map((r: string, i: number) => `${i + 1}. ${r}`).join('\n')}\n`
-      + 'For each criterion, decide pass or fail and give a one-line note quoting the draft where possible.';
     const rubricSchema = z.object({
       criteria: z.array(z.object({ criterion: z.string(), pass: z.boolean(), note: z.string() })),
     });
     const graderId = cfg.models.grader.model;
-    const judgeRubric = async (): Promise<{ criteria: { criterion: string; pass: boolean; note: string }[] }> => {
+    const judgeRubric = async (criteria: string[]): Promise<{ criteria: { criterion: string; pass: boolean; note: string }[] }> => {
+      const rubricPrompt = `Judge this draft against each rubric criterion. Prompt: "${input.prompt}"\n`
+        + `Draft:\n${result.draft}\n\nCriteria:\n${criteria.map((r: string, i: number) => `${i + 1}. ${r}`).join('\n')}\n`
+        + 'For each criterion, decide pass or fail and give a one-line note quoting the draft where possible.';
       if (isClaudeSdkModel(graderId)) {
         const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
         const { text } = await sdkGenerate({
@@ -683,19 +683,46 @@ export async function gradeBlockOutput(
     // them CONCURRENTLY. In series they doubled every essay's grading latency (two model
     // round-trips back to back), which is the single slowest interaction in the app.
     const [judgedRes, annRes] = await Promise.allSettled([
-      judgeRubric(), annotateDraft(input.prompt, result.draft, cfg, deps),
+      judgeRubric(input.rubric), annotateDraft(input.prompt, result.draft, cfg, deps),
     ]);
     if (judgedRes.status === 'rejected') throw judgedRes.reason;
     const judged = judgedRes.value;
+    const MISSING = 'the grader did not address this criterion';
     // The MODEL's list is advisory; the RUBRIC's list is authoritative. A grader that returned
-    // fewer criteria than were asked must not pass the draft by omission.
+    // fewer criteria than were asked must not pass the draft by omission. When the reply answers
+    // the enumerated list one-for-one, zip by INDEX — the prompt numbers the criteria, so a
+    // same-length reply is answering them in order even when it paraphrased the names (a live
+    // revision round lost a rubric point to exactly that paraphrase: the verdict existed, the
+    // name-matcher just couldn't see it).
     const byName = new Map(judged.criteria.map((c) => [c.criterion.trim().toLowerCase(), c]));
-    const results = input.rubric.map((criterion: string) => {
-      const found = byName.get(criterion.trim().toLowerCase())
+    const zipByIndex = judged.criteria.length === input.rubric.length;
+    const results = input.rubric.map((criterion: string, i: number) => {
+      const found = (zipByIndex ? judged.criteria[i] : undefined)
+        ?? byName.get(criterion.trim().toLowerCase())
         ?? judged.criteria.find((c) => c.criterion.toLowerCase().includes(criterion.slice(0, 24).toLowerCase()));
       return found ? { criterion, pass: found.pass, note: found.note }
-        : { criterion, pass: false, note: 'the grader did not address this criterion' };
+        : { criterion, pass: false, note: MISSING };
     });
+    // A criterion the grader genuinely left out gets ONE narrowed retry naming just the missing
+    // ones — a learner should not lose a point to grader laziness. Anything still unanswered
+    // (or a retry that itself fails) keeps the fail-closed verdict: unearned credit is worse
+    // than a second model call.
+    const missingIdx = results.flatMap((r: any, i: number) => (r.note === MISSING ? [i] : []));
+    if (missingIdx.length > 0) {
+      try {
+        const second = await judgeRubric(missingIdx.map((i: number) => input.rubric[i]));
+        for (const ri of missingIdx) {
+          const criterion: string = input.rubric[ri];
+          // Stricter than the first pass on purpose: no index credit here. A retry verdict only
+          // lands if it NAMES the criterion it answers (exact or stem match) — position alone is
+          // how a grader that echoed some other criterion would pass a draft by omission, the
+          // exact laundering gradeSource.test.ts's forgetful-grader case forbids.
+          const c = second.criteria.find((s) => s.criterion.trim().toLowerCase() === criterion.trim().toLowerCase())
+            ?? second.criteria.find((s) => s.criterion.toLowerCase().includes(criterion.slice(0, 24).toLowerCase()));
+          if (c) results[ri] = { criterion, pass: c.pass, note: c.note };
+        }
+      } catch { /* fail-closed verdicts stand */ }
+    }
     const passed = results.filter((r: { pass: boolean }) => r.pass).length;
     const all = passed === results.length;
     // The rubric decides the EVIDENCE; the annotations are the FEEDBACK. Until audit 40 this path
