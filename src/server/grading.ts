@@ -234,8 +234,26 @@ function unitKey(s: string): string {
 
 /** Leading number out of free text, tolerating a trailing unit and thousands separators:
  *  "9.81 m/s^2" -> 9.81, "1,024" -> 1024, "6.02e23" -> 6.02e23. NaN when there is no number. */
+/** Rewrite scientific notation written the way it is PRINTED and taught — "6.02 × 10^23",
+ *  "6.02 × 10²³", "3 x 10^-19" — into the e-notation Number() understands ("6.02e23"). Without this
+ *  a chemistry answer of Avogadro's number parsed as 6.02, off by twenty-three orders of magnitude,
+ *  because only the programmer's "6.02e23" form was recognised. Deliberately narrow: it matches the
+ *  mantissa×10^exp shape only. A unit exponent like "m/s^2" has no "× 10" and is untouched (so
+ *  "9.81 m/s^2" still reads 9.81), and "10" must be the WHOLE base ((?!\d)) so the "10" inside "100"
+ *  is never mistaken for it. */
+function normalizeSciNotation(s: string): string {
+  return s.replace(
+    /([+-]?\d*\.?\d+)\s*[×xX*·∙]\s*10(?!\d)\s*\^?\s*([+-]?\d+|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)/g,
+    (_, mantissa: string, exp: string) => {
+      const e = exp.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
+      return `${mantissa}e${e}`;
+    },
+  );
+}
+
 export function parseLeadingNumber(s: string): number {
-  const m = s.trim().replace(/,(?=\d{3}\b)/g, '').match(/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/);
+  const cleaned = normalizeSciNotation(s.trim().replace(/,(?=\d{3}\b)/g, ''));
+  const m = cleaned.match(/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/);
   return m ? Number(m[0]) : NaN;
 }
 

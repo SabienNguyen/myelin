@@ -564,6 +564,18 @@ describe('extractAnswerNumber — the number a free-text answer means', () => {
     expect(extractAnswerNumber('9.81 m/s^2')).toBe(9.81);
     expect(extractAnswerNumber('1,024')).toBe(1024);
   });
+  it('reads scientific notation written the printed way, not just e-notation', () => {
+    // Avogadro/electron-charge/light-speed style answers — a chem or physics learner writes
+    // "6.02 × 10^23", not "6.02e23", and the checker used to grade that as 6.02 (off by 10^23).
+    expect(extractAnswerNumber('6.02e23')).toBe(6.02e23);
+    expect(extractAnswerNumber('6.02 × 10^23')).toBe(6.02e23);
+    expect(extractAnswerNumber('6.02 x 10^23')).toBe(6.02e23);
+    expect(extractAnswerNumber('6.02 × 10²³')).toBe(6.02e23);       // printed superscript
+    expect(extractAnswerNumber('1.6 × 10⁻¹⁹')).toBe(1.6e-19);       // negative superscript exponent
+    expect(extractAnswerNumber('C = 3 × 10^8')).toBe(3e8);          // sci-notation after a derivation's =
+    // "× 10^n" is scientific notation; a unit exponent (no "× 10") must stay ignored.
+    expect(extractAnswerNumber('9.81 m/s^2')).toBe(9.81);
+  });
   it('a lone number anywhere in prose', () => {
     expect(extractAnswerNumber('about 0.02')).toBe(0.02);
     expect(extractAnswerNumber('answer: 42')).toBe(42);
