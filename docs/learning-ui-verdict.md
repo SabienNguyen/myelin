@@ -783,3 +783,9 @@ Written after the sprint that followed the original verdict; each line names its
   money amounts, but routes are advisory, numbers are gradeable, and a stricter regex risks
   false negatives on real math pages. The artifact carries the occurrence-suffix ids, verified
   by inspection.
+- **videoIngest audited clean.** The rolling-caption dedup, both VTT timing formats, the
+  escaped-stamp and already-a-link guards in linkifyTimestamps (traced against the actual
+  emitted `[\[2:40\]](…)` shape), and the length-or-silence paragraph breaks all hold. With
+  this, the session's contract-read sweep covers every harness server module that carries
+  learner-facing logic, plus loreweaver's three logic modules — four real fixes came out of the
+  reads (decay, empty-title, course-bank ids, and the earlier percent rule).
