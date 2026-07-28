@@ -742,6 +742,40 @@ describe('PUT /api/voice — the teaching-style preference', () => {
   });
 });
 
+describe('GET /api/status — names the live student, not the boot snapshot', () => {
+  // The status object handed to buildRestRoutes is captured at boot; /api/status re-reads the tutor
+  // model from cfg for the same reason it must re-read the student — switching learners rewrites
+  // cfg.student, but the snapshot's student never moved, so the badge's 60s poll reverted the
+  // displayed learner to the boot-time one while /api/students and /api/progress had already moved.
+  const { mkdtempSync, writeFileSync, rmSync } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir } = require('node:os') as typeof import('node:os');
+  const { join } = require('node:path') as typeof import('node:path');
+  const lw = { listSlugs: async () => [], call: async () => ({}) } as any;
+  let dir: string; let cfgFile: string; let prevEnv: string | undefined;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'lwh-status-'));
+    cfgFile = join(dir, 'harness.config.json');
+    writeFileSync(cfgFile, JSON.stringify({ student: 'kid' }));
+    prevEnv = process.env.HARNESS_CONFIG;
+    process.env.HARNESS_CONFIG = cfgFile;
+  });
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.HARNESS_CONFIG;
+    else process.env.HARNESS_CONFIG = prevEnv;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reflects the current student after a switch, not the one captured at boot', async () => {
+    const cfg = { student: 'kid', vault: dir, models: { tutor: { model: 'scripted' } } } as unknown as HarnessConfig;
+    // The 3rd arg is the boot snapshot — the same stale capture the bug read the student from.
+    const app = buildRestRoutes(lw, cfg, { student: 'kid', autoCompile: true });
+    expect((await (await app.request('/api/status')).json()).student).toBe('kid');
+    await app.request('/api/student', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'grownup' }) });
+    // Before the fix this stayed 'kid' (read from the snapshot); now it follows cfg.student.
+    expect((await (await app.request('/api/status')).json()).student).toBe('grownup');
+  });
+});
+
 // The Library's resume button read "resume at nn-forward-pass" — a raw slug in learner-facing
 // copy (fresh-eyes audit). The route resolves each row's next page to its title; a page that
 // cannot be read degrades to null so the client falls back to the slug instead of losing the

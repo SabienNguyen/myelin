@@ -539,10 +539,13 @@ export function buildRestRoutes(
     return c.json({ byLevel, slipping, earnedThisWeek });
   });
   app.get('/api/status', async (c) => {
-    // Read the tutor model from cfg HERE, not from the snapshot passed in at boot. Signing in with a
-    // Claude subscription rewrites it while the app is running (signin.ts's applyRoute), and a
-    // captured string meant the status badge kept naming the model the app had stopped using.
-    const extra: Record<string, string> = { tutor: cfg.models.tutor.model };
+    // Read the tutor model AND the student from cfg HERE, not from the snapshot passed in at boot.
+    // Both change while the app runs — signing in with a Claude subscription rewrites the tutor
+    // (signin.ts's applyRoute), and switching learners rewrites cfg.student (PUT /api/student). A
+    // captured value meant the badge kept naming the model the app had stopped using, and — the
+    // switcher bug this fixes — reverted the displayed learner to the boot-time one on the next
+    // 60s poll, even though /api/students and /api/progress had already moved to the new student.
+    const extra: Record<string, string> = { tutor: cfg.models.tutor.model, student: cfg.student };
     if (anki) {
       const up = await anki.isUp();
       // Number.isFinite: backlogDays is Infinity when Anki has NEVER synced — which is every
