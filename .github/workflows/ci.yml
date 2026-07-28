@@ -25,6 +25,9 @@ jobs:
       - name: Check out loreweaver beside the harness
         id: gate
         continue-on-error: true
+        # Bounded: while loreweaver is private this attempt FAILS by design (~40s of retries,
+        # measured on run 86) — a network flake must not let those retries spin the job out.
+        timeout-minutes: 3
         uses: actions/checkout@v4
         with:
           repository: SabienNguyen/loreweaver
