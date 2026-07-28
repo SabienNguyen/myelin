@@ -23,8 +23,9 @@ to it exclusively over stdio MCP.
 - **Every subject gets an applied check.** Mechanical checkers for science and structured answers
   (numeric/unit algebra, chemical equations, sets, sequences, matching, note arithmetic), a
   step-aware math scratchpad (MathLive entry, numeric-equivalence grading that understands
-  equation chains), diagram labelling for picture subjects, rubric'd writing drafts with a
-  one-click revise round, and a built-in **code sandbox**: exercise ladders, generated exercises
+  equation chains), diagram labelling for picture subjects, microphone tone-pronunciation grading
+  for spoken languages, rubric'd writing drafts with a one-click revise round, and a built-in
+  **code sandbox**: exercise ladders, generated exercises
   behind a review gate, and whole-program judging in ten runtimes (node, TypeScript, python3,
   bash, ruby, sqlite, C, Rust, CUDA where a toolkit exists; Go/Java via Docker) plus
   compose-backed service environments (redis, postgres).
@@ -37,14 +38,18 @@ to it exclusively over stdio MCP.
 - **The tutor is a librarian first.** Live literature search (newest and most-cited), citation
   chasing through an ingested paper's own references, and prompt rules that route learning through
   real human artifacts — research claims must match what was actually read.
-- **Languages get to be heard.** For tone languages especially (Vietnamese, Mandarin, Thai) the
-  tutor can attach a *hear this* button to any word, spoken by the browser's own speech engine —
-  no dependency, works offline. It degrades loudly: with no installed voice for the language it
-  says so and points to a native recording rather than faking the accent. Grading a learner's own
-  pronunciation is underway: tones are pitch contours, so the mechanical grader
-  (`src/shared/toneContour.ts`) and an autocorrelation pitch tracker (`src/shared/pitchTrack.ts`)
-  are built and tested end to end — a rising glide grades as *sắc*, not *huyền* — with only the
-  mic-capture UX left to wire ([`docs/pronunciation-roadmap.md`](docs/pronunciation-roadmap.md)).
+- **Languages get to be heard, typed, and spoken back.** For tone languages especially
+  (Vietnamese, Mandarin) the tutor attaches a *hear this* button to any word, spoken by the
+  browser's own speech engine — no dependency, works offline, and degrades loudly (with no
+  installed voice it says so and points to a native recording rather than faking the accent). The
+  learner types the language from an ASCII keyboard through a built-in input method — Vietnamese
+  Telex (`vieejt` → `việt`) and Mandarin Pinyin (`ni3` → `nǐ`) — set per-exercise so a later math
+  answer never transliterates. And they get *graded on their own pronunciation*: the `pronounce`
+  block records the mic, tracks the pitch (via the `pitchy` McLeod detector), and grades the tone
+  contour against a reference shape mechanically — no model opinion, and the audio never leaves the
+  browser. The learner sees their pitch drawn over the target, and it mints mastery only after
+  several clean attempts. Both Vietnamese (six tones) and Mandarin (four) are wired end to end
+  ([`docs/pronunciation-roadmap.md`](docs/pronunciation-roadmap.md)).
 - **The loop closes visibly.** Spaced review with decay, an interleaved one-click session plan,
   misconception record → surface → repair → resolve (repair history kept), per-student profiles,
   and two-way Anki sync.
