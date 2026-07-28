@@ -489,3 +489,17 @@ Written after the sprint that followed the original verdict; each line names its
   the SVG entity-escaped, two regions at identical coordinates, one label needed twice. The spec
   asserts real canvas height, clicks both coincident pins, re-uses the duplicate chip, and
   completes to 3/3 graded. Suite is now 8 browser specs.
+- **Cold-start audit: a brand-new vault's first lesson evaporated — fixed by picking the opening
+  mode from the vault.** Driving a genuinely empty vault end to end (fresh student, only the
+  boot-seeded pattern stub): the empty-state hero promises "your tutor writes pages as you go,"
+  but the session opened in `learn`, whose single-writer rule (deliberate — spec §5) forbids
+  write_page. The live tutor did everything right — researched three sources, taught backprop
+  well, even warned "nothing here gets saved" — and the newcomer's first lesson left no page, no
+  graph node, nowhere for evidence to land. The client now asks the graph before settling on a
+  mode: no real (non-stub) page → open in freeform, the one mode that keeps the hero's promise;
+  the first real page flips future sessions back to `learn`. Re-driven live: same question, same
+  fresh vault, first turn produced a 7-stop syllabus path (forward pass → loss → chain rule →
+  gradient descent → backprop → worked example → matrix form), seven sourced solid pages, and a
+  quick check — the graph exists after minute one. Established 10-page vault verified still
+  opening in `learn`; 8/8 e2e unaffected (all-stub fixture vaults flip to freeform, which the
+  scripted model never notices — mode only changes tool mounting it doesn't use).

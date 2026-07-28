@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { BookOpenTextIcon as BookOpenText } from '@phosphor-icons/react';
+import { getGraph } from './lib/api.js';
+import { coldStartMode } from './lib/coldStartMode.js';
 import { Runtime } from './runtime.js';
 import { Thread } from './components/Thread.js';
 import { SidePanel } from './components/SidePanel.js';
@@ -14,6 +16,20 @@ import { parseHash, serializeHash } from './lib/urlState.js';
 export function App() {
   const [mode, setMode] = useState('learn');
   const [threadId, setThreadId] = useState(() => parseHash(location.hash).threadId);
+
+  // Only ever switches AWAY from the untouched default: by the time the fetch resolves, a mode
+  // the user picked by hand is never 'learn' (re-selecting the current option fires no change
+  // event), so the `m !== 'learn'` guard doubles as the touched check. Graph unreachable →
+  // stay put: the setup gate or TopbarStatus already surfaces that failure.
+  useEffect(() => {
+    let cancelled = false;
+    getGraph()
+      .then((g) => {
+        if (!cancelled) setMode((m) => (m === 'learn' ? coldStartMode(g.nodes ?? []) : m));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // P1 (docs/superpowers/plans/2026-07-20-gap-integration.md): IDE focus mode. A code_exercise
   // block (CodeExercise.tsx) emits panelBus `focusMode` on mount-with-no-result / unmount; App
