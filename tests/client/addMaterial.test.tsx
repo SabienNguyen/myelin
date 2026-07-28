@@ -65,6 +65,42 @@ describe('AddMaterial — the one entry point', () => {
     expect(init?.body).toBeInstanceOf(FormData);
   });
 
+  it('a pasted local file path routes to /api/ingest as a JSON path, not the repo route', async () => {
+    // A file PATH (not a URL, not git@) goes to the document pipeline, so its extension gets a real
+    // "unsupported type" answer from the file route instead of the repo route's "rename the repo".
+    // `.markdown` is 8 chars — the old 5-char extension cap misrouted it to /api/ingest/repo.
+    const fetchMock = vi.fn(async () => jsonRes({ book: 'sgd-notes' }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<AddMaterial />);
+    openPanel();
+
+    fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
+      target: { value: '/home/user/notes/sgd-notes.markdown' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await screen.findByText(/sgd-notes: converting in the background/i);
+    expect(fetchMock).toHaveBeenCalledWith('/api/ingest', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ path: '/home/user/notes/sgd-notes.markdown' }),
+    }));
+  });
+
+  it('a pasted local folder path (no extension) still routes to /api/ingest/repo', async () => {
+    const fetchMock = vi.fn(async () => jsonRes({ name: 'myrepo', ingesting: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<AddMaterial />);
+    openPanel();
+
+    fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
+      target: { value: '/home/user/code/myrepo' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await screen.findByText(/myrepo: ingesting in the background/i);
+    expect(fetchMock).toHaveBeenCalledWith('/api/ingest/repo', expect.objectContaining({ method: 'POST' }));
+  });
+
   it('a pasted YouTube URL routes to /api/ingest as a caption transcript, same field', async () => {
     const fetchMock = vi.fn(async () => jsonRes({ book: 'The essence of calculus', converting: true }));
     vi.stubGlobal('fetch', fetchMock);

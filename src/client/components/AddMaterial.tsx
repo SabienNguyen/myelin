@@ -71,8 +71,12 @@ export function AddMaterial() {
     // becomes a paper), a local FILE path goes to book ingestion, everything else stays on the
     // repo path. Same door, no extra button. The file case exists because the audit typed a
     // notes file's path here and the repo route rejected its extension with "rename the repo".
+    // Ends in a file extension (and isn't a URL or git@ remote). The length bound is 10, not 5:
+    // `.markdown` is 8 characters and the server converts it (convert.ts, and the file-browse accept
+    // list carries it) — a 5-cap silently sent a pasted `.markdown` PATH to the repo route, the very
+    // "repo route rejects a file's extension" error this file-path branch was added to avoid.
     const looksLikeFilePath = !/^[a-z]+:\/\//i.test(trimmed) && !trimmed.startsWith('git@')
-      && /\.[A-Za-z0-9]{1,5}$/.test(trimmed);
+      && /\.[A-Za-z0-9]{1,10}$/.test(trimmed);
     if (looksLikeFilePath) {
       try {
         const res = await fetch('/api/ingest', {
