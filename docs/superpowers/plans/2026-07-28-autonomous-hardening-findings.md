@@ -131,8 +131,13 @@ page looks like and what the grading model + graph see. **Decision: accept / rej
   high-severity DEV-only advisories, all one transitive dep — `brace-expansion` (a
   DoS-via-unbounded-expansion, GHSA-mh99-v99m-4gvg) pulled in under `electron-builder`'s packaging
   chain (@electron/asar, dmg-builder, electron-winstaller, …). It ships nothing to users, and the DoS
-  is fed by the developer's own build-config globs, not remote input — low priority. The fix is an npm
-  `override` forcing a patched `brace-expansion`, OR `npm audit fix --force` (a breaking
-  `electron-builder` bump). Left for you: it can only be validated by a full `electron-builder`
-  packaging run (tests/tsc/vite/e2e don't exercise that path), so forcing it unverified could break
-  release packaging.
+  is fed by the developer's own build-config globs, not remote input — low priority. The vulnerable
+  copies are `brace-expansion@1.1.16`/`2.1.3` (nested under `electron-builder` → `minimatch@3`); the
+  top-level dep is already patched (5.0.8). The catch: the only patched line is 5.0.8+, so a fix is a
+  1.x/2.x→5.x MAJOR jump — either `npm audit fix --force` (electron-builder major bump, npm confirms
+  `isSemVerMajor: true`) or an `overrides: { "brace-expansion": "^5.0.8" }`. Its `expand()` API is
+  stable across those majors so it would likely work, but the only thing that exercises the vulnerable
+  path is a full `electron-builder` packaging run (tests/tsc/vite/e2e don't), so it can't be validated
+  here — forcing a 4-major override onto the release toolchain unverified, for a non-exploitable dev
+  DoS, isn't worth it. Left for you: apply the override + run a packaging build to confirm installers
+  still build.
