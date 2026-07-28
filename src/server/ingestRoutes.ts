@@ -2,7 +2,7 @@ import type { LanguageModel } from 'ai';
 import { Hono } from 'hono';
 import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
@@ -80,8 +80,17 @@ export function buildIngestRoutes(
     const body = await c.req.parseBody();
     const file = body.file;
     if (!(file instanceof File)) return c.json({ error: 'multipart field "file" is required' }, 400);
+    // file.name is client-controlled. join(tmpDir, "../../etc/x") escapes the temp dir and
+    // writeFileSync would then write to an arbitrary path — basename strips every path component,
+    // and rejecting the two traversal basenames ("." / "..") that survive it keeps the write inside
+    // the fresh temp dir. Same containment the vault's fileWithin and deriveRepoName already enforce
+    // for client-supplied names.
+    const safeName = basename(file.name);
+    if (!safeName || safeName === '.' || safeName === '..') {
+      return c.json({ error: 'invalid file name' }, 400);
+    }
     const tmpDir = mkdtempSync(join(tmpdir(), 'lwh-upload-'));
-    const tmpPath = join(tmpDir, file.name);
+    const tmpPath = join(tmpDir, safeName);
     writeFileSync(tmpPath, Buffer.from(await file.arrayBuffer()));
     const result = startConversion(lw, cfg, tmpPath, { converter: deps.converter, model: deps.model });
     return c.json(result);
