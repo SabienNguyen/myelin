@@ -98,8 +98,16 @@ The teaching-style ("voice") preference lives in the per-student StudentSwitcher
 comment says it "lives with the profile", but `PUT /api/voice` stores it in the global harness config
 (`restRoutes.ts:433`), and the core student model has no voice field. Two learners sharing a vault
 share one teaching style. Recommendation: per-student — implementable harness-only (a per-student
-voice map in config, backward-compatible, no core change). **Decision: per-student, or keep global and
-drop the per-student framing.**
+voice map in config with `cfg.voice` as the global fallback, backward-compatible, no core change).
+**Decision: per-student, or keep global and drop the per-student framing.**
+
+Why this is held while `generate_exercise` (a structurally-similar UI-says-X / code-does-Y gap) was
+shipped: that one had an EXPLICIT code invariant mandating the fix (the "keep in sync by hand"
+comment). Voice has only INFERRED intent with a counter-signal — the UI implies per-student, the
+config stores + comments it as global, and "should teaching style be per-learner?" is a user-facing
+product question, not a code-internal correctness property. Explicit invariant → ship; inferred
+product intent with tension → document. The change is bounded and backward-compatible whenever you
+want it, though — say the word.
 
 ### D. Structured page template (`2026-07-28-structured-page-template.md`)
 
