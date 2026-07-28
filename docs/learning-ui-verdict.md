@@ -756,3 +756,9 @@ Written after the sprint that followed the original verdict; each line names its
   (inside video-ingest.e2e.ts to inherit its runs-last compile-ordering guarantee): a temp
   markdown file's path through the one Add-material field asserts the 200, the Library takeover,
   and the on-disk chapter split. Suite is 9 browser specs.
+- **loreweaver queries.ts audited clean.** The next_lessons engine read for correctness the way
+  the decay bug was found: reviewDue keys on slipped-only (due-soon is the harness's layer),
+  unmetPrereqs teaches deepest-first by post-order DFS with cycle protection, frontier respects
+  decayed prereqs and falls back to easiest-first without embeddings, dedup and caps are sane.
+  Nothing to fix. The dangling attention-scaling probe was also answered (√d_k growth →
+  softmax saturation) — correct, evidence recorded.
