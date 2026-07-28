@@ -830,3 +830,10 @@ Written after the sprint that followed the original verdict; each line names its
   of separating draft/researched/solid. Also observed working: STDP-vs-backprop graded correct;
   the mode default correctly picked learn once the vault held real pages (coldStartMode), which is
   what re-gated the writes to freeform each reload.
+- **Thread-history switching: verified clean, per-thread isolation intact.** Two conversations in
+  one vault (the tone lesson with 6 speak chips + a 6/6 graded matching drill, and the cold-open
+  thread). The history menu listed both with titles and relative times; switching to the opener
+  showed zero speak chips and its own honest WebFetch-failure tool chips, with the URL hash
+  syncing to #/t/default; switching back restored all 6 chips and the graded block exactly — no
+  bleed between threads, no lost work, no stale render. Not every audit finds a bug; this surface
+  holds.
