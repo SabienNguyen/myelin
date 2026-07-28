@@ -59,9 +59,15 @@ function RuntimeInner(
   { mode, threadId, initial, children }: PropsWithChildren<{ mode: string; threadId: string; initial: UIMessage[] }>,
 ) {
   const runtime = useChatRuntime({
-    // body is a function so `writeUp` is resolved per REQUEST, not captured once at mount: the
-    // "write this up" button (OfferWrite.tsx) arms a one-shot flag just before it sends, and only
-    // that single request should carry it. mode/threadId are stable for the transport's life.
+    // body is a function so its fields are resolved per REQUEST, not captured once at mount. Two
+    // things ride on that: `writeUp` — the "write this up" button (OfferWrite.tsx) arms a one-shot
+    // flag just before it sends, and only that request should carry it; and `mode` — the topbar
+    // selector changes it WITHOUT remounting (only `threadId` remounts, via App's key), so each
+    // request must read the CURRENT mode. Driving a mid-thread switch in the browser confirms the
+    // wire carries the newly-selected mode (learn → freeform → quiz across three sends), which only
+    // holds because this closure is re-created each render. Do NOT hoist this transport into a
+    // useMemo([]) / module scope to avoid re-creating it: that freezes `mode` at mount and silently
+    // ignores the selector — the failure is invisible until someone switches mode and it's ignored.
     transport: new AssistantChatTransport({
       api: '/api/chat',
       body: () => ({ mode, threadId, writeUp: consumeWriteIntent() }),
