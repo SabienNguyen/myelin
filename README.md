@@ -133,8 +133,14 @@ UIMessage chunk shapes the chat client already understands, so no client changes
   through a `PreToolUse` hook's `updatedInput` — verified against a live subscription login;
   `canUseTool` is shadowed on this path (the SDK's own `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning
   names the fix).
-- **Known gap:** the research tools (`web_search`/`read_url`, `ingest_paper`) are not wired on
-  this path yet; everything else freeform mode offers is.
+- **Research is wired through the SDK's own WebSearch/WebFetch** — always on in freeform (where
+  subjects get researched and compiled), and unlocked in teaching modes only when the vault has a
+  real gap for what the student asked (same `vaultGap` contract as the ai-sdk path). The system
+  prompt renames the tools accordingly so the model never claims phantom `web_search`/`read_url`.
+- **The freeform-only write rule is enforced structurally**, not just by prompt: the same
+  `PreToolUse` hook denies `write_page`/`link_pages`/`compile_source`/`create_path` outside
+  freeform (`allowedTools` gates nothing under `bypassPermissions`, so prompt-only restraint was
+  overridable — a live sitting proved it).
 </details>
 
 ## Desktop app
