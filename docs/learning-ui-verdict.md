@@ -803,3 +803,5 @@ Written after the sprint that followed the original verdict; each line names its
   as navigation). The pronunciation-GRADING half — a tone-contour mechanical checker via
   CREPE/pyin pitch tracking, which fits the app's grading thesis exactly — is designed against
   real open-source components in docs/pronunciation-roadmap.md, deliberately not half-wired.
+- **AppImage re-batched through the speak feature** — the SPA bundle carries the hear-this
+  control, verified by inspection. Artifact current with the new capability.
