@@ -13,7 +13,7 @@ export function QuizInner({ args, addResult }: {
   return (
     <div className="block quiz">
       <h2>{args.title}</h2>
-      {args.items.map((item: any) => (
+      {args.items.map((item: any, i: number) => (
         <div className="quiz-item" key={item.id}>
           <BlockProse text={item.prompt} />
           {item.type === 'choice'
@@ -25,7 +25,11 @@ export function QuizInner({ args, addResult }: {
                 >{ch}</button>
               ))
             : (
+              // The prompt sits right above (BlockProse), but it isn't programmatically tied to the
+              // field — a screen-reader user tabbing here would otherwise hear "edit text, blank".
+              // A positional label disambiguates it from the other items' inputs.
               <input
+                aria-label={`answer for question ${i + 1}`}
                 value={answers[item.id] ?? ''}
                 onChange={(e) => setAnswer(item.id, e.target.value)}
               />

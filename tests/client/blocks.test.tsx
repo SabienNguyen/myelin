@@ -14,7 +14,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
 const appendSpy = vi.fn();
 import { render, screen } from '@testing-library/react';
 import { MathScratchpad } from '../../src/client/components/blocks/MathScratchpad.js';
-import { Quiz } from '../../src/client/components/blocks/Quiz.js';
+import { Quiz, QuizInner } from '../../src/client/components/blocks/Quiz.js';
 import { StructuredCheck } from '../../src/client/components/blocks/StructuredCheck.js';
 import { WritingDraftInner } from '../../src/client/components/blocks/WritingDraft.js';
 
@@ -32,6 +32,22 @@ describe('blocks survive a server-rejected (non-contract) result', () => {
     />);
     expect(screen.getByText('Stream parsing check')).toBeTruthy();
     expect(screen.getByText(/which survives across reads/i)).toBeTruthy();
+  });
+
+  it('Quiz short-answer inputs each carry a distinct accessible name', () => {
+    // A screen-reader user must not meet a row of blank "edit text" fields — each answer input is
+    // named by its position, since the visible prompt above it isn't programmatically tied to it.
+    // QuizInner (not Quiz): the writing view of Quiz renders through StagePortal, which lands
+    // outside the test container — QuizInner is the same body the portal hosts.
+    render(<QuizInner
+      args={{ title: 'T', items: [
+        { id: 'q1', type: 'short', prompt: 'Define entropy', pageSlug: 's' },
+        { id: 'q2', type: 'short', prompt: 'Define enthalpy', pageSlug: 's' },
+      ] }}
+      addResult={vi.fn()}
+    />);
+    expect(screen.getByRole('textbox', { name: /answer for question 1/i })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: /answer for question 2/i })).toBeTruthy();
   });
 
   it('StructuredCheck renders the prompt and a blank answer on missing result.values', () => {

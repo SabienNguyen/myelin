@@ -230,7 +230,9 @@ export function WritingDraftInner({ args, result, addResult }: {
           </ul>
         </div>
       )}
-      <textarea value={draft} onChange={(e) => setDraft(e.target.value)} />
+      {/* Labelled for a screen reader: the prompt (BlockProse) and rubric sit above but aren't tied
+          to the field, so without this it announced as a blank, purposeless text area. */}
+      <textarea aria-label="your draft" value={draft} onChange={(e) => setDraft(e.target.value)} />
       <HarperReview lints={lints} onApply={applyLint} />
       {/* The mechanical-issue count rides into the result so grading can weigh the draft's mechanics
           on a machine signal, not the model's read of them. */}

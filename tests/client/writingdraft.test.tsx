@@ -14,7 +14,8 @@ describe('WritingDraft', () => {
   it('submits the draft', () => {
     const addResult = vi.fn();
     render(<WritingDraftInner args={{ prompt: 'Argue X', round: 1, pageSlug: 'thesis' }} result={undefined} addResult={addResult} />);
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'My argument.' } });
+    // The draft field carries an accessible name — a screen reader must not hear a blank text area.
+    fireEvent.change(screen.getByRole('textbox', { name: /your draft/i }), { target: { value: 'My argument.' } });
     fireEvent.click(screen.getByRole('button', { name: /submit/i }));
     // mechanicalIssues rides along from the live Harper review (0 here — the WASM never loaded in
     // jsdom, so the debounced lint leaves the count at its initial 0).
