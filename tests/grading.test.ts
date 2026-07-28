@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mathEquivalent, freeVariables, gradeBlockOutput } from '../src/server/grading.js';
+import { extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
 import type { ClaudeSdkGenerateOpts, ClaudeSdkResult } from '../src/server/claudeSdk.js';
 
 describe('mathEquivalent (numeric sampling)', () => {
@@ -492,5 +492,32 @@ describe('math_scratchpad step-chain break detection', () => {
       { steps: [{ latex: '2x=8' }, { latex: 'x=5' }], finalLatex: 'x=5' }, cfg, {} as any);
     expect(g.verdict).toBe('incorrect');
     expect(g.detail).toContain('breaks between steps 1 and 2');
+  });
+});
+
+// A live session-plan sitting answered a numeric check with its full derivation and was told
+// "no number found in the answer" — parseLeadingNumber anchors at the start, and showing your
+// work must never read as not answering. extractAnswerNumber's ladder: leading, then after the
+// last '=', then a lone number token; genuinely ambiguous stays NaN.
+describe('extractAnswerNumber — the number a free-text answer means', () => {
+  it('a derivation ending in the final answer', () => {
+    expect(extractAnswerNumber('C = 1/2 (1 - 0.8)^2 = 1/2 (0.2)^2 = 0.02')).toBe(0.02);
+    expect(extractAnswerNumber('x = 4')).toBe(4);
+  });
+  it('leading-number fast path unchanged (unit exponents stay ignored)', () => {
+    expect(extractAnswerNumber('9.81 m/s^2')).toBe(9.81);
+    expect(extractAnswerNumber('1,024')).toBe(1024);
+  });
+  it('a lone number anywhere in prose', () => {
+    expect(extractAnswerNumber('about 0.02')).toBe(0.02);
+    expect(extractAnswerNumber('answer: 42')).toBe(42);
+  });
+  it('ambiguity stays NaN rather than guessing', () => {
+    expect(Number.isNaN(extractAnswerNumber('between 3 and 5'))).toBe(true);
+    expect(Number.isNaN(extractAnswerNumber('no idea'))).toBe(true);
+  });
+  it('gradeStructured accepts a shown-work numeric answer end to end', () => {
+    const g = gradeStructured({ kind: 'numeric', expected: 0.02 }, ['C = 1/2 (1 - 0.8)^2 = 0.02']);
+    expect(g.allCorrect).toBe(true);
   });
 });

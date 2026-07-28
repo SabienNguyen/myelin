@@ -589,3 +589,16 @@ Written after the sprint that followed the original verdict; each line names its
   an hour earlier), loss-functions with "just 1 day of slack left," and an honest "no reviews are
   actually due right now" that matches /api/due's due-soon-versus-slipped distinction. The
   injected fresh context is doing its job.
+- **Session-plan CTA driven live on the mid-journey vault — the sitting worked, and its first
+  probe exposed a grader bug.** The hero's "Start today's session (3 items)" rendered the right
+  plan (review loss-functions "1d before it slips", then two frontier items), one click sent the
+  ordered contract, and the tutor obeyed it: probed the review item first (an MSE computation)
+  before any reteaching. The bug: answering that probe with the full derivation — "C = 1/2
+  (1 - 0.8)^2 = ... = 0.02" — was graded "no number found in the answer", because
+  parseLeadingNumber anchors at the string's start. Showing your work must never read as not
+  answering. The tutor's save was itself exemplary (told the learner their algebra was right and
+  the auto-grader wanted a bare number — honest about its own machinery), but the grader now
+  meets learners where they are: extractAnswerNumber tries the leading number, then the number
+  after the last '=' (every derivation's final-answer convention, and "x = 4"), then a lone
+  number token in prose ("about 0.02"); genuine ambiguity ("between 3 and 5") still refuses to
+  guess. Suite crossed 1000 tests with the five new cases.

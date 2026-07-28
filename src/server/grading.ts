@@ -224,6 +224,28 @@ export function parseLeadingNumber(s: string): number {
   return m ? Number(m[0]) : NaN;
 }
 
+/** The number a learner's free-text answer MEANS. A live session-plan sitting answered a numeric
+ * check with its full derivation — "C = 1/2 (1 - 0.8)^2 = ... = 0.02" — and was told "no number
+ * found in the answer": parseLeadingNumber anchors at the string's start, and showing your work
+ * is the one thing a tutor must never punish. Conservative ladder, first hit wins:
+ *   1. leading number (unchanged fast path — keeps "9.81 m/s^2" ignoring the exponent's 2);
+ *   2. the number right after the LAST '=' — the final-answer convention of any derivation,
+ *      and of "x = 4";
+ *   3. the string's only number token, if there is exactly one — "about 0.02", "answer: 0.02".
+ * Anything still ambiguous ("between 3 and 5") stays NaN: guessing which number a learner meant
+ * is worse than asking them to restate it. */
+export function extractAnswerNumber(s: string): number {
+  const lead = parseLeadingNumber(s);
+  if (!Number.isNaN(lead)) return lead;
+  const lastEq = s.lastIndexOf('=');
+  if (lastEq !== -1) {
+    const after = parseLeadingNumber(s.slice(lastEq + 1));
+    if (!Number.isNaN(after)) return after;
+  }
+  const tokens = s.replace(/,(?=\d{3}\b)/g, '').match(/[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/g);
+  return tokens?.length === 1 ? Number(tokens[0]) : NaN;
+}
+
 interface StructuredGrade {
   allCorrect: boolean;
   anyCorrect: boolean;
@@ -237,7 +259,7 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
   const clean = values.map((v) => String(v ?? '')).filter((v) => v.trim() !== '');
 
   if (checker.kind === 'numeric') {
-    const got = parseLeadingNumber(clean[0] ?? '');
+    const got = extractAnswerNumber(clean[0] ?? '');
     if (Number.isNaN(got)) {
       return { allCorrect: false, anyCorrect: false, detail: 'no number found in the answer' };
     }
