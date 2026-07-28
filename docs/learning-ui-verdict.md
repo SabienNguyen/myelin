@@ -713,3 +713,5 @@ Written after the sprint that followed the original verdict; each line names its
   event, so the chip could only switch to a readerless Page tab. The result now carries the
   chapter path and the chip re-emits openSource (with a re-resolve-by-title fallback for chips
   saved before the path rode along — which is exactly the path the live re-drive exercised).
+- **AppImage re-batched through the reading-chip fix** — the SPA bundle in the asar carries the
+  chip's re-open wiring, verified by inspection. Artifact fully current with all sixteen fixes.
