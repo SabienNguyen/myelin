@@ -5,16 +5,20 @@
 // of thing a later "simplification" drops — these pin it, plus the accessible name each state
 // carries (the dot's colour is aria-hidden, so the label is the only non-visual carrier of state).
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import { TopbarStatus } from '../../src/client/components/TopbarStatus.js';
 
-function stubStatus(status: Record<string, unknown>) {
-  // Only /api/status matters on mount; StudentSwitcher fetches /api/students & /api/voice lazily
-  // (on open), so a catch-all that answers status and returns {} elsewhere is enough here.
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => ({
-    ok: true,
-    json: async () => (String(url).endsWith('/api/status') ? status : {}),
-  })) as any);
+function stubStatus(status: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+  // /api/status on mount; StudentSwitcher fetches /api/students & /api/voice on open. `extra` lets
+  // a test seed those (e.g. a students list) — otherwise they resolve to {}.
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const u = String(url);
+    const body = u.endsWith('/api/status') ? status
+      : u.endsWith('/api/students') ? (extra.students ?? {})
+        : u.endsWith('/api/voice') ? (extra.voice ?? {})
+          : {};
+    return { ok: true, json: async () => body };
+  }) as any);
 }
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -50,5 +54,32 @@ describe('TopbarStatus — the Anki badge is shown only when it says something u
     render(<TopbarStatus />);
     await screen.findByText('Sonnet');
     await waitFor(() => expect(document.querySelector('[class*="anki-"]')).toBeNull());
+  });
+});
+
+describe('StudentSwitcher — a popup with inputs is a dialog, not a menu', () => {
+  // It holds two text inputs (teaching style, new student) beside the student buttons. ARIA forbids
+  // a text field inside role="menu", and role="menu" advertises the arrow-key model this popup never
+  // implemented. It must announce as a dialog (like AddMaterial, its structural twin), and the
+  // student options must NOT carry role="menuitem" (which would re-assert the menu contract).
+  it('opens a dialog, and the student options are plain buttons — no menu roles anywhere', async () => {
+    stubStatus(
+      { student: 'e2e', tutor: 'claude-sdk:sonnet' },
+      { students: { current: 'e2e', students: ['e2e', 'alex'] }, voice: { voice: '' } },
+    );
+    render(<TopbarStatus />);
+    const trigger = await screen.findByRole('button', { name: /switch student/i });
+    expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
+
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    // The popup announces as a dialog…
+    const dialog = await screen.findByRole('dialog', { name: /switch student/i });
+    expect(dialog).toBeTruthy();
+    // …a switch target renders (proving the students fetch resolved into the popup)…
+    await screen.findByRole('button', { name: /alex/i });
+    // …and nothing inside claims to be a menu or a menu item.
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(document.querySelector('[role="menuitem"]')).toBeNull();
   });
 });

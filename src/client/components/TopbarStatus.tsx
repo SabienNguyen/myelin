@@ -124,16 +124,22 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
       <button
         ref={badgeRef}
         type="button" className="badge student-badge"
-        aria-haspopup="menu" aria-expanded={open}
+        aria-haspopup="dialog" aria-expanded={open}
         aria-label={`student: ${current} — switch student`}
         onClick={() => setOpen((o) => !o)}
       >
         <UserCircle size={14} weight="duotone" /> {current}
       </button>
+      {/* A dialog, not a menu — same call AddMaterial makes, and for the same reason: this popup
+          holds two text INPUTS (teaching style, new student) alongside the student buttons, and
+          ARIA forbids a text field inside role="menu". role="menu" also promised the APG arrow-key
+          model (focus into the list on open, roving Up/Down) that HistoryMenu implements and this
+          never did — announcing "menu" then trapping a screen-reader user with no roving and inputs
+          a menu can't contain. Dialog is what it actually is: open it, Tab through, Escape out. */}
       {open && (
-        <span className="student-menu" role="menu" aria-label="switch student">
+        <span className="student-menu" role="dialog" aria-label="switch student">
           {students.map((s) => (
-            <button key={s} type="button" role="menuitem" className={s === current ? 'on' : ''}
+            <button key={s} type="button" className={s === current ? 'on' : ''}
               onClick={() => (s === current ? setOpen(false) : switchTo(s))}>
               {s}{s === current ? ' \u00b7 current' : ''}
             </button>
