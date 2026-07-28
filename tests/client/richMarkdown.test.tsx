@@ -24,6 +24,18 @@ describe('RichMarkdown — the one markdown-string renderer', () => {
     expect(container.querySelector('.katex')).not.toBeNull();
   });
 
+  it('does NOT run the chat path\'s \\[…\\] normaliser — that syntax is a transcript stamp label here', () => {
+    // Deliberate: a video transcript's timestamp deep links render as `[\[1:05\]](url)` (escaped
+    // brackets as the visible label). If this renderer ran mathDelims, the `\[1:05\]` would be eaten
+    // as display math and the link would break. Model pages use $$ for display math, which typesets
+    // fine; only free chat prose emits \[…\], and only the chat path normalises it.
+    const { container } = render(<RichMarkdown text={'jump to [\\[1:05\\]](https://youtu.be/x?t=65s)'} />);
+    const a = container.querySelector('a');
+    expect(a?.getAttribute('href')).toBe('https://youtu.be/x?t=65s');
+    expect(a?.textContent).toBe('[1:05]');
+    expect(container.querySelector('.katex')).toBeNull();
+  });
+
   it('routes a ```mermaid fence to the diagram renderer, not a code block', () => {
     const { getByTestId } = render(<RichMarkdown text={'```mermaid\ngraph LR\n A-->B\n```'} />);
     expect(getByTestId('mermaid').textContent).toContain('graph LR');

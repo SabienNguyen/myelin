@@ -13,6 +13,13 @@ import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
  * block's prompt — was repeating this exact plugin set; a UI audit that added maths and diagrams to
  * the readers left the config copied four ways. This is the single source of truth for the three.
  *
+ * Deliberately NOT mathDelims (the chat path's \(…\)/\[…\] → $-delimiter normaliser): the content
+ * here uses `\[…\]` for its OWN purpose — a video transcript's timestamp deep links are emitted as
+ * `[\[1:05\]](url)`, escaped brackets as the visible label — so running mathDelims would eat the
+ * `\[1:05\]` as display math and break the link (a regression the transcriptStamp tests catch).
+ * Model-written pages and converted papers use `$…$`/`$$…$$`, which this already typesets; the
+ * chat path owns \(…\) because only free chat prose emits them.
+ *
  * (MarkdownText stays separate: it renders the assistant-ui message part it is mounted inside, not
  * an arbitrary string, so it can't share this component — but it shares the same WikiLink and
  * CodeOrDiagram, so the two still agree on what `$…$` and a mermaid fence mean.)
