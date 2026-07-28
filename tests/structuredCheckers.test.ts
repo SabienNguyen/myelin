@@ -109,6 +109,11 @@ describe('notes — pitch arithmetic, enharmonic-aware', () => {
     expect(parseNote('E').pc).toBe(4);
   });
 
+  it('accepts the natural sign — "F♮" is plain F, not a parse error', () => {
+    expect(parseNote('F♮').pc).toBe(parseNote('F').pc);
+    expect(gradeNotes(['F♮'], { expected: ['F'] }).ok).toBe(true);
+  });
+
   it('accepts either enharmonic spelling — C# names the same key as Db', () => {
     const majorThirdAboveB = { expected: ['D#'] };
     expect(gradeNotes(['D#'], majorThirdAboveB).ok).toBe(true);

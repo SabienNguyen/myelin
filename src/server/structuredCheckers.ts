@@ -206,13 +206,14 @@ const LETTER_PC: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, 
 /** `C#4` -> { pc, absolute } — pc is the semitone class (0–11), absolute is MIDI-style when an
  *  octave is given. Accidentals: # ♯ (+1 each), b ♭ (−1 each), x (+2). Throws on non-notes. */
 export function parseNote(raw: string): { pc: number; absolute: number | null } {
-  const m = raw.trim().match(/^([A-Ga-g])([#♯b♭x]*)(-?\d+)?$/);
+  const m = raw.trim().match(/^([A-Ga-g])([#♯b♭x♮]*)(-?\d+)?$/);
   if (!m) throw new Error(`“${raw.trim()}” is not a note name`);
   const letter = m[1].toUpperCase();
   let pc = LETTER_PC[letter];
   for (const acc of m[2]) {
     if (acc === '#' || acc === '♯') pc += 1;
     else if (acc === 'b' || acc === '♭') pc -= 1;
+    else if (acc === '♮') { /* natural sign — a valid way to write "F♮" for plain F; no change */ }
     else pc += 2; // x, double sharp
   }
   const octave = m[3] !== undefined ? Number(m[3]) : null;
