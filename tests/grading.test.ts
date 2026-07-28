@@ -291,6 +291,31 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'struggled' });
   });
 
+  // pronounce — grading is client-side (audio stays local); the server mints evidence from the
+  // reported outcome. `applied` requires `required` clean attempts, so no single lucky try mints
+  // mastery — the "require several passes" rule.
+  it('pronounce: applied (3/3 clean) -> applied-correctly', async () => {
+    const g = await gradeBlockOutput('pronounce',
+      { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'vietnamese-tones', requiredPasses: 3 },
+      { passes: 3, required: 3, applied: true, attempts: 4 }, cfg);
+    expect(g.verdict).toBe('correct');
+    expect(g.evidence[0]).toMatchObject({ slug: 'vietnamese-tones', kind: 'applied-correctly' });
+    expect(g.detail).toContain('3/3');
+  });
+  it('pronounce: some clean but short of required -> exposed, never applied-correctly', async () => {
+    const g = await gradeBlockOutput('pronounce',
+      { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'vietnamese-tones', requiredPasses: 3 },
+      { passes: 1, required: 3, applied: false, attempts: 5 }, cfg);
+    expect(g.verdict).toBe('partial');
+    expect(g.evidence[0]).toMatchObject({ kind: 'exposed' });
+  });
+  it('pronounce: no clean attempt -> struggled', async () => {
+    const g = await gradeBlockOutput('pronounce',
+      { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'vietnamese-tones' },
+      { passes: 0, required: 3, applied: false, attempts: 3 }, cfg);
+    expect(g.evidence[0]).toMatchObject({ kind: 'struggled' });
+  });
+
   it('failing-case NAMES ride into the struggled note and detail — a diagnosis, not a score', async () => {
     const g = await gradeBlockOutput('code_exercise',
       { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },

@@ -517,6 +517,33 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
 
+/* pronounce — the spoken-language block (Pronounce.tsx): hear, record, and see your pitch contour
+   drawn over the target so a tone miss is visible, not just told. */
+.pronounce-word { font-size: 1.8rem; font-weight: 600; margin: 0.3rem 0 0; }
+.pronounce-gloss { font-size: 1rem; font-weight: 400; color: var(--text-muted); }
+.pronounce-tone { margin: 0.2rem 0 0.8rem; color: var(--text-muted); }
+.pronounce-controls { display: flex; gap: 0.6rem; margin-bottom: 0.7rem; }
+.pronounce-hear, .pronounce-rec {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.45rem 0.9rem; border-radius: 8px; cursor: pointer;
+  font-family: var(--font-prose); font-size: 0.95rem; font-weight: 600;
+  border: 1px solid var(--border); background: var(--bg-panel); color: var(--text);
+}
+.pronounce-rec { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.pronounce-rec.is-recording { background: var(--bad); color: var(--bg); border-color: var(--bad); }
+.pronounce-feedback { margin: 0.4rem 0; }
+.pronounce-overlay { width: 100%; max-width: 340px; height: auto; display: block; }
+.pronounce-target { stroke: var(--text-muted); stroke-width: 2; stroke-dasharray: 4 3; opacity: 0.7; }
+.pronounce-learner { stroke: var(--accent); stroke-width: 2.5; }
+.pronounce-ok { color: var(--good); margin: 0.2rem 0; }
+.pronounce-miss { color: var(--text-muted); margin: 0.2rem 0; }
+.pronounce-error { color: var(--bad); font-size: 0.88rem; }
+.pronounce-progress { font-weight: 600; margin: 0.5rem 0 0.3rem; }
+.pronounce-give-up {
+  border: none; background: none; color: var(--text-muted);
+  text-decoration: underline; cursor: pointer; font-size: 0.85rem; padding: 0;
+}
+
 /* ime — the language input-method toggle on an answer field (ImeInput.tsx). Lets a learner type
    a target language (Vietnamese Telex) from an ASCII keyboard, with an honest off switch. */
 .ime-form { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }

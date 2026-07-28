@@ -12,6 +12,7 @@ import { CodeExercise } from './components/blocks/CodeExercise.js';
 import { LabelDiagram } from './components/blocks/LabelDiagram.js';
 import { Speak } from './components/blocks/Speak.js';
 import { OfferWrite } from './components/blocks/OfferWrite.js';
+import { Pronounce } from './components/blocks/Pronounce.js';
 
 /** Two different failures wear the error flag: a call the server REJECTED (schema mismatch —
  *  the tutor's mistake) and a call that was CANCELLED because the conversation moved on (the
@@ -85,6 +86,8 @@ export const toolkit = defineToolkit({
   code_exercise: human('code_exercise', 'Programming-pattern code exercise (the Gap ladder)', CodeExercise),
   // The picture-subject applied block: label regions of a tutor-drawn SVG, graded mechanically.
   label_diagram: human('label_diagram', 'Label regions of a diagram', LabelDiagram),
+  // The spoken-language applied block: say a word, graded on its tone contour, client-side.
+  pronounce: human('pronounce', 'Say a word, graded on its tone', Pronounce),
   // UI tool, not a block: navigation with a receipt, never graded (src/shared/uiTools.ts).
   open_source: {
     type: 'human' as const,

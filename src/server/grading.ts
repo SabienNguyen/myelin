@@ -576,6 +576,28 @@ export async function gradeBlockOutput(
     };
   }
 
+  // pronounce — the tone grade is computed CLIENT-side (the audio never leaves the browser;
+  // Pronounce.tsx runs pitchTrack + gradeTone and the learner sees the contour overlay, so the
+  // verdict is transparent, not a black box). The server mints evidence from the reported outcome.
+  // `applied` is true only when the learner hit the tone cleanly `required` separate times — the
+  // "require several passes" rule is what lets a machine-graded sound mint applied-correctly
+  // without a single lucky attempt counting as mastery.
+  if (tool === 'pronounce') {
+    const applied = result.applied === true;
+    const passes = Number(result.passes ?? 0);
+    const required = Number(result.required ?? input.requiredPasses ?? 3);
+    const kind: EvidenceKind = applied ? 'applied-correctly' : passes > 0 ? 'exposed' : 'struggled';
+    return {
+      verdict: applied ? 'correct' : passes > 0 ? 'partial' : 'incorrect',
+      source: 'mechanical',
+      detail: applied
+        ? `said “${input.word}” with the right ${input.tone} tone ${passes}/${required} times`
+        : `${passes}/${required} clean — ${input.tone} needs ${required} to count`,
+      evidence: [ev(input.pageSlug, kind,
+        `pronounced “${input.word}” (${input.tone} tone)`, 'mechanical')],
+    };
+  }
+
   if (tool === 'code_exercise') {
     // Sandbox unreachable: record NOTHING. A learner who never got to attempt the exercise has
     // demonstrated neither success nor struggle, and an empty evidence array is what stops the

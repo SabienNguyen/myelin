@@ -64,15 +64,18 @@ the browser, no new runtime dependency — or CREPE server-side for higher accur
 `tone_contour` checker-kind wired into `structured_check` so a pass mints `applied-correctly`
 evidence. The template set is a hand-drawn v1; a corpus-fit upgrade is a later step.
 
-### Why it isn't fully wired yet
+### Update: fully wired and shipped
 
-The grading *math* is done and needs no new dependency (above). What remains is the I/O around it,
-and one genuine design decision: the mic-capture UX — how a "say this" prompt records, plays back,
-and re-tries — plus a pitch tracker to feed the F0 array. That tracker can be pure-JS Web Audio
-autocorrelation (no new runtime dependency, browser-only) for a v1, with CREPE server-side as a
-later accuracy upgrade if noisy mics warrant it; Python is an option, not a requirement. Wiring a
-half-built version would violate the honesty rule that made `speak` degrade loudly, so the mic UX
-is left for a deliberate build rather than bolted on. The grounded components are all here now.
+The whole pipeline is now live as the `pronounce` block. Pitch tracking is `pitchy` (MIT, the
+maintained McLeod/NSDF implementation — we leverage it rather than the hand-rolled NSDF).
+`Pronounce.tsx` captures the mic (`getUserMedia`/`MediaRecorder`), decodes to mono PCM, runs
+`gradePronunciation` (pitchTrack → gradeTone), and draws the learner's contour over the target so
+a miss is visible, not just told. The audio never leaves the browser. It mints `applied-correctly`
+only after `requiredPasses` clean attempts (default 3), so one lucky try is never mastery — the
+"require several passes" rule. Verified end to end in a real browser via Chromium's fake-audio
+device feeding a generated tone: recorded → decoded → graded → evidence recorded → page to
+mastered. A corpus-fit template set and a CREPE server-side option for noisy mics remain later
+upgrades; the v1 hand-drawn templates tell the tones apart cleanly (tests/toneContour.test.ts).
 
 **Prior art for non-tone languages:** [speechocean762](https://www.researchgate.net/publication/354221406)
 is an open corpus for phoneme/word/sentence pronunciation scoring, and CMUSphinx documented an

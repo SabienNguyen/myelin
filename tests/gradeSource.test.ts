@@ -121,6 +121,14 @@ const BEST_CASE: { tool: any; input: any; result: any; expect: GradeSource }[] =
     expect: 'mechanical',
   },
   {
+    tool: 'pronounce',
+    // Grading is client-side (audio stays local); the server mints from the reported outcome, and
+    // the applied path is mechanical — no model judges a tone.
+    input: { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'p', requiredPasses: 3 },
+    result: { passes: 3, required: 3, applied: true, attempts: 3 },
+    expect: 'mechanical',
+  },
+  {
     tool: 'writing_draft',
     input: { prompt: 'write', round: 1, pageSlug: 'p' },
     result: { draft: 'a strong, concise, specific paragraph.' },

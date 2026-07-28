@@ -922,3 +922,13 @@ Written after the sprint that followed the original verdict; each line names its
   field rendered, typing `mas` produced `má`, and it graded correct with evidence recorded.
   Non-Latin scripts (Cyrillic, Arabic, CJK) would layer on `simple-keyboard` (MIT) as a later
   step — noted, not bundled, to keep the warm-paper surface and avoid a heavy dep for v1.
+- **Grading DOING, not just knowing, for sound: the `pronounce` block.** The payoff of the
+  pronunciation work — a spoken-language applied block. The learner hears the word, records
+  themselves, and their pitch contour is drawn over the target tone's reference shape so a miss is
+  visible, not merely told; grading is mechanical (pitch-track shape vs template, no model), and
+  the audio never leaves the browser. Pitch detection leverages `pitchy` (OSS McLeod/NSDF) rather
+  than a hand-roll. It mints applied-correctly only after N clean attempts (requiredPasses,
+  default 3) — a single lucky try is never mastery, the honesty rule the user chose. Verified end
+  to end in a real browser via Chromium's fake-audio device: recorded → decoded → graded "Level
+  and steady — that's ngang" with the overlay drawn, 2/2 clean passes minted applied-correctly,
+  page to mastered. Eight block kinds now; 1054 unit + 9 e2e green.

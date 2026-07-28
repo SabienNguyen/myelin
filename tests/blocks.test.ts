@@ -5,9 +5,9 @@ describe('block schemas', () => {
   // Was "the five v1 kinds". structured_check is the sixth: the generic applied block, added so
   // applied evidence is reachable outside maths/prose/programming (see src/shared/blocks.ts). This
   // list stays exhaustive on purpose — a new block kind should have to be added here deliberately.
-  it('exposes exactly the seven block kinds', () => {
+  it('exposes exactly the eight block kinds', () => {
     expect(BLOCK_TOOL_NAMES.sort()).toEqual(
-      ['code_exercise', 'label_diagram', 'math_scratchpad', 'quick_check', 'quiz', 'structured_check', 'writing_draft'],
+      ['code_exercise', 'label_diagram', 'math_scratchpad', 'pronounce', 'quick_check', 'quiz', 'structured_check', 'writing_draft'],
     );
   });
   it('structured_check round-trips each checker kind', () => {

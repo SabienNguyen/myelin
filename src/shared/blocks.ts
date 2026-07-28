@@ -221,10 +221,41 @@ const labelDiagram = {
   }),
 };
 
+/**
+ * pronounce — the APPLIED block for a spoken language, and the first block that grades DOING rather
+ * than knowing for sound. A tone language's tones ARE pitch contours (docs/pronunciation-roadmap.md),
+ * so a learner's attempt is graded the same mechanical way a numeric answer is: their microphone
+ * pitch track is compared in shape against the reference tone template (toneContour.gradeTone), no
+ * model opinion. The audio never leaves the browser — capture, pitch tracking, and grading are all
+ * client-side (Pronounce.tsx), a privacy property worth keeping; the block reports only the outcome.
+ *
+ * requiredPasses is why this can mint 'applied-correctly' honestly: a single lucky attempt is not
+ * mastery, so the block withholds `applied` until the learner hits the intended tone cleanly that
+ * many separate times in the sitting (the "require several passes" rule).
+ */
+const pronounce = {
+  input: z.object({
+    word: z.string(),                    // the syllable/word to say, in the target script
+    lang: z.string(),                    // BCP-47 tag for the hear-it voice (e.g. "vi")
+    tone: z.enum(['ngang', 'huyen', 'sac', 'hoi', 'nga', 'nang']),
+    gloss: z.string().optional(),        // meaning, shown beside the word
+    requiredPasses: z.number().int().min(1).max(5).optional(), // clean attempts to mint applied; default 3
+    pageSlug: z.string(),
+  }),
+  result: z.object({
+    passes: z.number(),                  // clean attempts achieved
+    required: z.number(),                // how many were needed
+    applied: z.boolean(),                // passes >= required — the only path to applied-correctly
+    attempts: z.number().optional(),     // total tries, for the struggled note
+    bestSimilarity: z.number().optional(),
+  }),
+};
+
 export const BLOCK_TOOLS = {
   quick_check: quickCheck,
   structured_check: structuredCheck,
   label_diagram: labelDiagram,
+  pronounce,
   quiz,
   math_scratchpad: mathScratchpad,
   writing_draft: writingDraft,
