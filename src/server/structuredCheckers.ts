@@ -19,9 +19,27 @@ interface CheckerVerdict { ok: boolean; detail: string }
 
 // ── unit: quantity equivalence via real unit algebra ───────────────────────────────────────────
 
+/** Rewrite scientific notation written the printed way — "3 × 10^8", "3 × 10⁸", "1.6 x 10^-19" —
+ *  into the e-notation both Number() and mathjs understand ("3e8"). Shared by the numeric checker
+ *  (grading.ts imports this) and the unit checker below; lives here because this file is a leaf and
+ *  grading.ts already depends on it. Deliberately narrow: only the mantissa×10^exp shape, and "10"
+ *  must be the whole base ((?!\d)), so a unit exponent like "m/s^2" (no "× 10") is left alone. */
+export function normalizeSciNotation(s: string): string {
+  return s.replace(
+    /([+-]?\d*\.?\d+)\s*[×xX*·∙]\s*10(?!\d)\s*\^?\s*([+-]?\d+|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+)/g,
+    (_, mantissa: string, exp: string) => {
+      const e = exp.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
+      return `${mantissa}e${e}`;
+    },
+  );
+}
+
 /** Learner-typed quantities arrive with typography mathjs does not speak. */
 function normalizeQuantity(s: string): string {
-  return s.trim()
+  // Scientific notation FIRST, into e-notation: mathjs parses "3e8 m/s" but rejects "3 * 10^8 m/s",
+  // so this must run before the ×→* rewrite below consumes the "×". Otherwise a physics answer of
+  // "3 × 10^8 m/s" for the speed of light could not be read as a quantity at all.
+  return normalizeSciNotation(s.trim())
     .replace(/[·×]/g, '*')
     // Superscript exponents in the printed form → caret notation mathjs parses. The old two-line
     // version only caught ² and ³; this also folds s⁻¹ (inverse second — dimensionally Hz), m⁻²,

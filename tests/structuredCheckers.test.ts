@@ -21,6 +21,15 @@ describe('unit — quantity equivalence, not digit equality', () => {
     expect(gradeUnitAnswer('1000 mJ', { expected: 1, unit: 'J' }).ok).toBe(true);
   });
 
+  it('accepts scientific notation written the printed way (3 × 10^8 m/s), not just e-notation', () => {
+    const c = { expected: 3e8, unit: 'm/s' }; // speed of light
+    expect(gradeUnitAnswer('3 × 10^8 m/s', c).ok).toBe(true);
+    expect(gradeUnitAnswer('3 × 10⁸ m/s', c).ok).toBe(true);   // printed superscript
+    expect(gradeUnitAnswer('3 x 10^8 m/s', c).ok).toBe(true);  // ascii 'x' times sign
+    expect(gradeUnitAnswer('3e8 m/s', c).ok).toBe(true);
+    expect(gradeUnitAnswer('20 m/s', c).ok).toBe(false);       // a wrong value still fails
+  });
+
   it('accepts superscript exponents in the printed form — s⁻¹ is Hz, m⁻² a per-area', () => {
     // The rendered unit uses superscripts; a learner who copies "10 s⁻¹" must grade the same as
     // one who types "10 s^-1". Previously only ²/³ folded, so negative and higher powers failed.
