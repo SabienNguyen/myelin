@@ -22,10 +22,17 @@ export interface Goal {
   setOn: string;
 }
 
-// Same allowlist shape as sessionStore's THREAD_ID and ingestRepo's REPO_NAME_RE: this value is
-// interpolated into MCP tool arguments and compared against vault slugs, so it is validated at the
-// boundary rather than trusted.
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// Same CHARACTER-CLASS allowlist as sessionStore's THREAD_ID and ingestRepo's REPO_NAME_RE (the
+// security-relevant part: this value is interpolated into MCP tool arguments and compared against
+// vault slugs, so `[a-z0-9-]` only, starting alphanumeric, is validated at the boundary rather than
+// trusted). The LENGTH bound is looser than those two on purpose: a thread-id and a repo-name become
+// a directory/file NAME the harness itself mints and can keep short, but a goal slug POINTS AT a
+// page/path slug, which is title-derived by slugify (no length cap) and only bounded by the
+// filesystem filename limit. Capping the pointer at 64 rejected a perfectly real long-titled page —
+// "Introduction to the Fundamental Theorem of Calculus…" slugifies to 83 chars — so write_page
+// created it but the goal route 400'd on "invalid goal slug". 250 keeps `<slug>.md` inside the
+// 255-byte filename limit while accepting any realistic title.
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,249}$/;
 
 const goalPath = (vault: string) => join(vault, '.harness', 'goal.json');
 

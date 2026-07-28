@@ -30,6 +30,18 @@ describe('goalStore — the active goal', () => {
     expect(() => writeGoal(vault, { kind: 'path', slug: '../../etc/passwd' })).toThrow(/invalid goal slug/);
     expect(() => writeGoal(vault, { kind: 'path', slug: 'Has Capitals' })).toThrow(/invalid goal slug/);
   });
+  it('accepts a long title-derived slug — the pointer must not be tighter than the page it names', () => {
+    // slugify caps nothing; "Introduction to the Fundamental Theorem of Calculus…" is 83 chars, and
+    // write_page happily creates that page. The old 64-char goal cap then 400'd on setting it as a
+    // goal — a page you could make but not aim at. The character class is still enforced.
+    const long = 'introduction-to-the-fundamental-theorem-of-calculus-and-its-applications-in-physics';
+    expect(long.length).toBeGreaterThan(64);
+    expect(writeGoal(vault, { kind: 'page', slug: long })?.slug).toBe(long);
+    expect(readGoal(vault)?.slug).toBe(long);
+    // still bounded (filesystem filename limit) and still character-class-checked regardless of length
+    expect(() => writeGoal(vault, { kind: 'page', slug: 'a'.repeat(300) })).toThrow(/invalid goal slug/);
+    expect(() => writeGoal(vault, { kind: 'page', slug: `${'a'.repeat(80)}/../../etc` })).toThrow(/invalid goal slug/);
+  });
   // /api/graph reads the goal, and that payload previously needed no vault — a partial config must
   // degrade to "no goal" rather than 500 the endpoint.
   it('returns null for a missing or empty vault path instead of throwing', () => {
