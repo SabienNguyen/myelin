@@ -182,12 +182,34 @@ export function gradeTone(f0Hz: number[], target: string, system: ToneSystem = '
   const { tone: closest } = bestMatch(c, def);
   const targetScore = contourSimilarity(c, def.templates[target]);
   const pass = closest === target && targetScore >= MATCH_THRESHOLD && range >= FLAT_RANGE;
+  // On a miss, append the fix — how the target tone should MOVE — not just the diagnosis. The cue is
+  // read off the target's own template so it always matches what's being graded.
+  const cue = ` To get ${name(target)}, ${shapeCue(def.templates[target])}.`;
   const detail = pass
     ? `Correct — your pitch traced the ${name(target)} contour.`
     : range < FLAT_RANGE
-      ? `That came out nearly level; ${name(target)} needs a clear pitch movement.`
-      : `That contour looks more like ${name(closest)} than ${name(target)}.`;
+      ? `That came out nearly level; ${name(target)} needs a clear pitch movement.${cue}`
+      : `That contour looks more like ${name(closest)} than ${name(target)}.${cue}`;
   return { pass, closest, similarity: targetScore, unscorable: false, detail };
+}
+
+/** A one-phrase corrective for a tone, READ OFF ITS OWN reference template rather than hand-written
+ *  per tone — so the coaching can never drift from what the grader actually checks against. Compares
+ *  the head and tail of the template and looks for a mid-contour trough, then names the movement to
+ *  aim for: the difference between "you produced the wrong tone" (a diagnosis) and "sắc rises, so
+ *  start low and finish higher" (a fix). Semitone gaps are small on purpose — these curves are
+ *  median-centered, so ~1.5 is already an audible move. */
+export function shapeCue(template: number[]): string {
+  const head = template.slice(0, 3).reduce((s, x) => s + x, 0) / 3;
+  const tail = template.slice(-3).reduce((s, x) => s + x, 0) / 3;
+  const low = Math.min(...template);
+  const lowIdx = template.indexOf(low);
+  const dips = lowIdx > CONTOUR_LEN * 0.2 && lowIdx < CONTOUR_LEN * 0.8
+    && low < head - 1 && low < tail - 1;
+  if (dips) return 'dip low through the middle, then lift the end back up';
+  if (tail - head > 1.5) return 'start low and finish clearly higher';
+  if (head - tail > 1.5) return 'start high and let the pitch fall away';
+  return 'keep a clear, steady pitch movement';
 }
 
 /** The template most correlated with `c`, among the system's non-level tones. */

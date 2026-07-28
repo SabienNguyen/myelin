@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  gradeTone, normalizeContour, contourSimilarity, TONE_TEMPLATES, TONE_SYSTEMS, CONTOUR_LEN, type Tone,
+  gradeTone, normalizeContour, contourSimilarity, shapeCue, TONE_TEMPLATES, TONE_SYSTEMS, CONTOUR_LEN, type Tone,
 } from '../src/shared/toneContour.js';
 
 // Synthetic pitch tracks in Hz, shaped like the tone they name. A tone grader that works must
@@ -71,6 +71,26 @@ describe('gradeTone — a rising utterance is sắc, not huyền', () => {
     expect(gradeTone(brokenRising(), 'nga').closest).toBe('nga');
     // A smooth rise must NOT pass as ngã — otherwise the grader rewards the wrong production.
     expect(gradeTone(rising(), 'nga').pass).toBe(false);
+  });
+
+  it('a miss appends how the target tone should MOVE, not just what it looked like', () => {
+    // Diagnosis + fix: sắc rises, so a fall that missed it should be told to finish higher.
+    const g = gradeTone(falling(), 'sac');
+    expect(g.pass).toBe(false);
+    expect(g.detail).toMatch(/finish clearly higher/);
+    // huyền falls, so a rise that missed it should be told to let the pitch fall.
+    const h = gradeTone(rising(), 'huyen');
+    expect(h.detail).toMatch(/let the pitch fall/);
+    // A pass carries no corrective — only misses get coached.
+    expect(gradeTone(rising(), 'sac').detail).not.toMatch(/To get/);
+  });
+
+  it('shapeCue is read off the template, so each tone gets its true corrective', () => {
+    expect(shapeCue(TONE_SYSTEMS.vi.templates.sac)).toMatch(/higher/);
+    expect(shapeCue(TONE_SYSTEMS.vi.templates.huyen)).toMatch(/fall/);
+    expect(shapeCue(TONE_SYSTEMS.vi.templates.hoi)).toMatch(/dip/);
+    expect(shapeCue(TONE_SYSTEMS.zh.templates.tone4)).toMatch(/fall/);
+    expect(shapeCue(TONE_SYSTEMS.zh.templates.tone2)).toMatch(/higher/);
   });
 
   it('too little voiced sound is unscorable — no grade, not a failure', () => {
