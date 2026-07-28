@@ -644,6 +644,25 @@ export async function gradeBlockOutput(
   // structured_check — the generic applied block. MECHANICAL throughout: no model is consulted for
   // any checker, which is what lets applied evidence generalise to subjects nobody hand-authored.
   if (tool === 'structured_check') {
+    // Light A (owner decision C + light A): a matching with 4+ pairs and no distractors is solvable
+    // by elimination — once the earlier picks are placed, the last ones are forced — so an
+    // all-correct result is not the mechanical proof `applied-correctly` is supposed to mean. Refuse
+    // to grade it rather than mint hollow applied evidence: no evidence, a neutral verdict, and a
+    // note the tutor can act on. The threshold is 4 (a 2–3 pair matching's elimination edge is
+    // slight, and forcing distractors on every tiny matching is heavy-handed); "no distractors" is
+    // the owner's proxy `options.length > items.length`. The tutor is steered to always include
+    // them (blocks.ts describe), so this is a backstop for a malformed block, not the common path.
+    const mc = input.checker;
+    if (mc?.kind === 'matching' && mc.items.length >= 4
+      && !(Array.isArray(mc.options) && mc.options.length > mc.items.length)) {
+      return {
+        verdict: 'reviewed',
+        source: 'mechanical',
+        detail: 'This matching had no distractor options, so the answers could be reached by '
+          + 'elimination — it needs a few plausible wrong options to count as applied practice.',
+        evidence: [],
+      };
+    }
     const g = gradeStructured(input.checker, result.values ?? []);
     const kind: EvidenceKind = g.allCorrect ? 'applied-correctly' : 'struggled';
     return {

@@ -144,11 +144,19 @@ const structuredCheck = {
       // "Put these in order" — order is the whole point.
       z.object({ kind: z.literal('sequence'), expected: z.array(z.string()).min(1) }),
       // "Match term to definition". `options` are what the learner picks from; without it the right
-      // sides double as the option list.
+      // sides double as the option list. The describe() reaches the model (inline // comments do
+      // not) — it steers the tutor to include DISTRACTORS so a matching can't be solved by
+      // elimination, which is what keeps its applied-correctly honest. grading.ts refuses to mint
+      // applied evidence from a 4+-pair matching that ships no distractors (owner decision: C + a
+      // light A); this guidance is the C half that keeps that refusal from ever firing in practice.
       z.object({
         kind: z.literal('matching'),
         items: z.array(z.object({ left: z.string(), right: z.string() })).min(1),
-        options: z.array(z.string()).optional(),
+        options: z.array(z.string()).optional().describe(
+          'The choices the learner picks from (one dropdown per left item). INCLUDE DISTRACTORS: '
+          + 'a few plausible-but-wrong options beyond the correct right-hand values, so the last '
+          + 'pick is never forced by elimination. Required once there are 4 or more pairs — a '
+          + 'matching that big with no distractors will not count as applied practice.'),
       }),
       // Normalised free text: nomenclature, notation, a term of art.
       z.object({ kind: z.literal('pattern'), expected: z.string() }),

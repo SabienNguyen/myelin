@@ -213,6 +213,37 @@ describe('structured_check checkers (mechanical, any subject)', () => {
     ]);
     expect(g.verdict).toBe('partial'); // 2/3, and never a false 'correct'
   });
+  it('matching (light A): a 4+-pair matching with no distractors is refused, not minted', async () => {
+    // Owner decision (C + light A): once there are 4 pairs and the options are just the right
+    // answers, the last pick is forced by elimination — so an all-correct result is not the
+    // mechanical proof applied-correctly is meant to be. Refuse it: neutral verdict, NO evidence,
+    // even when every pick is right (the learner isn't penalised for the tutor's malformed block).
+    const c = { kind: 'matching', items: [
+      { left: 'a', right: 'ra' }, { left: 'b', right: 'rb' },
+      { left: 'c', right: 'rc' }, { left: 'd', right: 'rd' },
+    ] };
+    const g = await grade(c, ['ra', 'rb', 'rc', 'rd']); // all correct, yet still refused
+    expect(g.verdict).toBe('reviewed');
+    expect(g.evidence).toEqual([]);          // nothing minted — not applied-correctly, not struggled
+    expect(g.detail).toMatch(/distractor/i);
+  });
+  it('matching (light A): 4+ pairs WITH distractors grades and mints normally', async () => {
+    const c = { kind: 'matching',
+      items: [{ left: 'a', right: 'ra' }, { left: 'b', right: 'rb' },
+        { left: 'c', right: 'rc' }, { left: 'd', right: 'rd' }],
+      options: ['ra', 'rb', 'rc', 'rd', 'wrong1', 'wrong2'] }; // options.length > items.length
+    const g = await grade(c, ['ra', 'rb', 'rc', 'rd']);
+    expect(g.verdict).toBe('correct');
+    expect(g.evidence[0]).toMatchObject({ kind: 'applied-correctly' });
+  });
+  it('matching (light A): the threshold is 4 — a 3-pair matching with no distractors still counts', async () => {
+    const c = { kind: 'matching', items: [
+      { left: 'a', right: 'ra' }, { left: 'b', right: 'rb' }, { left: 'c', right: 'rc' },
+    ] };
+    const g = await grade(c, ['ra', 'rb', 'rc']);
+    expect(g.verdict).toBe('correct');
+    expect(g.evidence[0]).toMatchObject({ kind: 'applied-correctly' });
+  });
   it('pattern: normalises case, spacing and stray quotes', async () => {
     const c = { kind: 'pattern', expected: 'sodium chloride' };
     expect((await grade(c, ['  Sodium   Chloride '])).verdict).toBe('correct');
