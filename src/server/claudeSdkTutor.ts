@@ -47,15 +47,22 @@ const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'unlink_pages', 'compi
 const LOREWEAVER_PREFIX = 'mcp__loreweaver__';
 const BLOCKS_PREFIX = 'mcp__blocks__';
 
-/** STRUCTURAL rule 1a (mirrors session.ts): a pure grading turn withholds the block tools — two
- *  live probes showed wording alone does not stop the model staging a block over its own offer.
- *  open_source stays in both cases: navigation is not staging work. Exported for tests. */
+// Navigation-class block tools: they move the learner around or speak, they do not STAGE gradable
+// work, so a grading turn keeps them (mirrors session.ts's turnBlockTools `keep` set). The single
+// source of truth for "which blocks survive a grade turn" — used by both blockAllowlist (what goes
+// in allowedTools) AND the grade-turn hook deny below (the seam that actually gates under
+// bypassPermissions), so the two cannot disagree the way they did when the hook denied the whole
+// BLOCKS_PREFIX and silently killed speak/open_source/offer_write on every grade turn.
+const NAV_BLOCKS = ['open_source', 'speak', 'offer_write'];
+
+/** STRUCTURAL rule 1a (mirrors session.ts): a pure grading turn withholds the STAGING block tools —
+ *  two live probes showed wording alone does not stop the model staging a block over its own offer.
+ *  The navigation-class blocks (NAV_BLOCKS) stay in both cases: navigation is not staging work.
+ *  Exported for tests. */
 export function blockAllowlist(gradingOnly: boolean): string[] {
   return [
     ...(gradingOnly ? [] : availableBlocks().map((n) => `${BLOCKS_PREFIX}${n}`)),
-    `${BLOCKS_PREFIX}open_source`,
-    `${BLOCKS_PREFIX}speak`, // navigation-class UI tool, allowed in every turn like open_source
-    `${BLOCKS_PREFIX}offer_write`, // navigation-class: a one-click "write this up" button
+    ...NAV_BLOCKS.map((n) => `${BLOCKS_PREFIX}${n}`),
   ];
 }
 const COURSE_PREFIX = 'mcp__course__';
@@ -366,7 +373,13 @@ export function createClaudeSdkTutorSession(
             // the write family below needs a hook deny and not just its allowedTools exclusion — so
             // without this the withhold was PROMPT-ONLY here, weaker than turnBlockTools' structural
             // drop on the ai-sdk route. Deny at the hook so the withhold actually holds.
-            if (gradingOnly && input.tool_name.startsWith(BLOCKS_PREFIX)) {
+            // Only the STAGING blocks are withheld on a grade turn; the navigation-class ones
+            // (NAV_BLOCKS: speak/open_source/offer_write) survive, exactly as blockAllowlist keeps
+            // them and session.ts's turnBlockTools does. A bare startsWith(BLOCKS_PREFIX) here denied
+            // those three too, so the tutor could not speak the verdict or open the source on the
+            // very turn it delivers a grade — a silent drift from the ai-sdk route.
+            if (gradingOnly && input.tool_name.startsWith(BLOCKS_PREFIX)
+              && !NAV_BLOCKS.includes(input.tool_name.slice(BLOCKS_PREFIX.length))) {
               return {
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse',

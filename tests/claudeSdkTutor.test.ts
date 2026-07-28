@@ -408,6 +408,53 @@ describe('single-writer rule: the SDK hook confines every vault-mutating lorewea
   }, 30_000);
 });
 
+describe('grade-turn block gating: STAGING blocks withheld, NAVIGATION blocks survive', () => {
+  // Parity with the ai-sdk route's turnBlockTools `keep` set: a grading turn must not let the tutor
+  // stage a fresh exercise over its own grade (rule 1a), but speak/open_source/offer_write are
+  // navigation, not staging — the tutor still speaks the verdict and opens the source. A bare
+  // BLOCKS_PREFIX deny killed all three; these lock the distinction in.
+  async function gradeTurnHook() {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-gb');
+      yield assistantMsg('sess-gb', [{ type: 'text', text: 'ok' }]);
+      yield resultMsg('sess-gb');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    // A turn whose LAST message is an assistant message carrying a completed block output is a grade
+    // turn (pendingBlockOutputs reads the last message and requires role 'assistant'); gradingOnly =
+    // pending.length > 0.
+    await drain(await session.respond(
+      [{ id: 'a1', role: 'assistant',
+         parts: [{ type: 'tool-quick_check', toolCallId: 'b1', state: 'output-available',
+           input: { question: 'q', mode: 'choice', choices: ['a', 'b'], expected: 'a', pageSlug: 'derivatives' },
+           output: { answer: 'a' } }] }] as any,
+      'learn', 'thread-gb',
+    ));
+    return calls[0].options.hooks.PreToolUse[0].hooks[0];
+  }
+  const callBlock = (hookFn: any, tool: string) => hookFn(
+    { hook_event_name: 'PreToolUse', session_id: 'sess-gb', transcript_path: '/tmp/x', cwd: '/tmp',
+      tool_name: `mcp__blocks__${tool}`, tool_input: {}, tool_use_id: 't' },
+    't', { signal: new AbortController().signal },
+  );
+
+  it('denies a staging block (quick_check) on a grade turn', async () => {
+    const res = await callBlock(await gradeTurnHook(), 'quick_check');
+    expect(res.hookSpecificOutput.permissionDecision).toBe('deny');
+  }, 30_000);
+
+  it('does NOT deny the navigation blocks (speak, open_source, offer_write) on a grade turn', async () => {
+    const hookFn = await gradeTurnHook();
+    for (const tool of ['speak', 'open_source', 'offer_write']) {
+      const res = await callBlock(hookFn, tool);
+      // not a deny — the hook returns {} (no decision → allowed under bypassPermissions) for these
+      expect(res?.hookSpecificOutput?.permissionDecision, tool).not.toBe('deny');
+    }
+  }, 30_000);
+});
+
 describe('graph-cache invalidation on the SDK route', () => {
   it('exposes a PostToolUse hook that drops the cached graph after record_evidence, and only then', async () => {
     const calls: any[] = [];
