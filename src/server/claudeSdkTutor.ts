@@ -327,6 +327,16 @@ export function createClaudeSdkTutorSession(
     return options;
   }
 
+  // Which mode each thread's LAST turn ran in. Session context (due reviews, suggested lessons,
+  // student state) is injected only on a thread's first turn — so a learner who flipped the mode
+  // selector mid-conversation got a tutor still acting on the context of the mode they left. A
+  // live decay sitting caught it: "review" selected over a thread whose turn-1 context predated
+  // the slippage, and the tutor — knowing only a history where everything was just aced —
+  // answered "what have I let slip?" with a researched lecture on forgetting curves instead of
+  // re-proving the slipped page. In-memory on purpose: after a restart the map is empty and no
+  // re-injection happens, which is the pre-existing behavior, not a new failure.
+  const lastModeByThread = new Map<string, Mode>();
+
   async function respond(messages: UIMessage[], mode: Mode, threadId = 'default'): Promise<Response> {
     const pending = pendingBlockOutputs(messages);
 
@@ -365,8 +375,21 @@ export function createClaudeSdkTutorSession(
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
 
+        // A mode switch mid-thread re-arms the context injection (see lastModeByThread above).
+        // Block submissions are excluded: they arrive under the same mode that staged the block,
+        // and a grade turn must stay a grade turn.
+        const prevMode = lastModeByThread.get(threadId);
+        const modeSwitched = !isFirstTurn && !pending.length && prevMode !== undefined && prevMode !== mode;
+        lastModeByThread.set(threadId, mode);
+
         const promptParts: string[] = [];
         if (isFirstTurn) promptParts.push(await bootstrap(mode, slugs));
+        else if (modeSwitched) {
+          promptParts.push(`HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
+            + 'Fresh session context follows — trust it over anything earlier in this conversation '
+            + '(mastery and due reviews may have changed since the conversation started).\n\n'
+            + await bootstrap(mode, slugs));
+        }
         if (gap && gap.reason !== 'freeform') {
           promptParts.push(`HARNESS: your memory has a gap here — ${gap.detail}. WebSearch and `
             + 'WebFetch are unlocked for this turn. Research it, cite what you read, and teach from '

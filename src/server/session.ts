@@ -520,7 +520,14 @@ export function createTutorSession(
     return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}`;
   }
 
-  async function respond(messages: UIMessage[], mode: Mode): Promise<Response> {
+  // Which mode each thread's LAST turn ran in — mirrors claudeSdkTutor.ts's map, same live find:
+  // session context is first-turn-only, so a mid-thread mode switch left the tutor acting on the
+  // context of the mode the learner left (a decay sitting watched "review" answered from a
+  // history where nothing was due). In-memory on purpose: post-restart the map is empty and no
+  // re-injection happens — pre-existing behavior, not a new failure.
+  const lastModeByThread = new Map<string, Mode>();
+
+  async function respond(messages: UIMessage[], mode: Mode, threadId = 'default'): Promise<Response> {
     const pending = pendingBlockOutputs(messages);
 
     // Everything slow (grading, bootstrap, model turns) runs INSIDE the stream's execute so the
@@ -644,8 +651,21 @@ export function createTutorSession(
         });
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
+        // A mode switch mid-thread re-arms the context injection (see lastModeByThread above).
+        // Block submissions are excluded: they arrive under the mode that staged the block, and a
+        // grade turn must stay a grade turn.
+        const prevMode = lastModeByThread.get(threadId);
+        const modeSwitched = !isFirstTurn && !pending.length && prevMode !== undefined && prevMode !== mode;
+        lastModeByThread.set(threadId, mode);
         const context: ModelMessage[] = [];
         if (isFirstTurn) context.push({ role: 'user', content: await bootstrap(mode, slugs) });
+        else if (modeSwitched) context.push({
+          role: 'user',
+          content: `HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
+            + 'Fresh session context follows — trust it over anything earlier in this conversation '
+            + '(mastery and due reviews may have changed since the conversation started).\n\n'
+            + await bootstrap(mode, slugs),
+        });
         // The unlock is decided per turn, so it can happen mid-conversation — after the bootstrap
         // has already been sent. Say it here or the tutor holds a tool it was told it does not have.
         // The REASON goes in too: "there is no page" and "the page is unsourced guesswork" call for

@@ -545,3 +545,42 @@ describe('freeform research grant', () => {
     expect(calls[0].options.systemPrompt).not.toMatch(/available on every turn in this mode/);
   }, 30_000);
 });
+
+// Session context was first-turn-only, so flipping the mode selector mid-thread left the tutor
+// acting on the context of the mode the learner left. A live decay sitting caught it: "review"
+// selected over a thread whose turn-1 context predated the slippage, and the tutor answered
+// "what have I let slip?" with a lecture on forgetting curves instead of re-proving the slipped
+// page. A mid-thread mode switch must re-inject fresh context; the same mode must not.
+describe('mid-thread mode switch re-injects session context', () => {
+  const history = (n: number) => [
+    { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] },
+    { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'hi', state: 'done' }] },
+    { id: `u${n}`, role: 'user', parts: [{ type: 'text', text: 'what have I let slip?' }] },
+  ] as any;
+
+  it('re-arms bootstrap on switch, stays quiet without one', async () => {
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-modeswitch');
+      yield assistantMsg('sess-modeswitch', [{ type: 'text', text: 'ok' }]);
+      yield resultMsg('sess-modeswitch');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+
+    // Turn 1 establishes the thread's mode (learn).
+    await drain(await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any,
+      'learn', 'thread-modeswitch'));
+    // Turn 2, same mode: no re-injection — the prompt is just the student's text.
+    await drain(await session.respond(history(2), 'learn', 'thread-modeswitch'));
+    expect(calls[1].prompt).not.toMatch(/SESSION CONTEXT/);
+    // Turn 3, switched to review: fresh context, explicitly marked as a mode switch.
+    await drain(await session.respond(history(3), 'review', 'thread-modeswitch'));
+    expect(calls[2].prompt).toMatch(/switched the tutor mode to REVIEW/);
+    expect(calls[2].prompt).toMatch(/SESSION CONTEXT/);
+    // Turn 4, still review: quiet again.
+    await drain(await session.respond(history(4), 'review', 'thread-modeswitch'));
+    expect(calls[3].prompt).not.toMatch(/SESSION CONTEXT/);
+  });
+});

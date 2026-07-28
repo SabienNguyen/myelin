@@ -551,3 +551,17 @@ Written after the sprint that followed the original verdict; each line names its
   "Anki has a review backlog" as both title and aria-label — light and dark verified. The
   fresh-install guard holds too: with no cursor at all the status reads `down` and the topbar
   stays quiet (no badge about work that never existed). State cleaned up after the drive.
+- **Decay → review → re-proof closed on the newcomer vault — after fixing a real mid-thread
+  staleness bug.** Crafted honest decay (chain-rule reinforced 38 days ago, loss-functions 20):
+  the /api/due queue ordered slipped-first with resolved titles, the Library tab grew its count
+  badge, and the path meter stayed decay-aware. Then the find: session context was injected only
+  on a thread's FIRST turn, so switching the mode selector to review mid-conversation left the
+  tutor acting on the context of the mode the learner left — it answered "what have I let slip?"
+  with a well-researched lecture on forgetting curves, because in its history nothing had ever
+  slipped. Both tutor routes now track each thread's last mode and a mid-thread switch re-injects
+  fresh bootstrap context marked as such (in-memory; post-restart stays quiet, the pre-existing
+  behavior). Verified live end to end: switch to review → the tutor named exactly what slipped,
+  citing the learner's own June evidence and clearing the healthy pages by name → staged the
+  re-proof → correct answer graded, evidence recorded, and chain-rule left the due queue. Also
+  re-proved twice over that drive scripts must wait on the thread-save PUT, not the working
+  indicator — two turns were lost to early browser closes before the third drive keyed on the PUT.
