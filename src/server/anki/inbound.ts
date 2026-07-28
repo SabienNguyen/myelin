@@ -71,11 +71,19 @@ export async function syncInbound(
   const noteToSlug = new Map<number, string>(notes.map(([id, v]) => [Number(id), v.slug]));
 
   // Deck names mirror outbound's `Loreweaver::<domain>` scheme; iterate the domains of every
-  // slug currently synced to Anki so cardReviews can be queried per-deck.
+  // slug currently synced to Anki so cardReviews can be queried per-deck. A card can outlive its
+  // page (delete the page, the Anki card and its ledger entry remain), and read_page THROWS on a
+  // missing slug — so guard it: a deleted-page slug is dropped rather than allowed to abort the
+  // whole sync (the contract is never-throws) and leave the cursor stuck forever. `liveSlugs` also
+  // gates evidence below, so a ghost card's reviews are ignored instead of recorded against a page
+  // that no longer exists.
   const slugs = [...new Set(notes.map(([, v]) => v.slug))];
   const domains = new Set<string>();
+  const liveSlugs = new Set<string>();
   for (const slug of slugs) {
-    const { page } = await lw.call('read_page', { slug });
+    const page = await lw.call('read_page', { slug }).then((r: any) => r?.page).catch(() => null);
+    if (!page) continue;
+    liveSlugs.add(slug);
     domains.add(page.domain || 'general');
   }
   const decks = [...domains].map((d) => `Loreweaver::${d}`);
@@ -101,7 +109,7 @@ export async function syncInbound(
     const noteId = cardToNote.get(cardId);
     if (noteId == null) continue;
     const slug = noteToSlug.get(noteId);
-    if (!slug) continue; // review on a card outside the current ledger — ignore
+    if (!slug || !liveSlugs.has(slug)) continue; // card outside the ledger, or its page was deleted — ignore
     const day = localDay(reviewTime);
     const key = `${slug}|${day}`;
     const g = groups.get(key) ?? { slug, day, ease: [] };

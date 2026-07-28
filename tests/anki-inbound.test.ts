@@ -111,6 +111,30 @@ describe('syncInbound', () => {
     await lw.close();
   }, 30_000);
 
+  it('a deleted page in the ledger does not abort the sync — its reviews are skipped, live ones record', async () => {
+    reviews = [];
+    // Only 'derivatives' has a page; 'ghost' is in the ledger (its Anki card outlived the page).
+    const { vault, cfg, lw } = await makeVaultLoreweaver('kid2', ['derivatives']);
+    writeLedger(vault, {
+      2001: { slug: 'derivatives', hash: 'h1' }, // card 55
+      3001: { slug: 'ghost', hash: 'h2' },        // card 66 — page was deleted
+    });
+    const anki = new AnkiClient(url);
+    // Reviews for BOTH cards. Before the fix, read_page('ghost') threw and the whole sync aborted.
+    reviews.push([Date.now() - 3_600_000, 55, -1, 4, 10, 5, 2500, 4000, 1]); // derivatives, Easy
+    reviews.push([Date.now() - 3_000_000, 66, -1, 4, 10, 5, 2500, 4000, 1]); // ghost, Easy
+
+    const res = await syncInbound(lw, anki, cfg); // must not throw
+    expect(res.recorded).toBe(1); // only the live slug
+
+    const dv = await lw.call('get_student_state', { student: 'kid2', slug: 'derivatives' });
+    expect(dv.detail.evidence.at(-1).kind).toBe('exposed');
+    // The cursor advanced past BOTH reviews, so the ghost review is not re-examined next run.
+    const again = await syncInbound(lw, anki, cfg);
+    expect(again.recorded).toBe(0);
+    await lw.close();
+  }, 30_000);
+
   it('returns {recorded: 0} cleanly when Anki is unreachable', async () => {
     let downPort = 0;
     await new Promise<void>((resolve) => {
