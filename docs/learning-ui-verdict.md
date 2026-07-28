@@ -715,3 +715,13 @@ Written after the sprint that followed the original verdict; each line names its
   saved before the path rode along — which is exactly the path the live re-drive exercised).
 - **AppImage re-batched through the reading-chip fix** — the SPA bundle in the asar carries the
   chip's re-open wiring, verified by inspection. Artifact fully current with all sixteen fixes.
+- **MoE deep-dive: label_diagram's hard cases re-proven on genuinely live content — and the
+  persistence fix observed saving a turn in the wild.** The sitting taught top-k routing
+  (renormalization graded to three decimals), then drew an 8-region MoE diagram whose label set
+  needed "Active expert" and "Inactive expert" TWICE each, with four distractors — exactly the
+  duplicate-chip case fixed from the transformer sitting, now arising naturally: the chip stayed
+  enabled after its first placement and all 8 regions graded 8/8 mechanically. Also observed in
+  the wild: an interrupted drive killed the browser mid-diagram-turn, and the server-side
+  persistence saved the whole turn — prose and block — where yesterday it would have vanished;
+  the auto-skipped block plus one honest re-ask completed the exercise. The tutor also held its
+  probe-before-production contract (routing check first, diagram second) unprompted.
