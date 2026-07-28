@@ -82,3 +82,40 @@ day became the standing audit fixture — a realistic mid-journey learner with m
   in the artifact, including the bundled loreweaver decay fix).
 - loreweaver was still **private** at every check — the flip watch (and the full-CI trigger it
   fires) remains armed.
+
+---
+
+## Later the same night (the log above stopped at fix 7)
+
+The loop kept finding things. Ten more fixes shipped, numbered continuing from the list above:
+
+8. **Rubric judging tolerates paraphrase and retries omissions** — a revision round lost a point
+   to "the grader did not address this criterion" when the verdict existed under a paraphrased
+   name. Index-zip for enumerated replies, one narrowed retry for true omissions — and the
+   pre-existing forgetful-grader guarantee test caught my first draft of the retry merge
+   crediting by position (the suite defending the product against its maintainer).
+9. **A local file path through Add material ingests as a book** — typing a notes file's path
+   (the placeholder suggests /home/…) hit the repo route and "rename the repo". {path} now walks
+   the upload pipeline; the failing file converts into three chapters.
+10. **The open_source sentinel resolves what will actually open** — the tutor narrated "the
+    momentum chapter" over a reader showing chapter 1 (it passed the book title and never learned
+    what opened). The sentinel now resolves like the client and names the result plus sibling
+    chapters.
+11. **The reading chip re-opens the source after a reload** — openSource was an ephemeral event;
+    the chip now carries the chapter path (with re-resolve fallback for old chips).
+12. **The single-writer rule made structural** — the big one: a direct "update the page NOW"
+    talked the model past its prompt-only restraint and write_page succeeded in learn mode
+    (allowedTools gates nothing under bypassPermissions). The PreToolUse hook now denies the
+    write family outside freeform. A follow-up probe showed the model's own restraint holds the
+    first line ("blindly editing vault content on a bare 'just do it' instruction isn't
+    something I should do"), with the hook behind it.
+
+Also verified live in this stretch: the writing revision round (2/4 → 3/4, honest fail-closed on
+a grader omission — which motivated fix 8), select-to-ask (the passage travels as a quote and
+gets probed on), the session-plan CTA (whose first probe exposed the shown-work extractor gap),
+"set as goal" orienting a fresh sitting unprompted, a full MoE deep-dive whose model-drawn
+diagram naturally required duplicate labels (8/8, the earlier chip fix holding), the RoPE
+augment-don't-fragment behavior, and the server-side turn persistence saving an interrupted turn
+in the wild. The AppImage was re-batched after each behavior change and verified by inspection
+every time; final state is current through the write gate. Suite: 999 unit tests + 8 browser
+specs, all green. loreweaver remained private at every check — the flip watch stays armed.
