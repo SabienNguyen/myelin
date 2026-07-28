@@ -4,7 +4,7 @@
 // browser — capture, pitch tracking, grading (gradePronunciation) are all local, and the overlay
 // makes the machine verdict transparent. A single lucky attempt isn't mastery, so the block
 // withholds its `applied` result until the learner hits the tone cleanly `required` times.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { MicrophoneIcon as Microphone } from '@phosphor-icons/react/dist/csr/Microphone';
 import { SpeakerHighIcon as SpeakerHigh } from '@phosphor-icons/react/dist/csr/SpeakerHigh';
 import { CheckIcon as Check } from '@phosphor-icons/react';
@@ -56,6 +56,19 @@ export function Pronounce({ args, result, addResult }: {
   const [last, setLast] = useState<{ grade: ToneGrade; contour: number[] | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
+  // getVoices() is empty until the async voiceschanged event on first load, so discover voices in
+  // state instead of reading them fresh inside hear(). Reading once at click time made the very
+  // first "Hear it" cry "no voice" while the list was still loading — the same false negative the
+  // Speak block was written to avoid. null = still discovering.
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[] | null>(null);
+  useEffect(() => {
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : undefined;
+    if (!synth) { setVoices([]); return; }
+    const load = () => setVoices(synth.getVoices());
+    load();
+    synth.addEventListener?.('voiceschanged', load);
+    return () => synth.removeEventListener?.('voiceschanged', load);
+  }, []);
   // The block submits exactly once, when the required passes are reached. A ref guards it because
   // addResult is a side effect and must not live inside a state updater (StrictMode double-invokes
   // updaters, and updaters must be pure).
@@ -74,8 +87,17 @@ export function Pronounce({ args, result, addResult }: {
 
   const hear = () => {
     const synth = window.speechSynthesis;
-    const voice = synth && pickVoice(synth.getVoices(), args.lang);
-    if (!synth || !voice) { setError(`No ${args.lang} voice on this device — use a native recording.`); return; }
+    if (!synth) { setError('No speech engine on this device — use a native recording.'); return; }
+    const list = voices ?? synth.getVoices();
+    const voice = pickVoice(list, args.lang);
+    if (!voice) {
+      // Only a FINISHED, non-empty search that found no match is an honest "no voice". An empty
+      // list means discovery is still in flight — say that instead of the false negative.
+      setError(list.length === 0
+        ? 'Still loading voices — tap Hear again in a moment.'
+        : `No ${args.lang} voice on this device — use a native recording.`);
+      return;
+    }
     const u = new SpeechSynthesisUtterance(args.word);
     u.voice = voice; u.lang = voice.lang; u.rate = 0.8;
     synth.cancel(); synth.speak(u);
