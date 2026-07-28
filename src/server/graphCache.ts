@@ -29,10 +29,16 @@ interface CacheEntry {
 
 let cached: CacheEntry | null = null;
 let refreshing: Promise<void> | null = null;
+// Bumped on every invalidation. A fetch (cold or background) captures this before it starts and
+// commits its result only if the count still matches — so a write_page that invalidates WHILE a
+// refresh reads the pre-write vault can't have that in-flight refresh re-install its stale payload
+// and mark it fresh, which would hide the write for a whole TTL despite the invalidation firing.
+let generation = 0;
 
 /** Drops the cached payload so the next getGraphCached() call awaits a fresh fetch. */
 export function invalidateGraphCache(): void {
   cached = null;
+  generation++;
 }
 
 /**
@@ -45,15 +51,19 @@ export function invalidateGraphCache(): void {
  */
 export async function getGraphCached(fetchGraph: () => Promise<GraphPayload>): Promise<GraphPayload> {
   if (!cached) {
+    const gen = generation;
     const value = await fetchGraph();
-    cached = { value, fetchedAt: Date.now() };
+    // Install only if no invalidation raced this fetch — otherwise return the value to THIS caller
+    // but leave the cache empty, so the next caller re-fetches and picks up the write.
+    if (gen === generation) cached = { value, fetchedAt: Date.now() };
     return value;
   }
 
   const isStale = Date.now() - cached.fetchedAt >= TTL_MS;
   if (isStale && !refreshing) {
+    const gen = generation;
     refreshing = fetchGraph()
-      .then((value) => { cached = { value, fetchedAt: Date.now() }; })
+      .then((value) => { if (gen === generation) cached = { value, fetchedAt: Date.now() }; })
       .catch((e) => { console.error('[graphCache] background refresh failed, serving stale graph payload:', e); })
       .finally(() => { refreshing = null; });
   }
