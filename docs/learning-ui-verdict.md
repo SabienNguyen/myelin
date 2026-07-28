@@ -768,3 +768,5 @@ Written after the sprint that followed the original verdict; each line names its
   vault loader passes through, it only checks typeof — would have lexically proposed against
   the entire vault in both directions. Guarded: no title, no lexical signal. loreweaver suite
   87 green; the loreweaver correctness sweep (student model, queries, linking) is complete.
+- **AppImage re-batched through the linking guard** — the bundled loreweaver's propose.js carries
+  the empty-title fix, verified by inspection. Artifact current with all eighteen fixes.
