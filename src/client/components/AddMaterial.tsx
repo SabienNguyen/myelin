@@ -68,7 +68,32 @@ export function AddMaterial() {
     setBusy(true);
     setStatus(null);
     // One field, routed by what was pasted: a video URL goes to caption ingestion (its transcript
-    // becomes a paper), everything else stays on the repo path. Same door, no extra button.
+    // becomes a paper), a local FILE path goes to book ingestion, everything else stays on the
+    // repo path. Same door, no extra button. The file case exists because the audit typed a
+    // notes file's path here and the repo route rejected its extension with "rename the repo".
+    const looksLikeFilePath = !/^[a-z]+:\/\//i.test(trimmed) && !trimmed.startsWith('git@')
+      && /\.[A-Za-z0-9]{1,5}$/.test(trimmed);
+    if (looksLikeFilePath) {
+      try {
+        const res = await fetch('/api/ingest', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: trimmed }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setStatus(`${data.book}: converting in the background — see Library`);
+          setSource('');
+          setOpen(false);
+          panelBus.setTab('library');
+        } else {
+          setStatus(`ingest failed: ${data.error ?? res.statusText}`);
+        }
+      } catch (err: any) {
+        setStatus(`ingest failed: ${err?.message ?? err}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (isVideoUrl(trimmed)) {
       try {
         const res = await fetch('/api/ingest', {

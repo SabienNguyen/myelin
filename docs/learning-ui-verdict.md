@@ -681,3 +681,12 @@ Written after the sprint that followed the original verdict; each line names its
 - **AppImage re-batched current through the rubric-retry fix** — grading.js inside the asar
   carries both extractAnswerNumber and the omission-retry path, verified by string inspection as
   before. No behavior commit is outside the artifact.
+- **A notes file by path can finally walk through the one door.** The audit typed a local
+  markdown file's path into Add material — the panel's own placeholder suggests "/home/…" — and
+  it fell through to the repo route, which rejected the ".md" extension and told the learner to
+  "rename the repo". /api/ingest now accepts a JSON {path} for a local file (validated to exist,
+  then the exact pipeline an upload takes — the server reading learner paths is already this
+  app's trust model via repo ingest), and the client routes extension-bearing non-URL paths
+  there. Re-driven live: the same sgd-notes.md path now converts, splits on its headings into
+  three DONE chapters, and sits in the Library as a book. URLs, git remotes, and videos still
+  route exactly as before (8/8 e2e including the video-URL spec).

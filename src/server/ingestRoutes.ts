@@ -1,6 +1,6 @@
 import type { LanguageModel } from 'ai';
 import { Hono } from 'hono';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HarnessConfig } from './config.js';
@@ -27,8 +27,23 @@ export function buildIngestRoutes(
     const contentType = c.req.header('content-type') ?? '';
 
     if (contentType.includes('application/json')) {
-      const body = await c.req.json().catch(() => null) as { url?: string; mode?: 'book' | 'paper' } | null;
-      if (!body?.url) return c.json({ error: 'JSON body requires a "url" field' }, 400);
+      const body = await c.req.json().catch(() => null) as { url?: string; path?: string; mode?: 'book' | 'paper' } | null;
+
+      // A LOCAL file by path — the audit typed a notes file's path into Add material and it fell
+      // through to the repo route, which choked deriving a repo name from "sgd-notes.md" and then
+      // told the learner to "rename the repo". The server reading a learner-supplied path is
+      // already this app's trust model (repo ingest does it for local directories); a single
+      // file goes through the exact pipeline an uploaded file does.
+      if (body?.path && !body.url) {
+        const p = body.path.trim();
+        if (!existsSync(p) || !statSync(p).isFile()) {
+          return c.json({ error: `no file at ${JSON.stringify(p)} — check the path` }, 400);
+        }
+        return c.json(startConversion(lw, cfg, p, {
+          converter: deps.converter, mode: body.mode, model: deps.model,
+        }));
+      }
+      if (!body?.url) return c.json({ error: 'JSON body requires a "url" or "path" field' }, 400);
 
       // A video URL through the SAME door as papers and books (single Add material entry point —
       // a product rule, not an accident): its captions become a timestamped transcript, which is

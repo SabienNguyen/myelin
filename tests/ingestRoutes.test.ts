@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -269,5 +269,30 @@ describe('POST /api/ingest/repo (B2c)', () => {
     const body = await res.json();
     expect(body.ingesting).toBe(true);
     await until(() => readQueue(vault).some((e) => e.mode === 'repo' && e.book === body.name));
+  });
+});
+
+// The audit typed a local notes file's path into Add material; it fell through to the repo route,
+// which rejected the ".md" extension and told the learner to "rename the repo". A JSON {path}
+// body now sends a local file through the same conversion pipeline as an upload.
+describe('POST /api/ingest — local file by path', () => {
+  it('converts an existing file and 400s a missing one honestly', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-path-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter });
+
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-notes-'));
+    const notes = join(dir, 'SGD Notes.md');
+    writeFileSync(notes, '# sgd\nminibatches.');
+    const ok = await app.request('/api/ingest', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: notes }),
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ book: 'SGD Notes', converting: true });
+
+    const missing = await app.request('/api/ingest', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: join(dir, 'nope.md') }),
+    });
+    expect(missing.status).toBe(400);
+    expect((await missing.json()).error).toMatch(/no file at/);
   });
 });
