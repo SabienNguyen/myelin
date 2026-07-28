@@ -73,6 +73,17 @@ tool is callable.** (Separately: `ingest_paper` is also absent, but that one IS 
 prompt's deliberate "use WebFetch" note — read-vs-ingest is a real capability gap but a documented,
 arguably-intended one; flagging for completeness, lower priority.)
 
+Root cause worth fixing structurally: the two routes decide the freeform toolset DIFFERENTLY, which
+is why they drift. `session.ts` exposes EVERY loreweaver tool in freeform (`mode === 'freeform' ||
+TEACH_TOOLS.includes(n)`); `claudeSdkTutor.ts` uses a hand-maintained allowlist (`TEACH_TOOLS +
+FREEFORM_EXTRA_TOOLS`). Any tool added to core is auto-exposed on the ai-sdk route but silently
+absent on the Agent-SDK route until someone edits the allowlist — a drift generator, not a one-off.
+It already bit twice: `generate_exercise` (above) and `list_pages` (a real core tool, `graphTools.ts`,
+in session.ts's freeform set, absent from the allowlist — lower stakes, a vault-survey utility the
+curated list may have omitted on purpose). A shared source of truth for "freeform loreweaver tools"
+that both routes import would close the class instead of the instances. Owner call on whether to
+refactor toward that or keep the hand-synced lists (with the two current gaps reconciled).
+
 ## Open decisions (owner)
 
 ### 1. Decay cascade: should long-stale `mastered` pages reach `exposed`?
