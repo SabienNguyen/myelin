@@ -537,3 +537,11 @@ Written after the sprint that followed the original verdict; each line names its
   evidence records landing on the vault. The divergence hazard is recorded here as known
   behavior with a working conversational recovery; a transport-level replay of unsaved turns is
   the eventual fix if it ever bites harder.
+- **Library panel fresh-eyes pass: healthy, one polish fix.** Light/dark/900px all clean (zero
+  horizontal overflow), the tutor-built path shows a decay-aware 1/7 meter, the no-books empty
+  state points at both entry paths, and Practice carries the seeded ladder with its NEW badge.
+  The one find: the resume button read "resume at nn-forward-pass" — a raw slug in
+  learner-facing copy. /api/paths now resolves each row's next page to its real title (bounded
+  one read_page per path, parallel, null on failure so the client degrades back to the slug),
+  and the button reads "resume at The Forward Pass: What a Neural Network Computes" — verified
+  live on the newcomer vault.

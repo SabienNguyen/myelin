@@ -610,3 +610,31 @@ describe('PUT /api/voice — the teaching-style preference', () => {
     expect('voice' in JSON.parse(readFileSync(cfgFile, 'utf8'))).toBe(false);
   });
 });
+
+// The Library's resume button read "resume at nn-forward-pass" — a raw slug in learner-facing
+// copy (fresh-eyes audit). The route resolves each row's next page to its title; a page that
+// cannot be read degrades to null so the client falls back to the slug instead of losing the
+// button.
+describe('GET /api/paths — nextTitle resolution', () => {
+  it('resolves nextSlug to the page title, null when unreadable', async () => {
+    const lw = {
+      call: async (name: string, args: any) => {
+        if (name === 'list_paths') return [
+          { slug: 'bp', title: 'Backprop', pages: ['fwd', 'loss'] },
+          { slug: 'ghost', title: 'Ghost', pages: ['missing'] },
+        ];
+        if (name === 'get_student_state') return {};
+        if (name === 'read_page') {
+          if (args.slug === 'fwd') return { page: { meta: { title: 'Forward pass' } } };
+          throw new Error('no such page');
+        }
+        throw new Error(`unexpected ${name}`);
+      },
+    } as any;
+    const app = buildRestRoutes(lw, { student: 'kid' } as HarnessConfig);
+    const body = await (await app.request('/api/paths')).json();
+    expect(body.paths[0].nextSlug).toBe('fwd');
+    expect(body.paths[0].nextTitle).toBe('Forward pass');
+    expect(body.paths[1].nextTitle).toBeNull();
+  });
+});

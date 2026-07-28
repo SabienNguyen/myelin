@@ -109,10 +109,20 @@ export function buildRestRoutes(
       lw.call('get_student_state', { student: cfg.student }),
     ]);
     const goal = readGoal(cfg.vault);
-    return c.json({
-      goal,
-      paths: (paths ?? []).map((p: any) => pathProgress(p, state)),
-    });
+    const rows = (paths ?? []).map((p: any) => pathProgress(p, state));
+    // The resume button read "resume at nn-forward-pass" — a raw slug in learner-facing copy
+    // (fresh-eyes audit). Resolve each row's next page to its real title: bounded at one
+    // read_page per path, parallel, and null on failure so a missing page degrades back to the
+    // slug rather than dropping the button (same contract as resolveNeighbors above).
+    const withTitles = await Promise.all(rows.map(async (r: any) => ({
+      ...r,
+      nextTitle: r.nextSlug
+        ? await lw.call('read_page', { slug: r.nextSlug })
+          .then((p: any) => (p.page.meta.title as string) ?? null)
+          .catch(() => null)
+        : null,
+    })));
+    return c.json({ goal, paths: withTitles });
   });
 
   app.get('/api/path/:slug', async (c) => {

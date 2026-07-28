@@ -37,7 +37,9 @@ function PathRowView({ row, isGoal, onSetGoal }: {
                 className="ghost-btn path-resume"
                 onClick={() => panelBus.openPage(row.nextSlug!)}
               >
-                resume at {row.nextSlug}
+                {/* Title, not slug: "resume at Forward pass", falling back to the slug only when
+                    the server couldn't resolve the page (it may not be written yet). */}
+                resume at {row.nextTitle ?? row.nextSlug}
               </button>
             )
             : <span className="path-next">no pages yet</span>}

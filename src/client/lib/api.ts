@@ -55,6 +55,8 @@ export const getStatus = () => getJson<any>('/api/status', 'the harness status')
 export interface PathRow {
   slug: string; title: string; pages: string[];
   known: number; total: number; nextSlug: string | null;
+  /** Resolved title of nextSlug's page, when the server could read it — display sugar only. */
+  nextTitle?: string | null;
 }
 export interface Goal { kind: 'path' | 'page'; slug: string; setOn: string }
 export interface PathsPayload { goal: Goal | null; paths: PathRow[] }
