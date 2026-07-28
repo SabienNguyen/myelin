@@ -855,3 +855,11 @@ Written after the sprint that followed the original verdict; each line names its
   evidence records minted, inline KaTeX (QK⊤, √dₖ) rendered cleanly, and the tutor's follow-up
   named exactly what was wrong on each miss and offered to rework them one at a time. Per-item
   grading, mixed item types, and the model/mechanical grading-source split all hold.
+- **Anki backlog badge: verified clean, full a11y contract.** Seeded a 10-day-stale sync cursor
+  into a vault's anki-map.json so /api/status computed `backlog` (finite backlogDays > the 3-day
+  nudge threshold, Anki down). The topbar showed exactly the badge the code intends: an amber dot
+  (rgb(132,95,30) — a warm on-brand amber, not an alarm red), text "anki", role="status" with
+  aria-label "Anki has a review backlog" (so it isn't title-only and invisible to the keyboard),
+  and only the backlog class — never the hidden 'down' or the 'up' variant. Confirms the
+  fresh-install guard too: 'backlog' requires a *finite* cursor, so a machine that never synced
+  shows nothing rather than an amber badge about work that never existed.
