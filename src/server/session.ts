@@ -11,7 +11,7 @@ import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { findCanonicalPapers, findRecentPapers } from './frontierResearch.js';
 import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
-import { gradeBlockOutput } from './grading.js';
+import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Loreweaver } from './mcp.js';
 import { modelFor } from './models.js';
@@ -740,29 +740,46 @@ export function createTutorSession(
         for (const p of pending) {
           writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
         }
+        // Returns the record_evidence tool inputs the model actually emitted this run — the count
+        // gates the guardrail below, and the (slug, kind) inside each drives the recording-integrity
+        // check after (appliedGradeBypass).
         const run = async (msgs: ModelMessage[]) => {
           const result = await agent.stream({ messages: msgs });
           writer.merge(toUIMessageStream({ stream: result.stream, onError: turnError }));
           const steps = await result.steps;
-          const called = steps.flatMap((s: any) => s.toolCalls ?? [])
-            .some((tc: any) => tc.toolName === 'record_evidence');
-          return called;
+          return steps.flatMap((s: any) => s.toolCalls ?? [])
+            .filter((tc: any) => tc.toolName === 'record_evidence')
+            .map((tc: any) => (tc.input ?? tc.args ?? {}));
         };
-        const recorded = await run(model_messages);
+        const recordedCalls: any[] = await run(model_messages);
         // Gate on evidence, not on grade COUNT: a grade can legitimately carry none (an unavailable
         // code_exercise — see grading.ts), and nagging the tutor to record evidence that does not
         // exist would train it to invent some.
-        if (grades.some((g) => g.evidence.length > 0) && !recorded) {
+        if (grades.some((g) => g.evidence.length > 0) && recordedCalls.length === 0) {
           // Guardrail: one nudged retry
           const nudged = await run([...model_messages, {
             role: 'user',
             content: 'HARNESS GUARDRAIL: you did not call record_evidence for the graded block result. Do it now, then continue.',
           }]);
-          if (!nudged) {
+          recordedCalls.push(...nudged);
+          if (nudged.length === 0) {
             logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
             writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true } as any);
           }
         }
+        // Recording-integrity detection (DETECTION ONLY): capApplied guarantees the machine grade,
+        // but record_evidence's kind is the model's own argument. Flag — never block — a turn where
+        // the tutor recorded 'applied-correctly' for a page whose machine grade this turn was
+        // lesser. Wrapped so a telemetry slip can never break the turn.
+        try {
+          const laundered = appliedGradeBypass(
+            grades.flatMap((g) => g.evidence),
+            recordedCalls.map((c) => ({ slug: String(c?.slug ?? ''), kind: c?.kind })),
+          );
+          if (laundered.length) {
+            logGuardrail(cfg.vault, `record_evidence claimed applied-correctly past the machine grade for: ${laundered.join(', ')}`);
+          }
+        } catch { /* detection is telemetry; it must never affect the turn */ }
       },
     });
     return createUIMessageStreamResponse({ stream });

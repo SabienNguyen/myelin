@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
+import { appliedGradeBypass, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
 import type { ClaudeSdkGenerateOpts, ClaudeSdkResult } from '../src/server/claudeSdk.js';
 
 describe('mathEquivalent (numeric sampling)', () => {
@@ -718,5 +718,44 @@ describe('rubric judging — paraphrase tolerance and the omission retry', () =>
     const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { sdkGenerate });
     expect(g.rubric?.[1].pass).toBe(false);
     expect(g.rubric?.[1].note).toMatch(/did not address/);
+  });
+});
+
+describe('appliedGradeBypass — the recording-integrity detector', () => {
+  const applied = (slug: string) => ({ slug, kind: 'applied-correctly' as const });
+  it('flags applied-correctly recorded for a slug the machine graded lesser', () => {
+    // capApplied computed 'struggled' for derivatives this turn; the tutor recorded it as
+    // 'applied-correctly' — laundering explanation/struggle into the mechanical-only tier.
+    expect(appliedGradeBypass(
+      [{ slug: 'derivatives', kind: 'struggled' }],
+      [applied('derivatives')],
+    )).toEqual(['derivatives']);
+    expect(appliedGradeBypass(
+      [{ slug: 'x', kind: 'explained-correctly' }],
+      [applied('x')],
+    )).toEqual(['x']);
+  });
+  it('does not flag an honest copy of the machine grade', () => {
+    expect(appliedGradeBypass([applied('x')], [applied('x')])).toEqual([]);
+  });
+  it('does not flag a record for a slug the machine did not grade this turn', () => {
+    // A misconception the tutor noticed, or an 'exposed' for a page it taught, is legitimate — the
+    // detector only cares about UPGRADING a slug the machine actually graded.
+    expect(appliedGradeBypass(
+      [{ slug: 'derivatives', kind: 'struggled' }],
+      [applied('some-other-page')],
+    )).toEqual([]);
+  });
+  it('does not flag a non-applied record (a lower kind is never laundering)', () => {
+    expect(appliedGradeBypass(
+      [{ slug: 'x', kind: 'applied-correctly' }],
+      [{ slug: 'x', kind: 'struggled' }],
+    )).toEqual([]);
+  });
+  it('reports each laundered slug once', () => {
+    expect(appliedGradeBypass(
+      [{ slug: 'x', kind: 'struggled' }],
+      [applied('x'), applied('x')],
+    )).toEqual(['x']);
   });
 });

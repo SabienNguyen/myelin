@@ -10,7 +10,7 @@ import { recentLapses } from './anki/inbound.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
-import { gradeBlockOutput } from './grading.js';
+import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
 import { readQueue } from './ingest.js';
 import { invalidateGraphCache } from './graphCache.js';
 import type { Loreweaver } from './mcp.js';
@@ -599,6 +599,7 @@ export function createClaudeSdkTutorSession(
           const options = buildOptions(mode, slugs, resumeId, gap, pending.length > 0);
           let capturedSessionId: string | undefined;
           let sawRecordEvidence = false;
+          const recorded: any[] = []; // record_evidence inputs this query, for the integrity check
           // Per-message-batch state: index -> what content_block_start told us about that index.
           // Reset at each stream_event message_start because indices are scoped to ONE raw API
           // turn, and a single query() can contain several raw turns (multi-step tool loop).
@@ -678,7 +679,7 @@ export function createClaudeSdkTutorSession(
                       toolName: name.slice(BLOCKS_PREFIX.length), input: block.input,
                     });
                   } else if (name.startsWith(LOREWEAVER_PREFIX)) {
-                    if (name === RECORD_EVIDENCE_TOOL) sawRecordEvidence = true;
+                    if (name === RECORD_EVIDENCE_TOOL) { sawRecordEvidence = true; recorded.push(block.input); }
                     pendingLoreweaverCalls.add(block.id);
                     emit({
                       type: 'tool-input-available', toolCallId: block.id,
@@ -725,7 +726,7 @@ export function createClaudeSdkTutorSession(
               }
             }
           }
-          return { capturedSessionId, sawRecordEvidence };
+          return { capturedSessionId, sawRecordEvidence, recorded };
         };
 
         const storedId = loadSdkSession(cfg.vault, threadId);
@@ -751,17 +752,32 @@ export function createClaudeSdkTutorSession(
         // correctly records nothing. Nudging on grade count alone spent a whole extra query() and
         // surfaced a false "evidence not recorded" warning to the learner every time the sandbox was
         // down. Nag only when there is real evidence that went unrecorded.
+        const recordedCalls: any[] = [...runResult.recorded];
         if (grades.some((g) => g.evidence.length > 0) && !runResult.sawRecordEvidence) {
           const nudgeResult = await runQuery(
             'HARNESS GUARDRAIL: you did not call record_evidence for the graded block result. Do it now, then continue.',
             runResult.capturedSessionId ?? storedId,
           );
+          recordedCalls.push(...nudgeResult.recorded);
           if (nudgeResult.capturedSessionId) saveSdkSession(cfg.vault, threadId, nudgeResult.capturedSessionId);
           if (!nudgeResult.sawRecordEvidence) {
             logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
             emit({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true } as any);
           }
         }
+        // Recording-integrity detection (DETECTION ONLY, parity with session.ts): capApplied makes
+        // the machine grade authoritative, but record_evidence's kind is the model's own argument
+        // and this route self-executes the call (never touching the harness wrapper). Flag — never
+        // block — a turn where the tutor claimed 'applied-correctly' past a lesser machine grade.
+        try {
+          const laundered = appliedGradeBypass(
+            grades.flatMap((g) => g.evidence),
+            recordedCalls.map((c) => ({ slug: String(c?.slug ?? ''), kind: c?.kind })),
+          );
+          if (laundered.length) {
+            logGuardrail(cfg.vault, `record_evidence claimed applied-correctly past the machine grade for: ${laundered.join(', ')}`);
+          }
+        } catch { /* detection is telemetry; it must never affect the turn */ }
         } finally {
           // The save itself — in a finally so a turn that errors mid-way still persists what the
           // learner saw (the user's message plus any partial answer beats a hole in the history).

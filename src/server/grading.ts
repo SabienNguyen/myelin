@@ -517,6 +517,36 @@ export function capApplied(kind: EvidenceKind, source: GradeSource): EvidenceKin
 const ev = (slug: string, kind: EvidenceKind, note: string, source: GradeSource) =>
   ({ slug, kind: capApplied(kind, source), note });
 
+/**
+ * Recording-side integrity check (DETECTION ONLY — see the two call sites in session.ts /
+ * claudeSdkTutor.ts). capApplied makes the COMPUTATION honest: only a machine grade can produce
+ * 'applied-correctly'. But the RECORDING is model-mediated — the harness hands the tutor the exact
+ * evidence and instructs "record this", yet record_evidence's `kind` is the model's own tool
+ * argument, and nothing structurally enforces the copy. This surfaces the one deviation that would
+ * launder the guarantee: the tutor recording 'applied-correctly' for a page whose machine grade THIS
+ * turn was something lesser (explained/struggled/…). Returns the offending slugs for logGuardrail.
+ *
+ * Narrow by construction, to stay false-positive-free: a record for a slug the machine did not grade
+ * this turn is legitimate tutor observation (a misconception it noticed, an 'exposed' for a page it
+ * taught) and is never flagged; only an UPGRADE — of a slug the machine DID grade, to an
+ * 'applied-correctly' it did not mint — counts.
+ */
+export function appliedGradeBypass(
+  computed: { slug: string; kind: EvidenceKind }[],
+  recorded: { slug: string; kind: EvidenceKind }[],
+): string[] {
+  const mintedApplied = new Set(computed.filter((e) => e.kind === 'applied-correctly').map((e) => e.slug));
+  const graded = new Set(computed.map((e) => e.slug));
+  const flagged: string[] = [];
+  for (const r of recorded) {
+    if (r.kind === 'applied-correctly' && graded.has(r.slug) && !mintedApplied.has(r.slug)
+      && !flagged.includes(r.slug)) {
+      flagged.push(r.slug);
+    }
+  }
+  return flagged;
+}
+
 /** How the draft's MECHANICS landed, from Harper's client-side count (WritingDraft.tsx). Surfaced
  *  in the writing grade's detail so the machine-checked layer (grammar, spelling) is visible beside
  *  the model-judged one (argument, structure) — and honest about which is which. Empty when the
