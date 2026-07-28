@@ -11,6 +11,9 @@ import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
 import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
+import { generateExercise, listGenerated } from './gap/generated.js';
+import { builtinPatterns } from './gap/service.js';
+import { compileGenerate } from './gap/generateSeam.js';
 import { readQueue } from './ingest.js';
 import { invalidateGraphCache } from './graphCache.js';
 import type { Loreweaver } from './mcp.js';
@@ -66,6 +69,7 @@ export function blockAllowlist(gradingOnly: boolean): string[] {
   ];
 }
 const COURSE_PREFIX = 'mcp__course__';
+const GENERATE_PREFIX = 'mcp__generate__';
 const RECORD_EVIDENCE_TOOL = `${LOREWEAVER_PREFIX}record_evidence`;
 
 /** Injectable seam for tests: a fake must accept the same {prompt, options} shape query() does
@@ -235,6 +239,70 @@ export function courseMcpTools(vault: string) {
   ];
 }
 
+/**
+ * generate_exercise on the Agent-SDK route — the freeform-only twin of session.ts's tool
+ * (its ai-sdk `tool({...})` at session.ts's generateTool). Re-expressed in the Agent SDK's tool()
+ * shape and kept in sync BY HAND, exactly like courseMcpTools above — this closes the drift where
+ * the tool existed only on the API-key route, so a Claude-subscription learner could not have the
+ * tutor author a practice exercise. Freeform-gating lives in buildOptions's allowedTools (like the
+ * write tools in FREEFORM_EXTRA_TOOLS), not here; the handler body mirrors the ai-sdk one exactly,
+ * only the return is wrapped as an MCP content block. Exported for the direct-handler test.
+ */
+export function generateMcpTools(cfg: HarnessConfig) {
+  return [
+    tool(
+      'generate_exercise',
+      'Author a new coding exercise — for subjects where CODE IS THE SKILL: '
+        + 'programming itself, or a domain the student chose to practice through code (data '
+        + 'analysis, scripting, infra). Non-coding subjects take their own applied routes '
+        + '(structured_check, math_scratchpad, label_diagram) — do not code-ify them uninvited. '
+        + 'Family "function" (the default): one plain function, JSON args in, JSON value out, '
+        + 'graded by deep comparison. '
+        + 'Family "manifest": the student writes a YAML manifest from an exam-style task '
+        + '(Kubernetes/CKA prep, CI configs, any YAML-configured system), graded by '
+        + 'mechanical assertions over the parsed document. '
+        + 'Family "exec": the student writes a WHOLE PROGRAM in a named runtime (python3, '
+        + 'bash, ruby, node, sqlite, ...), judged per test case on stdin/argv in and exact '
+        + 'stdout out — use it for algorithm practice, CLI tools, text processing, and any '
+        + 'language the student wants that their machine has. The sqlite runtime judges SQL. '
+        + 'Family "stream": async-generator-over-byte-chunks (SSE, NDJSON, line protocols, '
+        + 'framing). The result is verified mechanically and stored PENDING REVIEW — tell the '
+        + 'student it is waiting in the Library\'s Practice section for their approval, and do '
+        + 'not promise it mid-conversation.',
+      {
+        pattern: z.string().describe('kebab-case pattern id, e.g. dilution-calculator'),
+        description: z.string().describe('what the exercise should teach, 1-3 sentences'),
+        family: z.enum(['function', 'manifest', 'exec', 'stream']).optional()
+          .describe('function (default) for any-domain computations; manifest for YAML-writing tasks; exec for whole programs in a chosen language; stream only for byte-stream parsing'),
+        runtime: z.enum(['python3', 'bash', 'ruby', 'node', 'typescript', 'sqlite', 'c', 'rust', 'cuda', 'go', 'java']).optional()
+          .describe('exec family only: which runtime the program targets. node and typescript always work; python3/bash/ruby need a local install; sqlite judges SQL; c needs cc, rust needs rustc; go and java run in Docker. Generation fails loudly with the exact fix when something is missing.'),
+        environment: z.enum(['redis', 'postgres']).optional()
+          .describe('exec family only: a real service composed up fresh for every suite run — the program gets its connection string via REDIS_URL / DATABASE_URL. Needs Docker; generation fails loudly with the exact fix when missing.'),
+      },
+      async ({ pattern, description, family, runtime, environment }) => {
+        const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ error: `an exercise for "${slug}" already exists` }) }] };
+        }
+        try {
+          const ex = await generateExercise(cfg.vault, slug, description, {
+            generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
+          }, family ?? 'function', runtime, environment);
+          return { content: [{ type: 'text' as const, text: JSON.stringify({
+            pattern: ex.pattern, status: ex.status,
+            gates: ex.verification.gates.map((g) => `${g.ok ? 'PASS' : 'FAIL'} ${g.gate}`),
+            note: ex.status === 'pending'
+              ? 'verified mechanically; waiting in the Library tab\'s Practice section for the student to approve it'
+              : 'rejected by the verification gates — do not retry with the same content',
+          }) }] };
+        } catch (e: any) {
+          return { content: [{ type: 'text' as const, text: JSON.stringify({ error: e?.message ?? String(e) }) }] };
+        }
+      },
+    ),
+  ];
+}
+
 export function createClaudeSdkTutorSession(
   lw: Loreweaver, cfg: HarnessConfig, deps: ClaudeSdkTutorDeps = {},
 ) {
@@ -326,6 +394,9 @@ export function createClaudeSdkTutorSession(
       ...blockAllowlist(gradingOnly),
       // Every mode, matching session.ts: drilling a banked problem is a teaching activity.
       `${COURSE_PREFIX}course_problems`, `${COURSE_PREFIX}mark_course_problem`,
+      // Freeform only, matching session.ts's generateTool gate: commissioning a NEW exercise is a
+      // content-creating act, so it rides with the write tools, not the teaching-mode set.
+      ...(mode === 'freeform' ? [`${GENERATE_PREFIX}generate_exercise`] : []),
       // Same gate as the ai-sdk route: research when the vault has a gap, never otherwise.
       ...(gap ? SDK_RESEARCH_TOOLS : []),
     ];
@@ -350,6 +421,7 @@ export function createClaudeSdkTutorSession(
         },
         blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools(cfg.vault) }),
         course: createSdkMcpServer({ name: 'course', tools: courseMcpTools(cfg.vault) }),
+        generate: createSdkMcpServer({ name: 'generate', tools: generateMcpTools(cfg) }),
       },
       // Block/loreweaver tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK
       // executes them itself, not us). canUseTool would be the natural rewrite seam, but it is

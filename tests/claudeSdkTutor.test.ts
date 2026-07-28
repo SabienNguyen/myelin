@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Loreweaver } from '../src/server/mcp.js';
-import { courseMcpTools, createClaudeSdkTutorSession } from '../src/server/claudeSdkTutor.js';
+import { courseMcpTools, createClaudeSdkTutorSession, generateMcpTools } from '../src/server/claudeSdkTutor.js';
 import { getGraphCached, invalidateGraphCache } from '../src/server/graphCache.js';
 import { loadSdkSession, loadThread, saveSdkSession } from '../src/server/sessionStore.js';
 import { LW_REPO } from './lwRepo.js';
@@ -585,6 +585,25 @@ describe('course tools on the SDK route', () => {
     const payload = await callCourseTool(v, 'course_problems', {});
     expect(payload.problems).toEqual([]);
     expect(payload.note).toContain('course bank is empty');
+  });
+});
+
+// generate_exercise was wired on session.ts's ai-sdk route only; this route (the Claude
+// subscription path) silently lacked it, so those learners could not have the tutor author a
+// practice exercise. The tool is now re-expressed here in the Agent SDK's tool() shape; this pins
+// that it exists and that its dup-guard fires — the guard returns BEFORE generateExercise, so the
+// assertion needs no compile model.
+describe('generate_exercise — ported to the Agent-SDK route (parity with session.ts)', () => {
+  it('is registered, and refuses a pattern that already exists without a model call', async () => {
+    const { builtinPatterns } = await import('../src/server/gap/service.js');
+    const existing = builtinPatterns()[0];
+    expect(typeof existing).toBe('string'); // there is at least one built-in pattern to collide with
+    const cfg = { vault: mkdtempSync(join(tmpdir(), 'lwh-sdk-gen-')), models: { compile: { model: 'unused' } } } as any;
+    const t = generateMcpTools(cfg).find((tool) => tool.name === 'generate_exercise')! as any;
+    expect(t).toBeTruthy(); // the tool now exists on this route
+    const res = await t.handler({ pattern: existing, description: 'irrelevant — the guard fires first' }, {});
+    const out = JSON.parse(res.content[0].text);
+    expect(out.error).toContain('already exists');
   });
 });
 
