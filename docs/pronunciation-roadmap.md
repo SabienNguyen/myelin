@@ -49,6 +49,21 @@ Pipeline (all open-source, all local-capable):
    `struggled` with the specific miss named ("you fell where `ngã` rises"). This is a genuine new
    `structured_check` checker kind (`tone_contour`), sitting beside `numeric`/`chem_equation`.
 
+### Update: the grading core is built and tested
+
+The pure comparison math now exists as `src/shared/toneContour.ts` with `tests/toneContour.test.ts`
+(10 tests): `normalizeContour` (drop unvoiced frames → median-centered semitones → resample to a
+fixed length, so grading is independent of the speaker's pitch and speaking rate), `contourSimilarity`
+(Pearson correlation of shapes), reference `TONE_TEMPLATES` for the six tones, and `gradeTone` (best-
+matching template must be the intended one AND clear a threshold; ngang judged by flatness instead of
+correlation). The tests pin the properties that matter — an octave-shifted rise grades identically, a
+10-frame and a 40-frame rise agree, and the sắc-vs-ngã pair (smooth rise vs rise-with-glottal-notch)
+is kept apart. What remains is I/O, not algorithm: mic capture (`getUserMedia`/`MediaRecorder`), a
+pitch tracker to turn audio into the F0 array these functions expect (Web Audio autocorrelation in
+the browser, no new runtime dependency — or CREPE server-side for higher accuracy), and a
+`tone_contour` checker-kind wired into `structured_check` so a pass mints `applied-correctly`
+evidence. The template set is a hand-drawn v1; a corpus-fit upgrade is a later step.
+
 ### Why it isn't wired yet
 
 The grading half needs a pitch-analysis service (CREPE is Python/ONNX; pYIN is Python) — a new
