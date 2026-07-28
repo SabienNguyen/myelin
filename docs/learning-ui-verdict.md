@@ -641,3 +641,13 @@ Written after the sprint that followed the original verdict; each line names its
   exactly canonical: the Transformer paper, the RoFormer paper (arXiv 2104.09864), and
   EleutherAI's rotary-embeddings post. Augment-don't-fragment is the vault behavior a knowledge
   graph needs, observed unprompted.
+- **writing_draft on live content: the annotation flow at its best.** Asked to explain RoPE to a
+  junior engineer with one deliberately vague sentence planted: the grader annotated exact spans
+  (the filler sentence caught as VAGUE — "hedges with 'basically,' 'sort of,' and 'somehow'
+  without conveying any information"), scored the rubric an honest 2/4 with per-criterion
+  verdicts, and — the impressive part — judged AUDIENCE FIT correctly, flagging "2D subspaces"
+  and "compose additively" as unexplained jargon for the stated junior reader even though both
+  statements are technically accurate. Skill grades (claim good / concision weak / specificity
+  good), the Revise-this-draft round button, recorded evidence, and feedback prose that teaches
+  (the clock-hands analogy for angle difference) all rendered. Every block has now been driven
+  live within this session.
