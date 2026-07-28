@@ -178,6 +178,42 @@ describe('evidence guardrail', () => {
     expect(existsSync(join(vault, '.harness', 'guardrail.log'))).toBe(true);
   }, 30_000);
 
+  it('logs a guardrail when record_evidence claims applied-correctly past a lesser machine grade', async () => {
+    // Recording-integrity DETECTION (appliedGradeBypass), fire path through the real streaming
+    // inspection: the block grades mechanically as `struggled` (the learner answered wrong), but the
+    // tutor records it as `applied-correctly` — laundering into the mechanical-only tier. The
+    // detector must surface it in the guardrail log. It does NOT block the turn (record_evidence was
+    // called, so no unrecorded-evidence nudge either — this is a distinct, additional log line).
+    saveSdkSession(vault, 'thread-launder', 'sess-l0');
+    const calls: any[] = [];
+    async function* fakeQuery(params: any) {
+      calls.push(params);
+      yield initMsg('sess-l0');
+      yield assistantMsg('sess-l0', [
+        { type: 'text', text: 'Recorded.' },
+        { type: 'tool_use', id: 'tc-ev2', name: 'mcp__loreweaver__record_evidence',
+          input: { student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'inflated' } },
+      ]);
+      yield resultMsg('sess-l0');
+    }
+    const session = createClaudeSdkTutorSession(lw, cfg, { queryImpl: fakeQuery });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      { id: 'a1', role: 'assistant', parts: [{
+        // structured_check (numeric) grades MECHANICALLY — a wrong answer is 'struggled' with no
+        // model call (a wrong quick_check would fall back to the grader model, which this cfg lacks).
+        type: 'tool-structured_check', toolCallId: 'tc3', state: 'output-available',
+        input: { prompt: 'How many?', pageSlug: 'arith', checker: { kind: 'numeric', expected: 4 } },
+        output: { values: ['3'] }, // WRONG -> machine grade is 'struggled', not 'applied-correctly'
+      }] },
+    ] as any[];
+    await drain(await session.respond(history, 'learn', 'thread-launder'));
+
+    expect(calls.length).toBe(1); // record_evidence WAS called — the turn is not blocked or nudged
+    const log = readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8');
+    expect(log).toMatch(/applied-correctly past the machine grade for: arith/);
+  }, 30_000);
+
   it('does NOT nudge when the only grade carries no evidence (unavailable code_exercise)', async () => {
     // Parity with the ai-sdk route: an unavailable code_exercise grades with evidence: [], the tutor
     // is asked to "record_evidence for: []" and correctly records nothing. Gating the guardrail on
