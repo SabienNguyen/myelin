@@ -863,3 +863,15 @@ Written after the sprint that followed the original verdict; each line names its
   and only the backlog class — never the hidden 'down' or the 'up' variant. Confirms the
   fresh-install guard too: 'backlog' requires a *finite* cursor, so a machine that never synced
   shows nothing rather than an amber badge about work that never existed.
+- **Decay → review → re-proof: the core spaced-repetition loop verified end to end on real
+  content.** Backdated vietnamese-tones' last_reinforced 53 days (past the 45-day mastered
+  window) so effectiveLevel decayed it mastered → practicing. Review mode then surfaced exactly
+  that page unprompted — "decayed to practicing since your last review on 2026-06-05, let's
+  re-prove it before anything new" — and opened with COLD retrieval (ngã vs hỏi pitch contours,
+  no re-teaching first), the reviewDue-first ordering doing its job. On a correct answer the page
+  climbed back to practicing and last_reinforced reset to today, so it's no longer due and carries
+  a fresh decay window; the tutor then moved to the frontier (first-phrases / stream-consumer).
+  Honest nuance confirmed: one retrieval restores the practicing rung and resets the clock but
+  does not leap back to mastered — regaining that needs more evidence, which is the ladder
+  refusing to over-credit a single re-proof. The real re-proof overwrote the synthetic backdate,
+  so the vault is left truthful.
