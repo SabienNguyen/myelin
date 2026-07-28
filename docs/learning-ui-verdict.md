@@ -939,3 +939,10 @@ Written after the sprint that followed the original verdict; each line names its
   token contrast, stack without horizontal overflow at 900px, and expose their controls to
   keyboard focus. No visual or responsive bugs found; the new work sits inside the warm-paper
   design language rather than regressing out of it.
+- **A second language keyboard, near-free: Mandarin Pinyin tone input.** Extending the input-method
+  framework rather than a heavy on-screen-keyboard dependency: `src/shared/pinyin.ts` turns
+  `ni3 hao3` into `nǐ hǎo` (the standard tone-mark placement — a/e win, ou→o, else last vowel; `v`
+  is ü), 6 tests. It slots into ImeInput's method registry beside Telex, so `lang: zh` on a
+  quick_check now gives pinyin input exactly as `lang: vi` gives Telex — the same tested plumbing,
+  no new dependency. Verified live: tutor set `lang: zh`, typing `ni3 hao3` produced `nǐ hǎo`.
+  Non-Latin scripts (Cyrillic/Arabic/CJK characters) remain the simple-keyboard follow-up.

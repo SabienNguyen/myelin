@@ -9,11 +9,21 @@ afterEach(cleanup);
 // the crux: the field shows the transliteration while holding the raw keystrokes, and submits the
 // transliterated value — so a Vietnamese answer is graded as the learner meant it, not as ASCII.
 describe('imeFor — method selection by BCP-47 primary subtag', () => {
-  it('resolves Vietnamese, ignores region, and returns undefined for the unsupported', () => {
+  it('resolves Vietnamese and Mandarin, ignores region, and returns undefined for the unsupported', () => {
     expect(imeFor('vi')?.label).toBe('Telex');
     expect(imeFor('vi-VN')?.label).toBe('Telex');
+    expect(imeFor('zh')?.label).toBe('Pinyin');
+    expect(imeFor('zh-CN')?.label).toBe('Pinyin');
     expect(imeFor('en')).toBeUndefined();
     expect(imeFor(undefined)).toBeUndefined();
+  });
+
+  it('types pinyin tone numbers: ni3 → nǐ', () => {
+    const onSubmit = vi.fn();
+    render(<ImeInput name="a" lang="zh" onSubmit={onSubmit} />);
+    const input = screen.getByLabelText(/Pinyin input/) as HTMLInputElement;
+    for (const ch of 'ni3') fireEvent.keyDown(input, { key: ch });
+    expect(input.value).toBe('nǐ');
   });
 });
 

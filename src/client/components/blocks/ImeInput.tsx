@@ -11,11 +11,14 @@
 import { useState } from 'react';
 import { KeyboardIcon as Keyboard } from '@phosphor-icons/react/dist/csr/Keyboard';
 import { telex } from '../../../shared/telex.js';
+import { pinyin } from '../../../shared/pinyin.js';
 
-/** Input methods keyed by BCP-47 primary subtag. Each maps a raw keystroke buffer to display text.
- *  Vietnamese is the one shipped; the shape is ready for more (pinyin, etc.). */
+/** Input methods keyed by BCP-47 primary subtag. Each maps a raw keystroke buffer to display text:
+ *  Vietnamese Telex (vieejt→việt) and Mandarin Pinyin tone input (ni3→nǐ). Both are ASCII→toned
+ *  transliterations, the shape non-Latin scripts (a virtual keyboard) could extend later. */
 const METHODS: Record<string, { label: string; transform: (raw: string) => string }> = {
   vi: { label: 'Telex', transform: telex },
+  zh: { label: 'Pinyin', transform: pinyin },
 };
 
 export function imeFor(lang: string | undefined) {
