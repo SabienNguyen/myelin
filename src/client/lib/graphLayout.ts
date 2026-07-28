@@ -1,4 +1,4 @@
-import { DECAY, type MasteryLevel } from '../../shared/loreweaver.js';
+import { type MasteryLevel } from '../../shared/loreweaver.js';
 
 // Mastery colours live in styles.css :root as --mastery-* so they have dark-scheme counterparts and
 // so GraphPanel's legend can render swatches with var() instead of re-literalling these values (it
@@ -17,10 +17,6 @@ function masteryColors(): Record<MasteryLevel, string> {
     cs.getPropertyValue(`--mastery-${level}`).trim() || FALLBACK_COLORS[level];
   return { unseen: pick('unseen'), exposed: pick('exposed'), practicing: pick('practicing'), mastered: pick('mastered') };
 }
-const WINDOW: Partial<Record<MasteryLevel, number>> = {
-  mastered: DECAY.masteredDays, practicing: DECAY.practicingDays,
-};
-
 export interface LaidOutNode {
   slug: string;
   title: string;
@@ -90,12 +86,19 @@ export function graphMeta(nodes: any[], now: Date): { nodes: GraphNodeMeta[]; ed
   const colors = masteryColors(); // resolved once per call, not per node
   const metaNodes: GraphNodeMeta[] = nodes.map((n) => {
     const effective: MasteryLevel = n.mastery?.effective ?? 'unseen';
-    const window = WINDOW[effective];
+    // daysLeft is the memory layer's own countdown (get_student_state's days_left), NOT re-derived
+    // from a level→window table here — that table knew only mastered/practicing and so overstated a
+    // rubric-held page's remaining days (real window 14, table's 21), making the ring and the
+    // "Nd until decay" label read long. The window the ring needs back is reconstructed from
+    // days_left + elapsed (≈ the true window, rubric-aware, whatever it was), keeping ring and label
+    // in agreement. null days_left (slipped, or a level with no decay clock) means no ring, as before.
     let daysLeft: number | null = null, ringFraction: number | null = null;
-    if (window && n.mastery?.last_reinforced) {
-      const elapsed = Math.floor((now.getTime() - new Date(n.mastery.last_reinforced).getTime()) / 86_400_000);
-      daysLeft = Math.max(0, window - elapsed);
-      ringFraction = daysLeft / window;
+    const reported: number | null = n.mastery?.days_left ?? null;
+    if (reported != null && n.mastery?.last_reinforced) {
+      daysLeft = reported;
+      const elapsed = Math.max(0, Math.floor((now.getTime() - new Date(n.mastery.last_reinforced).getTime()) / 86_400_000));
+      const window = reported + elapsed;
+      ringFraction = window > 0 ? reported / window : null;
     }
     return {
       slug: n.slug, title: n.title,

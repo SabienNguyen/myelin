@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { graphMeta, radiusForDegree, NODE_R_MIN } from '../../src/client/lib/graphLayout.js';
 
+// Mastery is the get_student_state entry the /api/graph payload attaches verbatim: it carries
+// `days_left` and `slipped` (the layer's own decay numbers), NOT an evidence array. days_left is
+// null once a page has slipped or has no decay clock.
 const nodes = [
   { slug: 'derivatives', title: 'Derivatives', prereqs: [], deepens: [],
-    mastery: { level: 'mastered', effective: 'mastered', last_reinforced: '2026-07-05', evidence: [], misconceptions: [] } },
+    mastery: { level: 'mastered', effective: 'mastered', last_reinforced: '2026-07-05', days_left: 38, slipped: false, misconceptions: [] } },
   { slug: 'chain-rule', title: 'Chain Rule', prereqs: ['derivatives'], deepens: [],
-    mastery: { level: 'practicing', effective: 'exposed', last_reinforced: '2026-05-01', evidence: [], misconceptions: ['order confusion'] } },
+    mastery: { level: 'practicing', effective: 'exposed', last_reinforced: '2026-05-01', days_left: null, slipped: true, misconceptions: ['order confusion'] } },
   { slug: 'jacobians', title: 'Jacobians', prereqs: [], deepens: ['chain-rule'], mastery: null },
 ];
 
@@ -14,10 +17,22 @@ describe('graphMeta', () => {
   it('colors by EFFECTIVE level', () => {
     expect(g.nodes.find((n) => n.slug === 'chain-rule')!.color).toBe('#e0b040'); // effective exposed, not stored practicing
   });
-  it('computes decay ring for mastered (7 of 45 days elapsed)', () => {
+  it('computes decay ring for mastered from the layer\'s days_left (7 of 45 days elapsed)', () => {
     const d = g.nodes.find((n) => n.slug === 'derivatives')!;
     expect(d.daysLeft).toBe(38);
-    expect(d.ringFraction).toBeCloseTo(38 / 45, 2);
+    expect(d.ringFraction).toBeCloseTo(38 / 45, 2); // window reconstructed as 38 + 7 elapsed
+  });
+  it('a rubric-held page uses its true 14-day window, not the practicing 21', () => {
+    // The bug the days_left switch closes on the graph: this page rests on a rubric verdict, so the
+    // layer reports 2 days left against a 14-day window. Re-deriving from a mastered/practicing
+    // table would have shown ~9 days and a much fuller ring — the graph telling the same lie the
+    // digest used to. 12 days elapsed since last_reinforced, so window reconstructs as 2 + 12 = 14.
+    const rubric = graphMeta([{ slug: 'equilibrium', title: 'Equilibrium', prereqs: [], deepens: [],
+      mastery: { level: 'practicing', effective: 'practicing', last_reinforced: '2026-06-30', days_left: 2, slipped: false, misconceptions: [] } },
+    ] as any, new Date('2026-07-12'));
+    const e = rubric.nodes[0];
+    expect(e.daysLeft).toBe(2);
+    expect(e.ringFraction).toBeCloseTo(2 / 14, 2); // NOT 2/21 and NOT ~9 days
   });
   it('null mastery renders unseen gray, no ring', () => {
     const j = g.nodes.find((n) => n.slug === 'jacobians')!;
