@@ -161,6 +161,34 @@ describe('cold-start research unlock', () => {
     expect(tools).not.toContain('read_url');
     expect(prompt).not.toMatch(/your memory has a gap here/);
   }, 30_000);
+
+  it('does NOT re-open research on a grade turn, even when the staging question had a gap', async () => {
+    // The staging message names a topic the vault cannot cover (a no-page gap), but THIS turn is a
+    // block submission — grading, not a fresh ask. vaultGap keys off that stale user text, so without
+    // the grade-turn guard the tutor got a "research this" directive over the graded card and
+    // re-taught the whole topic instead of landing the grade (the SDK route already gates this).
+    const calls: any[] = [];
+    const model = textOnly();
+    const orig = model.doStream.bind(model);
+    (model as any).doStream = async (o: any) => { calls.push(o); return orig(o); };
+    const session = createTutorSession(lw, {
+      student: 'kid', vault, models: {}, search: { searxng: 'http://127.0.0.1:1' },
+    } as any, { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'explain species counterpoint to me' }] },
+      { id: 'a1', role: 'assistant', parts: [{
+        type: 'tool-quick_check', toolCallId: 'tc1', state: 'output-available',
+        input: { question: 'name a first-species rule', mode: 'free', expected: 'no parallel fifths', pageSlug: 'counterpoint' },
+        output: { answer: 'no parallel fifths' },
+      }] },
+    ] as any[];
+    await (await session.respond(history, 'learn')).text();
+    const tools = (calls[0].tools ?? []).map((t: any) => t.name);
+    const userPrompt = JSON.stringify((calls[0].prompt ?? []).filter((m: any) => m.role === 'user'));
+    expect(tools).not.toContain('web_search'); // research withheld on the grade turn…
+    expect(userPrompt).not.toMatch(/your memory has a gap here/);
+    expect(userPrompt).toMatch(/record_evidence/); // …because it IS a grade turn
+  }, 30_000);
 });
 
 describe('grading round-trip (Bug 2)', () => {

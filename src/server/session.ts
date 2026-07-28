@@ -595,7 +595,13 @@ export function createTutorSession(
         // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
         // wherever the vault has a GAP — no page, a stub, an unsourced page, a page too thin to
         // teach from. See vaultGap above for why each of those counts.
-        const gap = await vaultGap(mode, messages, slugs, {
+        //
+        // NOT on a grade turn: vaultGap keys off the last USER text, which on a block submission is
+        // the already-answered message that staged the block — re-running it re-issues the same
+        // research directive over the graded card, so the tutor re-researches and re-teaches the
+        // whole topic instead of landing the grade. The SDK route (claudeSdkTutor.ts) gates this the
+        // same way for the same reason; this brings the ai-sdk route into parity.
+        const gap = pending.length ? null : await vaultGap(mode, messages, slugs, {
           search: (query) => lw.call('search', { query }) as Promise<any>,
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
