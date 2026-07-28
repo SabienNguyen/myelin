@@ -582,3 +582,10 @@ Written after the sprint that followed the original verdict; each line names its
   clean boot; both were re-proven). The ai-sdk route keeps the lighter onEnd-based save (its
   stream emits real start chunks, so ids converge; full disconnect hardening there is future
   work if that route ever carries live traffic).
+- **Mode-switch injection re-proven against a clean boot.** The earlier live proof was void (stale
+  server); re-run properly: fresh thread, turn 1 in learn, selector flipped to review, then a
+  deliberately vague "what should we review right now?" — nothing in the conversation carried the
+  answer. The tutor replied with the vault's exact current state: chain-rule holding (re-proven
+  an hour earlier), loss-functions with "just 1 day of slack left," and an honest "no reviews are
+  actually due right now" that matches /api/due's due-soon-versus-slipped distinction. The
+  injected fresh context is doing its job.
