@@ -1,7 +1,6 @@
 import cron from 'node-cron';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { DECAY, LEVELS, type MasteryLevel } from '../shared/loreweaver.js';
 import type { HarnessConfig } from './config.js';
 import type { Loreweaver } from './mcp.js';
 import { sendNotification } from './notify.js';
@@ -9,25 +8,26 @@ import { sendNotification } from './notify.js';
 export type Ledger = Record<string, true>; // key: `${slug}|${kind}|${last_reinforced}`
 export interface DigestItem { slug: string; kind: 'decays-soon' | 'decayed'; message: string }
 
-const WINDOW: Partial<Record<MasteryLevel, number>> = {
-  mastered: DECAY.masteredDays, practicing: DECAY.practicingDays,
-};
-
-export function computeDigest(state: Record<string, any>, ledger: Ledger, now: Date) {
+/**
+ * Turn the student-state map into the digest lines a tick would notify, deduped against the ledger.
+ *
+ * `slipped` and `days_left` are read straight off each entry — they come from the memory layer,
+ * computed where the decay windows actually live (loreweaver's decayDaysLeft). This USED to
+ * re-derive the countdown here from a local `{mastered:45, practicing:21}` table, which is blind to
+ * the shorter window a rubric-held page rests on: such a page decays at 14 days, so its "decays
+ * soon" heads-up (fired at ≤3 days left) was computed against 21 and never sent before the page had
+ * already slipped. Consuming the layer's own number is the fix and the reason it exposes one.
+ */
+export function computeDigest(state: Record<string, any>, ledger: Ledger) {
   const items: DigestItem[] = [];
   const newLedger: Ledger = { ...ledger };
   for (const [slug, m] of Object.entries(state)) {
-    const decayed = LEVELS.indexOf(m.effective) < LEVELS.indexOf(m.level);
-    const window = WINDOW[m.effective as MasteryLevel];
     const push = (kind: DigestItem['kind'], message: string) => {
       const key = `${slug}|${kind}|${m.last_reinforced}`;
       if (!newLedger[key]) { newLedger[key] = true; items.push({ slug, kind, message }); }
     };
-    if (decayed) push('decayed', `${slug} slipped to ${m.effective} — review to restore`);
-    else if (window) {
-      const daysLeft = window - Math.floor((now.getTime() - new Date(m.last_reinforced).getTime()) / 86_400_000);
-      if (daysLeft > 0 && daysLeft <= 3) push('decays-soon', `${slug} decays in ${daysLeft}d`);
-    }
+    if (m.slipped) push('decayed', `${slug} slipped to ${m.effective} — review to restore`);
+    else if (m.days_left != null && m.days_left <= 3) push('decays-soon', `${slug} decays in ${m.days_left}d`);
   }
   return { items, newLedger };
 }
@@ -52,13 +52,11 @@ export async function runDigestTick(
   const now = deps.now ?? (() => new Date());
   const notify = deps.notify ?? sendNotification;
   if (inQuietHours(now().getHours(), cfg.schedule.quietHours)) return 'quiet';
+  // The map already carries per-page `slipped` and `days_left` (get_student_state computes both as
+  // of now), so one call is the whole input — no per-slug refetch, which fetched a `detail` shape
+  // that dropped exactly those two fields and forced the old local re-derivation.
   const state = await lw.call('get_student_state', { student: cfg.student });
-  const details: Record<string, any> = {};
-  for (const slug of Object.keys(state)) {
-    const d = await lw.call('get_student_state', { student: cfg.student, slug });
-    if (d.detail) details[slug] = d.detail;
-  }
-  const { items, newLedger } = computeDigest(details, loadLedger(cfg.vault), now());
+  const { items, newLedger } = computeDigest(state, loadLedger(cfg.vault));
   if (!items.length) return 'nothing-due';
   // Only mark the ledger when the notification actually reached the desktop — a headless
   // send (boot-before-login) fails and must retry on a later tick, not vanish.
