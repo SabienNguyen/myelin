@@ -92,7 +92,15 @@ function isoWeekKey(d: Date): string {
 
 const notifyLedgerPath = join(cfg.vault, '.harness', 'notify.json');
 function loadNotifyLedger(): Record<string, true> {
-  return existsSync(notifyLedgerPath) ? JSON.parse(readFileSync(notifyLedgerPath, 'utf8')) : {};
+  if (!existsSync(notifyLedgerPath)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(notifyLedgerPath, 'utf8'));
+    // Shared notify.json (scheduler.ts writes it too): a crash mid-write truncates it, and this
+    // dedup ledger is losslessly resettable — degrade rather than throw into the anki-backlog tick.
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 function saveNotifyLedger(ledger: Record<string, true>): void {
   mkdirSync(join(cfg.vault, '.harness'), { recursive: true });

@@ -33,8 +33,19 @@ export function computeDigest(state: Record<string, any>, ledger: Ledger) {
 }
 
 const ledgerPath = (vault: string) => join(vault, '.harness', 'notify.json');
-const loadLedger = (vault: string): Ledger =>
-  existsSync(ledgerPath(vault)) ? JSON.parse(readFileSync(ledgerPath(vault), 'utf8')) : {};
+const loadLedger = (vault: string): Ledger => {
+  const p = ledgerPath(vault);
+  if (!existsSync(p)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(p, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Ledger) : {};
+  } catch {
+    // A dedup ledger truncated by a crash mid-write is losslessly resettable — a notice already sent
+    // may re-fire once, which is far better than the digest throwing here every tick until the file
+    // is repaired by hand. Every other ledger in this codebase degrades the same way.
+    return {};
+  }
+};
 
 /** Is `hour` inside the quiet window? Handles windows that SPAN MIDNIGHT ([22, 8] means 22:00
  *  through 07:59) — the branch a naive range check silently gets wrong. */

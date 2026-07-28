@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeDigest, inQuietHours, runDigestTick } from '../src/server/scheduler.js';
@@ -105,6 +105,15 @@ describe('runDigestTick', () => {
     expect(existsSync(join(vault, '.harness', 'notify.json'))).toBe(false);
     // Delivery recovers on a later tick and only then persists.
     expect(await runDigestTick(makeLw(), cfgFor(vault), { now: at(13), notify: async () => true })).toBe('notified');
+  });
+
+  it('a corrupt notify ledger degrades to empty instead of throwing the tick', async () => {
+    // notify.json truncated by a crash mid-write must not throw runDigestTick every tick forever —
+    // it's a losslessly-resettable dedup ledger. The decayed page still notifies (empty ledger).
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-sched-'));
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    writeFileSync(join(vault, '.harness', 'notify.json'), '{"loss-functions|decayed|2026-0'); // truncated
+    expect(await runDigestTick(makeLw(), cfgFor(vault), { now: at(12), notify: async () => true })).toBe('notified');
   });
 
   it('a healthy student is four kinds of silence apart from a broken notifier', async () => {
