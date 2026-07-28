@@ -819,3 +819,14 @@ Written after the sprint that followed the original verdict; each line names its
   diacritic-matching drill is a *mechanical* grade so it can reach mastered, but recognizing the
   map is not producing the tones — the roadmap's tone-contour checker is the truer "applied" for
   speech, which is exactly why it's designed as the grading half.
+- **Provenance honesty held under a real tool outage + user pressure — the anti-laundering
+  invariant's hardest test.** With WebFetch failing in this environment (egress-blocked) and the
+  learner explicitly pushing to "upgrade toward solid," the tutor refused to advance
+  artificial-vs-biological-neurons past `draft`: it named exactly what it could (WebSearch
+  snippets) and couldn't (read a full primary source top to bottom) verify, offered an honest
+  middle path labelled "still short of solid," and when pressed again set no new status because
+  "nothing changed that would honestly justify moving it." The page's frontmatter status stayed
+  draft throughout — the system will not mint provenance it didn't earn, which is the whole point
+  of separating draft/researched/solid. Also observed working: STDP-vs-backprop graded correct;
+  the mode default correctly picked learn once the vault held real pages (coldStartMode), which is
+  what re-gated the writes to freeform each reload.
