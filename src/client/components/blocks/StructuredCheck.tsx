@@ -6,9 +6,12 @@
 // which for a "name all of them" question is most of the question.
 
 import { useState } from 'react';
+import { RulerIcon as Ruler } from '@phosphor-icons/react/dist/csr/Ruler';
 import { BlockProse } from '../BlockProse.js';
 import { prettyAnswer } from '../../lib/answerDisplay.js';
 import { parseNotes, playNotes } from '../../lib/audio.js';
+import { panelBus } from '../../lib/panelBus.js';
+import { StagePortal } from '../StagePortal.js';
 import { Verdict } from './Verdict.js';
 
 type Checker =
@@ -71,14 +74,6 @@ export function StructuredCheck({ args, result, addResult }: {
   // it on every prompt would subscript prose like "step2". Display only, as always.
   const displayPrompt = checker.kind === 'chem_equation'
     ? (prettyAnswer(args.prompt) ?? args.prompt) : args.prompt;
-  // Everything the learner answers in ONE input. `unit` includes its unit in the answer (that is
-  // the point of the checker), `chem_equation` is one equation, `notes` split server-side.
-  const isSingle = ['numeric', 'pattern', 'unit', 'chem_equation', 'notes', 'vector'].includes(checker.kind);
-  const [single, setSingle] = useState('');
-  const [lines, setLines] = useState('');
-  const [picks, setPicks] = useState<string[]>(
-    checker.kind === 'matching' ? checker.items.map(() => '') : [],
-  );
 
   if (result) {
     const g = result.grading;
@@ -108,6 +103,36 @@ export function StructuredCheck({ args, result, addResult }: {
       </div>
     );
   }
+
+  // Interactive applied check lives on the STAGE, like every other applied block (quiz, math,
+  // diagram, draft, code) and unlike the deliberately-inline quick_check warm-up — the stage's own
+  // empty copy already lists "science checks" among what lands there, and the matching/sequence
+  // variants need the stage's room rather than the narrower transcript column. The transcript keeps
+  // a chip that announces the exercise and jumps to it, exactly as Quiz/Math do.
+  return (
+    <>
+      <button type="button" className="block chip" onClick={() => panelBus.setTab('stage')}>
+        <Ruler size={15} weight="duotone" /> Applied check waiting on the stage
+      </button>
+      <StagePortal><StructuredCheckInner args={args} addResult={addResult} /></StagePortal>
+    </>
+  );
+}
+
+export function StructuredCheckInner({ args, addResult }: {
+  args: Args; addResult: (r: any) => void;
+}) {
+  const { checker } = args;
+  const displayPrompt = checker.kind === 'chem_equation'
+    ? (prettyAnswer(args.prompt) ?? args.prompt) : args.prompt;
+  // Everything the learner answers in ONE input. `unit` includes its unit in the answer (that is
+  // the point of the checker), `chem_equation` is one equation, `notes` split server-side.
+  const isSingle = ['numeric', 'pattern', 'unit', 'chem_equation', 'notes', 'vector'].includes(checker.kind);
+  const [single, setSingle] = useState('');
+  const [lines, setLines] = useState('');
+  const [picks, setPicks] = useState<string[]>(
+    checker.kind === 'matching' ? checker.items.map(() => '') : [],
+  );
 
   function submit() {
     const values = checker.kind === 'matching' ? picks

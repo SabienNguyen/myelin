@@ -6,7 +6,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, screen } from '@testing-library/react';
 import { prettyAnswer } from '../../src/client/lib/answerDisplay.js';
-import { StructuredCheck } from '../../src/client/components/blocks/StructuredCheck.js';
+import { StructuredCheck, StructuredCheckInner } from '../../src/client/components/blocks/StructuredCheck.js';
 
 describe('prettyAnswer', () => {
   it('subscripts digits that follow a letter or closing paren', () => {
@@ -55,9 +55,12 @@ describe('prettyAnswer', () => {
 describe('StructuredCheck answer preview', () => {
   afterEach(cleanup);
   const args = (checker: any) => ({ prompt: 'q', pageSlug: 'p', checker });
+  // The interactive form now portals to the stage (#stage-root, absent in jsdom), so these render
+  // StructuredCheckInner directly — the same body the portal hosts, the seam QuizInner tests use.
+  // The graded-card test at the end still renders StructuredCheck: the done branch stays inline.
 
   it('appears as the learner types a formula, and reads as the formula', () => {
-    render(<StructuredCheck args={args({ kind: 'pattern', expected: 'H2O' })} result={null} addResult={() => {}} />);
+    render(<StructuredCheckInner args={args({ kind: 'pattern', expected: 'H2O' })} addResult={() => {}} />);
     const input = screen.getByLabelText('answer');
     expect(document.querySelector('.structured-preview')).toBeNull(); // nothing typed, no echo
     fireEvent.change(input, { target: { value: 'H2O' } });
@@ -65,15 +68,15 @@ describe('StructuredCheck answer preview', () => {
   });
 
   it('never appears for an answer that renders as itself', () => {
-    render(<StructuredCheck args={args({ kind: 'numeric', expected: 42 })} result={null} addResult={() => {}} />);
+    render(<StructuredCheckInner args={args({ kind: 'numeric', expected: 42 })} addResult={() => {}} />);
     fireEvent.change(screen.getByLabelText('numeric answer'), { target: { value: '42' } });
     expect(document.querySelector('.structured-preview')).toBeNull();
   });
 
   it('submits the RAW string — the preview must never reach grading', () => {
     let submitted: any;
-    render(<StructuredCheck
-      args={args({ kind: 'pattern', expected: 'H2O' })} result={null}
+    render(<StructuredCheckInner
+      args={args({ kind: 'pattern', expected: 'H2O' })}
       addResult={(r: any) => { submitted = r; }}
     />);
     fireEvent.change(screen.getByLabelText('answer'), { target: { value: 'H2O' } });
@@ -82,8 +85,8 @@ describe('StructuredCheck answer preview', () => {
   });
 
   it('previews a set answer once any line differs, without revealing the expected count', () => {
-    render(<StructuredCheck
-      args={args({ kind: 'set', expected: ['H2O', 'CO2'] })} result={null} addResult={() => {}}
+    render(<StructuredCheckInner
+      args={args({ kind: 'set', expected: ['H2O', 'CO2'] })} addResult={() => {}}
     />);
     const box = screen.getByLabelText('one per line, in any order');
     fireEvent.change(box, { target: { value: 'water' } });
@@ -95,17 +98,17 @@ describe('StructuredCheck answer preview', () => {
   it('renders a chem_equation prompt as chemistry, not ASCII', () => {
     // The tutor writes formulas in typed form; the learner should still read printed chemistry —
     // otherwise the question looks less like chemistry than the answer preview under it.
-    render(<StructuredCheck
+    render(<StructuredCheckInner
       args={{ prompt: 'Balance: CH4 + O2 -> CO2 + H2O', pageSlug: 'p',
         checker: { kind: 'chem_equation', reactants: ['CH4', 'O2'], products: ['CO2', 'H2O'] } }}
-      result={null} addResult={() => {}}
+      addResult={() => {}}
     />);
     expect(document.querySelector('.structured-prompt')?.textContent).toContain('CH₄ + O₂ → CO₂ + H₂O');
   });
 
   it('shows the numeric unit suffix in printed form', () => {
-    render(<StructuredCheck
-      args={args({ kind: 'numeric', expected: 9.8, unit: 'm/s^2' })} result={null} addResult={() => {}}
+    render(<StructuredCheckInner
+      args={args({ kind: 'numeric', expected: 9.8, unit: 'm/s^2' })} addResult={() => {}}
     />);
     expect(document.querySelector('.structured-unit')?.textContent).toBe('m/s²');
   });

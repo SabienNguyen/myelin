@@ -15,7 +15,7 @@ const appendSpy = vi.fn();
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MathScratchpad } from '../../src/client/components/blocks/MathScratchpad.js';
 import { Quiz, QuizInner } from '../../src/client/components/blocks/Quiz.js';
-import { StructuredCheck } from '../../src/client/components/blocks/StructuredCheck.js';
+import { StructuredCheck, StructuredCheckInner } from '../../src/client/components/blocks/StructuredCheck.js';
 import { WritingDraftInner } from '../../src/client/components/blocks/WritingDraft.js';
 
 // What the client actually receives for a rejected call: not {answers}, not {values}, not {draft}.
@@ -105,13 +105,15 @@ describe('matching renders its labels and options as notation, not raw source', 
   // `$…$` label leaked its delimiters literally. Grading must stay byte-identical: the <option>'s
   // value stays the raw string even when its visible text is prettified.
   it('a `$…$` left label renders through KaTeX, not as literal dollar signs', () => {
-    const { container } = render(<StructuredCheck
+    // StructuredCheckInner (not StructuredCheck): the interactive form now renders through
+    // StagePortal into #stage-root, which lands outside the test container — Inner is the same body
+    // the portal hosts, the same seam the QuizInner/WritingDraftInner tests use.
+    const { container } = render(<StructuredCheckInner
       args={{ prompt: 'Match them', pageSlug: 's', checker: {
         kind: 'matching',
         items: [{ left: '$\\sin x$', right: 'cos x' }],
         options: ['cos x', '-sin x'],
       } }}
-      result={null}
       addResult={vi.fn()}
     />);
     const left = container.querySelector('.structured-left');
@@ -120,13 +122,12 @@ describe('matching renders its labels and options as notation, not raw source', 
   });
 
   it('an ASCII-maths option shows prettified text but submits its raw value', () => {
-    const { container } = render(<StructuredCheck
+    const { container } = render(<StructuredCheckInner
       args={{ prompt: 'Match them', pageSlug: 's', checker: {
         kind: 'matching',
         items: [{ left: 'f', right: 'x^2' }],
         options: ['x^2', '2x'],
       } }}
-      result={null}
       addResult={vi.fn()}
     />);
     // The learner reads x²…
@@ -136,6 +137,24 @@ describe('matching renders its labels and options as notation, not raw source', 
     expect((pretty as HTMLOptionElement).value).toBe('x^2');
     // The left label is also prettified (no raw `x^2` caret anywhere in the card).
     expect(container.querySelector('.structured-matching')?.textContent).not.toContain('x^2');
+  });
+});
+
+describe('structured_check is an applied block — it lives on the stage', () => {
+  // Every applied block (quiz, math, diagram, draft, code) portals its interactive form to the
+  // stage; only the quick_check warm-up stays inline. structured_check used to render inline too,
+  // which left the stage's own empty copy ("…science checks…") promising a surface the block never
+  // reached. The interactive form now portals; the transcript keeps a jump-to-stage chip.
+  it('renders a stage chip in the transcript, not the answer input inline', () => {
+    const { container } = render(<StructuredCheck
+      args={{ prompt: 'How many?', pageSlug: 's', checker: { kind: 'numeric', expected: 3 } }}
+      result={null}
+      addResult={vi.fn()}
+    />);
+    expect(screen.getByRole('button', { name: /applied check waiting on the stage/i })).toBeTruthy();
+    // The input lives on the stage now (portalled into #stage-root, which is absent in this
+    // container), so nothing answerable leaks into the transcript.
+    expect(container.querySelector('input')).toBeNull();
   });
 });
 
