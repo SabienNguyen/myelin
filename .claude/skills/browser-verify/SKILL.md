@@ -70,13 +70,19 @@ boot — that is how the config is written.
 
 ### Known results — do not mistake these for your regression
 
-- `gap-exercise.e2e.ts` and `gap-help.e2e.ts` **skip** unless the real the-gap sidecar answers on
-  `:4930`. This is deliberate: `global-setup.ts` pings it and the tests `test.skip()` with a reason
-  rather than mocking a service whose whole job is real grading.
-- `tutor-loop.e2e.ts` **fails** at `expect(page.getByText('Correct! Recorded — nice.'))` with a
-  strict-mode violation: the locator matches both the real transcript `<p>` and `FocusRail`'s hidden
-  `<p class="focus-rail-lastline">`, which mirrors the last assistant line. Pre-existing, and about
-  the locator's specificity rather than the feature.
+The suite currently runs **all 10 tests green** (verified). The two entries below were once a
+documented skip and a documented failure; both are now resolved. They are kept here so that if
+either reappears you recognise it as a REAL regression, not the old baseline:
+
+- `gap-exercise.e2e.ts` and `gap-help.e2e.ts` **run and pass** — they exercise the BUILT-IN sandbox,
+  which serves `/api/gap/*` from the backend process itself, so there is no external the-gap sidecar
+  on `:4930` to gate on. (The old external-sidecar version `test.skip()`ped when `:4930` went
+  unanswered; that dependency is gone — see gap-exercise.e2e.ts's own "No skip" comment.) If these
+  start skipping or failing, suspect a broken built-in sandbox, not a missing sidecar.
+- `tutor-loop.e2e.ts` **passes** — the old strict-mode violation (a bare
+  `getByText('Correct! Recorded — nice.')` matched both the real transcript `<p>` and `FocusRail`'s
+  hidden `.focus-rail-lastline` mirror) was fixed by asserting with `{ exact: true }`, which the
+  rail's longer containing text no longer satisfies. A re-broadened locator would bring it back.
 - `graph-contextual.e2e.ts` passes.
 
 ## Ad-hoc driving (the useful mode)
