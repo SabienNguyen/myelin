@@ -18,8 +18,14 @@ export function QuizInner({ args, addResult }: {
           <BlockProse text={item.prompt} />
           {item.type === 'choice'
             ? item.choices?.map((ch: string) => (
+                // aria-pressed carries the selection to assistive tech: the `.on` class is a purely
+                // visual toggle, so without it a screen-reader user hears three identical "button"s
+                // and no which-one-is-chosen (WCAG 4.1.2). type="button" keeps a choice from acting
+                // as a submit if this block is ever portalled inside a form.
                 <button
                   key={ch}
+                  type="button"
+                  aria-pressed={answers[item.id] === ch}
                   className={answers[item.id] === ch ? 'on' : ''}
                   onClick={() => setAnswer(item.id, ch)}
                 >{ch}</button>
@@ -36,7 +42,7 @@ export function QuizInner({ args, addResult }: {
             )}
         </div>
       ))}
-      <button onClick={() => addResult({
+      <button type="button" onClick={() => addResult({
         answers: args.items.map((item: any) => ({ id: item.id, answer: answers[item.id] ?? '' })),
       })}>Submit</button>
     </div>

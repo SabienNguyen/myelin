@@ -12,7 +12,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
   return { ...actual, useThreadRuntime: () => ({ append: appendSpy }) };
 });
 const appendSpy = vi.fn();
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MathScratchpad } from '../../src/client/components/blocks/MathScratchpad.js';
 import { Quiz, QuizInner } from '../../src/client/components/blocks/Quiz.js';
 import { StructuredCheck } from '../../src/client/components/blocks/StructuredCheck.js';
@@ -48,6 +48,24 @@ describe('blocks survive a server-rejected (non-contract) result', () => {
     />);
     expect(screen.getByRole('textbox', { name: /answer for question 1/i })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: /answer for question 2/i })).toBeTruthy();
+  });
+
+  it('Quiz choice buttons expose their selected state to assistive tech', () => {
+    // The `.on` class is a visual-only toggle; a screen-reader user needs aria-pressed to hear
+    // which option is chosen (WCAG 4.1.2). Before selecting, none is pressed; clicking one presses
+    // exactly that button and leaves the siblings unpressed.
+    render(<QuizInner
+      args={{ title: 'T', items: [
+        { id: 'q1', type: 'choice', prompt: 'Pick one', choices: ['a', 'b', 'c'], pageSlug: 's' },
+      ] }}
+      addResult={vi.fn()}
+    />);
+    const a = screen.getByRole('button', { name: 'a' });
+    const b = screen.getByRole('button', { name: 'b' });
+    expect(a.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(a);
+    expect(a.getAttribute('aria-pressed')).toBe('true');
+    expect(b.getAttribute('aria-pressed')).toBe('false');
   });
 
   it('StructuredCheck renders the prompt and a blank answer on missing result.values', () => {
