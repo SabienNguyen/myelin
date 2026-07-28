@@ -979,3 +979,6 @@ Written after the sprint that followed the original verdict; each line names its
   chat, blocks, page reader, source reader — now agree on math and diagrams. Verified by parity with
   the two live-confirmed Page-reader fixes (identical plugins/components, tsc + build clean); the
   source reader opens only through a panelBus event with no hash route to deep-link in a drive.
+- **Pronounce overlay gained a legend** — the contour chart drew the learner's pitch (solid accent)
+  over the target (dashed) but never said which was which; two squiggles teach nothing unnamed. A
+  small keyed legend now labels them, shown once a contour is actually drawn. Verified live.

@@ -134,6 +134,14 @@ export function Pronounce({ args, result, addResult }: {
       {last && (
         <div className="pronounce-feedback">
           <Overlay template={template} learner={last.contour} />
+          {/* Which line is which — two squiggles teach nothing until the learner knows their own
+              pitch from the target. Only shown once a contour has actually been drawn. */}
+          {last.contour && (
+            <p className="pronounce-legend" aria-hidden>
+              <span className="pronounce-key learner">your pitch</span>
+              <span className="pronounce-key target">target</span>
+            </p>
+          )}
           <p className={last.grade.pass ? 'pronounce-ok' : 'pronounce-miss'}>{last.grade.detail}</p>
         </div>
       )}
