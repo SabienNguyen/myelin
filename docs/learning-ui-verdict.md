@@ -875,3 +875,13 @@ Written after the sprint that followed the original verdict; each line names its
   does not leap back to mastered — regaining that needs more evidence, which is the ladder
   refusing to over-credit a single re-proof. The real re-proof overwrote the synthetic backdate,
   so the vault is left truthful.
+- **The `speak` chips pass the full responsive + dark-mode + fresh-eyes audit.** New UI shipped
+  this session had only been seen at 1360px in light mode; driving the six-chip tone lesson at
+  900px and 1360px in dark mode: zero horizontal scroll at either width (scrollWidth == innerWidth),
+  the stage panel stacks correctly below the thread at 900px, and the chips render on-brand in dark
+  — muted SpeakerSlash icon, bold word plus secondary gloss, the "use a native recording" note at
+  a legible muted token (rgb(155,148,131)) on the dark warm-paper background, dashed border on the
+  unavailable variant. No visual bug. (Observation, not a defect: in a no-voice environment all six
+  chips repeat the same native-recording note; on a device with a Vietnamese voice they are play
+  buttons with no note, so the repetition only appears in the degraded state and each chip is
+  independently honest — left as designed.)
