@@ -135,7 +135,17 @@ export function Thread() {
   const empty = useThread((s) => s.messages.length === 0);
   return (
     <ThreadPrimitive.Root className="thread">
-      <ThreadPrimitive.Viewport className="thread-viewport" autoScroll={!empty}>
+      {/* tabIndex + a name so the transcript can be SCROLLED by keyboard. It is its own scroll
+          region (the side panel scrolls independently), and most turns are plain prose with no
+          focusable element inside — so without a tab stop of its own, a keyboard-only user has no
+          way to scroll back through the conversation (axe flags this as scrollable-region-focusable,
+          WCAG 2.1.1). The name makes the stop meaningful rather than an anonymous focusable div. */}
+      <ThreadPrimitive.Viewport
+        className="thread-viewport"
+        autoScroll={!empty}
+        tabIndex={0}
+        aria-label="Conversation transcript"
+      >
         {/* First run showed a blank half-screen and a placeholder — the single most important
             moment in the app said nothing about what it is or what to type. The suggestions are
             deliberately across different SUBJECTS: the thing most worth conveying in the first
