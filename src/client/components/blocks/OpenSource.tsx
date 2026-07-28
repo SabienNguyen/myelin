@@ -23,7 +23,10 @@ export function OpenSource({ args, result, addResult }: {
             || want.includes(e.title?.toLowerCase() ?? ' ')));
         if (!hit) { addResult({ error: `no ingested source matches “${args.title}”` }); return; }
         panelBus.openSource(hit.chapter, hit.title);
-        addResult({ opened: hit.title });
+        // The chapter path rides in the result so the chip can RE-open the reader after a
+        // reload — openSource is an ephemeral event, and a chip that only switched tabs left
+        // the Page panel readerless (caught driving select-to-ask on a reloaded thread).
+        addResult({ opened: hit.title, chapter: hit.chapter });
       } catch (e: any) {
         addResult({ error: String(e?.message ?? e) });
       }
@@ -35,8 +38,20 @@ export function OpenSource({ args, result, addResult }: {
     <button
       type="button"
       className="block chip"
-      // The chip stays useful after the moment: clicking it re-opens the source view.
-      onClick={() => { if (result?.opened) panelBus.setTab('page'); }}
+      // The chip stays useful after the moment: clicking it RE-OPENS the source view — with the
+      // stored chapter when the result carries one, else by re-resolving the title (results
+      // saved before the chapter rode along). setTab alone left a readerless Page panel after a
+      // reload, because openSource is an ephemeral event no one replays.
+      onClick={async () => {
+        if (!result?.opened) return;
+        if (result.chapter) { panelBus.openSource(result.chapter, result.opened); return; }
+        try {
+          const queue: { title: string; chapter: string }[] = await fetch('/api/ingest/queue').then((r) => r.json());
+          const hit = (queue ?? []).find((e) => e.title === result.opened && e.chapter?.startsWith('raw/'));
+          if (hit) panelBus.openSource(hit.chapter, hit.title);
+          else panelBus.setTab('page');
+        } catch { panelBus.setTab('page'); }
+      }}
     >
       <BookOpenText size={15} weight="duotone" />
       {result?.opened ? ` Reading: ${result.opened} — on the Page tab` : ` Opening ${args.title}…`}

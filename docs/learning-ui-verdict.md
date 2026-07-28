@@ -705,3 +705,11 @@ Written after the sprint that followed the original verdict; each line names its
 - **AppImage re-batched through the open_source resolver** — the asar carries the {path} ingest
   route and the resolving sentinel, verified by string inspection. No behavior commit outside
   the artifact.
+- **Select-to-ask driven live — clean — and the reading chip now survives reloads.** Selecting
+  the Nesterov sentence in the momentum chapter raised the "Ask the tutor about this" affordance;
+  clicking sent the passage as a quoted message ("From the source 'Momentum': > …") and the tutor
+  answered with a contextual choice check on exactly that sentence's concept. The fix on the way:
+  the "Reading: …" chip's re-open promise was broken after a reload — openSource is an ephemeral
+  event, so the chip could only switch to a readerless Page tab. The result now carries the
+  chapter path and the chip re-emits openSource (with a re-resolve-by-title fallback for chips
+  saved before the path rode along — which is exactly the path the live re-drive exercised).
