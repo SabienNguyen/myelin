@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   deriveArtifactTitle, deriveRepoName, discoverDocFiles, ingestRepo, isGitUrl, parseMineReport,
-  seedMinedArtifactPage, type MineReport, type PassedArtifact,
+  runCommand, seedMinedArtifactPage, type MineReport, type PassedArtifact,
 } from '../src/server/ingestRepo.js';
 import { readQueue } from '../src/server/ingest.js';
 import type { HarnessConfig } from '../src/server/config.js';
@@ -397,5 +397,17 @@ describe('ingestRepo orchestration (git URL source, clone/reingest dispatch)', (
 
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
     expect(reingestCalled).toBe(true);
+  });
+});
+
+describe('runCommand', () => {
+  it('captures the whole of a large stdout, not a truncated tail', async () => {
+    // The miner's JSON report arrives on stdout and parseMineReport must see all of it. Resolving on
+    // 'exit' rather than 'close' truncated the capture once output passed the OS pipe buffer (~64KB):
+    // the process had ended but its stdout pipe still held unread bytes. 300KB is well past that, so
+    // this would come back short under the old event; on 'close' it is always complete.
+    const N = 300_000;
+    const { stdout } = await runCommand(process.execPath, ['-e', `process.stdout.write("x".repeat(${N}))`]);
+    expect(stdout.length).toBe(N);
   });
 });

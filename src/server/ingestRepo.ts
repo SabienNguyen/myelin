@@ -175,7 +175,9 @@ export function discoverDocFiles(repoPath: string): string[] {
 
 // ── external-process helpers (default IngestRepoDeps implementations) ──────────────────────
 
-function runCommand(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
+// Exported for the large-output test — the truncation this guards against only shows past the pipe
+// buffer, so it needs a real spawn to exercise.
+export function runCommand(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
@@ -183,7 +185,12 @@ function runCommand(cmd: string, args: string[], opts: { cwd?: string } = {}): P
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', reject);
-    child.on('exit', (code) => {
+    // 'close', NOT 'exit': 'exit' fires when the process ends but its stdout/stderr pipes may still
+    // hold unread buffered data, so resolving there truncates the capture — and defaultRunMiner
+    // parses this stdout as the miner's JSON report, where a truncated tail silently loses mined
+    // artifacts. 'close' fires only once every stdio stream has drained. Every other spawn helper in
+    // this codebase (runner.ts, exec.ts, environment.ts) already waits on 'close' for this reason.
+    child.on('close', (code) => {
       if (code === 0) resolve({ stdout, stderr });
       else reject(Object.assign(new Error(`${cmd} ${args.join(' ')} exited with code ${code}`), { stdout, stderr }));
     });
