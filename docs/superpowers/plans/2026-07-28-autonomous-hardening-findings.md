@@ -44,6 +44,35 @@ live — scratch cleaned, learner's file preserved); SourceReader + select-to-as
 prose; graph/page/library/review/student-switcher/cold-start/Anki-badge; a full multi-step journey
 with zero console warnings. Both suites green (harness full, core 101).
 
+## Confirmed feature drift — highest priority (bounded fix, needs greenlight)
+
+### 0. `generate_exercise` is missing from the Claude-subscription tutor route
+
+The two tutor routes must offer the same tools — `claudeSdkTutor.ts:30-32` says so outright: "keep in
+sync by hand; a divergence here means the two tutor routes disagree on tool access." They have
+diverged. `session.ts` (the ai-sdk / API-key route) wires `generate_exercise` in freeform
+(`session.ts:617`); `claudeSdkTutor.ts` (the Agent-SDK / Claude-subscription route) does not wire it
+at all. So a learner on a Claude subscription cannot have the tutor author a practice exercise
+(function / manifest / exec / stream families — the entire generated-exercises feature), while an
+API-key learner can.
+
+This is almost certainly an oversight, not a deliberate exclusion: the research tools that ARE
+deliberately absent from this route (`web_search`, `read_url`, `ingest_url`, …) carry an explicit
+"these DO NOT EXIST on this route, use WebFetch instead" note in the prompt (`claudeSdkTutor.ts:296`),
+because the Agent SDK ships its own WebSearch/WebFetch. `generate_exercise` has no such note and no SDK
+equivalent — it is silently gone.
+
+The fix is bounded: the exercise logic (`generateExercise`) is shared, so porting is re-expressing the
+tool in the Agent SDK's `tool(name, desc, schema, handler)` shape (the `course_problems` port at
+`claudeSdkTutor.ts:201` is the template — handler returns MCP content blocks), adding it to the
+freeform `allowedTools`, and naming it in the prompt. Not a pedagogy call — the intent (parity) is
+unambiguous. Held for greenlight only because it edits the tutor query pipeline that subscription
+users depend on, and a subtly-wrong port there is the kind of thing an absent owner shouldn't inherit
+unverified. **On your word I'll port it, with tsc + the route's tests + a live drive confirming the
+tool is callable.** (Separately: `ingest_paper` is also absent, but that one IS covered by the
+prompt's deliberate "use WebFetch" note — read-vs-ingest is a real capability gap but a documented,
+arguably-intended one; flagging for completeness, lower priority.)
+
 ## Open decisions (owner)
 
 ### 1. Decay cascade: should long-stale `mastered` pages reach `exposed`?
