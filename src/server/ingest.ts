@@ -169,6 +169,13 @@ export function startConversion(
   opts: {
     converter?: Converter; incrementalConverter?: IncrementalConverter;
     mode?: 'book' | 'paper'; title?: string; sourceUrl?: string; model?: LanguageModel; onComplete?: () => void;
+    // A temp dir holding the INPUT file this conversion consumes. The upload/video/download routes
+    // each create one per ingest (lwh-upload-/lwh-video-/lwh-download-) and hand it off here, because
+    // the conversion runs in the background — past the route's return — so only this function knows
+    // when the input has been fully read and the dir is safe to delete. Removed in the finally.
+    // MUST stay unset for a learner's OWN local file path (ingestRoutes' `path` branch): its parent
+    // is the user's directory, and deleting that would be catastrophic.
+    cleanupInputDir?: string;
   } = {},
 ): { book: string; converting: true } {
   const book = opts.title || basename(filePath, extname(filePath));
@@ -312,6 +319,9 @@ export function startConversion(
       // The conversion is done (success or error); drop its scratch dir rather than leak a
       // /tmp/lwh-convert-* per ingest. (ingestBook cleans its own outDir inline.)
       if (outDir) rmSync(outDir, { recursive: true, force: true });
+      // …and the route's input temp dir, now that the converter has finished reading it. Opt-in, so
+      // a learner's own local file (no cleanupInputDir passed) is never touched.
+      if (opts.cleanupInputDir) rmSync(opts.cleanupInputDir, { recursive: true, force: true });
     }
   })();
 

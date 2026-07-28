@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3 } from 'ai/test';
 import { Loreweaver } from '../src/server/mcp.js';
-import { ingestBook, compileNext, readQueue } from '../src/server/ingest.js';
+import { ingestBook, compileNext, readQueue, startConversion } from '../src/server/ingest.js';
 import type { Converter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import { LW_REPO } from './lwRepo.js';
@@ -142,6 +142,39 @@ describe('ingestBook paper mode', () => {
 
     expect(result.book).toBe('Explicit Title');
     expect(readQueue(vault)[0].title).toBe('Explicit Title');
+  });
+});
+
+describe('startConversion — input temp dir cleanup', () => {
+  const fake: Converter = async () => ({ markdown: '# T\nbody' });
+  const cfgFor = (vault: string) =>
+    ({ vault, student: 'kid', models: {}, autoCompile: false }) as unknown as HarnessConfig;
+
+  // startConversion runs the conversion in the BACKGROUND; wait for onComplete, then a tick so the
+  // finally (where the dirs are removed) has run. lw is unused with autoCompile:false.
+  const runToDone = (cfg: HarnessConfig, filePath: string, extra: Record<string, unknown>) =>
+    new Promise<void>((resolve) => {
+      startConversion({} as never, cfg, filePath, {
+        converter: fake, mode: 'paper', onComplete: () => resolve(), ...extra,
+      });
+    }).then(() => new Promise((r) => { setTimeout(r, 30); }));
+
+  it('removes an opt-in cleanupInputDir once conversion finishes', async () => {
+    const cfg = cfgFor(mkdtempSync(join(tmpdir(), 'lwh-conv-vault-')));
+    const tempInput = mkdtempSync(join(tmpdir(), 'lwh-upload-'));
+    writeFileSync(join(tempInput, 'doc.md'), '# T\nbody');
+    await runToDone(cfg, join(tempInput, 'doc.md'), { cleanupInputDir: tempInput });
+    expect(existsSync(tempInput)).toBe(false);
+  });
+
+  it("NEVER removes the containing dir when cleanupInputDir is unset — a learner's own file is safe", async () => {
+    // The `path` ingest branch passes a user's local file straight through with NO cleanupInputDir;
+    // deleting its parent would wipe their directory. This is the guard against that.
+    const cfg = cfgFor(mkdtempSync(join(tmpdir(), 'lwh-conv-vault-')));
+    const ownDir = mkdtempSync(join(tmpdir(), 'lwh-userfiles-'));
+    writeFileSync(join(ownDir, 'notes.md'), '# T\nbody');
+    await runToDone(cfg, join(ownDir, 'notes.md'), {}); // no cleanupInputDir
+    expect(existsSync(ownDir)).toBe(true);
   });
 });
 

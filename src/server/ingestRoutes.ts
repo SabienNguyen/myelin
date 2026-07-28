@@ -2,7 +2,7 @@ import type { LanguageModel } from 'ai';
 import { Hono } from 'hono';
 import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
@@ -56,6 +56,7 @@ export function buildIngestRoutes(
           writeFileSync(mdPath, markdown);
           return c.json(startConversion(lw, cfg, mdPath, {
             converter: deps.converter, mode: 'paper', title, model: deps.model, sourceUrl: body.url,
+            cleanupInputDir: tmpDirV,
           }));
         } catch (e: any) {
           return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
@@ -73,6 +74,7 @@ export function buildIngestRoutes(
       // reload-safe 'converting' placeholder immediately.
       const result = startConversion(lw, cfg, downloaded.path, {
         converter: deps.converter, mode: body.mode ?? 'paper', model: deps.model, sourceUrl: body.url,
+        cleanupInputDir: dirname(downloaded.path),
       });
       return c.json(result);
     }
@@ -92,7 +94,9 @@ export function buildIngestRoutes(
     const tmpDir = mkdtempSync(join(tmpdir(), 'lwh-upload-'));
     const tmpPath = join(tmpDir, safeName);
     writeFileSync(tmpPath, Buffer.from(await file.arrayBuffer()));
-    const result = startConversion(lw, cfg, tmpPath, { converter: deps.converter, model: deps.model });
+    const result = startConversion(lw, cfg, tmpPath, {
+      converter: deps.converter, model: deps.model, cleanupInputDir: tmpDir,
+    });
     return c.json(result);
   });
 

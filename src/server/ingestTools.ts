@@ -5,6 +5,7 @@ import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
 import { startConversion } from './ingest.js';
 import type { Loreweaver } from './mcp.js';
+import { dirname } from 'node:path';
 
 /** The tutor's own paper-fetching tool — freeform mode only (wired in session.ts alongside
  * web_search/read_url). Downloads a URL, ingests it in paper mode, then fires a background
@@ -37,6 +38,7 @@ export function buildIngestTools(
           // upload/URL ingest routes.
           const result = startConversion(lw, cfg, downloaded.path, {
             converter: deps.converter, mode: 'paper', title, sourceUrl: url,
+            cleanupInputDir: dirname(downloaded.path),
           });
           return { queued: result.book, converting: true, compiling: 'starts after conversion' };
         } catch (e: any) {

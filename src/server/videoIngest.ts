@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -187,31 +187,37 @@ export async function fetchVideoTranscript(
   ]);
   const [title = 'Untitled video', channel = '', duration = ''] = meta.stdout.trim().split('\n');
 
+  // yt-dlp writes the .vtt into this scratch dir; the finally removes it so a caption download
+  // doesn't leak a /tmp/lwh-captions-* dir per video (covers the no-captions/empty-cues throws too).
   const dir = mkdtempSync(join(tmpdir(), 'lwh-captions-'));
-  const prefix = join(dir, 'cap');
-  const findVtt = () => readdirSync(dir).find((f) => f.endsWith('.vtt'));
+  try {
+    const prefix = join(dir, 'cap');
+    const findVtt = () => readdirSync(dir).find((f) => f.endsWith('.vtt'));
 
-  await run(exec, [
-    '--skip-download', '--no-warnings', '--no-playlist',
-    '--write-subs', '--sub-langs', 'en.*,en', '--sub-format', 'vtt',
-    '-o', prefix, '--', url,
-  ]);
-  if (!findVtt()) {
     await run(exec, [
       '--skip-download', '--no-warnings', '--no-playlist',
-      '--write-auto-subs', '--sub-langs', 'en.*,en', '--sub-format', 'vtt',
+      '--write-subs', '--sub-langs', 'en.*,en', '--sub-format', 'vtt',
       '-o', prefix, '--', url,
     ]);
-  }
-  const vttFile = findVtt();
-  if (!vttFile) {
-    throw new Error(`"${title}" has no captions (manual or auto) — caption-less videos are not `
-      + 'supported yet; Whisper transcription is deliberately parked. Pick a captioned video.');
-  }
+    if (!findVtt()) {
+      await run(exec, [
+        '--skip-download', '--no-warnings', '--no-playlist',
+        '--write-auto-subs', '--sub-langs', 'en.*,en', '--sub-format', 'vtt',
+        '-o', prefix, '--', url,
+      ]);
+    }
+    const vttFile = findVtt();
+    if (!vttFile) {
+      throw new Error(`"${title}" has no captions (manual or auto) — caption-less videos are not `
+        + 'supported yet; Whisper transcription is deliberately parked. Pick a captioned video.');
+    }
 
-  const cues = parseVtt(readFileSync(join(dir, vttFile), 'utf8'));
-  if (cues.length === 0) {
-    throw new Error(`"${title}" — the caption file came back empty; nothing to ingest.`);
+    const cues = parseVtt(readFileSync(join(dir, vttFile), 'utf8'));
+    if (cues.length === 0) {
+      throw new Error(`"${title}" — the caption file came back empty; nothing to ingest.`);
+    }
+    return { title, markdown: transcriptMarkdown({ title, channel, duration, url }, cues) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  return { title, markdown: transcriptMarkdown({ title, channel, duration, url }, cues) };
 }
