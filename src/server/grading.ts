@@ -268,7 +268,9 @@ export function extractAnswerNumber(s: string): number {
  *  start of the unit — so a unit that contains a digit (m/s2, cm3) can't be mistaken for a
  *  component. Returns null when no leading number is found. */
 function parseVector(s: string): { nums: number[]; rest: string } | null {
-  const tokens = s.replace(/[()[\]{}⟨⟩<>|]/g, ' ').split(/[\s,]+/).filter(Boolean);
+  // Fold printed scientific notation first, so a field vector like "(3 × 10^5, 0) N/C" tokenises to
+  // "3e5", "0" instead of splitting the component at the "×" and reporting the wrong count.
+  const tokens = normalizeSciNotation(s).replace(/[()[\]{}⟨⟩<>|]/g, ' ').split(/[\s,]+/).filter(Boolean);
   const nums: number[] = [];
   let i = 0;
   for (; i < tokens.length; i++) {

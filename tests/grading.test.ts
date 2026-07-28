@@ -132,6 +132,13 @@ describe('structured_check checkers (mechanical, any subject)', () => {
     expect((await grade(c, ['(3, 4)'])).verdict).toBe('partial');
   });
 
+  it('vector: a component in printed scientific notation parses (E-field style)', async () => {
+    const c = { kind: 'vector', expected: [3e5, 0], tolerance: 1 };
+    expect((await grade(c, ['(3 × 10^5, 0)'])).verdict).toBe('correct');
+    expect((await grade(c, ['(3 × 10⁵, 0)'])).verdict).toBe('correct'); // printed superscript
+    expect((await grade(c, ['(5, 0)'])).verdict).not.toBe('correct');   // wrong value still fails
+  });
+
   it('numeric: tolerance, units, and non-numeric input', async () => {
     const c = { kind: 'numeric', expected: 9.81, tolerance: 0.01, unit: 'm/s^2' };
     expect((await grade(c, ['9.81 m/s^2'])).verdict).toBe('correct');
