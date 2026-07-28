@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildRestRoutes } from '../src/server/restRoutes.js';
+import { buildRestRoutes, interleaveByTopic } from '../src/server/restRoutes.js';
 import { invalidateGraphCache } from '../src/server/graphCache.js';
 import { saveProblems, markCorrect } from '../src/server/courseBank.js';
 import type { HarnessConfig } from '../src/server/config.js';
@@ -438,6 +438,52 @@ describe('GET /api/due and /api/session-plan', () => {
     for (const p of plan.filter((x: any) => x.kind === 'new' || x.kind === 'course')) {
       expect(p.transfer).toBeUndefined();
     }
+  });
+
+  describe('interleaveByTopic', () => {
+    type Row = { id: string; _topic?: string };
+    const key = (xs: Row[]) => xs.map((x) => x.id).join(',');
+    it('separates two same-topic rows by pulling a different topic forward', () => {
+      const out = interleaveByTopic<Row>([
+        { id: 'a', _topic: 't1' }, { id: 'b', _topic: 't1' }, { id: 'c', _topic: 't2' },
+      ]);
+      expect(key(out)).toBe('a,c,b'); // b(t1) no longer sits next to a(t1)
+    });
+    it('leaves position 0 fixed — most-urgent-first is a promise', () => {
+      const out = interleaveByTopic<Row>([
+        { id: 'a', _topic: 't1' }, { id: 'b', _topic: 't1' }, { id: 'c', _topic: 't1' }, { id: 'd', _topic: 't2' },
+      ]);
+      expect(out[0].id).toBe('a');
+      // no two adjacent share a topic where a swap was possible
+      expect(out.some((x, i) => i > 0 && x._topic === out[i - 1]._topic && out.slice(i).some((y) => y._topic !== x._topic))).toBe(false);
+    });
+    it('is a no-op when topics are absent or all equal', () => {
+      expect(key(interleaveByTopic<Row>([{ id: 'a' }, { id: 'b' }, { id: 'c' }]))).toBe('a,b,c');
+      expect(key(interleaveByTopic<Row>([{ id: 'a', _topic: 't' }, { id: 'b', _topic: 't' }]))).toBe('a,b');
+    });
+  });
+
+  it('/api/session-plan breaks up same-topic adjacency when one kind fills the slots', async () => {
+    // Three reviews, two on the same topic; no new/fix/course due. Kind-rotation alone would leave
+    // the two same-topic reviews adjacent — interleaveByTopic pulls the third between them.
+    const state: Record<string, any> = {
+      'attn-a': { level: 'practicing', effective: 'practicing', last_reinforced: '2000-01-01', days_left: 1, slipped: false, misconceptions: [] },
+      'attn-b': { level: 'practicing', effective: 'practicing', last_reinforced: '2000-01-01', days_left: 2, slipped: false, misconceptions: [] },
+      'graph-c': { level: 'practicing', effective: 'practicing', last_reinforced: '2000-01-01', days_left: 3, slipped: false, misconceptions: [] },
+    };
+    const tags: Record<string, string[]> = { 'attn-a': ['attention'], 'attn-b': ['attention'], 'graph-c': ['graphs'] };
+    const lw = {
+      listSlugs: async () => Object.keys(state),
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') return state;
+        if (name === 'next_lessons') return { lessons: [] };
+        if (name === 'read_page') return { page: { meta: { title: `T:${args.slug}`, tags: tags[args.slug] ?? [] } } };
+        throw new Error(`unexpected ${name}`);
+      },
+    } as any;
+    const { plan } = await (await buildRestRoutes(lw, cfg).request('/api/session-plan')).json();
+    expect(plan.map((p: any) => p.slug)).toEqual(['attn-a', 'graph-c', 'attn-b']);
+    expect(plan.every((p: any) => p._topic === undefined)).toBe(true); // internal key never leaks
   });
 
   it('/api/session-plan never offers an untouched boot-seeded stub as "new"', async () => {

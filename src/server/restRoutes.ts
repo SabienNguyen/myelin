@@ -90,6 +90,30 @@ async function resolveNeighbors(lw: Loreweaver, cfg: HarnessConfig, page: any) {
   return out;
 }
 
+/**
+ * Break up same-topic adjacency in an already kind-interleaved plan. The rotation in
+ * `/api/session-plan` alternates by KIND (review / new / fix / course), but interleaving's actual
+ * mechanism is juxtaposing DISSIMILAR items so the learner has to discriminate which idea applies —
+ * and when one kind fills several consecutive slots (e.g. five reviews, nothing new due), two rows
+ * on the same topic can still sit side by side. That's blocked practice the kind-rotation didn't
+ * catch.
+ *
+ * Greedy and STABLE: position 0 is left where it is (the review queue promises most-urgent-first),
+ * and any later row that repeats its predecessor's topic is swapped with the nearest following row
+ * of a different topic. A pure no-op when topics are absent or all equal — so an untagged vault, a
+ * single-topic sitting, and every test that sets no tags keep their exact rotation order.
+ */
+export function interleaveByTopic<T extends { _topic?: string }>(items: T[]): T[] {
+  const out = items.slice();
+  for (let i = 1; i < out.length; i++) {
+    const prev = out[i - 1]._topic;
+    if (prev == null || out[i]._topic !== prev) continue;
+    const j = out.findIndex((it, k) => k > i && it._topic !== prev);
+    if (j > i) { const [moved] = out.splice(j, 1); out.splice(i, 0, moved); }
+  }
+  return out;
+}
+
 export function buildRestRoutes(
   lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string | boolean> = {}, anki?: AnkiClient,
 ) {
@@ -328,13 +352,19 @@ export function buildRestRoutes(
       const next = q.shift();
       if (next) plan.push(next);
     }
-    // Course entries carry their own title — their slug is a bank id no page will ever resolve.
-    const titled = await Promise.all(plan.map(async (p) => (p.title ? p : {
-      ...p,
-      title: await lw.call('read_page', { slug: p.slug })
-        .then((pg: any) => pg.page?.meta?.title ?? p.slug)
-        .catch(() => p.slug),
-    })));
+    // Resolve title AND a topic key in one pass (the read we already do for titles carries the
+    // page's tags too, so topic-awareness costs no extra calls). Course entries carry their own
+    // title — their slug is a bank id no page resolves — and take the source as their topic so two
+    // problems from the same exam don't end up adjacent either.
+    const withMeta = await Promise.all(plan.map(async (p) => {
+      if (p.title) return { ...p, _topic: `course:${p.why}` };
+      const meta = await lw.call('read_page', { slug: p.slug })
+        .then((pg: any) => pg.page?.meta ?? null).catch(() => null);
+      const tags = Array.isArray(meta?.tags) ? meta.tags : [];
+      return { ...p, title: meta?.title ?? p.slug, _topic: tags.length ? String(tags[0]) : undefined };
+    }));
+    // Separate same-topic neighbours, then drop the internal topic key from the payload.
+    const titled = interleaveByTopic(withMeta).map(({ _topic, ...rest }) => rest);
     return c.json({ plan: titled });
   });
 
