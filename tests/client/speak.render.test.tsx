@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { Speak } from '../../src/client/components/blocks/Speak.js';
 
@@ -30,10 +30,8 @@ function installSynth(voices: { lang: string; name: string }[]) {
 afterEach(() => { delete (window as any).speechSynthesis; });
 
 describe('Speak — honesty about whether audio is actually available', () => {
-  let addResult: ReturnType<typeof vi.fn>;
-  beforeEach(() => { addResult = vi.fn(); });
-
   it('no matching voice → the degrade-loudly chip, and reports available:false once', async () => {
+    const addResult = vi.fn();
     installSynth([{ lang: 'en-US', name: 'English' }]);
     render(<Speak args={{ text: 'mạ', lang: 'vi', gloss: 'rice seedling' }} result={null} addResult={addResult} />);
 
@@ -46,6 +44,7 @@ describe('Speak — honesty about whether audio is actually available', () => {
   });
 
   it('a matching voice → a real play button that speaks, and reports available:true', async () => {
+    const addResult = vi.fn();
     const speak = installSynth([{ lang: 'vi-VN', name: 'Vietnamese' }]);
     render(<Speak args={{ text: 'má', lang: 'vi' }} result={null} addResult={addResult} />);
 
@@ -61,6 +60,7 @@ describe('Speak — honesty about whether audio is actually available', () => {
   });
 
   it('once a result exists, it does not re-report (receipt is one-shot)', async () => {
+    const addResult = vi.fn();
     installSynth([{ lang: 'en-US', name: 'English' }]);
     render(<Speak args={{ text: 'ma', lang: 'vi' }} result={{ available: false }} addResult={addResult} />);
     // Give the availability effect a chance to (wrongly) fire.
