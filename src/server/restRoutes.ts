@@ -4,19 +4,19 @@ import { Hono } from 'hono';
 import type { AnkiClient } from './anki/client.js';
 import { backlogDays } from './anki/inbound.js';
 import { isGapUp } from './gapProxy.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import type { HarnessConfig } from './config.js';
 import { getGraphCached, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
 import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
 import { readBank } from './courseBank.js';
 
-async function fetchGraph(lw: Loreweaver, cfg: HarnessConfig): Promise<GraphPayload> {
+async function fetchGraph(lw: Engram, cfg: HarnessConfig): Promise<GraphPayload> {
   // Two calls for the whole vault, however large. The old shape — read_page plus a per-slug
   // get_student_state for EVERY page — was 1+2N stdio roundtrips: a synthetic 500-page vault
   // measured 10.9s for its first graph build. The whole-map student call already carries every
   // field the graph reads (effective, last_reinforced, misconceptions), and list_pages
-  // (loreweaver) returns all page metadata in one snapshot. Same fixture after: well under a
+  // (engram) returns all page metadata in one snapshot. Same fixture after: well under a
   // second.
   const student = await lw.call('get_student_state', { student: cfg.student });
   let nodes: GraphPayload['nodes'];
@@ -29,7 +29,7 @@ async function fetchGraph(lw: Loreweaver, cfg: HarnessConfig): Promise<GraphPayl
       mastery: (student as Record<string, any>)[p.slug] ?? null,
     }));
   } catch {
-    // An older bundled loreweaver without list_pages: the per-page path still works, it is just
+    // An older bundled engram without list_pages: the per-page path still works, it is just
     // slow at scale. Version skew is real for packaged apps, so degrade rather than break.
     const slugs = await lw.listSlugs();
     nodes = await Promise.all(slugs.map(async (slug) => {
@@ -60,10 +60,10 @@ async function fetchGraph(lw: Loreweaver, cfg: HarnessConfig): Promise<GraphPayl
  * count, issued in parallel, plus one bulk student-state call for all of them.
  *
  * A neighbour that fails to resolve gets `title: null` rather than being dropped. That case is real
- * (Loreweaver's `missingTargets` names it: a page may declare a prereq nobody has written yet) and
+ * (Engram's `missingTargets` names it: a page may declare a prereq nobody has written yet) and
  * showing it as a dead link is more honest than silently rendering a shorter list.
  */
-async function resolveNeighbors(lw: Loreweaver, cfg: HarnessConfig, page: any) {
+async function resolveNeighbors(lw: Engram, cfg: HarnessConfig, page: any) {
   const slugs = new Set<string>([
     ...(page?.edges?.out ?? []).map((e: any) => e.dst),
     ...(page?.edges?.in ?? []).map((e: any) => e.src),
@@ -115,7 +115,7 @@ export function interleaveByTopic<T extends { _topic?: string }>(items: T[]): T[
 }
 
 export function buildRestRoutes(
-  lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string | boolean> = {}, anki?: AnkiClient,
+  lw: Engram, cfg: HarnessConfig, status: Record<string, string | boolean> = {}, anki?: AnkiClient,
 ) {
   const app = new Hono();
 
@@ -123,7 +123,7 @@ export function buildRestRoutes(
   // see src/server/graphCache.ts for the caching contract and mcp.ts for invalidation.
   app.get('/api/graph', async (c) => c.json(await getGraphCached(() => fetchGraph(lw, cfg))));
 
-  // Curated paths — Loreweaver's syllabus primitive. It has existed since the first version
+  // Curated paths — Engram's syllabus primitive. It has existed since the first version
   // (create_path / list_paths / read_path) with NO learner-facing surface at all: the tutor could
   // read a path, the learner could never see one, so a subject had no visible spine and no sense of
   // "how far through am I". These two routes plus the Library's Paths section are that surface.
@@ -248,7 +248,7 @@ export function buildRestRoutes(
    * half: decay windows always ran, but the only way to notice one closing was to go LOOKING at a
    * page or the graph. Optimal review is the system's job, not the learner's vigilance.
    *
-   * Two tiers, both straight from loreweaver's own numbers (days_left/slipped are computed where
+   * Two tiers, both straight from engram's own numbers (days_left/slipped are computed where
    * the decay rules live): `slipped` pages already lost a rung and lead the list; `dueSoon` pages
    * are within DUE_SOON_DAYS of losing one. Sorted most-urgent-first, capped — a wall of 40 due
    * items teaches avoidance, not review.
@@ -259,7 +259,7 @@ export function buildRestRoutes(
    *
    * Three queues, rotated: due reviews (slipped first — the /api/due ordering), misconception
    * repairs (recorded misconceptions are data nothing acted on until now), and new material
-   * (loreweaver's next_lessons — frontier and unmet-prereq picks). Rotation is the interleaving:
+   * (engram's next_lessons — frontier and unmet-prereq picks). Rotation is the interleaving:
    * blocked practice (all review, then all new) is exactly what the rotation exists to prevent.
    * Capped at 6 — a session plan, not a syllabus.
    */
@@ -394,7 +394,7 @@ export function buildRestRoutes(
 
   /**
    * Student profiles — the homeschool-parent persona: one vault, several learners, separate
-   * evidence. Loreweaver has always keyed evidence by student id; these two routes and the
+   * evidence. Engram has always keyed evidence by student id; these two routes and the
    * topbar switcher are the missing surface. Switching mutates cfg.student IN PLACE (the
    * signin.ts applyRoute precedent — every handler reads cfg.student per request, so the next
    * request is the new learner) and persists to the config file so a restart keeps it.
@@ -539,10 +539,13 @@ export function buildRestRoutes(
     return c.json({ byLevel, slipping, earnedThisWeek });
   });
   app.get('/api/status', async (c) => {
-    // Read the tutor model from cfg HERE, not from the snapshot passed in at boot. Signing in with a
-    // Claude subscription rewrites it while the app is running (signin.ts's applyRoute), and a
-    // captured string meant the status badge kept naming the model the app had stopped using.
-    const extra: Record<string, string> = { tutor: cfg.models.tutor.model };
+    // Read the tutor model AND the student from cfg HERE, not from the snapshot passed in at boot.
+    // Both change while the app runs — signing in with a Claude subscription rewrites the tutor
+    // (signin.ts's applyRoute), and switching learners rewrites cfg.student (PUT /api/student). A
+    // captured value meant the badge kept naming the model the app had stopped using, and — the
+    // switcher bug this fixes — reverted the displayed learner to the boot-time one on the next
+    // 60s poll, even though /api/students and /api/progress had already moved to the new student.
+    const extra: Record<string, string> = { tutor: cfg.models.tutor.model, student: cfg.student };
     if (anki) {
       const up = await anki.isUp();
       // Number.isFinite: backlogDays is Infinity when Anki has NEVER synced — which is every

@@ -13,7 +13,7 @@ import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
 import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { modelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
@@ -203,7 +203,7 @@ export function blockTools(): ToolSet {
 }
 
 /** Words that carry no topic, so a page whose body happens to contain them is not evidence that
- *  the vault covers what the student just asked about. Loreweaver's `search` scores +1 per body
+ *  the vault covers what the student just asked about. Engram's `search` scores +1 per body
  *  token, so without this every page in the vault matches "what is the derivative of x" via
  *  "what"/"is"/"the" and the coverage test below would always say "covered". */
 const STOPWORDS = new Set([
@@ -234,7 +234,7 @@ function lastUserText(messages: UIMessage[]): string {
   return '';
 }
 
-/** A page this short is a placeholder, whatever its frontmatter claims. Loreweaver's own auto-stub
+/** A page this short is a placeholder, whatever its frontmatter claims. Engram's own auto-stub
  *  body is one sentence; a real page that teaches something is not 400 characters long. */
 const THIN_BODY_CHARS = 400;
 
@@ -266,7 +266,7 @@ interface GapDeps {
  * The first version of this only unlocked when the vault had no page at all, which missed the more
  * common and more damaging case — a page that EXISTS but is not worth being grounded in:
  *
- *   * a `stub`, which Loreweaver creates automatically for any prereq nobody has written yet, so
+ *   * a `stub`, which Engram creates automatically for any prereq nobody has written yet, so
  *     "the vault has a page on it" can mean "the vault has a sentence saying it should have one";
  *   * a page with an empty `sources` list, which is the vault's own record that it was written from
  *     model memory and never verified — exactly the thing research exists to fix;
@@ -471,7 +471,7 @@ function pendingBlockOutputs(messages: UIMessage[]) {
 }
 
 export function createTutorSession(
-  lw: Loreweaver, cfg: HarnessConfig,
+  lw: Engram, cfg: HarnessConfig,
   opts: { model?: LanguageModel; now?: () => Date } = {},
 ) {
   const model = opts.model ?? modelFor('tutor', cfg);

@@ -1,12 +1,12 @@
-# Loreweaver Harness — Design Spec
+# Engram Harness — Design Spec
 
 **Date:** 2026-07-12
 **Status:** Approved design, pre-implementation
-**Repo:** `~/Dev/personal/loreweaver-harness` (standalone app; Loreweaver server at `~/Dev/personal/loreweaver` is a dependency, unchanged)
+**Repo:** `~/Dev/personal/myelin` (standalone app; Engram server at `~/Dev/personal/engram` is a dependency, unchanged)
 
 ## 1. Goal
 
-A learner-facing tutoring harness over the Loreweaver MCP server: a localhost web app where a tutor agent teaches any subject from a Loreweaver vault, with the ritual, enforcement, and rendering that generic chat harnesses cannot provide:
+A learner-facing tutoring harness over the Engram MCP server: a localhost web app where a tutor agent teaches any subject from a Engram vault, with the ritual, enforcement, and rendering that generic chat harnesses cannot provide:
 
 1. **Ritualized session start** — the loop, not the prompt, guarantees the tutor knows student state before the first word.
 2. **Mechanical evidence guardrail** — teaching exchanges cannot silently skip `record_evidence`.
@@ -40,13 +40,13 @@ Node backend (Hono; systemd user service)
   ├─ Scheduler   — node-cron → notify-send (libnotify/Hyprland)
   └─ AnkiBridge  — AnkiConnect client (localhost:8765), both directions
         │  stdio (spawned child)      │  HTTPS
-Loreweaver MCP server (13 tools)   Anthropic API (per-role models, prompt caching)
+Engram MCP server (13 tools)   Anthropic API (per-role models, prompt caching)
         │
 Vault files (pages/, students/, raw/, review-log.md)
   └─ vault/.harness/ — harness-only state (see §10)
 ```
 
-**Boundary rule (load-bearing):** the Loreweaver MCP server is the **only writer** of vault and student files. The AnkiBridge records evidence via `record_evidence`; the graph/page REST endpoints read via MCP tools. The harness never parses or writes vault markdown directly. One writer, no divergence.
+**Boundary rule (load-bearing):** the Engram MCP server is the **only writer** of vault and student files. The AnkiBridge records evidence via `record_evidence`; the graph/page REST endpoints read via MCP tools. The harness never parses or writes vault markdown directly. One writer, no divergence.
 
 **Frontend stack:** Vite, React, TypeScript, `@assistant-ui/react` + `@assistant-ui/react-ai-sdk`, `@assistant-ui/react-markdown` with a remark wiki-link plugin (clicks route to the Page tab), KaTeX for math display, MathLive for math input, dagre (or ELK) for graph layout.
 
@@ -77,7 +77,7 @@ A **block** is a frontend tool call: the tutor calls `present_block({kind, paylo
 - **Modes** (changes injected framing only): `learn` (default), `review` (due items first), `quiz`, `freeform`.
 - **Evidence guardrail:** loop tracks a per-turn flag — gradeable event (block result returned, or new concept presented) without a matching `record_evidence`. On attempted turn end with flag up: inject one system nudge and continue. Second failure: end turn, log `⚠ evidence not recorded` to UI + file.
 - **Model routing:** roles `tutor`, `grader`, `quiz_gen`, `card_gen`, `compile` — each `{model, effort?}` in config. Header dropdown switches `tutor` live and persists. Non-tutor roles run as one-shot calls outside the conversation context.
-- **Prompt caching:** system prompt (pedagogy rules, evolved from loreweaver `docs/tutor-prompt.md`) + tool definitions are stable per session → cache-controlled.
+- **Prompt caching:** system prompt (pedagogy rules, evolved from engram `docs/tutor-prompt.md`) + tool definitions are stable per session → cache-controlled.
 - **Persistence:** threads as JSONL in `vault/.harness/sessions/`. Resume is a convenience; a fresh session bootstrapped from student state must always be sufficient (portability invariant).
 - **Swap hedge:** `TutorSession` exposes a thin interface (start, send, events out); AI SDK specifics stay inside the module.
 
@@ -102,7 +102,7 @@ A **block** is a frontend tool call: the tutor calls `present_block({kind, paylo
 
 **Prereqs (setup step, documented in README):** install Anki desktop + AnkiConnect add-on; Anki must be open for sync ticks to land.
 
-- **Outbound:** page reaches `practicing` or a quiz item is missed → `card_gen` generates cloze/Q-A cards → push to deck `Loreweaver::<domain>`, tag `loreweaver::<slug>`. Ledger `vault/.harness/anki-map.json` (noteId ↔ slug ↔ content hash) dedupes and updates in place when a page changes.
+- **Outbound:** page reaches `practicing` or a quiz item is missed → `card_gen` generates cloze/Q-A cards → push to deck `Engram::<domain>`, tag `engram::<slug>`. Ledger `vault/.harness/anki-map.json` (noteId ↔ slug ↔ content hash) dedupes and updates in place when a page changes.
 - **Inbound:** sync on backend start, every 30 min, and before session bootstrap. Pull reviews of tagged cards since last sync; aggregate per slug per day:
   - consistent Good/Easy → one successful practice rep (refreshes decay via `record_evidence`);
   - Again → lapse; repeated lapses surface at next session start for re-teaching/misconception probing.
@@ -113,7 +113,7 @@ A **block** is a frontend tool call: the tutor calls `present_block({kind, paylo
 
 ```jsonc
 {
-  "vault": "~/Dev/personal/loreweaver-vault",
+  "vault": "~/Dev/personal/engram-vault",
   "student": "sabien",
   "models": {
     "tutor":   { "model": "claude-sonnet-5" },
@@ -122,7 +122,7 @@ A **block** is a frontend tool call: the tutor calls `present_block({kind, paylo
     "card_gen":{ "model": "claude-haiku-4-5" },
     "compile": { "model": "claude-sonnet-5" }
   },
-  "loreweaver": { "command": "npx", "args": ["tsx", "~/Dev/personal/loreweaver/src/server.ts"], "embeddings": "ollama" },
+  "engram": { "command": "npx", "args": ["tsx", "~/Dev/personal/engram/src/server.ts"], "embeddings": "ollama" },
   "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
   "port": 4820
 }
@@ -135,7 +135,7 @@ Model values are examples, not defaults baked into code; every role is user-edit
 - `anki-map.json` — card ledger (§8)
 - `notify.json` — notification ledger (§7)
 - `sessions/*.jsonl` — chat threads (§5)
-- Travels with the vault; ignored by the Loreweaver server; safe to delete (degrades gracefully: cards re-deduped by tag scan, notifications may re-fire once, threads lost but student model intact).
+- Travels with the vault; ignored by the Engram server; safe to delete (degrades gracefully: cards re-deduped by tag scan, notifications may re-fire once, threads lost but student model intact).
 
 ## 11. Error handling
 
@@ -153,13 +153,13 @@ Theme: **degrade loudly, never corrupt.**
 - **AnkiBridge:** fake AnkiConnect HTTP fixture — ledger dedup, grade→evidence mapping, maintain-not-promote rule.
 - **Scheduler:** injected clock — decay windows, ledger dedup, quiet hours.
 - **Blocks:** Testing Library component tests — math step flow, writing annotations, schema round-trips.
-- **E2E (one):** Playwright — real backend + real Loreweaver server (fake embeddings) + mock model: bootstrap → quick-check → answer → evidence in student file.
+- **E2E (one):** Playwright — real backend + real Engram server (fake embeddings) + mock model: bootstrap → quick-check → answer → evidence in student file.
 
 ## 13. Deferred (v1.x+)
 
 - Constellation graph skin (component-boundary swap)
 - Science / history / social-studies / language kits (timeline, diagram, source-analysis, cloze+audio blocks)
-- FSRS/BKT student model (lands in Loreweaver server, not harness)
-- AGI Path roadmap import as a Loreweaver path
+- FSRS/BKT student model (lands in Engram server, not harness)
+- AGI Path roadmap import as a Engram path
 - Multi-student UI (config field exists; UI assumes one)
 - Voice, mobile

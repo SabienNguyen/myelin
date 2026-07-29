@@ -11,7 +11,7 @@ const valid = {
     quiz_gen: { model: 'claude-sonnet-5' }, card_gen: { model: 'claude-haiku-4-5' },
     compile: { model: 'claude-sonnet-5' },
   },
-  loreweaver: { command: 'npx', args: ['tsx', 'server.ts'], embeddings: 'fake' },
+  engram: { command: 'npx', args: ['tsx', 'server.ts'], embeddings: 'fake' },
   schedule: { digestHour: 9, quietHours: [22, 8], ankiSyncMinutes: 30, ankiBacklogNudgeDays: 3 },
   port: 4820,
 };
@@ -40,18 +40,18 @@ describe('loadConfig', () => {
       delete process.env.E2E_DIR;
     }
   });
-  it('expands a ${VAR} inside a loreweaver arg too', () => {
+  it('expands a ${VAR} inside a engram arg too', () => {
     const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
     const p = join(dir, 'harness.config.json');
     writeFileSync(p, JSON.stringify({
       ...valid,
-      loreweaver: { command: 'npx', args: ['tsx', '${LOREWEAVER_SRC}'], embeddings: 'fake' },
+      engram: { command: 'npx', args: ['tsx', '${ENGRAM_SRC}'], embeddings: 'fake' },
     }));
-    process.env.LOREWEAVER_SRC = '/checkout/loreweaver/src/server.ts';
+    process.env.ENGRAM_SRC = '/checkout/engram/src/server.ts';
     try {
-      expect(loadConfig(p).loreweaver.args).toEqual(['tsx', '/checkout/loreweaver/src/server.ts']);
+      expect(loadConfig(p).engram.args).toEqual(['tsx', '/checkout/engram/src/server.ts']);
     } finally {
-      delete process.env.LOREWEAVER_SRC;
+      delete process.env.ENGRAM_SRC;
     }
   });
   it('fills in a role the file leaves out', () => {

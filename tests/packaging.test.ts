@@ -23,9 +23,9 @@ describe('desktop build configuration', () => {
     expect(pkg.build.files.some((f: string) => f.startsWith('src'))).toBe(false);
   });
 
-  it('copies Loreweaver in an afterPack hook rather than as an extraResource', () => {
+  it('copies Engram in an afterPack hook rather than as an extraResource', () => {
     // Not a style preference. electron-builder STRIPS node_modules out of extraResources, and
-    // Loreweaver's shipped server imports @modelcontextprotocol/sdk at runtime — so the
+    // Engram's shipped server imports @modelcontextprotocol/sdk at runtime — so the
     // extraResources version packaged cleanly, launched, and died with ERR_MODULE_NOT_FOUND.
     expect(pkg.build.afterPack).toBe('electron/afterPack.mjs');
     expect(pkg.build.extraResources).toBeUndefined();
@@ -55,7 +55,7 @@ describe('desktop build configuration', () => {
   });
 
   it('assembles the two repos before packaging', () => {
-    expect(pkg.scripts.dist).toMatch(/bundle:loreweaver/);
+    expect(pkg.scripts.dist).toMatch(/bundle:engram/);
     expect(pkg.scripts.dist).toMatch(/build:all/);
   });
 });
@@ -84,12 +84,12 @@ describe('blocks the tutor is allowed to use', () => {
   });
 });
 
-describe('spawning Loreweaver from inside Electron', () => {
+describe('spawning Engram from inside Electron', () => {
   it('sets ELECTRON_RUN_AS_NODE on the child', () => {
     // config.ts's runnerFor uses process.execPath to run a compiled entry, and inside the packaged
     // app that IS the Electron binary — launching it plainly opens a second app window instead of a
     // Node process. Verified against the packaged AppImage: the boot log shows Electron's own binary
-    // as the Loreweaver runner, and /api/graph completes a real MCP round-trip through it.
+    // as the Engram runner, and /api/graph completes a real MCP round-trip through it.
     const mcp = readFileSync(join(root, 'src/server/mcp.ts'), 'utf8');
     expect(mcp).toMatch(/ELECTRON_RUN_AS_NODE:\s*'1'/);
   });

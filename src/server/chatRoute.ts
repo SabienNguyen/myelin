@@ -3,7 +3,7 @@ import type { UIMessage } from 'ai';
 import { isClaudeSdkModel } from './claudeSdk.js';
 import { createClaudeSdkTutorSession } from './claudeSdkTutor.js';
 import type { HarnessConfig } from './config.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { createTutorSession } from './session.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { MODES, type Mode } from './prompt.js';
@@ -13,7 +13,7 @@ import { MODES, type Mode } from './prompt.js';
 // declared params is assignable to a wider call signature, so this union stays simple.
 type Respond = (messages: UIMessage[], mode: Mode, threadId: string) => Promise<Response>;
 
-export function buildChatRoute(lw: Loreweaver, cfg: HarnessConfig) {
+export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
 
   // Chosen PER REQUEST, not once at boot, and memoised per tutor model id. The route depends on

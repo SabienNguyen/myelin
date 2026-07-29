@@ -17,7 +17,7 @@ async function tick(times = 20) {
 }
 
 // compileNext/route tests elsewhere (tests/ingestRepo.test.ts, tests/ingestRoutes.test.ts) use the
-// same shape of plain-object stub for the Loreweaver client — a real MCP round-trip for
+// same shape of plain-object stub for the Engram client — a real MCP round-trip for
 // GET /api/graph is already covered by tests/mcp.test.ts.
 function fakeLw(opts: { slugs?: string[]; fail?: () => boolean } = {}) {
   const { slugs = ['a'], fail = () => false } = opts;
@@ -234,7 +234,7 @@ function pageLw(opts: {
         }
         const title = opts.pages[args.slug];
         // Mirrors the real tool: a slug with no page is an error, not an empty page.
-        if (title === undefined) throw new Error(`loreweaver read_page: page not found: ${args.slug}`);
+        if (title === undefined) throw new Error(`engram read_page: page not found: ${args.slug}`);
         return { page: { slug: args.slug, meta: { title } }, edges: { in: [], out: [] } };
       }
       throw new Error(`pageLw: unexpected call ${name}`);
@@ -375,12 +375,12 @@ describe('GET /api/page/:slug for a page that does not exist', () => {
   const missingLw = {
     listSlugs: async () => [],
     // Mirrors read_page's own wording, routed through lw.call's throw-on-isError.
-    call: async () => { throw new Error('loreweaver read_page: page not found: ghost'); },
+    call: async () => { throw new Error('engram read_page: page not found: ghost'); },
   } as any;
 
   it('answers 404, not 500', async () => {
     const res = await buildRestRoutes(missingLw, cfg).request('/api/page/ghost');
-    // A dangling wiki-link is the most ordinary thing a typed graph produces — Loreweaver models it
+    // A dangling wiki-link is the most ordinary thing a typed graph produces — Engram models it
     // (`missingTargets`) — so it must not be reported to the learner as a harness malfunction.
     expect(res.status).toBe(404);
     expect((await res.json()).error).toMatch(/no page for/i);
@@ -389,7 +389,7 @@ describe('GET /api/page/:slug for a page that does not exist', () => {
   it('still propagates a genuine failure as a 500', async () => {
     const brokenLw = {
       listSlugs: async () => [],
-      call: async () => { throw new Error('loreweaver read_page: ENOSPC writing index'); },
+      call: async () => { throw new Error('engram read_page: ENOSPC writing index'); },
     } as any;
     // Blanket-catching would have turned every backend fault into a soothing "not written yet".
     const res = await buildRestRoutes(brokenLw, cfg).request('/api/page/ghost');
@@ -402,7 +402,7 @@ describe('GET /api/due and /api/session-plan', () => {
 
   function spacedLw() {
     const state: Record<string, any> = {
-      // slipped: practicing, window passed, loreweaver reports slipped=true, days_left=null
+      // slipped: practicing, window passed, engram reports slipped=true, days_left=null
       slipped: { level: 'practicing', effective: 'exposed', last_reinforced: day(25), days_left: null, slipped: true, misconceptions: [] },
       // due soon
       soon: { level: 'practicing', effective: 'practicing', last_reinforced: day(19), days_left: 2, slipped: false, misconceptions: [] },
@@ -739,6 +739,40 @@ describe('PUT /api/voice — the teaching-style preference', () => {
     await app.request('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice: '' }) });
     expect((cfg as any).voice).toBeUndefined();
     expect('voice' in JSON.parse(readFileSync(cfgFile, 'utf8'))).toBe(false);
+  });
+});
+
+describe('GET /api/status — names the live student, not the boot snapshot', () => {
+  // The status object handed to buildRestRoutes is captured at boot; /api/status re-reads the tutor
+  // model from cfg for the same reason it must re-read the student — switching learners rewrites
+  // cfg.student, but the snapshot's student never moved, so the badge's 60s poll reverted the
+  // displayed learner to the boot-time one while /api/students and /api/progress had already moved.
+  const { mkdtempSync, writeFileSync, rmSync } = require('node:fs') as typeof import('node:fs');
+  const { tmpdir } = require('node:os') as typeof import('node:os');
+  const { join } = require('node:path') as typeof import('node:path');
+  const lw = { listSlugs: async () => [], call: async () => ({}) } as any;
+  let dir: string; let cfgFile: string; let prevEnv: string | undefined;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'lwh-status-'));
+    cfgFile = join(dir, 'harness.config.json');
+    writeFileSync(cfgFile, JSON.stringify({ student: 'kid' }));
+    prevEnv = process.env.HARNESS_CONFIG;
+    process.env.HARNESS_CONFIG = cfgFile;
+  });
+  afterEach(() => {
+    if (prevEnv === undefined) delete process.env.HARNESS_CONFIG;
+    else process.env.HARNESS_CONFIG = prevEnv;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reflects the current student after a switch, not the one captured at boot', async () => {
+    const cfg = { student: 'kid', vault: dir, models: { tutor: { model: 'scripted' } } } as unknown as HarnessConfig;
+    // The 3rd arg is the boot snapshot — the same stale capture the bug read the student from.
+    const app = buildRestRoutes(lw, cfg, { student: 'kid', autoCompile: true });
+    expect((await (await app.request('/api/status')).json()).student).toBe('kid');
+    await app.request('/api/student', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'grownup' }) });
+    // Before the fix this stayed 'kid' (read from the snapshot); now it follows cfg.student.
+    expect((await (await app.request('/api/status')).json()).student).toBe('grownup');
   });
 });
 

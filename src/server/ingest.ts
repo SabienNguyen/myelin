@@ -12,7 +12,7 @@ import {
   type Converter, type IncrementalConverter,
 } from './convert.js';
 import { extractProblems, saveProblems } from './courseBank.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { modelFor } from './models.js';
 import {
   readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
@@ -36,8 +36,8 @@ export {
   readQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
 
-// Mirrors loreweaver's src/vault/parsePage.ts slugify — duplicated here for the same reason
-// DECAY/MasteryLevel are duplicated in src/shared/loreweaver.ts (documented divergence risk).
+// Mirrors engram's src/vault/parsePage.ts slugify — duplicated here for the same reason
+// DECAY/MasteryLevel are duplicated in src/shared/engram.ts (documented divergence risk).
 // Exported for ingestRepo.ts, which needs the identical slug algorithm for repo/doc-file naming.
 export function slugify(s: string): string {
   return s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -48,7 +48,7 @@ const H1_LINE = /^#\s+(.+)$/m;
 /**
  * Converts a book (or paper) file and appends 'pending' ledger entries to
  * vault/.harness/compile-queue.json. These are the only two locations this pipeline ever writes —
- * pages/ and students/ are the Loreweaver MCP server's exclusive territory.
+ * pages/ and students/ are the Engram MCP server's exclusive territory.
  *
  * Book mode (default) splits the converted markdown into per-chapter files under
  * vault/raw/uploads/<book-slug>/ and appends one ledger entry per chapter.
@@ -165,7 +165,7 @@ function singleShotIncremental(converter: Converter): IncrementalConverter {
  * continuation, arbitrarily far past an await — goes through updateQueue.
  */
 export function startConversion(
-  lw: Loreweaver, cfg: HarnessConfig, filePath: string,
+  lw: Engram, cfg: HarnessConfig, filePath: string,
   opts: {
     converter?: Converter; incrementalConverter?: IncrementalConverter;
     mode?: 'book' | 'paper'; title?: string; sourceUrl?: string; model?: LanguageModel; onComplete?: () => void;
@@ -472,7 +472,7 @@ export function buildCompilePrompt(
  * queueStore.ts's module doc comment for the full incident writeup.
  */
 export async function compileOne(
-  lw: Loreweaver, cfg: HarnessConfig, model: LanguageModel | undefined, entry: QueueEntry,
+  lw: Engram, cfg: HarnessConfig, model: LanguageModel | undefined, entry: QueueEntry,
   chunkChars: number,
   claudeSdk: { useSdk: boolean; modelId: string; deps?: CompileDeps },
 ): Promise<'compiled' | 'failed'> {
@@ -524,22 +524,22 @@ export async function compileOne(
             prompt: `${prompt}\n\nREQUIRED: every write_page call's "sources" array MUST include `
               + `exactly this string: "${citation}".`,
             mcp: {
-              loreweaver: {
-                command: cfg.loreweaver.command,
-                args: cfg.loreweaver.args,
-                // Mirrors mcp.ts's Loreweaver.spawn env exactly. NOTE: this spawns a SECOND
-                // loreweaver server process pointed at the same vault — loreweaver's writes are
+              engram: {
+                command: cfg.engram.command,
+                args: cfg.engram.args,
+                // Mirrors mcp.ts's Engram.spawn env exactly. NOTE: this spawns a SECOND
+                // engram server process pointed at the same vault — engram's writes are
                 // file-per-page, and the harness's own client (`lw`) only calls listSlugs()
                 // (a filesystem glob) during compile, never lw.tools()/lw.call(), so a second
                 // writer process here is acceptable for now.
                 env: {
                   ...process.env as Record<string, string>,
-                  LOREWEAVER_VAULT: cfg.vault,
-                  LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
+                  ENGRAM_VAULT: cfg.vault,
+                  ENGRAM_EMBEDDINGS: cfg.engram.embeddings,
                 },
               },
             },
-            allowedTools: ['mcp__loreweaver__write_page', 'mcp__loreweaver__link_pages', 'mcp__loreweaver__read_page'],
+            allowedTools: ['mcp__engram__write_page', 'mcp__engram__link_pages', 'mcp__engram__read_page'],
             maxTurns: 24,
           });
           // Same honesty gate as the ai-sdk path below, just fed from the SDK's own tool-call log
@@ -555,7 +555,7 @@ export async function compileOne(
       const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
       const agent = new ToolLoopAgent({
         model: model!, // invariant: useSdk is false here, so compileNext always supplied a model
-        instructions: 'You are compiling one textbook chapter into Loreweaver vault pages.',
+        instructions: 'You are compiling one textbook chapter into Engram vault pages.',
         tools,
         stopWhen: isStepCount(16),
       });
@@ -610,7 +610,7 @@ export async function compileOne(
  * the incident this replaces.
  */
 export async function compileNext(
-  lw: Loreweaver, cfg: HarnessConfig, n = 1,
+  lw: Engram, cfg: HarnessConfig, n = 1,
   opts: { model?: LanguageModel; concurrency?: number; chunkChars?: number; deps?: CompileDeps } = {},
 ): Promise<{ compiled: number; failed: number }> {
   const compileModelId = cfg.models?.compile?.model;
@@ -694,7 +694,7 @@ let drainRunning = false;
  * 'error' — the loop moves on and never retries a failed one (manual retry only, e.g. re-running
  * compile from the UI later).
  */
-export function ensureCompileDrain(lw: Loreweaver, cfg: HarnessConfig, opts: { model?: LanguageModel } = {}): void {
+export function ensureCompileDrain(lw: Engram, cfg: HarnessConfig, opts: { model?: LanguageModel } = {}): void {
   if (drainRunning) return;
   // Defensive: production config always has models.compile (zod-required), but some test
   // fixtures construct a bare-bones HarnessConfig without it — treat that as "nothing to drain"

@@ -793,7 +793,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                     // The <title> below is the tooltip; aria-label is what a screen reader reads,
                     // and it has to carry the mastery and decay a sighted user gets from the node's
                     // colour and ring — those are the only place that information exists.
-                    aria-label={`${n.title}, ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft} days until decay` : ''}${n.misconceptions.length > 0 ? ', has a recorded misconception' : ''}`}
+                    aria-label={`${n.title}, ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft} ${n.daysLeft === 1 ? 'day' : 'days'} until decay` : ''}${n.misconceptions.length > 0 ? ', has a recorded misconception' : ''}`}
                     // Roving tabindex: the selected node if there is one, else the first, so the
                     // group is a single Tab stop that resumes where the learner left off.
                     tabIndex={(selected != null ? selected === n.slug : nodeIndex === 0) ? 0 : -1}

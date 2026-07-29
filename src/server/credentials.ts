@@ -13,11 +13,11 @@ import { join } from 'node:path';
  * it, should never have a stale saved key silently override them.
  */
 export function credentialsPath(home = homedir(), os = platform()): string {
-  if (os === 'darwin') return join(home, 'Library', 'Application Support', 'Loreweaver', 'credentials.json');
+  if (os === 'darwin') return join(home, 'Library', 'Application Support', 'Myelin', 'credentials.json');
   if (os === 'win32') {
-    return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Loreweaver', 'credentials.json');
+    return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Myelin', 'credentials.json');
   }
-  return join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'loreweaver', 'credentials.json');
+  return join(process.env.XDG_CONFIG_HOME ?? join(home, '.config'), 'myelin', 'credentials.json');
 }
 
 export interface Credentials {

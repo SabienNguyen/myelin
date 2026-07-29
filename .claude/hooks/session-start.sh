@@ -16,15 +16,15 @@ cd "$CLAUDE_PROJECT_DIR"
 npm install
 
 mkdir -p "$HOME/Dev/personal"
-ln -sfn "$CLAUDE_PROJECT_DIR" "$HOME/Dev/personal/loreweaver-harness"
+ln -sfn "$CLAUDE_PROJECT_DIR" "$HOME/Dev/personal/myelin"
 
-# The loreweaver sibling is present when the session was started with both repos. Without it the
+# The engram sibling is present when the session was started with both repos. Without it the
 # integration tests that spawn the real MCP server will fail loudly — which is honest; only the
 # layout should never be the reason.
-for sibling in "$CLAUDE_PROJECT_DIR/../loreweaver" "$HOME/Dev/personal/../../user/loreweaver" "/home/user/loreweaver"; do
+for sibling in "$CLAUDE_PROJECT_DIR/../engram" "$HOME/Dev/personal/../../user/engram" "/home/user/engram"; do
   if [ -d "$sibling" ] && [ -f "$sibling/package.json" ]; then
     real="$(cd "$sibling" && pwd)"
-    ln -sfn "$real" "$HOME/Dev/personal/loreweaver"
+    ln -sfn "$real" "$HOME/Dev/personal/engram"
     (cd "$real" && npm install)
     break
   fi

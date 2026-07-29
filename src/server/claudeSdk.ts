@@ -19,7 +19,7 @@ export function stripClaudeSdkPrefix(id: string): string {
 }
 
 export interface ClaudeSdkMcpConfig {
-  loreweaver: { command: string; args: string[]; env?: Record<string, string> };
+  engram: { command: string; args: string[]; env?: Record<string, string> };
 }
 
 export interface ClaudeSdkGenerateOpts {
@@ -33,7 +33,7 @@ export interface ClaudeSdkGenerateOpts {
 
 export interface ClaudeSdkResult {
   text: string;
-  toolCallNames: string[]; // normalized: 'mcp__loreweaver__write_page' -> 'write_page'
+  toolCallNames: string[]; // normalized: 'mcp__engram__write_page' -> 'write_page'
 }
 
 /**
@@ -73,11 +73,11 @@ export async function claudeSdkGenerate(opts: ClaudeSdkGenerateOpts): Promise<Cl
   if (opts.allowedTools !== undefined) options.allowedTools = opts.allowedTools;
   if (opts.mcp) {
     options.mcpServers = {
-      loreweaver: {
+      engram: {
         type: 'stdio',
-        command: opts.mcp.loreweaver.command,
-        args: opts.mcp.loreweaver.args,
-        ...(opts.mcp.loreweaver.env ? { env: opts.mcp.loreweaver.env } : {}),
+        command: opts.mcp.engram.command,
+        args: opts.mcp.engram.args,
+        ...(opts.mcp.engram.env ? { env: opts.mcp.engram.env } : {}),
       },
     };
   }

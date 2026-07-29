@@ -24,7 +24,7 @@ async function until<T>(fn: () => T, ms = 3000): Promise<T> {
   }
 }
 
-// compileNext only ever calls .listSlugs()/.tools() on the Loreweaver client — a plain stub is
+// compileNext only ever calls .listSlugs()/.tools() on the Engram client — a plain stub is
 // enough here; the real MCP round-trip is already covered by tests/ingest.test.ts.
 function fakeLw() {
   return { listSlugs: async () => [] as string[], tools: async () => ({}) } as any;

@@ -1,7 +1,7 @@
 // Ported from ~/Dev/personal/the-gap apps/web/src/api.ts (READ ONLY there) — adapted to the
 // harness proxy contract (docs/superpowers/plans/2026-07-20-gap-integration.md Pinned Contracts):
 // GET /api/gap/ladder, POST /api/gap/run {rungId, code, trace?}. The gap's own /api/ledger is not
-// ported — the harness records evidence through grading.ts + Loreweaver's record_evidence instead
+// ported — the harness records evidence through grading.ts + Engram's record_evidence instead
 // of the gap's standalone watched/written ledger.
 
 import type { Ladder, MinedEntry, Rung } from './types.js';

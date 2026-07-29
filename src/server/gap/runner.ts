@@ -201,7 +201,7 @@ export function runInChild(job: RunnerJob, killAfterMs = KILL_AFTER_MS): Promise
         ...process.env,
         // Inside the packaged desktop app, process.execPath is the Electron binary; without this it
         // opens a second app window instead of running as Node. A no-op under a real node binary —
-        // the same trick, for the same reason, as the Loreweaver spawn in mcp.ts.
+        // the same trick, for the same reason, as the Engram spawn in mcp.ts.
         ELECTRON_RUN_AS_NODE: '1',
       },
     });

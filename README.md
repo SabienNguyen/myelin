@@ -1,22 +1,46 @@
-# Loreweaver
+<div align="center">
+
+# Myelin
 
 **A learn-anything desktop tutor that refuses to lie about what you know.**
 
 [![CI](https://github.com/SabienNguyen/loreweaver-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/SabienNguyen/loreweaver-harness/actions/workflows/ci.yml)
 
-A chat tutor teaches through graded interactive blocks, a mastery graph tracks what you have
-actually **proven**, and an evidence guardrail keeps the two honest: nothing counts as learned
-without being graded and recorded, and a model's opinion can never mint the evidence a machine
-check earns. Memory lives in [Loreweaver](https://github.com/SabienNguyen/loreweaver), an MCP
-teaching-memory server that is the *only* writer of your notes and student files — the app talks
-to it exclusively over stdio MCP.
+*Repeated use myelinates a pathway — recall gets faster and more durable; leave it alone and it thins and fades. This app is built on that one fact.*
 
-| | |
-|---|---|
-| ![Cold start — what do you want to learn?](docs/screenshots/cold-start.png) | ![A graded math derivation](docs/screenshots/math-graded.png) |
-| *First run: ask for anything — the tutor writes pages as you go.* | *A step-aware math scratchpad, graded mechanically.* |
-| ![The mastery graph](docs/screenshots/graph.png) | ![A graded quiz, dark theme at 900px](docs/screenshots/quiz-dark.png) |
-| *The mastery graph after a real sitting: two domains, levels earned by graded evidence.* | *Per-item verdicts — ✗ stays ✗. Dark theme, narrow layout.* |
+</div>
+
+Myelin is a chat tutor that teaches through graded interactive blocks, a mastery graph that tracks
+what you have actually **proven**, and an evidence guardrail that keeps the two honest: nothing
+counts as learned without being graded and recorded, and a model's opinion can never mint the
+evidence a machine check earns. Long-term memory lives in
+**[Engram](https://github.com/SabienNguyen/loreweaver)** — an MCP teaching-memory server that is the
+*only* writer of your notes and student files, reached exclusively over stdio MCP.
+
+## A guided tour
+
+**Ask for anything.** No syllabus to choose, no deck to build — say what you want to learn, and the
+tutor writes the pages as you go and links them into a graph.
+
+![Cold start — “What do you want to learn?”](docs/screenshots/cold-start.png)
+
+**Every answer is graded by a machine, not a vibe.** The step-aware math scratchpad (MathLive entry)
+is checked by *numeric equivalence*, so any algebraically-correct form passes — and the verdict says
+exactly why.
+
+![A graded math derivation on the scratchpad](docs/screenshots/math-graded.png)
+
+**A miss stays a miss.** Quizzes mark every item mechanically and never round up — the score is the
+truth, and a ✗ stays a ✗.
+
+![A graded quiz with honest per-item verdicts](docs/screenshots/quiz.png)
+
+**A map of what you’ve proven.** The mastery graph colours every page by the level you’ve *earned*
+and decays it over time, so the picture moves down as well as up.
+
+<p align="center">
+  <img src="docs/screenshots/graph.png" alt="The mastery graph after a real sitting" width="520">
+</p>
 
 ## Why it's different
 
@@ -73,10 +97,10 @@ default (`src/server/config.ts`):
 
 | | Default | Change it with |
 |---|---|---|
-| Vault | `~/Documents/Loreweaver` (created at boot) | `vault` |
+| Vault | `~/Documents/Myelin` (created at boot) | `vault` |
 | Student id | your OS username | `student` |
 | Models | Sonnet for tutor/quiz/compile, Haiku for grader/card_gen | `models.*.model` |
-| Loreweaver server | found automatically: installed dependency, then a sibling checkout | `LOREWEAVER_ENTRY`, or `loreweaver.command`/`args` |
+| Engram server | found automatically: installed dependency, then a sibling checkout | `ENGRAM_ENTRY`, or `engram.command`/`args` |
 | Port | 4820 | `port` |
 
 Anything you do want to change goes in `harness.config.json` — copy
@@ -89,8 +113,8 @@ path shows up immediately rather than as a broken feature later.
 
 Anthropic-routed model roles need a key. The app asks on first run, checks it against Anthropic
 before saving (a wrong key fails at the prompt, not mid-lesson), and stores it in your OS config
-directory — `~/.config/loreweaver/credentials.json`, `~/Library/Application Support/Loreweaver/`
-on macOS, `%APPDATA%\Loreweaver\` on Windows — **not** in the vault, since vaults get synced and
+directory — `~/.config/myelin/credentials.json`, `~/Library/Application Support/Myelin/`
+on macOS, `%APPDATA%\Myelin\` on Windows — **not** in the vault, since vaults get synced and
 pushed. `ANTHROPIC_API_KEY` in the environment always wins over the saved key. A fully `ollama:`
 or `claude-sdk:` setup is never asked for a key.
 </details>
@@ -166,11 +190,11 @@ UIMessage chunk shapes the chat client already understands, so no client changes
 
 `npm run dist` produces a single downloadable file — an AppImage on Linux, a dmg on macOS, an NSIS
 installer on Windows — that runs with nothing installed and no config to write. It bundles both
-repos: the harness serves its own built client, and Loreweaver rides along as an unpacked resource
+repos: the harness serves its own built client, and Engram rides along as an unpacked resource
 spawned over stdio exactly as in development.
 
 ```bash
-npm run dist            # build:all + bundle:loreweaver + electron-builder
+npm run dist            # build:all + bundle:engram + electron-builder
 npm run desktop         # same shell against the dev tree, no packaging
 ```
 
@@ -180,14 +204,14 @@ talks to the local server over HTTP like any browser would.
 <details>
 <summary><b>Three packaging decisions that were each a bug before they were a comment</b></summary>
 
-- **`ELECTRON_RUN_AS_NODE=1` on the Loreweaver child** (`src/server/mcp.ts`): inside the packaged
+- **`ELECTRON_RUN_AS_NODE=1` on the Engram child** (`src/server/mcp.ts`): inside the packaged
   app, `process.execPath` is the Electron binary — spawning it plainly opens a second app window.
-- **Loreweaver is copied in an `afterPack` hook**, not `extraResources`: electron-builder strips
+- **Engram is copied in an `afterPack` hook**, not `extraResources`: electron-builder strips
   `node_modules` from extra resources, and the shipped server imports
   `@modelcontextprotocol/sdk` at runtime — the extraResources version packaged cleanly, launched,
   and died with `ERR_MODULE_NOT_FOUND`. It also lives outside the asar archive because Node
   cannot spawn a script from inside one.
-- **`scripts/bundle-loreweaver.mjs` installs runtime deps from the lockfile** rather than copying
+- **`scripts/bundle-engram.mjs` installs runtime deps from the lockfile** rather than copying
   the dev checkout's `node_modules` — copy-then-prune left typescript, vitest and rollup in the
   download.
 
@@ -203,7 +227,7 @@ unverified.
 
 **Dev** (two processes, hot reload):
 ```bash
-npm run dev:server   # Hono + AI SDK agent loop + Loreweaver MCP client, :4820
+npm run dev:server   # Hono + AI SDK agent loop + Engram MCP client, :4820
 npm run dev:client   # Vite dev server, :5173
 ```
 
@@ -216,9 +240,9 @@ npx vite preview --port 4173        # serves dist/; inherits the /api proxy
 
 **As a systemd user service:**
 ```bash
-cp systemd/loreweaver-harness.service ~/.config/systemd/user/
+cp systemd/myelin.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now loreweaver-harness
+systemctl --user enable --now myelin
 ```
 
 ### The coding sandbox
@@ -241,7 +265,7 @@ npx vitest run      # 900+ unit + integration tests (incl. seeded fuzz suites)
 npm run e2e         # Playwright, 8 specs against a scripted model
 ```
 
-The e2e suite spins up the real backend and a real Loreweaver server (fake embeddings, disposable
+The e2e suite spins up the real backend and a real Engram server (fake embeddings, disposable
 fixture vaults) with the tutor replaced by a scripted model, then drives the built SPA with a real
 browser: the full tutor loop (quick_check → grade → evidence on disk), the whole coding flow
 (predict gate → editor → real tests → evidence), the exercise Help tab, the contextual graph,
@@ -251,8 +275,8 @@ and video ingest (a fake `yt-dlp` serves captions with no network). On a machine
 `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
 
 **CI** runs on every push: typecheck and the client component suite unconditionally; the
-integration and e2e suites run whenever the loreweaver repo can be checked out beside this one —
-automatic when it's public (forks included), or via a `LOREWEAVER_CI_TOKEN` fine-grained PAT
+integration and e2e suites run whenever the engram repo can be checked out beside this one —
+automatic when it's public (forks included), or via a `ENGRAM_CI_TOKEN` fine-grained PAT
 secret if it's private. When neither works, CI stays green on the ungated steps and prints a
 warning saying why.
 

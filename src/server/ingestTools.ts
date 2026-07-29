@@ -4,7 +4,7 @@ import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
 import { startConversion } from './ingest.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { dirname } from 'node:path';
 
 /** The tutor's own paper-fetching tool — freeform mode only (wired in session.ts alongside
@@ -12,7 +12,7 @@ import { dirname } from 'node:path';
  * compile so the resulting vault pages come from the actual paper text rather than the model's
  * memory. Structured errors, never throws — matches webTools.ts style. */
 export function buildIngestTools(
-  lw: Loreweaver, cfg: HarnessConfig,
+  lw: Engram, cfg: HarnessConfig,
   deps: { download?: typeof downloadToTemp; converter?: Converter } = {},
 ): ToolSet {
   const download = deps.download ?? downloadToTemp;

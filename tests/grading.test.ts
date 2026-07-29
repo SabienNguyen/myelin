@@ -12,6 +12,16 @@ describe('mathEquivalent (numeric sampling)', () => {
     expect(mathEquivalent('x^2', 'x^3', 'x')).toBe(false);
   });
 
+  // Honesty regression: a blank/unparseable answer compiles to a node that never yields a
+  // comparable number, so every sample point was skipped and the loop fell through to `return
+  // true` — grading an EMPTY math_scratchpad "correct" and minting fabricated applied-correctly
+  // evidence. Nothing checked must mean not-equivalent, exactly as the equation path already does.
+  it('refuses to grade a blank or non-evaluable answer as correct', () => {
+    expect(mathEquivalent('', '2x', 'x')).toBe(false);
+    expect(mathEquivalent('   ', '2x', 'x')).toBe(false);
+    expect(mathEquivalent(undefined as unknown as string, '2x', 'x')).toBe(false);
+  });
+
   // Multivariate (learn-anything pass): single-variable-only capped applied maths evidence at
   // one-unknown algebra, excluding physics/stats/engineering.
   describe('multivariate', () => {
@@ -599,6 +609,19 @@ describe('math_scratchpad step-chain break detection', () => {
       { steps: [{ latex: '2x=8' }, { latex: 'x=5' }], finalLatex: 'x=5' }, cfg, {} as any);
     expect(g.verdict).toBe('incorrect');
     expect(g.detail).toContain('breaks between steps 1 and 2');
+  });
+
+  // Robustness: the UI always sends folded()'s array, but a direct API call or a buggy client can
+  // submit stepMode input with the `steps` field missing/null. The badStep findIndex used to throw
+  // there while the breakNote walk 12 lines down guarded the same field — and gradeBlockOutput runs
+  // inside the turn's execute(), so the throw failed the WHOLE turn instead of grading the final.
+  // Now it grades the final answer (the real evidence) and just skips the step-level call-out.
+  it('grades the final answer when a malformed submission omits steps, instead of throwing', async () => {
+    const stepInput = { problemLatex: 'x^2', expectedLatex: '2x', variable: 'x', stepMode: true, pageSlug: 'p' };
+    const missing = await gradeBlockOutput('math_scratchpad', stepInput, { finalLatex: '2x' }, cfg, {} as any);
+    expect(missing.verdict).toBe('correct');
+    const nulled = await gradeBlockOutput('math_scratchpad', stepInput, { finalLatex: 'x', steps: null }, cfg, {} as any);
+    expect(nulled.verdict).toBe('incorrect');
   });
 });
 

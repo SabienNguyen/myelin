@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3 } from 'ai/test';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import {
   canCompileNow, compileConcurrencyFor, ensureCompileDrain, readQueue, startConversion,
 } from '../src/server/ingest.js';
@@ -52,7 +52,7 @@ async function until<T>(fn: () => T, ms = 15_000): Promise<T> {
 }
 
 describe('ensureCompileDrain — autoCompile end to end', () => {
-  let lw: Loreweaver;
+  let lw: Engram;
   let vault: string;
   let cfg: HarnessConfig;
 
@@ -63,9 +63,9 @@ describe('ensureCompileDrain — autoCompile end to end', () => {
       vault, student: 'kid', autoCompile: true,
       // Non-ollama id so canCompileNow never gates this test on activeConversions timing.
       models: { compile: { model: 'claude-drain-test' } },
-      loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+      engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
     } as unknown as HarnessConfig;
-    lw = await Loreweaver.connect(cfg);
+    lw = await Engram.connect(cfg);
   }, 30_000);
   afterAll(async () => { await lw.close(); });
 

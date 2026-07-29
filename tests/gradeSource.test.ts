@@ -10,7 +10,7 @@
 //     came back weak.
 //
 // Nothing failed when they did that, because no test asserted the rule and `applyEvidence` treats
-// 'explained-correctly' and 'applied-correctly' identically (loreweaver src/student/model.ts — both
+// 'explained-correctly' and 'applied-correctly' identically (engram src/student/model.ts — both
 // step exactly one rung). The convention was doing all the work and there was no mechanism.
 //
 // The test below is deliberately a PROPERTY over every block type rather than one assertion per
@@ -215,6 +215,32 @@ describe('THE RULE: a model-graded verdict can never mint applied-correctly', ()
     const { BLOCK_TOOL_NAMES } = await import('../src/shared/blocks.js');
     const covered = new Set(BEST_CASE.map((c) => c.tool));
     expect([...BLOCK_TOOL_NAMES].filter((t) => !covered.has(t))).toEqual([]);
+  });
+});
+
+// Block outputs are NOT schema-validated before grading (session.ts validates the tool input, not
+// the client-submitted result), results are persisted to and reloaded from thread JSON, and
+// gradeBlockOutput runs inside the turn's execute() under onError:turnError — so a throw on a
+// malformed result failed the WHOLE turn (grade AND tutor reply lost). quick_check, quiz, and
+// math_scratchpad each read a required result field unguarded and threw; structured/label/pronounce/
+// code already coerced. Every branch must grade an absent field, never throw.
+describe('a malformed submission grades instead of failing the turn', () => {
+  it('quick_check with no answer field does not throw', async () => {
+    const g = await gradeBlockOutput('quick_check', { question: 'q', expected: '2x', pageSlug: 'p' }, {}, cfg, yesGrader as any);
+    expect(g).toBeDefined();
+    // A missing answer can never be a mechanical exact match, so it can't mint applied-correctly.
+    expect(g.evidence.map((e) => e.kind)).not.toContain('applied-correctly');
+  });
+  it('quiz with no answers array grades all-incorrect, does not throw', async () => {
+    const g = await gradeBlockOutput('quiz',
+      { items: [{ id: '1', type: 'choice', prompt: 'q', expected: 'a', pageSlug: 'p' }] }, {}, cfg, yesGrader as any);
+    expect(g.verdict).toBe('incorrect');
+    expect(g.evidence.map((e) => e.kind)).not.toContain('applied-correctly');
+  });
+  it('math_scratchpad with no steps under stepMode grades the final, does not throw', async () => {
+    const g = await gradeBlockOutput('math_scratchpad',
+      { problemLatex: 'x', expectedLatex: '2x', variable: 'x', stepMode: true, pageSlug: 'p' }, { finalLatex: '2x' }, cfg, yesGrader as any);
+    expect(g.verdict).toBe('correct');
   });
 });
 

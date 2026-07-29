@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3 } from 'ai/test';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import { ingestBook, compileNext, readQueue, startConversion } from '../src/server/ingest.js';
 import type { Converter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
@@ -179,7 +179,7 @@ describe('startConversion — input temp dir cleanup', () => {
 });
 
 describe('compileNext', () => {
-  let lw: Loreweaver;
+  let lw: Engram;
   let vault: string;
   let cfg: HarnessConfig;
 
@@ -188,9 +188,9 @@ describe('compileNext', () => {
     mkdirSync(join(vault, 'pages'), { recursive: true });
     cfg = {
       vault, student: 'kid',
-      loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+      engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
     } as unknown as HarnessConfig;
-    lw = await Loreweaver.connect(cfg);
+    lw = await Engram.connect(cfg);
   }, 30_000);
   afterAll(async () => { await lw.close(); });
 
@@ -388,15 +388,15 @@ describe('compileNext', () => {
       expect(calls[0].model).toBe('sonnet'); // prefix stripped before reaching the SDK
       expect(calls[0].maxTurns).toBe(24);
       expect(calls[0].allowedTools).toEqual([
-        'mcp__loreweaver__write_page', 'mcp__loreweaver__link_pages', 'mcp__loreweaver__read_page',
+        'mcp__engram__write_page', 'mcp__engram__link_pages', 'mcp__engram__read_page',
       ]);
       expect(calls[0].mcp).toEqual({
-        loreweaver: {
+        engram: {
           command: 'npx',
           args: ['tsx', join(LW_REPO, 'src/server.ts')],
           env: expect.objectContaining({
-            LOREWEAVER_VAULT: vault,
-            LOREWEAVER_EMBEDDINGS: 'fake',
+            ENGRAM_VAULT: vault,
+            ENGRAM_EMBEDDINGS: 'fake',
           }),
         },
       });

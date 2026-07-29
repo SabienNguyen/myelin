@@ -36,7 +36,7 @@ describe('claudeSdkGenerate', () => {
     queryMock.mockReturnValue(messages([
       {
         type: 'assistant',
-        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__loreweaver__write_page', input: {} }] },
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__engram__write_page', input: {} }] },
       },
       { type: 'assistant', message: { content: [{ type: 'text', text: 'working...' }] } },
       { type: 'result', subtype: 'success', result: 'Done — wrote 1 page.', is_error: false },
@@ -77,7 +77,7 @@ describe('claudeSdkGenerate', () => {
     expect(call.options.tools).toEqual([]);
   });
 
-  it('wires mcp.loreweaver into options.mcpServers as a stdio server, and allowedTools through', async () => {
+  it('wires mcp.engram into options.mcpServers as a stdio server, and allowedTools through', async () => {
     queryMock.mockReturnValue(messages([
       { type: 'result', subtype: 'success', result: 'OK', is_error: false },
     ]));
@@ -85,16 +85,16 @@ describe('claudeSdkGenerate', () => {
     await claudeSdkGenerate({
       model: 'sonnet',
       prompt: 'compile',
-      mcp: { loreweaver: { command: 'npx', args: ['tsx', 'server.ts'], env: { LOREWEAVER_VAULT: '/vault' } } },
-      allowedTools: ['mcp__loreweaver__write_page'],
+      mcp: { engram: { command: 'npx', args: ['tsx', 'server.ts'], env: { ENGRAM_VAULT: '/vault' } } },
+      allowedTools: ['mcp__engram__write_page'],
       maxTurns: 24,
     });
 
     const call = queryMock.mock.calls[0][0] as any;
     expect(call.options.mcpServers).toEqual({
-      loreweaver: { type: 'stdio', command: 'npx', args: ['tsx', 'server.ts'], env: { LOREWEAVER_VAULT: '/vault' } },
+      engram: { type: 'stdio', command: 'npx', args: ['tsx', 'server.ts'], env: { ENGRAM_VAULT: '/vault' } },
     });
-    expect(call.options.allowedTools).toEqual(['mcp__loreweaver__write_page']);
+    expect(call.options.allowedTools).toEqual(['mcp__engram__write_page']);
   });
 
   it('throws a readable error when the query ends in a non-success result', async () => {
@@ -110,7 +110,7 @@ describe('claudeSdkGenerate', () => {
     queryMock.mockReturnValue(messages([
       {
         type: 'assistant',
-        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__loreweaver__link_pages', input: {} }] },
+        message: { content: [{ type: 'tool_use', id: 't1', name: 'mcp__engram__link_pages', input: {} }] },
       },
       { type: 'result', subtype: 'success', result: 'ok', is_error: false },
     ]));

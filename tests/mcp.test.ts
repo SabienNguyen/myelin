@@ -2,11 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Loreweaver, isTransportError } from '../src/server/mcp.js';
+import { Engram, isTransportError } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import { LW_REPO } from './lwRepo.js';
 
-let lw: Loreweaver;
+let lw: Engram;
 let vault: string;
 
 beforeAll(async () => {
@@ -16,14 +16,14 @@ beforeAll(async () => {
     '---\ntitle: Derivatives\ndifficulty: 1\nstatus: solid\n---\nrates of change');
   const cfg = {
     vault, student: 'testkid',
-    loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as HarnessConfig;
-  lw = await Loreweaver.connect(cfg);
+  lw = await Engram.connect(cfg);
 }, 30_000);
 
 afterAll(async () => { await lw.close(); });
 
-describe('Loreweaver client', () => {
+describe('Engram client', () => {
   it('lists slugs by glob without parsing', async () => {
     expect(await lw.listSlugs()).toEqual(['derivatives']);
   });
@@ -72,9 +72,9 @@ describe('Loreweaver client', () => {
     // they all hit the transport error together — each used to spawn its own replacement and orphan
     // all but the last. Count spawns across three concurrent recoveries: it must be exactly one.
     await (lw as any).client.close();
-    const realSpawn = (Loreweaver as any).spawn.bind(Loreweaver);
+    const realSpawn = (Engram as any).spawn.bind(Engram);
     let spawns = 0;
-    (Loreweaver as any).spawn = (cfg: any) => { spawns += 1; return realSpawn(cfg); };
+    (Engram as any).spawn = (cfg: any) => { spawns += 1; return realSpawn(cfg); };
     try {
       const pages = await Promise.all([
         lw.call('read_page', { slug: 'derivatives' }),
@@ -84,7 +84,7 @@ describe('Loreweaver client', () => {
       expect(pages.every((p) => p.page.meta.title === 'Derivatives')).toBe(true);
       expect(spawns).toBe(1); // one shared respawn — three before this fix
     } finally {
-      (Loreweaver as any).spawn = realSpawn;
+      (Engram as any).spawn = realSpawn;
     }
   });
 }, 60_000);
@@ -115,7 +115,7 @@ it('GET /api/graph returns nodes with mastery', async () => {
 // T43 (misconception lifecycle audit): graph nodes carry mastery — color, decay ring, and the ⚠
 // misconception marker — baked into the cached /api/graph payload, so with write_page-only
 // invalidation a freshly recorded or freshly resolved misconception kept a stale marker for up to
-// a TTL plus a client poll (~90s measured live). This drives the REAL loreweaver through the same
+// a TTL plus a client poll (~90s measured live). This drives the REAL engram through the same
 // wrapper the harness uses and asserts the payload is fresh with no TTL wait on either side of
 // the lifecycle.
 describe('record_evidence graph-cache invalidation (T43)', () => {

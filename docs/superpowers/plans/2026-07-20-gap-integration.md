@@ -1,6 +1,6 @@
 # Gap→Harness integration plan (tasks I1–I3)
 
-Goal: the Loreweaver harness (localhost:4173) is the ONE place to interact with the whole
+Goal: the Engram harness (localhost:4173) is the ONE place to interact with the whole
 learning system. The Gap (~/Dev/personal/the-gap) becomes a subject kit: the tutor presents
 code exercises as blocks; the Stage renders them; passing real tests records real evidence;
 coding patterns live in the vault/graph like any other knowledge.
@@ -9,7 +9,7 @@ The Gap's spec principles still bind inside the harness: never the answer to the
 instance; tests are the grading; ambient dismissible offers, never modal; tone rules.
 
 ## Global constraints
-All of docs/superpowers/plans/2026-07-12-loreweaver-harness.md Global Constraints apply
+All of docs/superpowers/plans/2026-07-12-myelin.md Global Constraints apply
 (ESM .js imports, TDD, vitest exit-code checks, no hardcoded models, explicit-path staging,
 commit trailer). The Gap repo is a DEPENDENCY — never modified except where a task explicitly
 fences a file there. pnpm in the gap repo runs via `npm exec --yes pnpm@latest -- <args>`.
@@ -93,7 +93,7 @@ package.json (CM6 deps), tests. Contract above is verbatim.
 ## I3 — vault wiring + practice entry + E2E
 Fence: src/server/{index.ts or a new seed module}, src/client/components/{SidePanel.tsx,
 PagePanel.tsx or PracticePanel.tsx(new)}, tutor-system-prompt.md, tests, .uitour additions.
-1. Pattern page seeding: src/server/seedPatternPages.ts — on boot (after Loreweaver.connect),
+1. Pattern page seeding: src/server/seedPatternPages.ts — on boot (after Engram.connect),
    for each gap ladder pattern (MVP: stream-consumer → slug 'stream-consumer' titled
    "Consuming SSE token streams", domain 'programming'), if slug missing from listSlugs,
    lw.call('write_page', {...stub body describing the pattern, status:'stub',

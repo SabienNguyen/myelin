@@ -78,7 +78,7 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
       {/* main, not div: this screen replaces the whole app, so it needs its own main landmark —
           axe landmark-one-main/region, caught scanning the setup states. */}
       <main className="firstrun-card">
-        <p className="firstrun-mark"><BookOpenText size={18} weight="duotone" /> Loreweaver</p>
+        <p className="firstrun-mark"><BookOpenText size={18} weight="duotone" /> Myelin</p>
         <h1>Ready when you are</h1>
         {/* One sentence, no paths. The vault location matters eventually and not now — it moved to
             the muted footer, because on the first screenshot of this card four lines of absolute

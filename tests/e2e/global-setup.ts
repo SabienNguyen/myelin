@@ -6,9 +6,9 @@ import { FAKE_AUDIO_WAV } from '../../playwright.config.js';
 // The same directory the config files resolve `${E2E_DIR}` to (this file lives in tests/e2e), so
 // the fixture vaults written here and the vaults the harness backends read stay in lockstep no
 // matter where the repo is checked out. Playwright runs globalSetup after webServer processes have
-// already started but before any test executes; Loreweaver's VaultStore re-globs pages/ on every
+// already started but before any test executes; Engram's VaultStore re-globs pages/ on every
 // call (no startup cache — see its vaultStore.ts loadPages()), so it's safe for these fixtures to
-// be written after the harness/Loreweaver servers have booted.
+// be written after the harness/Engram servers have booted.
 const E2E_DIR = dirname(fileURLToPath(import.meta.url));
 const VAULT = join(E2E_DIR, '.tmp-vault');
 
@@ -21,8 +21,8 @@ const VAULT = join(E2E_DIR, '.tmp-vault');
 // page the backend had just seeded, and turn 2's record_evidence 404'd with "page not found"),
 // the per-run reset below is surgical: remove only students/ (so the evidence assertion can never
 // pass on a stale file from a previous run) and leave the freshly-seeded pages/ alone. No
-// pre-created skeleton is needed for a first run from a clean checkout either — Loreweaver's
-// writes mkdir recursively (loreweaver's vaultStore.ts dir()).
+// pre-created skeleton is needed for a first run from a clean checkout either — Engram's
+// writes mkdir recursively (engram's vaultStore.ts dir()).
 const GAP_VAULT = join(E2E_DIR, '.tmp-vault-gap');
 const LABEL_VAULT = join(E2E_DIR, '.tmp-vault-label');
 const PRONOUNCE_VAULT = join(E2E_DIR, '.tmp-vault-pronounce');
@@ -90,7 +90,7 @@ export default async function globalSetup() {
   // TTL-cached (src/server/graphCache.ts): when the gap tests run first, their chat turns warm
   // the cache, and fixture pages written after that warm were invisible to the graph test's
   // fresh-by-TTL read. global-setup runs before any test can warm anything. Slugs come from the
-  // file's BASENAME alone (loreweaver's loadPages()), the directory nesting is cosmetic.
+  // file's BASENAME alone (engram's loadPages()), the directory nesting is cosmetic.
   const fixtureDir = join(GAP_VAULT, 'pages', 'programming');
   mkdirSync(fixtureDir, { recursive: true });
   const GAP_FIXTURE_PAGES: Record<string, string> = {

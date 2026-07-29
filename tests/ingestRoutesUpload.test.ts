@@ -5,7 +5,7 @@ import { buildIngestRoutes } from '../src/server/ingestRoutes.js';
 // traversal name must not reach writeFileSync unsanitized. The two names that survive basename() —
 // "." and ".." — are rejected outright (they'd still escape the temp dir); everything else is
 // reduced to its basename before the write. These guard cases return 400 before startConversion,
-// so no Loreweaver or converter is needed to exercise them.
+// so no Engram or converter is needed to exercise them.
 const cfg = { vault: '/tmp/lwh-ingest-upload-test' } as any;
 
 async function uploadNamed(filename: string): Promise<Response> {

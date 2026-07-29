@@ -3,7 +3,7 @@
 // The web app already works as a single process on a single port (src/server/staticRoutes.ts serves
 // the built client alongside the API), so this file's whole job is the three things a browser tab
 // cannot do — pick a port that is free, know when the server is ready, and find the bundled
-// Loreweaver inside a packaged app.
+// Engram inside a packaged app.
 //
 // The server runs IN this process rather than as a child. It is the same Node runtime, the failure
 // modes are the ones the server already handles, and a child would need its own ELECTRON_RUN_AS_NODE
@@ -32,17 +32,17 @@ function freePort() {
 }
 
 /**
- * Where the bundled Loreweaver lives.
+ * Where the bundled Engram lives.
  *
  * Packaged, it is an unpacked extra resource (it has to be: Node cannot spawn a script from inside
- * an asar archive). Unpackaged, it is the `vendor/` copy that scripts/bundle-loreweaver.mjs makes.
- * Returning null is fine — src/server/config.ts's resolveLoreweaver then falls back to a sibling
+ * an asar archive). Unpackaged, it is the `vendor/` copy that scripts/bundle-engram.mjs makes.
+ * Returning null is fine — src/server/config.ts's resolveEngram then falls back to a sibling
  * checkout, which is exactly what a developer running `npm run desktop` wants.
  */
-function bundledLoreweaver() {
+function bundledEngram() {
   const candidates = app.isPackaged
-    ? [join(process.resourcesPath, 'loreweaver', 'dist', 'server.js')]
-    : [join(here, '..', 'vendor', 'loreweaver', 'dist', 'server.js')];
+    ? [join(process.resourcesPath, 'engram', 'dist', 'server.js')]
+    : [join(here, '..', 'vendor', 'engram', 'dist', 'server.js')];
   return candidates.find(existsSync) ?? null;
 }
 
@@ -66,7 +66,7 @@ function createWindow(url) {
     width: 1280,
     height: 860,
     minWidth: 760,
-    title: 'Loreweaver',
+    title: 'Engram',
     backgroundColor: '#f5f2ea', // matches --bg, so the first paint is not a white flash
     show: false,
     webPreferences: {
@@ -93,8 +93,8 @@ function createWindow(url) {
 }
 
 function showBootFailure(message) {
-  const win = new BrowserWindow({ width: 720, height: 420, title: 'Loreweaver', backgroundColor: '#f5f2ea' });
-  const body = `<h1>Loreweaver could not start</h1><pre>${
+  const win = new BrowserWindow({ width: 720, height: 420, title: 'Engram', backgroundColor: '#f5f2ea' });
+  const body = `<h1>Engram could not start</h1><pre>${
     String(message).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
   }</pre>`;
   win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
@@ -111,8 +111,8 @@ app.whenReady().then(async () => {
     const port = await freePort();
     process.env.HARNESS_PORT = String(port);
 
-    const entry = bundledLoreweaver();
-    if (entry) process.env.LOREWEAVER_ENTRY = entry;
+    const entry = bundledEngram();
+    if (entry) process.env.ENGRAM_ENTRY = entry;
 
     // Imported, not spawned — and imported AFTER the env above is set, because the server reads its
     // config at module load.
@@ -124,7 +124,7 @@ app.whenReady().then(async () => {
 
     const url = `http://127.0.0.1:${port}`;
     if (!await waitForServer(port)) {
-      throw new Error('The server started but never became ready. Check the log for a Loreweaver '
+      throw new Error('The server started but never became ready. Check the log for a Engram '
         + 'connection failure.');
     }
     createWindow(url);

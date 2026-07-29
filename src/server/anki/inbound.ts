@@ -3,7 +3,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessConfig } from '../config.js';
-import type { Loreweaver } from '../mcp.js';
+import type { Engram } from '../mcp.js';
 import type { AnkiClient } from './client.js';
 
 interface LedgerEntry {
@@ -46,8 +46,8 @@ export interface SyncInboundResult {
 const localDay = (reviewTimeMs: number): string => new Date(reviewTimeMs).toISOString().slice(0, 10);
 
 /**
- * Pulls reviews of Loreweaver-tagged Anki cards since the stored cursor, aggregates them
- * per-slug-per-day, and records evidence through Loreweaver's `record_evidence` tool.
+ * Pulls reviews of Engram-tagged Anki cards since the stored cursor, aggregates them
+ * per-slug-per-day, and records evidence through Engram's `record_evidence` tool.
  *
  * Maintain-never-promote ceiling: a day's reviews for a slug map to 'exposed' (refreshes
  * `last_reinforced`, can never raise mastery level) unless any review that day was ease=1
@@ -58,7 +58,7 @@ const localDay = (reviewTimeMs: number): string => new Date(reviewTimeMs).toISOS
  * never throws.
  */
 export async function syncInbound(
-  lw: Loreweaver, anki: AnkiClient, cfg: HarnessConfig,
+  lw: Engram, anki: AnkiClient, cfg: HarnessConfig,
 ): Promise<SyncInboundResult> {
   const result: SyncInboundResult = { recorded: 0 };
   if (!(await anki.isUp())) return result; // Anki closed / connection refused — skip silently
@@ -70,7 +70,7 @@ export async function syncInbound(
   const cursor = ledger._cursor ?? 0;
   const noteToSlug = new Map<number, string>(notes.map(([id, v]) => [Number(id), v.slug]));
 
-  // Deck names mirror outbound's `Loreweaver::<domain>` scheme; iterate the domains of every
+  // Deck names mirror outbound's `Engram::<domain>` scheme; iterate the domains of every
   // slug currently synced to Anki so cardReviews can be queried per-deck. A card can outlive its
   // page (delete the page, the Anki card and its ledger entry remain), and read_page THROWS on a
   // missing slug — so guard it: a deleted-page slug is dropped rather than allowed to abort the
@@ -86,7 +86,7 @@ export async function syncInbound(
     liveSlugs.add(slug);
     domains.add(page.domain || 'general');
   }
-  const decks = [...domains].map((d) => `Loreweaver::${d}`);
+  const decks = [...domains].map((d) => `Engram::${d}`);
 
   const allReviews: number[][] = [];
   for (const deck of decks) {

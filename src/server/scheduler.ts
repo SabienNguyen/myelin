@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HarnessConfig } from './config.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { sendNotification } from './notify.js';
 
 export type Ledger = Record<string, true>; // key: `${slug}|${kind}|${last_reinforced}`
@@ -12,7 +12,7 @@ export interface DigestItem { slug: string; kind: 'decays-soon' | 'decayed'; mes
  * Turn the student-state map into the digest lines a tick would notify, deduped against the ledger.
  *
  * `slipped` and `days_left` are read straight off each entry — they come from the memory layer,
- * computed where the decay windows actually live (loreweaver's decayDaysLeft). This USED to
+ * computed where the decay windows actually live (engram's decayDaysLeft). This USED to
  * re-derive the countdown here from a local `{mastered:45, practicing:21}` table, which is blind to
  * the shorter window a rubric-held page rests on: such a page decays at 14 days, so its "decays
  * soon" heads-up (fired at ≤3 days left) was computed against 21 and never sent before the page had
@@ -57,7 +57,7 @@ export function inQuietHours(hour: number, [qStart, qEnd]: [number, number]): bo
  *  and notifier. Returns what happened — 'quiet' | 'nothing-due' | 'notified' | 'undelivered' —
  *  so the caller (and a test) can tell the four silences apart. */
 export async function runDigestTick(
-  lw: Loreweaver, cfg: HarnessConfig,
+  lw: Engram, cfg: HarnessConfig,
   deps: { now?: () => Date; notify?: typeof sendNotification } = {},
 ): Promise<'quiet' | 'nothing-due' | 'notified' | 'undelivered'> {
   const now = deps.now ?? (() => new Date());
@@ -71,14 +71,14 @@ export async function runDigestTick(
   if (!items.length) return 'nothing-due';
   // Only mark the ledger when the notification actually reached the desktop — a headless
   // send (boot-before-login) fails and must retry on a later tick, not vanish.
-  const delivered = await notify('Loreweaver', items.map((i) => i.message).join('\n'));
+  const delivered = await notify('Myelin', items.map((i) => i.message).join('\n'));
   if (!delivered) return 'undelivered';
   mkdirSync(join(cfg.vault, '.harness'), { recursive: true });
   writeFileSync(ledgerPath(cfg.vault), JSON.stringify(newLedger));
   return 'notified';
 }
 
-export function startScheduler(lw: Loreweaver, cfg: HarnessConfig) {
+export function startScheduler(lw: Engram, cfg: HarnessConfig) {
   // .catch for the same reason ankiTick has one (index.ts): runDigestTick awaits MCP calls, a
   // notifier, and a ledger read, any of which can reject — an unhandled rejection in a background
   // cron tick has no business reaching the process. A logged miss retries on the next tick.

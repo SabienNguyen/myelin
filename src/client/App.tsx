@@ -83,7 +83,7 @@ export function App() {
     <Runtime key={threadId} mode={mode} threadId={threadId}>
       <div className={appClass}>
         <header className="topbar">
-          <h1><BookOpenText size={20} weight="duotone" /> Loreweaver</h1>
+          <h1><BookOpenText size={20} weight="duotone" /> Myelin</h1>
           <HistoryMenu activeId={threadId} onSelect={selectThread} />
           <TopbarStatus />
           {/* THE add entry point — one control for every kind of material (file, git URL, local

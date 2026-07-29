@@ -1,6 +1,6 @@
 // Curated paths as the learner's syllabus — the first learner-facing surface they have ever had.
 //
-// Loreweaver has shipped create_path / list_paths / read_path from the start, and the harness exposed
+// Engram has shipped create_path / list_paths / read_path from the start, and the harness exposed
 // none of it: the tutor could read a path, the learner could not see one. So a subject had no visible
 // spine and no answer to "how far through this am I", which is the question someone learning a new
 // subject actually has. Progress is decay-aware (it counts EFFECTIVE practicing/mastered), so a path

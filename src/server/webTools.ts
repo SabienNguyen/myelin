@@ -57,7 +57,7 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): ToolSet {
         try {
           const res = await fetch(url, {
             signal: AbortSignal.timeout(20_000),
-            headers: { 'user-agent': 'loreweaver-harness/1.0 (personal tutoring app)' },
+            headers: { 'user-agent': 'myelin/1.0 (personal tutoring app)' },
           });
           if (!res.ok) return { error: `fetch failed: HTTP ${res.status}` };
           const html = await res.text();

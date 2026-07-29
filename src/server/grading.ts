@@ -3,7 +3,7 @@ import { create, all } from 'mathjs';
 import { generateText, Output } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
 import { TONE_SYSTEMS, type ToneSystem } from '../shared/toneContour.js';
-import type { EvidenceKind } from '../shared/loreweaver.js';
+import type { EvidenceKind } from '../shared/engram.js';
 import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import { modelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
@@ -167,14 +167,21 @@ function sampledEqual(amA: string, amB: string, vars?: string | string[], eps = 
   const fa = math.compile(amA), fb = math.compile(amB);
   const names = sampleNames([amA, amB], vars);
   const points = names.length === 1 ? SAMPLES.length : SAMPLES.length * 3;
+  // Did any point actually compare two numbers? An empty, blank, or non-evaluable answer compiles
+  // to a node that throws or yields a non-number, sweeping EVERY sample into a `continue` — and a
+  // loop that only ever `continue`s used to fall through to `return true`, grading a blank
+  // math_scratchpad "correct" and minting fabricated applied-correctly evidence. Guard it exactly
+  // as residualsProportional does: nothing checked → refuse to call it equivalent.
+  let sawPoint = false;
   for (let k = 0; k < points; k++) {
     let ra: number, rb: number;
     try { ra = fa.evaluate(scopeAt(names, k)); rb = fb.evaluate(scopeAt(names, k)); } catch { continue; }
     if (typeof ra !== 'number' || typeof rb !== 'number') continue; // matrices/units — not sampled
     if (Number.isNaN(ra) && Number.isNaN(rb)) continue;
+    sawPoint = true;
     if (Math.abs(ra - rb) > eps * Math.max(1, Math.abs(ra), Math.abs(rb))) return false;
   }
-  return true;
+  return sawPoint;
 }
 
 function residualsProportional(
@@ -495,7 +502,7 @@ export interface Grade {
  * stays honest.
  *
  * Note for whoever changes applyEvidence next: today this cap has NO effect on mastery, because
- * loreweaver's student/model.ts puts 'explained-correctly' and 'applied-correctly' in the same
+ * engram's student/model.ts puts 'explained-correctly' and 'applied-correctly' in the same
  * branch — both step exactly one rung. So the two kinds currently differ in truthfulness and
  * nothing else. That is a live design question (should applied work resist decay longer? should
  * explaining alone be unable to reach 'mastered'?) and this is the seam where it would be answered.
@@ -561,8 +568,14 @@ export async function gradeBlockOutput(
   tool: BlockToolName, input: any, result: any, cfg: HarnessConfig, deps: GradingDeps = {},
 ): Promise<Grade> {
   if (tool === 'quick_check') {
+    // Coerce once: the client always sends a string `answer`, but block outputs are not
+    // schema-validated before grading (session.ts validates the tool INPUT, not the submitted
+    // result), and a malformed/legacy output reaching `result.answer.trim()` threw inside the
+    // turn's execute() — failing the whole turn. A missing answer becomes '', which already grades
+    // as a miss on the path below; existing empty-submission behavior is unchanged.
+    const answer = String(result.answer ?? '');
     if (input.expected != null) {
-      const ok = result.answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
+      const ok = answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
       if (ok) {
         return {
           verdict: 'correct',
@@ -577,9 +590,9 @@ export async function gradeBlockOutput(
       // kind (capApplied keeps it from minting applied-correctly — a model judged it, honestly so),
       // and a genuinely wrong one still records struggled. Free-text punishing phrasing teaches
       // learners to guess the grader's wording, which is the opposite of knowing the thing.
-      return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps, input.expected);
+      return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected);
     }
-    return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps);
+    return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps);
   }
 
   if (tool === 'math_scratchpad') {
@@ -588,7 +601,13 @@ export async function gradeBlockOutput(
       // `variables` (multivariate) wins when present; `variable` remains the single-variable path.
       input.variables ?? input.variable,
     );
-    const badStep = input.stepMode
+    // Array.isArray guard mirrors the breakNote walk below, which reads the SAME field: a malformed
+    // submission (stepMode input true, but the result omits `steps` — never the UI, which always
+    // sends folded()'s array, but reachable from a direct API call or a buggy client) used to throw
+    // `findIndex of undefined` here, and gradeBlockOutput runs inside the turn's execute() — so one
+    // bad field failed the WHOLE turn (grade AND tutor reply lost) instead of grading the final
+    // answer, which is the real evidence. No steps to inspect → no unparseable step to flag.
+    const badStep = input.stepMode && Array.isArray(result.steps)
       ? result.steps.findIndex((s: { latex: string }) => !latexParses(s.latex)) : -1;
     // The step call-out is independent of the final's verdict: only parseability is checked, and a
     // garbled step hidden under a green final implied the whole derivation had been read. Naming it
@@ -627,8 +646,12 @@ export async function gradeBlockOutput(
     // are exact-matched, short-answer items go to the grader model. The per-ITEM source therefore
     // has to be carried through the aggregation, because evidence is emitted per SLUG and one
     // model-graded item is enough to make that slug's verdict a judgement rather than a check.
+    // Same guard as quick_check/math_scratchpad: block outputs aren't schema-validated before
+    // grading, so a malformed submission with no `answers` array reaching `.find` threw inside the
+    // turn's execute() and failed the whole turn. No answers → every item is unanswered → incorrect.
+    const submitted = Array.isArray(result.answers) ? result.answers : [];
     const perItem = await Promise.all(input.items.map(async (item: any) => {
-      const answer = result.answers.find((a: any) => a.id === item.id)?.answer ?? '';
+      const answer = submitted.find((a: any) => a.id === item.id)?.answer ?? '';
       if (item.type !== 'short' && item.expected != null) {
         return {
           id: item.id, source: 'mechanical' as GradeSource,
@@ -827,7 +850,7 @@ export async function gradeBlockOutput(
 
   // writing_draft with an explicit rubric — the judged-work path for essay subjects. The grader
   // marks each stated criterion pass/fail; passing ALL of them mints 'rubric-passed', the third
-  // positive evidence kind (loreweaver caps it at practicing and decays it on its own shorter
+  // positive evidence kind (engram caps it at practicing and decays it on its own shorter
   // window). It is deliberately NOT 'applied-correctly' — a rubric is a model applying criteria,
   // and naming it keeps it from ever laundering into the evidence that gates 'mastered'.
   if (Array.isArray(input.rubric) && input.rubric.length > 0) {

@@ -1,0 +1,14 @@
+[Unit]
+Description=Engram tutoring harness
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Dev/personal/myelin
+ExecStart=/usr/bin/npx tsx src/server/index.ts
+Environment=HARNESS_CONFIG=%h/Dev/personal/myelin/harness.config.json
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

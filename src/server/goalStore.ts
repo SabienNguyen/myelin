@@ -1,13 +1,13 @@
 // The learner's active goal — "what am I trying to learn right now".
 //
-// Why this exists: Loreweaver already has the syllabus primitive (curated paths, written by
+// Why this exists: Engram already has the syllabus primitive (curated paths, written by
 // create_path, read by list_paths/read_path) and the graph payload has carried a `goal: null` field
 // since it was written, never populated. So the system could answer "what should I learn next"
 // against the whole vault, but never "how far through THIS subject am I" — which is the question a
 // learner starting a new subject actually has.
 //
 // Territory: this is harness state, not vault knowledge, so it lives under vault/.harness/ alongside
-// the compile queue and the notify ledger. Loreweaver remains the only writer of pages/ and
+// the compile queue and the notify ledger. Engram remains the only writer of pages/ and
 // students/. The goal deliberately stores only a POINTER (a path slug or a page slug) — never a copy
 // of the syllabus itself, which would immediately drift from the path doc it was copied from.
 

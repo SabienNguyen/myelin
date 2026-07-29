@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
  * -> the real client auto-resubmits -> server grades + records evidence -> grading round-trips
  * back to the browser -> turn-2 text renders.
  *
- * Real backend (src/server/index.ts) + real Loreweaver MCP server (fake embeddings, fixture vault
+ * Real backend (src/server/index.ts) + real Engram MCP server (fake embeddings, fixture vault
  * from global-setup.ts) + a scripted tutor model (tests/e2e/scripted-model.cjs, wired in via the
  * LW_MOCK_MODEL env hook in src/server/models.ts) + the real built SPA driven by an actual browser.
  *

@@ -8,7 +8,7 @@ import {
 import { applyRoute, readRoute, resetRouteModels, subscriptionStatus, writeRoute } from './signin.js';
 
 /** A path as a person would say it. The absolute form of a vault path is four lines of monospace on
- *  a first-run card and nobody reads it; `~/Documents/Loreweaver` is the same information in six
+ *  a first-run card and nobody reads it; `~/Documents/Myelin` is the same information in six
  *  words. Shortening happens server-side because only the server knows the real home directory. */
 export function displayPath(path: string, home = homedir()): string {
   if (!home) return path;
