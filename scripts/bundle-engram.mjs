@@ -40,7 +40,10 @@ if (!repo) {
 }
 console.log(`engram: ${repo}`);
 
-const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: 'inherit' });
+// `shell` on Windows: npm is `npm.cmd` there, and execFileSync won't find a `.cmd` without a shell
+// (fails with `spawnSync npm ENOENT`). POSIX resolves the bare `npm` fine, so only Windows needs it.
+const run = (cmd, args, cwd) =>
+  execFileSync(cmd, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
 
 // Its own deps first — the copy below includes node_modules, because the shipped server imports
 // @modelcontextprotocol/sdk and gray-matter at runtime and nothing hoists them for it.
