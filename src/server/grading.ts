@@ -167,14 +167,21 @@ function sampledEqual(amA: string, amB: string, vars?: string | string[], eps = 
   const fa = math.compile(amA), fb = math.compile(amB);
   const names = sampleNames([amA, amB], vars);
   const points = names.length === 1 ? SAMPLES.length : SAMPLES.length * 3;
+  // Did any point actually compare two numbers? An empty, blank, or non-evaluable answer compiles
+  // to a node that throws or yields a non-number, sweeping EVERY sample into a `continue` — and a
+  // loop that only ever `continue`s used to fall through to `return true`, grading a blank
+  // math_scratchpad "correct" and minting fabricated applied-correctly evidence. Guard it exactly
+  // as residualsProportional does: nothing checked → refuse to call it equivalent.
+  let sawPoint = false;
   for (let k = 0; k < points; k++) {
     let ra: number, rb: number;
     try { ra = fa.evaluate(scopeAt(names, k)); rb = fb.evaluate(scopeAt(names, k)); } catch { continue; }
     if (typeof ra !== 'number' || typeof rb !== 'number') continue; // matrices/units — not sampled
     if (Number.isNaN(ra) && Number.isNaN(rb)) continue;
+    sawPoint = true;
     if (Math.abs(ra - rb) > eps * Math.max(1, Math.abs(ra), Math.abs(rb))) return false;
   }
-  return true;
+  return sawPoint;
 }
 
 function residualsProportional(

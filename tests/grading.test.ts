@@ -12,6 +12,16 @@ describe('mathEquivalent (numeric sampling)', () => {
     expect(mathEquivalent('x^2', 'x^3', 'x')).toBe(false);
   });
 
+  // Honesty regression: a blank/unparseable answer compiles to a node that never yields a
+  // comparable number, so every sample point was skipped and the loop fell through to `return
+  // true` — grading an EMPTY math_scratchpad "correct" and minting fabricated applied-correctly
+  // evidence. Nothing checked must mean not-equivalent, exactly as the equation path already does.
+  it('refuses to grade a blank or non-evaluable answer as correct', () => {
+    expect(mathEquivalent('', '2x', 'x')).toBe(false);
+    expect(mathEquivalent('   ', '2x', 'x')).toBe(false);
+    expect(mathEquivalent(undefined as unknown as string, '2x', 'x')).toBe(false);
+  });
+
   // Multivariate (learn-anything pass): single-variable-only capped applied maths evidence at
   // one-unknown algebra, excluding physics/stats/engineering.
   describe('multivariate', () => {
