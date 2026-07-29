@@ -24,13 +24,16 @@ export function buildStaticRoutes(
   const app = new Hono();
   if (!existsSync(root)) return { app, root, found: false };
 
-  // serveStatic resolves `root` relative to CWD, not to this file, and a desktop app's CWD is
-  // whatever the OS felt like — so pass a path relative to `/` and let it be absolute.
-  const rel = root.startsWith('/') ? root.slice(1) : root;
-  app.use('/*', serveStatic({ root: `/${rel}` }));
+  // Pass the ABSOLUTE `root` straight through. serveStatic builds each file path with
+  // `path.join(root, requestPath)`, which ignores CWD for an absolute root and is correct on both
+  // POSIX and Windows. The previous trick sliced off a leading `/` and re-added one, which is a
+  // no-op on a POSIX path but turned a Windows path like `C:\…\dist` into `/C:\…\dist` — so the
+  // packaged Windows app served a 404 for index.html and every asset (the app opened to "404 Not
+  // Found"). `root` is already absolute (`resolve(...)`), so no massaging is needed.
+  app.use('/*', serveStatic({ root }));
   app.get('*', async (c, next) => {
     if (c.req.path.startsWith('/api/')) return next();
-    return serveStatic({ root: `/${rel}`, path: 'index.html' })(c, next);
+    return serveStatic({ root, path: 'index.html' })(c, next);
   });
   return { app, root, found: true };
 }
