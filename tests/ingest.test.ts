@@ -7,6 +7,7 @@ import { Engram } from '../src/server/mcp.js';
 import { ingestBook, compileNext, readQueue, startConversion } from '../src/server/ingest.js';
 import type { Converter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { readLinkDirectories } from '../src/server/linkList.js';
 import { LW_REPO } from './lwRepo.js';
 
 
@@ -175,6 +176,74 @@ describe('startConversion — input temp dir cleanup', () => {
     writeFileSync(join(ownDir, 'notes.md'), '# T\nbody');
     await runToDone(cfg, join(ownDir, 'notes.md'), {}); // no cleanupInputDir
     expect(existsSync(ownDir)).toBe(true);
+  });
+});
+
+describe('startConversion — link-directory diversion (upload/URL doors)', () => {
+  const AWESOME_MD = [
+    '# Awesome Reads', '',
+    'A curated list.', '',
+    '## Systems', '',
+    ...Array.from({ length: 12 }, (_, i) => `- [Systems ${i}](https://blog.example/sys-${i}) - systems reading ${i}`),
+    '',
+    '## Theory', '',
+    ...Array.from({ length: 8 }, (_, i) => `- [Theory ${i}](https://blog.example/th-${i})`),
+  ].join('\n');
+  const awesomeConverter: Converter = async () => ({ markdown: AWESOME_MD });
+  const cfgFor = (vault: string) =>
+    ({ vault, student: 'kid', models: {}, autoCompile: false }) as unknown as HarnessConfig;
+  const runToDone = (cfg: HarnessConfig, filePath: string, extra: Record<string, unknown> = {}) =>
+    new Promise<void>((resolve) => {
+      startConversion({} as never, cfg, filePath, {
+        converter: awesomeConverter, onComplete: () => resolve(), ...extra,
+      });
+    }).then(() => new Promise((r) => { setTimeout(r, 30); }));
+
+  it('a bare .md upload (book mode) becomes a catalogue, not chapters', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-linkconv-'));
+    await runToDone(cfgFor(vault), '/uploads/awesome-reads.md');
+
+    const queue = readQueue(vault);
+    // One terminal 'done' receipt, zero pending chapters, no leftover placeholder.
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatchObject({
+      book: 'awesome-reads', chapter: '__link_directory__/awesome-reads', status: 'done',
+    });
+    expect(queue[0].title).toContain('20 links catalogued');
+
+    const dirs = readLinkDirectories(vault);
+    expect(dirs).toHaveLength(1);
+    expect(dirs[0].name).toBe('awesome-reads');
+    expect(dirs[0].total).toBe(20);
+    expect(dirs[0].sections.map((s) => s.title)).toEqual(['Systems', 'Theory']);
+  });
+
+  it('a downloaded URL (paper mode) diverts too, carrying the source url', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-linkconv-'));
+    await runToDone(cfgFor(vault), '/tmp/dl/readme.md', {
+      mode: 'paper', sourceUrl: 'https://example.com/awesome/readme.md',
+    });
+
+    const queue = readQueue(vault);
+    expect(queue).toHaveLength(1);
+    expect(queue[0].status).toBe('done');
+    expect(queue[0].sourceUrl).toBe('https://example.com/awesome/readme.md');
+    // No pending paper row — the directory was catalogued instead of queued for compilation.
+    expect(queue.some((e) => e.status === 'pending')).toBe(false);
+    expect(readLinkDirectories(vault)[0].source).toBe('https://example.com/awesome/readme.md');
+  });
+
+  it('an ordinary document still queues chapters and writes no catalogue', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-linkconv-'));
+    const cfg = cfgFor(vault);
+    await new Promise<void>((resolve) => {
+      startConversion({} as never, cfg, '/uploads/plain.md', {
+        converter: async () => ({ markdown: FIXTURE_MD }), onComplete: () => resolve(),
+      });
+    }).then(() => new Promise((r) => { setTimeout(r, 30); }));
+
+    expect(readQueue(vault).filter((e) => e.status === 'pending')).toHaveLength(2);
+    expect(readLinkDirectories(vault)).toEqual([]);
   });
 });
 
