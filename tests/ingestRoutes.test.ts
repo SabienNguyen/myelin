@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { MockLanguageModelV3 } from 'ai/test';
 import { buildIngestRoutes } from '../src/server/ingestRoutes.js';
 import { readQueue } from '../src/server/ingest.js';
+import { saveLinkDirectory } from '../src/server/linkList.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import type { Converter } from '../src/server/convert.js';
 
@@ -47,6 +48,35 @@ function noToolModel() {
 function cfgFor(vault: string): HarnessConfig {
   return { vault, student: 'kid', models: {} } as unknown as HarnessConfig;
 }
+
+describe('link-directory routes', () => {
+  it('GET /api/linklists returns stored catalogues; DELETE dismisses one', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-linklist-routes-'));
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter });
+
+    expect(await (await app.request('/api/linklists')).json()).toEqual([]);
+
+    const entry = {
+      name: 'awesome-x', source: 'https://github.com/y/awesome-x', file: 'README.md',
+      savedAt: '2026-07-29T00:00:00.000Z',
+      sections: [{ title: 'Reads', links: [{ title: 't', url: 'https://e.com/1', note: 'n' }] }],
+      total: 1, omitted: 0,
+    };
+    saveLinkDirectory(vault, entry);
+    expect(await (await app.request('/api/linklists')).json()).toEqual([entry]);
+
+    const del = await app.request('/api/linklists', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'awesome-x' }),
+    });
+    expect(del.status).toBe(200);
+    expect(await (await app.request('/api/linklists')).json()).toEqual([]);
+
+    const missing = await app.request('/api/linklists', {
+      method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'awesome-x' }),
+    });
+    expect(missing.status).toBe(404);
+  });
+});
 
 describe('ingest routes', () => {
   it('POST /api/ingest converts + queues; GET /api/ingest/queue reflects it', async () => {

@@ -7,6 +7,7 @@ import {
   runCommand, seedMinedArtifactPage, type MineReport, type PassedArtifact,
 } from '../src/server/ingestRepo.js';
 import { readQueue } from '../src/server/ingest.js';
+import { readLinkDirectories } from '../src/server/linkList.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
 /** Poll until fn() is truthy — ingestRepo's background phases (mirrors ingestRoutes.test.ts's
@@ -357,6 +358,72 @@ describe('ingestRepo orchestration (local path source)', () => {
       /could not derive a safe name/,
     );
     expect(readQueue(vault)).toHaveLength(0);
+  });
+});
+
+describe('ingestRepo — link-directory explosion', () => {
+  // An awesome-list README: sections of external-link bullets. Enough links to clear detection,
+  // shaped exactly like the real thing (intro prose, badge, blurbed bullets).
+  function awesomeRepoFixture(): string {
+    const repo = mkdtempSync(join(tmpdir(), 'lwh-awesome-'));
+    const links = (section: string, n: number) => Array.from(
+      { length: n },
+      (_, i) => `- [${section} ${i + 1}](https://blog.example/${section.toLowerCase()}-${i}) - a ${section.toLowerCase()} reading`,
+    ).join('\n');
+    writeFileSync(join(repo, 'README.md'), [
+      '# Awesome Distributed Systems', '',
+      'A curated list of readings.', '',
+      '## Principles', '', links('Principles', 10), '',
+      '## Practice', '', links('Practice', 10), '',
+    ].join('\n'));
+    return repo;
+  }
+
+  it('catalogues the links, queues NO chapters for the directory, and says so in the ledger', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
+    const repo = awesomeRepoFixture();
+
+    const result = ingestRepo(fakeLw(), cfgFor(vault), repo, {
+      miner: async () => ({ candidates: 0, passed: [], rejected: [] }),
+      restartSidecar: async () => {},
+      pingGap: async () => true,
+    });
+    await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
+
+    // No chapter entries — the directory was exploded, not compiled into TOC pages.
+    const docEntries = readQueue(vault).filter((e) => e.book === result.name && e.mode !== 'repo');
+    expect(docEntries).toHaveLength(0);
+
+    // The catalogue exists, grouped by the README's own sections.
+    const dirs = readLinkDirectories(vault);
+    expect(dirs).toHaveLength(1);
+    expect(dirs[0].name).toBe(result.name);
+    expect(dirs[0].file).toBe('README.md');
+    expect(dirs[0].total).toBe(20);
+    expect(dirs[0].sections.map((s) => s.title)).toContain('Principles');
+    const first = dirs[0].sections.find((s) => s.title === 'Principles')!.links[0];
+    expect(first.url).toBe('https://blog.example/principles-0');
+    expect(first.note).toBe('a principles reading');
+
+    // The ledger row carries the receipt.
+    const placeholder = readQueue(vault).find((e) => e.book === result.name && e.mode === 'repo')!;
+    expect(placeholder.phase).toContain('link directory: 20 catalogued');
+  });
+
+  it('an ordinary prose README still compiles as chapters and writes no catalogue', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
+    const repo = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-'));
+    writeFileSync(join(repo, 'README.md'), '# My Repo\nSome intro text about the project.');
+
+    const result = ingestRepo(fakeLw(), cfgFor(vault), repo, {
+      miner: async () => ({ candidates: 0, passed: [], rejected: [] }),
+      restartSidecar: async () => {},
+      pingGap: async () => true,
+    });
+    await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
+
+    expect(readQueue(vault).filter((e) => e.book === result.name && e.mode !== 'repo')).toHaveLength(1);
+    expect(readLinkDirectories(vault)).toEqual([]);
   });
 });
 

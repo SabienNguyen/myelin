@@ -2238,6 +2238,38 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 .q-dismiss:hover { color: var(--bad); border-color: var(--border); background: var(--bg-panel); }
 
+/* ── Link directories: catalogues an exploded awesome-list leaves in the Library ───────────── */
+.link-directory .ld-meta {
+  position: relative;
+  margin: 0 0 0.35rem;
+  padding-right: 1.8rem; /* room for the same corner-anchored dismiss the ledger rows use */
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.ld-section { margin: 0.25rem 0; }
+.ld-section summary {
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.25rem 0;
+}
+.ld-section ul { list-style: none; margin: 0 0 0.3rem; padding: 0 0 0 1.1rem; }
+.link-directory li.ld-link {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.28rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.ld-link-main { flex: 1; min-width: 0; }
+.ld-link-main a { color: var(--text); text-decoration-color: var(--border); }
+.ld-link-main a:hover { color: var(--accent); text-decoration-color: var(--accent); }
+.ld-note { display: block; font-size: 0.8rem; color: var(--text-muted); }
+.ld-add { font-size: 0.8rem; padding: 0.1rem 0.6rem; white-space: nowrap; }
+.ld-add:hover { border-color: var(--accent); background: var(--accent-soft); }
+.ld-added { font-size: 0.8rem; color: var(--good); white-space: nowrap; }
+.ld-error { font-size: 0.8rem; color: var(--bad); }
+
 /* ── Source reader: the artifact as the surface ────────────────────────────────────────────── */
 .source-reader { display: flex; flex-direction: column; height: 100%; }
 .source-reader-bar {

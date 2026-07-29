@@ -12,6 +12,7 @@ import {
   type Converter, type IncrementalConverter,
 } from './convert.js';
 import { extractProblems, saveProblems } from './courseBank.js';
+import { analyzeLinkList, saveLinkDirectory } from './linkList.js';
 import type { Engram } from './mcp.js';
 import { modelFor } from './models.js';
 import {
@@ -218,9 +219,15 @@ export function startConversion(
       // paraphrased into prose pages is the wrong shape; the student wants the professor's actual
       // problems, verbatim.
       let bankProblems: ReturnType<typeof extractProblems> | null = null;
+      // Same diversion pattern for the third document shape this pipeline can be handed: a
+      // link DIRECTORY (awesome-list — see linkList.ts). The repo docs pass already explodes
+      // these; this is the same rule for the other two doors (a bare .md upload/local path, a
+      // downloaded URL), so no door compiles a table of contents into pages. Re-evaluated on the
+      // cumulative markdown every update, exactly like bankProblems — the final verdict decides.
+      let linkCatalogue: ReturnType<typeof analyzeLinkList> | null = null;
       // Chapter identities this conversion queued before extraction tipped over MIN_PROBLEMS (a
       // sliced PDF can queue early chapters before enough of the exam has converted to recognize
-      // it) — removed again when the document banks.
+      // it) — removed again when the document banks (or turns out to be a link directory).
       const queuedChapters: string[] = [];
 
       if (mode === 'paper') {
@@ -230,13 +237,14 @@ export function startConversion(
           await updatePlaceholderProgress(u.pagesDone, u.pagesTotal);
         });
         bankProblems = extractProblems(lastMarkdown);
+        linkCatalogue = analyzeLinkList(lastMarkdown);
         const title = opts.title || lastMarkdown.match(H1_LINE)?.[1]?.trim() || basename(filePath, extname(filePath));
         const slug = slugify(title) || 'paper';
         const dir = join(cfg.vault, 'raw', 'uploads', slug);
         mkdirSync(dir, { recursive: true });
         writeFileSync(join(dir, 'paper.md'), `<!-- source: "${title}" -->\n\n${lastMarkdown}\n`);
 
-        if (bankProblems.length === 0) {
+        if (bankProblems.length === 0 && !linkCatalogue.isLinkList) {
           await updateQueue(cfg.vault, (entries) => {
             const kept = entries.filter((e) => e.chapter !== placeholderKey);
             kept.push({
@@ -250,6 +258,16 @@ export function startConversion(
         let queuedCount = 0;
 
         await incremental(filePath, outDir, async (u) => {
+          linkCatalogue = analyzeLinkList(u.markdown);
+          if (linkCatalogue.isLinkList) {
+            // A link directory: keep the raw markdown for the record, queue nothing further. If a
+            // later slice's prose tips the verdict back (re-evaluated on cumulative markdown, like
+            // bankProblems), queuedCount hasn't advanced, so the next round queues every complete
+            // section — nothing is lost by having skipped this one.
+            writeFileSync(join(uploadsDir, 'source.md'), `<!-- source: "${bookTitle}" -->\n\n${u.markdown}\n`);
+            await updatePlaceholderProgress(u.pagesDone, u.pagesTotal);
+            return;
+          }
           bankProblems = extractProblems(u.markdown);
           if (bankProblems.length > 0) {
             // A problem set: keep the raw markdown for the record, queue nothing further.
@@ -283,6 +301,39 @@ export function startConversion(
             if (ph) ph.progress = { pagesDone: u.pagesDone, pagesTotal: u.pagesTotal };
           });
         });
+      }
+
+      // Link-directory diversion — the final verdict on the cumulative markdown, same terminal
+      // shape as the course bank below: placeholder and any early-queued chapters come out, one
+      // 'done' row records what happened, and the catalogue lands where the Library reads it
+      // (GET /api/linklists). Checked before the bank: a directory that happened to trip the
+      // problem extractor on an early slice is still a directory.
+      const cat = linkCatalogue as ReturnType<typeof analyzeLinkList> | null;
+      if (cat?.isLinkList) {
+        const name = (slugify(book) || 'links').slice(0, 64);
+        saveLinkDirectory(cfg.vault, {
+          name,
+          source: opts.sourceUrl ?? filePath,
+          file: basename(filePath),
+          savedAt: new Date().toISOString(),
+          sections: cat.sections,
+          total: cat.total,
+          omitted: cat.omitted,
+        });
+        const dirKey = `__link_directory__/${name}`;
+        await updateQueue(cfg.vault, (entries) => {
+          const kept = entries.filter((e) => e.chapter !== placeholderKey
+            && e.chapter !== dirKey && !queuedChapters.includes(e.chapter));
+          kept.push({
+            book, chapter: dirKey,
+            title: `link directory: ${cat.total} links catalogued — browse them below`,
+            status: 'done',
+            ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
+          });
+          return kept;
+        });
+        opts.onComplete?.();
+        return; // deliberately NO compile drain: this ingest queued no pages
       }
 
       if (bankProblems && bankProblems.length > 0) {

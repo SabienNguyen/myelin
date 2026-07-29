@@ -6,12 +6,14 @@ import { ProgressCard } from './ProgressCard.js';
 import { ReviewQueue } from './ReviewQueue.js';
 import { PathsSection } from './PathsSection.js';
 import { CoursePractice } from './CoursePractice.js';
+import { LinkDirectory } from './LinkDirectory.js';
 
 type Entry = {
   book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string;
   progress?: { pagesDone: number; pagesTotal: number | null };
   mode?: string; // 'repo' for a B2c repo-ingest placeholder — plain book chapters leave this unset
   phase?: string; // repo-ingest placeholder's human-readable phase text (cloning/docs/mining/done)
+  sourceUrl?: string; // URL ingests: the pasted URL — how LinkDirectory knows a link is already in
 };
 
 function elapsed(iso?: string): string {
@@ -184,6 +186,8 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
     );
   }
 
+  const queuedUrls = new Set(queue.map((e) => e.sourceUrl).filter(Boolean) as string[]);
+
   if (queue.length === 0) {
     return (
       <div className="library-panel">
@@ -197,6 +201,9 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
             state, and it is exactly when a syllabus matters most: they may have a path and no books
             at all. Omitting it here hid the whole feature for the default case. */}
         <PathsSection visible={visible} />
+        {/* Link directories survive their own repo row's dismissal — a catalogue with an empty
+            compile queue is exactly the "browse and pick something" state. */}
+        <LinkDirectory visible={visible} queuedUrls={queuedUrls} />
         <p className="empty">No books yet — use “Add material” in the top bar, or ask the tutor (freeform) to pull in a paper.</p>
         <CoursePractice visible={visible} />
         <PracticePanel visible={visible} />
@@ -226,6 +233,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
         {!note && pending > 0 && autoCompile
           && <span className="library-note library-autocompile-note" role="status">auto-compiling in the background</span>}
       </div>
+      <LinkDirectory visible={visible} queuedUrls={queuedUrls} />
       {books.map((book) => (
         <section key={book} className="library-book">
           <BookTitle book={book} onRenamed={() => setRefresh((r) => r + 1)} />
