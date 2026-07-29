@@ -9,6 +9,7 @@ import { downloadToTemp } from './download.js';
 import { compileNext, readQueue, renameBook, startConversion } from './ingest.js';
 import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
+import { deleteLinkDirectory, readLinkDirectories } from './linkList.js';
 import { fetchVideoTranscript, isVideoUrl, type VideoIngestDeps } from './videoIngest.js';
 import type { Engram } from './mcp.js';
 
@@ -137,6 +138,20 @@ export function buildIngestRoutes(
     } catch (e: any) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
+  });
+
+  // Link directories (linkList.ts): catalogues written by the repo docs pass when a doc file is
+  // an awesome-list-shaped directory of external links. Browsing lives in the Library; ingesting
+  // an individual link goes back through POST /api/ingest {url} — the same single door as every
+  // other URL, so a video link still becomes a transcript and an article a paper.
+  app.get('/api/linklists', (c) => c.json(readLinkDirectories(cfg.vault)));
+
+  app.delete('/api/linklists', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const name = String(body?.name ?? '');
+    if (!name) return c.json({ error: 'name is required' }, 400);
+    if (!deleteLinkDirectory(cfg.vault, name)) return c.json({ error: `no link directory named ${JSON.stringify(name)}` }, 404);
+    return c.json({ dismissed: name });
   });
 
   app.patch('/api/ingest/book', async (c) => {

@@ -31,6 +31,7 @@ import { splitChapters } from './convert.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { mineRepoBuiltin, type RepoMineReport } from './gap/mineRepo.js';
 import { ensureCompileDrain, slugify } from './ingest.js';
+import { analyzeLinkList, saveLinkDirectory, type DirectorySection } from './linkList.js';
 import type { Engram } from './mcp.js';
 import { readQueue, updateQueue, writeQueue, type QueueEntry } from './queueStore.js';
 
@@ -444,9 +445,26 @@ export function ingestRepo(
       const repoSlug = slugify(name) || 'repo';
       const uploadsDir = join(cfg.vault, 'raw', 'uploads', repoSlug);
       let queuedChapters = 0;
+      // Link-directory explosion: a doc file that is overwhelmingly a curated list of external
+      // links (awesome-list shape — see linkList.ts) would compile into pages that are just themed
+      // tables of contents, since the compiler never follows links. Those files are EXPLODED
+      // instead of compiled: their links become a browsable catalogue in the Library, each one
+      // click from the single-document ingest that handles it well.
+      const linkListFiles: string[] = [];
+      const linkSections: DirectorySection[] = [];
+      let cataloguedLinks = 0;
+      let omittedLinks = 0;
       if (docFiles.length > 0) mkdirSync(uploadsDir, { recursive: true });
       for (const relPath of docFiles) {
         const raw = readFileSync(join(repoPath, relPath), 'utf8');
+        const analysis = analyzeLinkList(raw);
+        if (analysis.isLinkList) {
+          linkListFiles.push(relPath);
+          linkSections.push(...analysis.sections);
+          cataloguedLinks += analysis.total;
+          omittedLinks += analysis.omitted;
+          continue; // catalogued, not compiled — no chapter entries for a directory
+        }
         const chapters = splitChapters(raw);
         const fileSlug = slugify(relPath.replace(/\.md$/i, '')) || 'doc';
         const newEntries: QueueEntry[] = chapters.map((ch, i) => {
@@ -470,7 +488,25 @@ export function ingestRepo(
         await updateQueue(cfg.vault, (entries) => { entries.push(...newEntries); });
         queuedChapters += chapters.length;
       }
-      await setPhase(docFiles.length > 0 ? `docs: ${queuedChapters} queued` : 'docs: 0 queued (no markdown files found)');
+      if (linkListFiles.length > 0) {
+        saveLinkDirectory(cfg.vault, {
+          name,
+          source: trimmedSource,
+          file: linkListFiles.join(', '),
+          savedAt: new Date().toISOString(),
+          sections: linkSections,
+          total: cataloguedLinks,
+          omitted: omittedLinks,
+        });
+      }
+      // The link note rides every later phase string so the catalogue's existence never scrolls
+      // away — the ledger row is the only receipt the learner gets that their paste did something.
+      const linkNote = cataloguedLinks > 0
+        ? `, link directory: ${cataloguedLinks} catalogued${omittedLinks ? ` (${omittedLinks} past the cap)` : ''}`
+        : '';
+      await setPhase(docFiles.length > 0
+        ? `docs: ${queuedChapters} queued${linkNote}`
+        : 'docs: 0 queued (no markdown files found)');
       if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg);
 
       // ── mining pass (contract point 4) ──────────────────────────────────────────────────
@@ -496,11 +532,11 @@ export function ingestRepo(
             : `no exercises authored (${mined.qualified}/${mined.candidates} candidate functions qualified)`;
           // mined.note names a skipped language (e.g. python3 missing) — without it, a Python
           // repo's "0 candidates" reads as a miner fault instead of a missing runtime.
-          await finish('done', `${notePrefix}docs: ${queuedChapters} queued — ${summary}${mined.rejected.length ? ` — ${mined.rejected.length} rejected by the gates` : ''}${mined.note ? ` — ${mined.note}` : ''}`);
+          await finish('done', `${notePrefix}docs: ${queuedChapters} queued${linkNote} — ${summary}${mined.rejected.length ? ` — ${mined.rejected.length} rejected by the gates` : ''}${mined.note ? ` — ${mined.note}` : ''}`);
         } catch (e: any) {
           const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
           // The docs pass already succeeded; say so rather than branding the whole ingest failed.
-          await finish('done', `${notePrefix}docs: ${queuedChapters} queued — exercise authoring failed: ${msg}`);
+          await finish('done', `${notePrefix}docs: ${queuedChapters} queued${linkNote} — exercise authoring failed: ${msg}`);
         }
       };
 
@@ -551,7 +587,7 @@ export function ingestRepo(
         }
       }
 
-      await finish('done', `pages: ${queuedChapters} queued, exercises: ${seeded}${warning}`);
+      await finish('done', `pages: ${queuedChapters} queued, exercises: ${seeded}${linkNote}${warning}`);
     } catch (e: any) {
       await finish('error', 'repo ingest failed', (e instanceof Error ? e.message : String(e)).slice(0, 500));
     }
