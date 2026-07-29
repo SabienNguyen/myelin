@@ -1958,6 +1958,21 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   overflow-wrap: anywhere;
 }
 
+/* ── watch_video (WatchVideo.tsx) — assigned viewing, played in place ─────────
+   The embed enforces the snippet (start+end); the deep link is the fallback when the
+   player can't load (offline, embedding disabled). */
+.watch-video .wv-player {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 0.6rem 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-inset);
+}
+.watch-video .wv-link { margin: 0.25rem 0 0.5rem; font-size: 0.85rem; }
+.watch-video .wv-note { color: var(--text-muted); font-size: 0.8rem; }
+
 /* ── label_diagram (LabelDiagram.tsx) — the picture-subject applied block ─────
    Pins sit at percent coordinates over an inert <img>; the tray holds the labels.
    Click-click, not drag: keyboard and touch get the same interaction for free. */

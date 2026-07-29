@@ -277,6 +277,40 @@ const pronounce = {
   }),
 };
 
+/**
+ * watch_video — an assigned viewing, in place, as a step INSIDE the evidence loop.
+ *
+ * The tutor names a video snippet (typically found via find_video and located to the second from
+ * the transcript), says what to watch FOR, and the Stage plays it right there — YouTube's embed
+ * honors start AND end, so the snippet is enforced, not suggested. A deep link rides alongside for
+ * the two honest failure modes (offline, embedding disabled by the video's owner).
+ *
+ * Why it is a BLOCK and not a UI tool: "done watching" mints evidence — 'exposed', the encounter
+ * kind, which engram's clock rules already refuse to let refresh a standing the learner didn't
+ * re-earn. Watching alone therefore never inflates mastery; the graded check the tutor issues
+ * AFTER the video is where viewing becomes demonstrated knowledge. That one-two is the point:
+ * the video is a step in the loop, not an exit from it.
+ */
+const watchVideo = {
+  input: z.object({
+    /** YouTube URL (watch / youtu.be / shorts / embed). Other hosts render as a plain link. */
+    url: z.string(),
+    /** Where the relevant passage begins, in seconds — from the transcript's [M:SS] marks. */
+    startSeconds: z.number().int().min(0).optional(),
+    /** Where it ends; the embedded player stops here, keeping the assignment a snippet. */
+    endSeconds: z.number().int().min(0).optional(),
+    /** The video's title, shown above the player. */
+    title: z.string().optional(),
+    /** One line: what to watch FOR ("how completing the square becomes the formula"). */
+    why: z.string(),
+    pageSlug: z.string(),
+  }),
+  result: z.object({
+    /** True when the learner pressed "done watching". Never set by the client otherwise. */
+    watched: z.boolean(),
+  }),
+};
+
 export const BLOCK_TOOLS = {
   quick_check: quickCheck,
   structured_check: structuredCheck,
@@ -286,6 +320,7 @@ export const BLOCK_TOOLS = {
   math_scratchpad: mathScratchpad,
   writing_draft: writingDraft,
   code_exercise: codeExercise,
+  watch_video: watchVideo,
 } as const;
 export type BlockToolName = keyof typeof BLOCK_TOOLS;
 export const BLOCK_TOOL_NAMES = Object.keys(BLOCK_TOOLS) as BlockToolName[];
