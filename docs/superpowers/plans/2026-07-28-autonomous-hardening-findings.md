@@ -1,6 +1,6 @@
 # 2026-07-28 — Autonomous hardening pass: findings and open decisions
 
-**Status:** summary of an autonomous session. **Six fixes are shipped** on
+**Status:** summary of an autonomous session. **Seven fixes are shipped** on
 `claude/analyze-repos-dinnsr` and green at unit + type + browser tiers. **Four items are left for the
 owner** — three product/pedagogy decisions and one verification that needs a real Claude
 subscription. None of those four is actioned: each changes behavior on a judgment call (or can't be
@@ -14,7 +14,7 @@ transfers: a structured page template — see `2026-07-28-structured-page-templa
 broader pass: drive every flow in the real app, cross-check state-view and route pairs, sweep bug
 classes, and read + test the core engine.
 
-## Shipped fixes (6)
+## Shipped fixes (7)
 
 | Commit | Fix | How it was found |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ classes, and read + test the core engine.
 | `0ffa950` | Due-count badge aria-label: "1 page", not "1 pages". | Drove the ReviewQueue with a crafted slipped-page fixture. |
 | `0e85603` | Graph node aria-label: "1 day until decay", not "1 days". | Swept the pluralization class the badge bug revealed. |
 | `0d55b78` (+ `9c1bd3e` test) | `generate_exercise` restored on the Claude-subscription tutor route — it was wired on the API-key route only, so subscription learners couldn't have the tutor author a practice exercise. See "The port" below. | Cross-checked the two tutor routes against the code's own "keep in sync by hand" invariant. |
+| `24f7382` | **A malformed `math_scratchpad` submission failed the whole turn.** The `stepMode` `badStep` read `result.steps.findIndex(...)` with no `Array.isArray` guard — while the breakNote walk 12 lines below guards the same field. A submission with `stepMode` input true but no `steps` array (not the UI, but reachable from a direct API call / buggy client) threw `findIndex of undefined`; since `gradeBlockOutput` runs inside the turn's `execute()` under `onError:turnError`, the throw lost the grade AND the tutor reply instead of grading the final answer. Mirrored the guard. | Drove step-mode multi-step derivations (add/edit/save/submit); probed the malformed edge at the unit layer. |
 | `8bc1983` | **A blank `math_scratchpad` answer graded "correct".** `sampledEqual` returned `true` whenever every sample point was skipped — an empty/blank/non-evaluable answer compiles to a node that throws or yields a non-number, so the loop only ever `continue`d and fell through to `return true`, minting fabricated `applied-correctly` evidence. Guarded exactly as its sibling `residualsProportional` already is (nothing checked → not equivalent). This was a grading-honesty defect in the core evidence layer — the highest-severity class in the system. | Drove the real `math_scratchpad` flow; a blank submit came back green. Confirmed at the unit layer (`mathEquivalent('', '2x') === true`) and swept the sibling structured checkers (all already reject empty). |
 
 Method that worked: drive the actual flow with realistic state, don't trust the happy-path
