@@ -69,9 +69,11 @@ export function resolveEngram(from = dirname(fileURLToPath(import.meta.url))): {
     } catch { /* not installed under this name; keep looking */ }
   }
 
-  // Sibling checkout. `from` is src/server/ in dev and dist/server/ once built, so walk up far
-  // enough to clear both, and prefer the build over the source at each level.
-  for (const up of ['../../..', '../../../..']) {
+  // Sibling checkout, or a child checkout (CI uses `actions/checkout` with `path: engram`, which
+  // lands the core INSIDE the harness workspace). `from` is src/server/ in dev and dist/server/
+  // once built; `../..` reaches the repo root (finds a child `engram/`), and the deeper rungs reach
+  // a true sibling. Prefer the build over the source at each level.
+  for (const up of ['../..', '../../..', '../../../..']) {
     for (const name of names) {
       for (const rel of [`${name}/dist/server.js`, `${name}/src/server.ts`]) {
         const candidate = resolve(from, up, rel);
