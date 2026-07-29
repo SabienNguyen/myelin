@@ -4,7 +4,7 @@
 
 **A learn-anything desktop tutor that refuses to lie about what you know.**
 
-[![CI](https://github.com/SabienNguyen/loreweaver-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/SabienNguyen/loreweaver-harness/actions/workflows/ci.yml)
+[![CI](https://github.com/SabienNguyen/myelin/actions/workflows/ci.yml/badge.svg)](https://github.com/SabienNguyen/myelin/actions/workflows/ci.yml)
 
 *Repeated use myelinates a pathway — recall gets faster and more durable; leave it alone and it thins and fades. This app is built on that one fact.*
 
@@ -14,7 +14,7 @@ Myelin is a chat tutor that teaches through graded interactive blocks, a mastery
 what you have actually **proven**, and an evidence guardrail that keeps the two honest: nothing
 counts as learned without being graded and recorded, and a model's opinion can never mint the
 evidence a machine check earns. Long-term memory lives in
-**[Engram](https://github.com/SabienNguyen/loreweaver)** — an MCP teaching-memory server that is the
+**[Engram](https://github.com/SabienNguyen/engram)** — an MCP teaching-memory server that is the
 *only* writer of your notes and student files, reached exclusively over stdio MCP.
 
 ## A guided tour
