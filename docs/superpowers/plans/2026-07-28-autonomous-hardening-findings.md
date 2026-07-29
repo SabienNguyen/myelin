@@ -64,6 +64,13 @@ a regression), but it's the honest last mile.
   reach, Space to select, Enter to submit — no focus trap).
 - **Anki sync**: outbound/inbound share one ledger (`anki-map.json`); the `_cursor` key is filtered
   on both sides.
+- **Empty/no-op submit → false evidence** (the class the `math_scratchpad` bug revealed, then swept
+  across every graded block): `math_scratchpad` was the SOLE hole (fixed, `8bc1983`). The others
+  each already guard it — `structured_check`'s `clean` filter drops blanks before grading,
+  `label_diagram` requires `perItem.length > 0`, `quiz` has `.min(1)` items plus exact-match (blank ≠
+  expected), `pronounce` mints applied only on an explicit `applied === true` after N clean passes,
+  `code_exercise` gates on `suiteGreen` with the audit-45 red-suite/reveal ceilings (a 0-test suite
+  is unreachable through a real ladder). No block mints `applied-correctly` from an empty submission.
 
 Coverage: every block type (8) driven or e2e-covered; Add-material ingest (temp-dir fix re-validated
 live); SourceReader + select-to-ask on real ingested prose; graph/page/library/review/student-switcher
