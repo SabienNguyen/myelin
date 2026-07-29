@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from '@playwright/test';
@@ -9,8 +10,15 @@ import { defineConfig } from '@playwright/test';
 // rule; global-setup.ts and the specs derive the same paths from their own import.meta.url.
 const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
 const E2E_DIR = join(REPO_ROOT, 'tests', 'e2e');
-// Sibling checkout — the same layout resolveEngram() falls back to when no config names it.
-const ENGRAM_SRC = join(REPO_ROOT, '..', 'engram', 'src', 'server.ts');
+// Where the core is checked out, mirroring resolveEngram()'s search: a sibling (dev machines),
+// a child (CI uses `actions/checkout` with `path: engram`, landing it inside the workspace), and
+// the pre-rename `loreweaver` name for a checkout that predates the Engram rename. First match wins.
+const ENGRAM_SRC = [
+  join(REPO_ROOT, '..', 'engram', 'src', 'server.ts'),
+  join(REPO_ROOT, 'engram', 'src', 'server.ts'),
+  join(REPO_ROOT, '..', 'loreweaver', 'src', 'server.ts'),
+  join(REPO_ROOT, 'loreweaver', 'src', 'server.ts'),
+].find(existsSync) ?? join(REPO_ROOT, '..', 'engram', 'src', 'server.ts');
 // The env the harness backends read the portable fixture paths from (config `${E2E_DIR}` etc.).
 const backendEnv = { E2E_DIR, ENGRAM_SRC };
 
