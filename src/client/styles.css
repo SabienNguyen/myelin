@@ -1758,10 +1758,17 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
    one moment where the app has to say what it is, and the examples span three unrelated subjects
    on purpose: the most useful thing to convey in the first three seconds is that this is a tutor,
    not a programming tutor. */
+/* Center the empty-state hero in the viewport instead of hanging it at a fixed 12vh — on a tall
+   window the pitch floated above a large dead field, and in a short one the third example chip
+   was pushed under the composer. Auto block margins are the overflow-safe centering idiom (they
+   collapse to zero when the content is taller than the viewport, so nothing ever clips); the
+   bottom padding lifts the group slightly above geometric center, where a lone card reads as
+   centered rather than sunk. */
+.thread-viewport:has(.thread-empty) { display: flex; flex-direction: column; }
 .thread-empty {
   max-width: 46ch;
-  margin: 12vh auto 0;
-  padding: 0 1.5rem;
+  margin: auto;
+  padding: 1rem 1.5rem 6vh;
   text-align: center;
 }
 .thread-empty h2 {

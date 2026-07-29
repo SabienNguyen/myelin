@@ -85,18 +85,9 @@ interface PlanItem { kind: string; slug: string; title: string; why: string; tra
  * message so the tutor works through it in order — the same delegation shape as every other row
  * that hands the composer a request.
  */
-function SessionPlanCta() {
+function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
   const composer = useComposerRuntime();
-  const [plan, setPlan] = useState<PlanItem[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch('/api/session-plan')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d) setPlan(d.plan ?? []); })
-      .catch(() => { /* no plan is a quiet state — the examples still carry the empty screen */ });
-    return () => { cancelled = true; };
-  }, []);
-  if (!plan || plan.length === 0) return null;
+  if (plan.length === 0) return null;
 
   const KIND_LABEL: Record<string, string> = { review: 'review', new: 'new', misconception: 'fix', course: 'course' };
   const start = () => {
@@ -128,6 +119,43 @@ function SessionPlanCta() {
   );
 }
 
+/**
+ * The empty thread's hero, which knows who it is talking to. A brand-new learner gets the pitch
+ * and the cross-subject example asks; a RETURNING learner with a session plan gets "pick up where
+ * you left off" and the plan — not a headline asking what they want to learn above a card that
+ * already knows. One fetch decides both (plan lives here, SessionPlanCta just renders it), and the
+ * hero renders nothing until it resolves, so the copy never flashes from one audience to the other.
+ */
+function EmptyHero() {
+  const [plan, setPlan] = useState<PlanItem[] | null>(null); // null = still deciding
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/session-plan')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled) setPlan(d?.plan ?? []); })
+      .catch(() => { if (!cancelled) setPlan([]); }); // no plan is the newcomer state, not an error
+    return () => { cancelled = true; };
+  }, []);
+  if (plan === null) return null;
+
+  const returning = plan.length > 0;
+  return (
+    <div className="thread-empty">
+      <h2>{returning ? 'Pick up where you left off' : 'What do you want to learn?'}</h2>
+      {!returning && (
+        <p>
+          Ask for anything — a topic, a paper, a book you are stuck in. Your tutor writes pages
+          as you go, links them into a graph, and tracks what you have actually shown you know.
+        </p>
+      )}
+      <SessionPlanCta plan={plan} />
+      {/* The example asks taught their lesson (any subject works) on day one; for a returner they
+          are noise beside the plan, and the composer is right below for anything new. */}
+      {!returning && <ExampleAsks />}
+    </div>
+  );
+}
+
 export function Thread() {
   // The viewport's autoScroll pins to the bottom on mount — correct for a conversation, wrong for
   // the empty state: in a short window the pitch overflows and a brand-new thread opened with
@@ -151,15 +179,7 @@ export function Thread() {
             deliberately across different SUBJECTS: the thing most worth conveying in the first
             three seconds is that this is not a programming tutor, it is a tutor. */}
         <ThreadPrimitive.Empty>
-          <div className="thread-empty">
-            <h2>What do you want to learn?</h2>
-            <p>
-              Ask for anything — a topic, a paper, a book you are stuck in. Your tutor writes pages
-              as you go, links them into a graph, and tracks what you have actually shown you know.
-            </p>
-            <SessionPlanCta />
-            <ExampleAsks />
-          </div>
+          <EmptyHero />
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
         <ThreadPrimitive.If running>
