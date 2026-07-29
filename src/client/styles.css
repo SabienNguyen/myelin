@@ -2237,8 +2237,13 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   background: var(--bg-inset);
   color: var(--text-muted);
 }
-.session-plan-kind--review { background: color-mix(in srgb, var(--warn) 18%, var(--bg-inset)); color: var(--warn); }
-.session-plan-kind--misconception { background: color-mix(in srgb, var(--bad) 15%, var(--bg-inset)); color: var(--bad); }
+/* Chip TEXT is the status hue pulled 45% toward ink, not the raw token: raw --warn on the warn
+   wash measured 2.9:1 at this size (axe, serious) — status colors are tuned for dots and borders,
+   not 0.72rem text. Mixing toward --text lands ≥4.5:1 in both schemes automatically (darker ink on
+   the light wash, lighter ink on the dark one) while keeping the hue legible as warn/bad. --new
+   and --course pass as-is: the accent family is dark enough for text. */
+.session-plan-kind--review { background: color-mix(in srgb, var(--warn) 18%, var(--bg-inset)); color: color-mix(in srgb, var(--warn) 55%, var(--text)); }
+.session-plan-kind--misconception { background: color-mix(in srgb, var(--bad) 15%, var(--bg-inset)); color: color-mix(in srgb, var(--bad) 55%, var(--text)); }
 .session-plan-kind--new { background: var(--accent-soft); color: var(--accent); }
 /* Course items reuse the accent family deliberately — banked problems are new work drawn from the
    learner's own material, not a third status hue. The label text carries the distinction. */
