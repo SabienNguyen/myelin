@@ -595,7 +595,13 @@ export async function gradeBlockOutput(
       // `variables` (multivariate) wins when present; `variable` remains the single-variable path.
       input.variables ?? input.variable,
     );
-    const badStep = input.stepMode
+    // Array.isArray guard mirrors the breakNote walk below, which reads the SAME field: a malformed
+    // submission (stepMode input true, but the result omits `steps` — never the UI, which always
+    // sends folded()'s array, but reachable from a direct API call or a buggy client) used to throw
+    // `findIndex of undefined` here, and gradeBlockOutput runs inside the turn's execute() — so one
+    // bad field failed the WHOLE turn (grade AND tutor reply lost) instead of grading the final
+    // answer, which is the real evidence. No steps to inspect → no unparseable step to flag.
+    const badStep = input.stepMode && Array.isArray(result.steps)
       ? result.steps.findIndex((s: { latex: string }) => !latexParses(s.latex)) : -1;
     // The step call-out is independent of the final's verdict: only parseability is checked, and a
     // garbled step hidden under a green final implied the whole derivation had been read. Naming it

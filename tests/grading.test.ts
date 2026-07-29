@@ -610,6 +610,19 @@ describe('math_scratchpad step-chain break detection', () => {
     expect(g.verdict).toBe('incorrect');
     expect(g.detail).toContain('breaks between steps 1 and 2');
   });
+
+  // Robustness: the UI always sends folded()'s array, but a direct API call or a buggy client can
+  // submit stepMode input with the `steps` field missing/null. The badStep findIndex used to throw
+  // there while the breakNote walk 12 lines down guarded the same field — and gradeBlockOutput runs
+  // inside the turn's execute(), so the throw failed the WHOLE turn instead of grading the final.
+  // Now it grades the final answer (the real evidence) and just skips the step-level call-out.
+  it('grades the final answer when a malformed submission omits steps, instead of throwing', async () => {
+    const stepInput = { problemLatex: 'x^2', expectedLatex: '2x', variable: 'x', stepMode: true, pageSlug: 'p' };
+    const missing = await gradeBlockOutput('math_scratchpad', stepInput, { finalLatex: '2x' }, cfg, {} as any);
+    expect(missing.verdict).toBe('correct');
+    const nulled = await gradeBlockOutput('math_scratchpad', stepInput, { finalLatex: 'x', steps: null }, cfg, {} as any);
+    expect(nulled.verdict).toBe('incorrect');
+  });
 });
 
 // A live session-plan sitting answered a numeric check with its full derivation and was told
