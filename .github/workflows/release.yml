@@ -44,20 +44,35 @@ jobs:
 
       - run: npm ci
 
-      # build:all + bundle:engram + electron-builder.
-      #
-      # Signing is opt-in via repository secrets and OFF by default — with none set, every var below
-      # is empty and electron-builder produces the same unsigned installers as before (see
-      # docs/SIGNING.md for what to add). CSC_LINK carries the platform's certificate: on the macOS
-      # runner a Developer ID .p12, on the Windows runner a code-signing .pfx — each job reads its own
-      # secret. CSC_IDENTITY_AUTO_DISCOVERY=false stops a keychain search when no cert is provided; an
-      # explicit CSC_LINK still signs. The APPLE_* trio drives notarization in electron/notarize.mjs.
+      # Export the platform's certificate ONLY when its secret is actually set. An EMPTY CSC_LINK is
+      # not the same as an unset one: electron-builder treats a present-but-empty CSC_LINK as "a cert
+      # was provided", tries to read it as a file, and dies with "not a file". So write it to the env
+      # only when non-empty; with nothing exported and auto-discovery off (below), the build is
+      # cleanly unsigned. macOS reads a Developer ID .p12, Windows a .pfx — each job its own secret.
+      - name: Prepare code-signing certificate
+        shell: bash
+        env:
+          CERT: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_LINK || runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK || '' }}
+          CERT_PWD: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || runner.os == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
+        run: |
+          if [ -n "$CERT" ]; then
+            {
+              echo "CSC_LINK<<__CSC_EOF__"; echo "$CERT"; echo "__CSC_EOF__"
+              echo "CSC_KEY_PASSWORD<<__PWD_EOF__"; echo "$CERT_PWD"; echo "__PWD_EOF__"
+            } >> "$GITHUB_ENV"
+            echo "signing: certificate configured for ${{ runner.os }}"
+          else
+            echo "signing: no certificate for ${{ runner.os }} — building unsigned"
+          fi
+
+      # build:all + bundle:engram + electron-builder. CSC_LINK/CSC_KEY_PASSWORD arrive from the step
+      # above only when a cert secret exists. CSC_IDENTITY_AUTO_DISCOVERY=false stops a keychain
+      # search when there's no cert; the APPLE_* trio drives notarization in electron/notarize.mjs
+      # (which no-ops when they're empty).
       - name: Build installer
         run: npm run dist
         env:
           ENGRAM_REPO: ${{ github.workspace }}/engram
-          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_LINK || runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || runner.os == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
