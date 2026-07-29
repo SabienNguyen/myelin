@@ -14,7 +14,7 @@ import { app, BrowserWindow, shell } from 'electron';
 import { createServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -120,7 +120,10 @@ app.whenReady().then(async () => {
       ? join(process.resourcesPath, 'app.asar', 'dist-server', 'server', 'index.js')
       : join(here, '..', 'dist-server', 'server', 'index.js');
     if (!existsSync(server)) throw new Error(`No server build at ${server}. Run \`npm run build:all\`.`);
-    await import(`file://${server}`);
+    // pathToFileURL, not `file://${server}`: on Windows the path is `C:\…\index.js`, and string-
+    // concatenating that after `file://` makes a malformed URL (the drive reads as a host). This
+    // builds `file:///C:/…` correctly on every platform.
+    await import(pathToFileURL(server).href);
 
     const url = `http://127.0.0.1:${port}`;
     if (!await waitForServer(port)) {
