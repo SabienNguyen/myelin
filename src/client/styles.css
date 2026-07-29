@@ -268,11 +268,7 @@ button.badge:hover { color: var(--text); }
 }
 
 /* ── Messages ────────────────────────────────────────── */
-.msg { margin-bottom: 1.1rem; max-width: 100%; animation: msg-in 0.18s ease-out; }
-@keyframes msg-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
-}
+.msg { margin-bottom: 1.1rem; max-width: 100%; }
 
 .error-bubble {
   margin: 0.5rem 0;
@@ -295,6 +291,10 @@ button.badge:hover { color: var(--text); }
   justify-self: end;
   margin-inline-start: auto;
 }
+/* UA default p margins inside the bubble stretch a one-line message past its padding. */
+.msg.user p { margin: 0.45rem 0; }
+.msg.user > *:first-child { margin-top: 0; }
+.msg.user > *:last-child { margin-bottom: 0; }
 
 .msg.assistant {
   margin-right: 8%;

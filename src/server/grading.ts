@@ -501,11 +501,11 @@ export interface Grade {
  * code_exercise's reveal ceiling. In each case the affordance stays available and the evidence
  * stays honest.
  *
- * Note for whoever changes applyEvidence next: today this cap has NO effect on mastery, because
- * engram's student/model.ts puts 'explained-correctly' and 'applied-correctly' in the same
- * branch — both step exactly one rung. So the two kinds currently differ in truthfulness and
- * nothing else. That is a live design question (should applied work resist decay longer? should
- * explaining alone be unable to reach 'mastered'?) and this is the seam where it would be answered.
+ * The cap now has real mastery consequences: engram's student/model.ts ceilings
+ * 'explained-correctly' and 'rubric-passed' at 'practicing' — only 'applied-correctly' can reach
+ * 'mastered', and standing that rests on a rubric verdict decays fastest. So a model-graded pass
+ * no longer just labels the evidence honestly; it keeps the top of the scale out of reach until a
+ * machine confirms the work.
  */
 export function capApplied(kind: EvidenceKind, source: GradeSource): EvidenceKind {
   if (source === 'model' && kind === 'applied-correctly') return 'explained-correctly';

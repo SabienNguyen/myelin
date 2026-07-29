@@ -51,14 +51,14 @@ All colour lives in `:root` custom properties in `src/client/styles.css`, each w
 | `--bg-panel` | `#fdfbf6` | `#24221c` | raised surface |
 | `--bg-inset` | `#ebe6da` | `#2c2a22` | recessed surface |
 | `--text` | `#26241f` | `#e7e1d2` | body type |
-| `--text-muted` | `#6b6456` | `#948d7b` | secondary type |
+| `--text-muted` | `#6b6456` | `#9b9483` | secondary type |
 | `--border` | `#ddd5c5` | `#3b382d` | hairlines |
 | `--accent` | `#3b5b8c` | `#93aed4` | the single accent |
 | `--accent-soft` | `#e7ecf4` | `#2b3547` | accent wash |
 | `--accent-text` | `#fdfbf6` | `#1d1b16` | type on accent |
-| `--good` | `#38754f` | `#6fae86` | semantic: pass/correct |
-| `--bad` | `#a84d3f` | `#d4867a` | semantic: fail/incorrect |
-| `--warn` | `#8a6420` | `#c99a4a` | semantic: caution |
+| `--good` | `#356e4a` | `#6fae86` | semantic: pass/correct |
+| `--bad` | `#a2493b` | `#d4867a` | semantic: fail/incorrect |
+| `--warn` | `#845f1e` | `#c99a4a` | semantic: caution |
 
 Rules:
 - A raw hex, `rgb()`, or `oklch()` in a component or new rule is a bug. Need a new shade? Add a
@@ -74,7 +74,7 @@ Rules:
 whatever surface they actually render on — not to the 3:1 non-text floor.
 
 Every token pair is verified with real WCAG math, both schemes, before a value changes. Current
-worst cases: `--text-muted` 4.71 on `--bg-inset` (light), `--bad` 5.13 on `--bg-inset` (dark). The
+worst cases: `--warn` 4.64 on `--bg-inset` (light), `--text-muted` 4.76 on `--bg-inset` (dark). The
 one knowingly-failing pair is `--border` at 1.30:1 (light) / 1.47:1 (dark) — see § Accepted
 deviations.
 
