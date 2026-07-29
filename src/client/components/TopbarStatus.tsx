@@ -73,7 +73,7 @@ export function TopbarStatus() {
 
 /**
  * The student badge, grown into a switcher: one vault, several learners, separate evidence —
- * loreweaver has always keyed the student model by id, and this is the surface that lets a
+ * engram has always keyed the student model by id, and this is the surface that lets a
  * household actually use that. Menu lists known students (anyone with a state file) plus a
  * field for a new name; switching takes effect on the next request and persists.
  */

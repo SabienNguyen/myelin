@@ -7,7 +7,7 @@
 // (cold-cache) request pays the real ~3s cost synchronously, same as before this cache existed.
 //
 // Invalidation: the harness's own writes shouldn't wait out the TTL to show up. `invalidateGraphCache()`
-// is called from the Loreweaver client wrapper (src/server/mcp.ts) whenever a `write_page` tool
+// is called from the Engram client wrapper (src/server/mcp.ts) whenever a `write_page` tool
 // call completes successfully — see the comment there for why that's the chosen seam. Edits made
 // outside the harness (e.g. a user editing the vault directly in Obsidian) aren't covered by
 // invalidation and are simply picked up within one TTL window.

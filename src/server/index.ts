@@ -8,7 +8,7 @@ import { applyCredentials, credentialsPath } from './credentials.js';
 import { applyRoute, readRoute } from './signin.js';
 import { buildSetupRoutes, needsApiKey } from './setupRoutes.js';
 import { buildStaticRoutes } from './staticRoutes.js';
-import { Loreweaver } from './mcp.js';
+import { Engram } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
 import { buildIngestRoutes } from './ingestRoutes.js';
@@ -39,16 +39,16 @@ function preflight(): void {
   mkdirSync(join(cfg.vault, 'pages'), { recursive: true }); // a fresh vault is just an empty dir
   console.log(`vault:  ${cfg.vault}`);
 
-  // The MCP server is spawned lazily by Loreweaver.connect, and a missing entry point surfaces
+  // The MCP server is spawned lazily by Engram.connect, and a missing entry point surfaces
   // there as an opaque transport error, so name it here where the fix is obvious.
-  const entry = cfg.loreweaver.args[cfg.loreweaver.args.length - 1];
+  const entry = cfg.engram.args[cfg.engram.args.length - 1];
   if (!entry || !existsSync(entry)) {
-    console.error(`\nCannot find the Loreweaver MCP server at:\n  ${entry}\n`
-      + 'Fix by any one of: installing it as a dependency, putting a `loreweaver` checkout beside '
-      + 'this one, setting LOREWEAVER_ENTRY, or setting `loreweaver.command`/`args` in '
+    console.error(`\nCannot find the Engram MCP server at:\n  ${entry}\n`
+      + 'Fix by any one of: installing it as a dependency, putting a `engram` checkout beside '
+      + 'this one, setting ENGRAM_ENTRY, or setting `engram.command`/`args` in '
       + 'harness.config.json.\n');
   } else {
-    console.log(`memory: ${cfg.loreweaver.command} ${cfg.loreweaver.args.join(' ')}`);
+    console.log(`memory: ${cfg.engram.command} ${cfg.engram.args.join(' ')}`);
   }
 
   const route = readRoute();
@@ -67,7 +67,7 @@ applyCredentials(); // saved key -> env, before anything constructs a model. The
 applyRoute(cfg, explicitModelRoles(), readRoute());
 preflight();
 
-const lw = await Loreweaver.connect(cfg);
+const lw = await Engram.connect(cfg);
 // I3: seed the sandbox's ladder patterns as vault pages (idempotent, mechanical content — see
 // seedPatternPages.ts for the single-writer rationale). Unconditional now that the sandbox ships
 // built-in: there is always at least one ladder to give a page to.
@@ -115,7 +115,7 @@ async function ankiTick(): Promise<void> {
   const ledger = loadNotifyLedger();
   if (ledger[key]) return;
   // Ledger only on delivery — a headless boot's failed notify-send must retry next tick.
-  if (await sendNotification('Loreweaver', 'Anki reviews are piling up — open Anki to catch up.')) {
+  if (await sendNotification('Myelin', 'Anki reviews are piling up — open Anki to catch up.')) {
     ledger[key] = true;
     saveNotifyLedger(ledger);
   }
@@ -149,5 +149,5 @@ const staticFiles = buildStaticRoutes();
 if (staticFiles.found) app.route('/', staticFiles.app);
 serve({ fetch: app.fetch, port: cfg.port });
 console.log(staticFiles.found
-  ? `Loreweaver is running — open http://localhost:${cfg.port}`
-  : `loreweaver-harness API on :${cfg.port} (no built client; run \`npm run dev:client\`)`);
+  ? `Myelin is running — open http://localhost:${cfg.port}`
+  : `myelin API on :${cfg.port} (no built client; run \`npm run dev:client\`)`);

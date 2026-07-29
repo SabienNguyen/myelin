@@ -1,4 +1,4 @@
-// The review queue — the spacing loop's visible half. Decay windows always ran (loreweaver's
+// The review queue — the spacing loop's visible half. Decay windows always ran (engram's
 // effectiveLevel), but nothing surfaced "this is about to slip" anywhere a learner would see it
 // without going looking. Optimal review timing is the SYSTEM's job; this section is where it
 // does that job.

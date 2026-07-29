@@ -31,7 +31,7 @@ import { splitChapters } from './convert.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { mineRepoBuiltin, type RepoMineReport } from './gap/mineRepo.js';
 import { ensureCompileDrain, slugify } from './ingest.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { readQueue, updateQueue, writeQueue, type QueueEntry } from './queueStore.js';
 
 // ── name/source derivation ──────────────────────────────────────────────────────────────────
@@ -294,7 +294,7 @@ async function waitForGapUp(ping: () => Promise<boolean>, timeoutMs = GAP_RESTAR
 
 /**
  * Seeds one vault stub page for a passed mined artifact, via the same lw.call('write_page', ...)
- * single-writer path seedPatternPages.ts uses — Loreweaver remains the only thing that ever
+ * single-writer path seedPatternPages.ts uses — Engram remains the only thing that ever
  * touches the vault on disk. Idempotent: `existingSlugs` is checked (and, by the caller, updated)
  * so a repeat run — or two same-named artifacts in one run — never overwrites an already-seeded
  * page. Slug = the artifact directory's own basename, which is EXACTLY the `artifactId` the-gap's
@@ -307,7 +307,7 @@ async function waitForGapUp(ping: () => Promise<boolean>, timeoutMs = GAP_RESTAR
  * string a model paraphrases or mistypes if it has to reconstruct it instead of copying it.
  */
 export async function seedMinedArtifactPage(
-  lw: Loreweaver, artifact: PassedArtifact, existingSlugs: Set<string>,
+  lw: Engram, artifact: PassedArtifact, existingSlugs: Set<string>,
 ): Promise<{ slug: string; seeded: boolean; title: string }> {
   const slug = basename(artifact.dir);
   if (existingSlugs.has(slug)) return { slug, seeded: false, title: artifact.title };
@@ -377,7 +377,7 @@ export interface IngestRepoDeps {
  * module doc comment for the incident that requires this.
  */
 export function ingestRepo(
-  lw: Loreweaver, cfg: HarnessConfig, source: string, deps: IngestRepoDeps = {},
+  lw: Engram, cfg: HarnessConfig, source: string, deps: IngestRepoDeps = {},
 ): { name: string; ingesting: true } {
   const trimmedSource = source.trim();
   if (!trimmedSource) throw new Error('source must not be empty');

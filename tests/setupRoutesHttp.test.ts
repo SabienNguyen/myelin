@@ -71,7 +71,7 @@ describe('PUT /api/setup/subscription', () => {
     expect(state.route).toBe('subscription');
     expect(cfg.models.tutor.model).toBe('claude-sdk:sonnet');
     // Persisted for the next boot, beside the key, not in the project config.
-    const stored = JSON.parse(readFileSync(join(confDir, 'loreweaver', 'credentials.json'), 'utf8'));
+    const stored = JSON.parse(readFileSync(join(confDir, 'myelin', 'credentials.json'), 'utf8'));
     expect(stored.route).toBe('subscription');
   });
 
@@ -104,7 +104,7 @@ describe('PUT /api/setup/api-key', () => {
     expect(state.blocked).toBe(false);
     expect(state.apiKey.present).toBe(true);
     expect(process.env.ANTHROPIC_API_KEY).toBe(REAL_SHAPE);
-    const stored = JSON.parse(readFileSync(join(confDir, 'loreweaver', 'credentials.json'), 'utf8'));
+    const stored = JSON.parse(readFileSync(join(confDir, 'myelin', 'credentials.json'), 'utf8'));
     expect(stored.anthropicApiKey).toBe(REAL_SHAPE);
     // The probe carried the pasted key, not whatever the process had.
     expect(probeFetch.mock.calls[0][1]?.headers).toMatchObject({ 'x-api-key': REAL_SHAPE });

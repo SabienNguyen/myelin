@@ -1,4 +1,4 @@
-// Mirrors ~/Dev/personal/loreweaver/src/types.ts — source of truth lives there.
+// Mirrors ~/Dev/personal/engram/src/types.ts — source of truth lives there.
 export type MasteryLevel = 'unseen' | 'exposed' | 'practicing' | 'mastered';
 export const LEVELS: MasteryLevel[] = ['unseen', 'exposed', 'practicing', 'mastered'];
 export const DECAY = { masteredDays: 45, practicingDays: 21, rubricDays: 14 };

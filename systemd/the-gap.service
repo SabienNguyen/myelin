@@ -1,5 +1,5 @@
 [Unit]
-Description=The Gap — code-exercise sidecar (ladder API + gauntlet-gated content) for loreweaver-harness
+Description=The Gap — code-exercise sidecar (ladder API + gauntlet-gated content) for myelin
 After=network.target
 
 [Service]
@@ -10,7 +10,7 @@ WorkingDirectory=%h/Dev/personal/the-gap
 # serve IN ADDITION to the built-in packages/artifacts/store — currently just the harness vault's
 # mined-artifact output dir. Missing/empty dir is tolerated (logged, not fatal) if nothing has
 # been mined yet.
-Environment=GAP_EXTRA_STORES=%h/Dev/personal/loreweaver-vault/.harness/mined
+Environment=GAP_EXTRA_STORES=%h/Dev/personal/myelin-vault/.harness/mined
 # `pnpm demo` runs scripts/demo.mjs: a synchronous gauntlet pre-flight check (builds every rung
 # of the demo ladder and runs the full 5-gate gauntlet — content re-earns its place each boot;
 # this is the CORRECT behavior per docs/plan.md G8, not overhead to work around) before starting

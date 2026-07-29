@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3 } from 'ai/test';
 import { simulateReadableStream } from 'ai';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import { createTutorSession } from '../src/server/session.js';
 import { LW_REPO } from './lwRepo.js';
 
-let lw: Loreweaver; let vault: string;
+let lw: Engram; let vault: string;
 
 // Stream chunks for: a text-only reply (no record_evidence) — used to trip the guardrail.
 const textOnly = () => new MockLanguageModelV3({
@@ -44,9 +44,9 @@ beforeAll(async () => {
   writeFileSync(join(vault, 'pages', 'photosynthesis.md'),
     '---\ntitle: Photosynthesis\ndifficulty: 2\nstatus: solid\n---\n'
     + `Plants convert light into chemical energy. ${'Confident unsourced prose. '.repeat(40)}`);
-  lw = await Loreweaver.connect({
+  lw = await Engram.connect({
     vault, student: 'kid',
-    loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as any);
 }, 30_000);
 afterAll(async () => { await lw.close(); });

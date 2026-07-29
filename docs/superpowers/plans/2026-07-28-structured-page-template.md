@@ -9,13 +9,13 @@ accepted, rejected, or amended, not merged as-is.
 
 A request to evaluate the trending [`virgiliojr94/book-to-skill`](https://github.com/virgiliojr94/book-to-skill)
 repo for transferable insight. book-to-skill turns a technical-book PDF into a compact Claude Code
-*skill* — a read-only reference artifact for an agent. Loreweaver and it share the whole front half
+*skill* — a read-only reference artifact for an agent. Engram and it share the whole front half
 (book → structured knowledge, chunk large sources, keep cost proportional to output) and then
-diverge completely: book-to-skill emits a static reference; Loreweaver emits *tutored learning* with
-a typed knowledge graph, mechanical honest grading, and mastery/decay. Loreweaver is the more
+diverge completely: book-to-skill emits a static reference; Engram emits *tutored learning* with
+a typed knowledge graph, mechanical honest grading, and mastery/decay. Engram is the more
 ambitious system, not the one behind.
 
-But book-to-skill does one thing Loreweaver currently does not: it compiles each chapter against a
+But book-to-skill does one thing Engram currently does not: it compiles each chapter against a
 **fixed section template** rather than freeform prose. That single idea is the only part worth
 importing, and only if it earns its place against the tool's own ethos.
 
@@ -34,9 +34,9 @@ completely differently.
 ## The proposal
 
 Give the `body` an optional section skeleton, adapted from book-to-skill's chapter template and pared
-to what Loreweaver's own machinery already values:
+to what Engram's own machinery already values:
 
-| Section | Why it belongs in Loreweaver specifically |
+| Section | Why it belongs in Engram specifically |
 | --- | --- |
 | **Core idea** | one-paragraph atom — matches "extract 2-6 teachable, atomic concepts" |
 | **Key concepts** | the substance; this is today's freeform body |
@@ -93,6 +93,6 @@ Not a rewrite — a bounded A/B a human can judge:
 ## Recommendation
 
 Worth the experiment specifically for the "Connects to" and "Anti-patterns" sections, because both map
-onto machinery Loreweaver already has (graph edges; distractor-hungry checkers) rather than bolting on
+onto machinery Engram already has (graph edges; distractor-hungry checkers) rather than bolting on
 a new idea. But it is the owner's call to run it, and the template must stay optional to survive
 contact with a thin chapter.

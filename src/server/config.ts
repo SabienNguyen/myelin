@@ -21,19 +21,19 @@ const expand = (p: string) => p
  * A vault is Obsidian-compatible markdown the learner is *meant* to open, edit and back up — so it
  * belongs where they keep documents, not in an application-support directory where they would never
  * find it. `~/Documents` when that exists (macOS and Windows always, most Linux desktops), and a
- * plain `~/loreweaver-vault` when it does not, which is the common case on a server or a minimal
+ * plain `~/myelin-vault` when it does not, which is the common case on a server or a minimal
  * Linux install.
  */
 export function defaultVaultPath(home = homedir()): string {
   const docs = join(home, 'Documents');
-  return existsSync(docs) ? join(docs, 'Loreweaver') : join(home, 'loreweaver-vault');
+  return existsSync(docs) ? join(docs, 'Myelin') : join(home, 'myelin-vault');
 }
 
 /**
- * Find the Loreweaver MCP server without being told where it is.
+ * Find the Engram MCP server without being told where it is.
  *
  * This used to be mandatory config, and the example pointed at one particular person's checkout
- * (`~/Dev/personal/loreweaver`) — which meant a fresh clone could not start at all until someone
+ * (`~/Dev/personal/engram`) — which meant a fresh clone could not start at all until someone
  * edited a path by hand. The ladder below covers the three ways the server can actually be present:
  * installed as a dependency (how a packaged app ships it), a sibling checkout (how this repo is
  * developed), or explicitly named by env for anything unusual.
@@ -41,37 +41,49 @@ export function defaultVaultPath(home = homedir()): string {
  * The runner follows from the file: compiled `.js` runs on this very Node binary, which matters for
  * a packaged app that has no `npx` on PATH; `.ts` needs tsx, which only a dev checkout would hit.
  */
-export function resolveLoreweaver(from = dirname(fileURLToPath(import.meta.url))): {
+export function resolveEngram(from = dirname(fileURLToPath(import.meta.url))): {
   command: string; args: string[];
 } {
-  const explicit = process.env.LOREWEAVER_ENTRY;
+  // ENGRAM_ENTRY is the current name; LOREWEAVER_ENTRY is honoured as a fallback so a machine set
+  // up before the Engram rename (or an existing packaged app) keeps starting unchanged.
+  const explicit = process.env.ENGRAM_ENTRY ?? process.env.LOREWEAVER_ENTRY;
   if (explicit) return runnerFor(expand(explicit));
 
-  // Bundled by scripts/bundle-loreweaver.mjs. A packaged desktop app sets LOREWEAVER_ENTRY
+  // Every rung tries the current name first, then the pre-rename `loreweaver` name — a checkout or
+  // install that predates the rename still resolves without anyone editing a path.
+  const names = ['engram', 'loreweaver'];
+
+  // Bundled by scripts/bundle-engram.mjs. A packaged desktop app sets ENGRAM_ENTRY
   // explicitly (electron/main.mjs), so this rung is for running the assembled tree locally.
   for (const up of ['..', '../..']) {
-    const vendored = resolve(from, up, 'vendor/loreweaver/dist/server.js');
-    if (existsSync(vendored)) return runnerFor(vendored);
+    for (const name of names) {
+      const vendored = resolve(from, up, `vendor/${name}/dist/server.js`);
+      if (existsSync(vendored)) return runnerFor(vendored);
+    }
   }
 
-  // Installed as a dependency, for a tree that chose `npm i file:../loreweaver` instead.
-  try {
-    return runnerFor(createRequire(import.meta.url).resolve('loreweaver/dist/server.js'));
-  } catch { /* not installed; keep looking */ }
+  // Installed as a dependency, for a tree that chose `npm i file:../engram` instead.
+  for (const name of names) {
+    try {
+      return runnerFor(createRequire(import.meta.url).resolve(`${name}/dist/server.js`));
+    } catch { /* not installed under this name; keep looking */ }
+  }
 
   // Sibling checkout. `from` is src/server/ in dev and dist/server/ once built, so walk up far
   // enough to clear both, and prefer the build over the source at each level.
   for (const up of ['../../..', '../../../..']) {
-    for (const rel of ['loreweaver/dist/server.js', 'loreweaver/src/server.ts']) {
-      const candidate = resolve(from, up, rel);
-      if (existsSync(candidate)) return runnerFor(candidate);
+    for (const name of names) {
+      for (const rel of [`${name}/dist/server.js`, `${name}/src/server.ts`]) {
+        const candidate = resolve(from, up, rel);
+        if (existsSync(candidate)) return runnerFor(candidate);
+      }
     }
   }
 
   // Nothing found. Return the dependency path anyway rather than throwing here: the failure the
   // learner should see is a startup message naming what is missing (index.ts), not a config parse
   // error from a module they never edited.
-  return runnerFor(resolve(from, '../../node_modules/loreweaver/dist/server.js'));
+  return runnerFor(resolve(from, '../../node_modules/engram/dist/server.js'));
 }
 
 function runnerFor(entry: string): { command: string; args: string[] } {
@@ -84,7 +96,7 @@ function runnerFor(entry: string): { command: string; args: string[] } {
  * Every field has a default, and the config file itself is optional.
  *
  * The point is that `npm start` works on a fresh clone with nothing but an API key. Before this,
- * fifteen fields were mandatory — vault path, student id, five model roles, the Loreweaver command,
+ * fifteen fields were mandatory — vault path, student id, five model roles, the Engram command,
  * four schedule numbers — so the first thing a new user met was a zod error listing all of them.
  * Anything they do want to change still overrides, and unknown keys are stripped (which is what
  * lets the example file carry a `_modelRoutes` note).
@@ -110,11 +122,11 @@ const configSchema = z.object({
     // restate all five roles), while `.prefault()` feeds `{}` through the schema and lets each
     // role's own default apply. Same intent — "an absent `models` block means all defaults".
   }).prefault({}),
-  loreweaver: z.object({
+  engram: z.object({
     command: z.string(),
     args: z.array(z.string()),
     // 'ollama' gives semantic search and find_analogies; without Ollama running it degrades to
-    // lexical-only search (loreweaver's context.ts catches the failure and reports
+    // lexical-only search (engram's context.ts catches the failure and reports
     // `embeddingsError`), so it is safe as a default rather than a prerequisite.
     embeddings: z.enum(['ollama', 'fake', 'none']).default('ollama'),
   }),
@@ -170,11 +182,11 @@ export function loadConfig(path = process.env.HARNESS_CONFIG ?? './harness.confi
     ...raw,
     // Resolved here rather than as a schema default so the filesystem probe only runs when it is
     // actually needed — importing this module stays side-effect-free.
-    loreweaver: raw.loreweaver ?? resolveLoreweaver(),
+    engram: raw.engram ?? resolveEngram(),
   });
   return {
     ...cfg,
     vault: expand(cfg.vault),
-    loreweaver: { ...cfg.loreweaver, args: cfg.loreweaver.args.map(expand) },
+    engram: { ...cfg.engram, args: cfg.engram.args.map(expand) },
   };
 }

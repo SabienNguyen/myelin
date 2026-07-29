@@ -1,4 +1,4 @@
-# design.md — loreweaver-harness
+# design.md — myelin
 
 The locked design system for this project. Hallmark's pre-flight (Step 0) reads this file first and
 defers to it: **do not pick a theme, do not pick a macrostructure for existing surfaces, do not

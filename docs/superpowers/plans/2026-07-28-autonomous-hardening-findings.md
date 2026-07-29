@@ -94,7 +94,7 @@ confirm the tutor can call `generate_exercise` (and cannot in learn/review/quiz)
 
 ### B. Decay cascade: should long-stale `mastered` pages reach `exposed`?
 
-`effectiveLevel` (`loreweaver/src/student/model.ts:29-34`) demotes `mastered`→`practicing` after 45
+`effectiveLevel` (`engram/src/student/model.ts:29-34`) demotes `mastered`→`practicing` after 45
 days, but the `practicing`→`exposed` rule checks the RAW level — which never becomes `practicing` for
 a stored-`mastered` page. Verified empirically: a page mastered 6 years ago reports effective
 **practicing** (counts in ProgressCard's "pages you can do right now"), while a page merely practicing
@@ -137,7 +137,7 @@ page looks like and what the grading model + graph see. **Decision: accept / rej
   allowlist is edited. It bit twice — `generate_exercise` (fixed) and `list_pages` (a vault-survey
   read tool exposed incidentally on session.ts's freeform, absent from the curated allowlist; whether
   the tutor should have a list-all tool at all is a judgment call, so it's left as-is). A shared
-  source of truth for "freeform loreweaver tools" would close the class; that's a refactor decision.
+  source of truth for "freeform engram tools" would close the class; that's a refactor decision.
 - `ingest_paper` is also absent from the subscription route, but is covered by the prompt's deliberate
   "use WebFetch" note — a documented, arguably-intended read-vs-ingest gap.
 - Minor: core `reviewDue` is unsorted, so `nextLessons`' "top 2 review" is arbitrary order — harmless,

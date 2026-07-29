@@ -1,6 +1,6 @@
 ---
 name: no-slop-ui
-description: UI and visual-design standards for the loreweaver-harness client — use before creating or editing anything under src/client (components, CSS, blocks, UI copy), and when reviewing a UI diff. This app has a deliberate warm-paper design language with its own token set, serif type stack, and real ARIA patterns; the job of this skill is to keep new work inside that language instead of regressing to generic AI-default UI (Tailwind, Inter, indigo gradients, emoji icons, glassmorphism).
+description: UI and visual-design standards for the myelin client — use before creating or editing anything under src/client (components, CSS, blocks, UI copy), and when reviewing a UI diff. This app has a deliberate warm-paper design language with its own token set, serif type stack, and real ARIA patterns; the job of this skill is to keep new work inside that language instead of regressing to generic AI-default UI (Tailwind, Inter, indigo gradients, emoji icons, glassmorphism).
 ---
 
 # No-Slop UI (harness client)

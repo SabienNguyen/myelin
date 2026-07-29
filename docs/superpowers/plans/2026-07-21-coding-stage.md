@@ -39,7 +39,7 @@ practice artifacts mined from its tested code, gauntlet-verified like every othe
 - Run the EXISTING 5-gate gauntlet over each candidate; only passers are kept.
 - CLI: `pnpm miner <repoPath> --out <dir>` → JSON report
   `{candidates, passed: [...], rejected: [{path, gate, reason}]}`.
-- DoD: mining the-gap itself and/or loreweaver-harness yields ≥1 passing artifact end-to-end
+- DoD: mining the-gap itself and/or myelin yields ≥1 passing artifact end-to-end
   (e.g. pure helpers with focused tests are known to exist in both).
 
 ### B2 (harness): Add-repo ingestion (after B1 review)

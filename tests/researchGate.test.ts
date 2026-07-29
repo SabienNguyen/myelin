@@ -6,7 +6,7 @@
 //   * Too tight and the tutor teaches from a placeholder. The first version of this gate only
 //     unlocked when the vault had NO page, which missed the more common case: a page that exists but
 //     is a stub, or cites nothing, or says almost nothing. "The vault has a page on it" can mean "the
-//     vault has one sentence saying it should have one" — Loreweaver auto-creates stubs for any
+//     vault has one sentence saying it should have one" — Engram auto-creates stubs for any
 //     prereq nobody has written yet.
 //   * Too loose and the tutor abandons a real page — with the student's own evidence, edges and
 //     history on it — in favour of a stranger's blog post.
@@ -30,7 +30,7 @@ const GOOD_PAGE = {
   body: 'x'.repeat(1200),
 };
 
-/** Stands in for Loreweaver's `search`, which scores +3 for a title hit and +1 per body token. */
+/** Stands in for Engram's `search`, which scores +3 for a title hit and +1 per body token. */
 const vaultWith = (hits: Record<string, number>) =>
   async (query: string) => topicTokens(query)
     .flatMap((t) => Object.entries(hits).filter(([term]) => term === t))
@@ -82,7 +82,7 @@ describe('vaultGap — the gap kinds, each for a different reason', () => {
     expect(gap?.slug).toBeUndefined();
   });
 
-  it('stub: the page is Loreweaver\'s own placeholder for a prereq nobody wrote', async () => {
+  it('stub: the page is Engram\'s own placeholder for a prereq nobody wrote', async () => {
     const gap = await vaultGap('learn', [user('what about derivatives')], SLUGS, deps(
       vaultWith({ derivatives: 3 }),
       { meta: { status: 'stub', sources: [] }, body: '_Stub created by link validation._' },
@@ -132,7 +132,7 @@ describe('vaultGap — matching the question to the page', () => {
   });
 
   it('ignores stopwords, so a shared "what/is/the" cannot look like coverage', async () => {
-    // The concrete bug the stopword list exists for: Loreweaver's search scores +1 per body token,
+    // The concrete bug the stopword list exists for: Engram's search scores +1 per body token,
     // so a page about anything at all matches three of the words in almost any question.
     const gap = await vaultGap('learn', [user('what is the tonic of a minor key')], SLUGS,
       deps(vaultWith({ what: 1, is: 1, the: 1 })));

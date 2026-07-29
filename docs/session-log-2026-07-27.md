@@ -39,9 +39,9 @@ evidence, due badge accurate, zero drift).
   (28e9ae1).
 - The suite's last unnamed transient failure was root-caused (a test-double fidelity gap) and
   killed (1e93667); a second race in the e2e gap spec likewise (e677e9e).
-- The graph didn't scale: 10.9s cold at 500 pages (1+2N stdio roundtrips). loreweaver grew
+- The graph didn't scale: 10.9s cold at 500 pages (1+2N stdio roundtrips). engram grew
   `list_pages`; the harness builds the graph in two calls; 16ms on the same fixture (539ed4f,
-  loreweaver a15fe44). Probed to 2,000 pages: no cliff, first-to-degrade surface named
+  engram a15fe44). Probed to 2,000 pages: no cliff, first-to-degrade surface named
   (a9a98b3).
 - The prompts didn't scale either: both tutor routes inlined EVERY vault slug into EVERY turn,
   and every compile part did the same — thousands of tokens per call at 2,000 pages, billed
@@ -56,16 +56,16 @@ inert against injected content (e896a68); the /api/source symlink escape got its
 1,800 seeded-fuzz inputs across six hostile-input parsers, all invariants held (56ec97f);
 coverage-guided tests took setupRoutes/signin/scheduler/notify to full honest coverage
 (5738cda, 6ab1f89, 3c2a074); a tripwire fails the build if the mirrored mastery contract ever
-drifts from loreweaver's (7a8a311).
+drifts from engram's (7a8a311).
 
 ## Infrastructure
 
 - **CI in both repos** — harness: typecheck + 297 client component tests ungated on every push
-  (980ed42), full integration + e2e suites unlock when you add a `LOREWEAVER_CI_TOKEN` secret
-  (a fine-grained PAT with read access to the loreweaver repo — see the workflow header or
-  README). loreweaver: build + full suite on every push. CI caught one real mistake (a typecheck
+  (980ed42), full integration + e2e suites unlock when you add a `ENGRAM_CI_TOKEN` secret
+  (a fine-grained PAT with read access to the engram repo — see the workflow header or
+  README). engram: build + full suite on every push. CI caught one real mistake (a typecheck
   slip) within a minute of it reaching master.
-- **SessionStart hooks in both repos** (3063711, loreweaver 186f2ad) — future Claude Code web
+- **SessionStart hooks in both repos** (3063711, engram 186f2ad) — future Claude Code web
   sessions self-provision: dependencies installed, and for the harness the ~/Dev/personal layout
   its integration suites resolve through.
 - **The AppImage is tip-current** and the packaged binary itself was executed and smoke-tested
@@ -74,7 +74,7 @@ drifts from loreweaver's (7a8a311).
 ## Where things stand
 
 Harness: 951 unit tests + 6 runtime-availability skips, 5/5 e2e, everything green.
-Loreweaver: 81/81. Parked with reasons (verdict doc): real screen-reader speech, audio-in,
+Engram: 81/81. Parked with reasons (verdict doc): real screen-reader speech, audio-in,
 Whisper for caption-less videos, CUDA against real hardware, and a linter (typescript-eslint
 does not support TS 7 yet).
 
@@ -137,6 +137,6 @@ the strongest evidence the project has:
   entity-escaped SVG rendering as a 26px broken image that crushed every pin, no minimum canvas
   height behind it, and duplicate-label diagrams being impossible to complete. All fixed;
   re-driven to 8/8 correct.
-- **CI is flip-ready**: the loreweaver checkout is now attempted on every run (secret if
-  present, default token otherwise), so the moment loreweaver goes public the full integration
+- **CI is flip-ready**: the engram checkout is now attempted on every run (secret if
+  present, default token otherwise), so the moment engram goes public the full integration
   and e2e suites run in CI automatically — for forks too. The graceful-skip path is proven live.

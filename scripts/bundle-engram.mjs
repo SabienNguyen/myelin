@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 // Assemble the two repos into one shippable tree.
 //
-// Loreweaver is a separate repo on purpose — it is the memory layer, it has its own tests, and the
+// Engram is a separate repo on purpose — it is the memory layer, it has its own tests, and the
 // harness talks to it only over stdio MCP. But a person downloading a tutor should not have to know
-// that, let alone clone two things. So the desktop build copies a BUILT Loreweaver into
-// `vendor/loreweaver/`, which the app then ships as an unpacked resource.
+// that, let alone clone two things. So the desktop build copies a BUILT Engram into
+// `vendor/engram/`, which the app then ships as an unpacked resource.
 //
-// Deliberately a copy rather than an npm `file:` dependency: a `file:../loreweaver` entry in
+// Deliberately a copy rather than an npm `file:` dependency: a `file:../engram` entry in
 // package.json would make `npm i` fail outright for anyone who cloned only the harness, which is
 // the common case for working on it.
 //
-// Usage:  node scripts/bundle-loreweaver.mjs [path-to-loreweaver]
-//         LOREWEAVER_REPO=/path/to/loreweaver node scripts/bundle-loreweaver.mjs
+// Usage:  node scripts/bundle-engram.mjs [path-to-engram]
+//         ENGRAM_REPO=/path/to/engram node scripts/bundle-engram.mjs
 
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -22,11 +22,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const harness = resolve(here, '..');
 
 function findRepo() {
-  const given = process.argv[2] ?? process.env.LOREWEAVER_REPO;
+  const given = process.argv[2] ?? process.env.ENGRAM_REPO;
   if (given) return resolve(given);
-  // Same sibling-checkout assumption src/server/config.ts's resolveLoreweaver makes, so a working
+  // Same sibling-checkout assumption src/server/config.ts's resolveEngram makes, so a working
   // dev tree needs no arguments.
-  for (const candidate of [resolve(harness, '../loreweaver'), resolve(harness, '../../loreweaver')]) {
+  for (const candidate of [resolve(harness, '../engram'), resolve(harness, '../../engram')]) {
     if (existsSync(join(candidate, 'package.json'))) return candidate;
   }
   return null;
@@ -34,11 +34,11 @@ function findRepo() {
 
 const repo = findRepo();
 if (!repo) {
-  console.error('Cannot find the loreweaver repo. Clone it beside this one, or pass its path:\n'
-    + '  node scripts/bundle-loreweaver.mjs ../loreweaver');
+  console.error('Cannot find the engram repo. Clone it beside this one, or pass its path:\n'
+    + '  node scripts/bundle-engram.mjs ../engram');
   process.exit(1);
 }
-console.log(`loreweaver: ${repo}`);
+console.log(`engram: ${repo}`);
 
 const run = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, stdio: 'inherit' });
 
@@ -52,11 +52,11 @@ run('npm', ['run', 'build'], repo);
 
 const entry = join(repo, 'dist', 'server.js');
 if (!existsSync(entry)) {
-  console.error(`Build produced no ${entry} — check loreweaver's own build.`);
+  console.error(`Build produced no ${entry} — check engram's own build.`);
   process.exit(1);
 }
 
-const out = join(harness, 'vendor', 'loreweaver');
+const out = join(harness, 'vendor', 'engram');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 for (const part of ['dist', 'package.json', 'package-lock.json']) {

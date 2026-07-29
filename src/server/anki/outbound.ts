@@ -5,7 +5,7 @@ import { generateText, Output } from 'ai';
 import { z } from 'zod';
 import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from '../claudeSdk.js';
 import type { HarnessConfig } from '../config.js';
-import type { Loreweaver } from '../mcp.js';
+import type { Engram } from '../mcp.js';
 import { modelFor } from '../models.js';
 import type { AnkiClient } from './client.js';
 
@@ -123,7 +123,7 @@ async function llmGenerateCards(
  * tick by the caller.
  */
 export async function syncOutbound(
-  lw: Loreweaver,
+  lw: Engram,
   anki: AnkiClient,
   cfg: HarnessConfig,
   opts: { generateCards?: GenerateCards; deps?: OutboundDeps } = {},
@@ -171,7 +171,7 @@ export async function syncOutbound(
     // unsynced, and re-aborts at the same spot on every future tick. Isolate it to the one page.
     try {
       const domain = page.domain || 'general';
-      const deck = `Loreweaver::${domain}`;
+      const deck = `Engram::${domain}`;
       await anki.invoke('createDeck', { deck });
 
       const existingIds = Object.entries(ledger)
@@ -202,7 +202,7 @@ export async function syncOutbound(
               modelName: 'Basic',
               fields: { Front: front, Back: back },
               options: { allowDuplicate: false, duplicateScope: 'deck' },
-              tags: [`loreweaver::${slug}`],
+              tags: [`engram::${slug}`],
             },
           });
           ledger[String(noteId)] = { slug, hash };

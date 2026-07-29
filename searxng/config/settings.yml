@@ -1,7 +1,7 @@
-# Minimal SearXNG config for the Loreweaver harness research tools.
+# Minimal SearXNG config for the Engram harness research tools.
 use_default_settings: true
 server:
-  secret_key: "loreweaver-local-only-not-secret"
+  secret_key: "engram-local-only-not-secret"
   limiter: false
 search:
   formats:

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AnkiClient } from '../src/server/anki/client.js';
 import { syncOutbound } from '../src/server/anki/outbound.js';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import { LW_REPO } from './lwRepo.js';
 
@@ -42,11 +42,11 @@ describe('AnkiClient', () => {
     expect(await anki.isUp()).toBe(true);
     const id = await anki.invoke('addNote', { note: { deckName: 'D', modelName: 'Basic',
       fields: { Front: 'q', Back: 'a' }, options: { allowDuplicate: false, duplicateScope: 'deck' },
-      tags: ['loreweaver::chain-rule'] } });
+      tags: ['engram::chain-rule'] } });
     expect(id).toBe(1000);
     const call = received.find((r) => r.action === 'addNote');
     expect(call.version).toBe(6);
-    expect(call.params.note.tags).toEqual(['loreweaver::chain-rule']);
+    expect(call.params.note.tags).toEqual(['engram::chain-rule']);
   });
   it('throws readable errors', async () => {
     const app = new Hono();
@@ -59,27 +59,27 @@ describe('AnkiClient', () => {
   });
 });
 
-async function makeVaultLoreweaver(student: string, slug: string, title: string) {
+async function makeVaultEngram(student: string, slug: string, title: string) {
   const vault = mkdtempSync(join(tmpdir(), 'lwh-vault-'));
   mkdirSync(join(vault, 'pages'), { recursive: true });
   writeFileSync(join(vault, 'pages', `${slug}.md`),
     `---\ntitle: ${title}\ndifficulty: 1\nstatus: solid\n---\nsome content about ${title}`);
   const cfg = {
     vault, student,
-    loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as HarnessConfig;
-  const lw = await Loreweaver.connect(cfg);
+  const lw = await Engram.connect(cfg);
   return { vault, cfg, lw };
 }
 
-async function bringToPracticing(lw: Loreweaver, student: string, slug: string) {
+async function bringToPracticing(lw: Engram, student: string, slug: string) {
   await lw.call('record_evidence', { student, slug, kind: 'explained-correctly', note: 'seed 1' });
   await lw.call('record_evidence', { student, slug, kind: 'applied-correctly', note: 'seed 2' });
 }
 
 describe('syncOutbound — ledger dedup and update-in-place', () => {
   it('pushes new cards then skips unchanged cards on a second run', async () => {
-    const { vault, cfg, lw } = await makeVaultLoreweaver('kid1', 'derivatives', 'Derivatives');
+    const { vault, cfg, lw } = await makeVaultEngram('kid1', 'derivatives', 'Derivatives');
     await bringToPracticing(lw, 'kid1', 'derivatives');
     const anki = new AnkiClient(url);
     const generateCards = async () => [{ front: 'Q1', back: 'A1' }, { front: 'Q2', back: 'A2' }];
@@ -100,7 +100,7 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
   }, 30_000);
 
   it('updates notes in place when generated card content changes', async () => {
-    const { cfg, lw } = await makeVaultLoreweaver('kid2', 'chain-rule', 'Chain Rule');
+    const { cfg, lw } = await makeVaultEngram('kid2', 'chain-rule', 'Chain Rule');
     await bringToPracticing(lw, 'kid2', 'chain-rule');
     const anki = new AnkiClient(url);
 
@@ -118,7 +118,7 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
   }, 30_000);
 
   it('never promotes past 4 cards per page even if more are generated', async () => {
-    const { cfg, lw } = await makeVaultLoreweaver('kid3', 'limits', 'Limits');
+    const { cfg, lw } = await makeVaultEngram('kid3', 'limits', 'Limits');
     await bringToPracticing(lw, 'kid3', 'limits');
     const anki = new AnkiClient(url);
     const generateCards = async () => [
@@ -132,7 +132,7 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
   }, 30_000);
 
   it('skips pages below practicing effective mastery', async () => {
-    const { cfg, lw } = await makeVaultLoreweaver('kid4', 'unseen-page', 'Unseen Page');
+    const { cfg, lw } = await makeVaultEngram('kid4', 'unseen-page', 'Unseen Page');
     // no evidence recorded — stays 'unseen', never appears in get_student_state map
     const anki = new AnkiClient(url);
     let called = false;
@@ -146,7 +146,7 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
   }, 30_000);
 
   it('a slug with evidence but a since-deleted page is skipped, not fatal for the whole run', async () => {
-    const { vault, cfg, lw } = await makeVaultLoreweaver('kid6', 'derivatives', 'Derivatives');
+    const { vault, cfg, lw } = await makeVaultEngram('kid6', 'derivatives', 'Derivatives');
     // A second page earns evidence, then its file is deleted — student state persists, so it stays
     // in get_student_state while read_page now throws for it. Before the guard, that aborted the
     // entire run and NO page synced.
@@ -165,7 +165,7 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
 
 describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
   it('routes llmGenerateCards to the injected fake and parses the FRONT/BACK format', async () => {
-    const { cfg, lw } = await makeVaultLoreweaver('kid5', 'integrals', 'Integrals');
+    const { cfg, lw } = await makeVaultEngram('kid5', 'integrals', 'Integrals');
     await bringToPracticing(lw, 'kid5', 'integrals');
     const anki = new AnkiClient(url);
 
@@ -188,7 +188,7 @@ describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
 
 describe('syncOutbound — claude-sdk card_gen wrapped in a markdown fence', () => {
   it('tolerates a whole-response fence around the FRONT/BACK blocks', async () => {
-    const { cfg, lw } = await makeVaultLoreweaver('kid7', 'fenced-page', 'Fenced Page');
+    const { cfg, lw } = await makeVaultEngram('kid7', 'fenced-page', 'Fenced Page');
     await bringToPracticing(lw, 'kid7', 'fenced-page');
     (cfg as any).models = { card_gen: { model: 'claude-sdk:sonnet' } };
     const anki = new AnkiClient(url);
@@ -205,7 +205,7 @@ describe('syncOutbound — claude-sdk card_gen wrapped in a markdown fence', () 
 });
 
 describe('syncOutbound — Anki offline', () => {
-  it('skips silently without touching Loreweaver when Anki is down', async () => {
+  it('skips silently without touching Engram when Anki is down', async () => {
     // Bind then immediately close a server to get a port nothing is listening on.
     let downPort = 0;
     await new Promise<void>((resolve) => {
@@ -216,7 +216,7 @@ describe('syncOutbound — Anki offline', () => {
     });
     const anki = new AnkiClient(`http://127.0.0.1:${downPort}`);
     const fakeLw = { call: async () => { throw new Error('lw.call should not be invoked when Anki is down'); } };
-    const result = await syncOutbound(fakeLw as unknown as Loreweaver, anki,
+    const result = await syncOutbound(fakeLw as unknown as Engram, anki,
       { vault: mkdtempSync(join(tmpdir(), 'lwh-vault-')), student: 'x' } as HarnessConfig,
       { generateCards: async () => [{ front: 'x', back: 'y' }] });
     expect(result).toEqual({ pushed: 0, updated: 0, skipped: 0, failed: 0 });
@@ -227,7 +227,7 @@ describe('syncOutbound — Anki offline', () => {
 // whole sync die with it. One page's bad generation must not abort every other page's cards.
 describe('syncOutbound — one page failing generation does not abort the run', () => {
   it('counts the failure and still pushes the other page', async () => {
-    const { vault, cfg, lw } = await makeVaultLoreweaver('kid6', 'good-page', 'Good Page');
+    const { vault, cfg, lw } = await makeVaultEngram('kid6', 'good-page', 'Good Page');
     writeFileSync(join(vault, 'pages', 'bad-page.md'),
       '---\ntitle: Bad Page\ndifficulty: 1\nstatus: solid\n---\nmath-heavy content');
     await bringToPracticing(lw, 'kid6', 'good-page');
@@ -251,7 +251,7 @@ describe('syncOutbound — one page failing generation does not abort the run', 
 // one throw must not abort the whole run and strand every page ordered after it.
 describe('syncOutbound — one page failing to PUSH does not abort the run', () => {
   it('counts the push failure and still pushes the other page', async () => {
-    const { vault, cfg, lw } = await makeVaultLoreweaver('kid7', 'ok-page', 'OK Page');
+    const { vault, cfg, lw } = await makeVaultEngram('kid7', 'ok-page', 'OK Page');
     writeFileSync(join(vault, 'pages', 'dupe-page.md'),
       '---\ntitle: Dupe Page\ndifficulty: 1\nstatus: solid\n---\ncontent for the dupe page');
     await bringToPracticing(lw, 'kid7', 'ok-page');

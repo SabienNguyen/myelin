@@ -36,7 +36,7 @@ day became the standing audit fixture — a realistic mid-journey learner with m
    string's start. It now finds the number a derivation means (after the last `=`, or a lone
    number in prose) and still refuses to guess on genuine ambiguity.
 
-## Fixes shipped (loreweaver)
+## Fixes shipped (engram)
 
 7. **A misconception no longer resets the decay clock.** Every evidence kind stamped
    `last_reinforced = today` — so recording a learner's *confusion* extended the system's trust
@@ -79,8 +79,8 @@ day became the standing audit fixture — a realistic mid-journey learner with m
 - Both repos: masters green, branches in sync, worktrees clean. Harness CI green through every
   completed run; suite crossed **1,000 unit tests** plus 8 browser specs.
 - The AppImage is rebuilt current and its contents verified by inspection (every fix above is
-  in the artifact, including the bundled loreweaver decay fix).
-- loreweaver was still **private** at every check — the flip watch (and the full-CI trigger it
+  in the artifact, including the bundled engram decay fix).
+- engram was still **private** at every check — the flip watch (and the full-CI trigger it
   fires) remains armed.
 
 ---
@@ -118,7 +118,7 @@ diagram naturally required duplicate labels (8/8, the earlier chip fix holding),
 augment-don't-fragment behavior, and the server-side turn persistence saving an interrupted turn
 in the wild. The AppImage was re-batched after each behavior change and verified by inspection
 every time; final state is current through the write gate. Suite: 999 unit tests + 8 browser
-specs, all green. loreweaver remained private at every check — the flip watch stays armed.
+specs, all green. engram remained private at every check — the flip watch stays armed.
 
 ---
 
@@ -172,6 +172,6 @@ convenient.
 ## State at close of this arc
 
 harness on master through `bb2e6ed`; 1028 unit + integration tests green, typecheck clean, e2e 9
-green; AppImage current through the speak feature. loreweaver still private at every check — the
+green; AppImage current through the speak feature. engram still private at every check — the
 flip watch and its full-CI trigger remain armed. The pronunciation capability is one deliberate
 mic-capture UX away from a learner recording their voice and getting an honest tone grade.

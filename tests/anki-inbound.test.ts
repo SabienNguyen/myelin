@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AnkiClient } from '../src/server/anki/client.js';
 import { syncInbound, recentLapses } from '../src/server/anki/inbound.js';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import { LW_REPO } from './lwRepo.js';
 
@@ -45,7 +45,7 @@ beforeAll(async () => {
 });
 afterAll(() => server.close());
 
-async function makeVaultLoreweaver(student: string, slugs: string[]) {
+async function makeVaultEngram(student: string, slugs: string[]) {
   const vault = mkdtempSync(join(tmpdir(), 'lwh-vault-'));
   mkdirSync(join(vault, 'pages'), { recursive: true });
   for (const slug of slugs) {
@@ -54,9 +54,9 @@ async function makeVaultLoreweaver(student: string, slugs: string[]) {
   }
   const cfg = {
     vault, student,
-    loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as HarnessConfig;
-  const lw = await Loreweaver.connect(cfg);
+  const lw = await Engram.connect(cfg);
   return { vault, cfg, lw };
 }
 
@@ -68,7 +68,7 @@ function writeLedger(vault: string, entries: Record<string, { slug: string; hash
 describe('syncInbound', () => {
   it('maintain-never-promote ceiling, lapse surfacing, cursor advance, offline handling', async () => {
     reviews = [];
-    const { vault, cfg, lw } = await makeVaultLoreweaver('kid1', ['derivatives', 'chain-rule']);
+    const { vault, cfg, lw } = await makeVaultEngram('kid1', ['derivatives', 'chain-rule']);
     writeLedger(vault, {
       2001: { slug: 'derivatives', hash: 'h1' },
       3001: { slug: 'chain-rule', hash: 'h2' },
@@ -114,7 +114,7 @@ describe('syncInbound', () => {
   it('a deleted page in the ledger does not abort the sync — its reviews are skipped, live ones record', async () => {
     reviews = [];
     // Only 'derivatives' has a page; 'ghost' is in the ledger (its Anki card outlived the page).
-    const { vault, cfg, lw } = await makeVaultLoreweaver('kid2', ['derivatives']);
+    const { vault, cfg, lw } = await makeVaultEngram('kid2', ['derivatives']);
     writeLedger(vault, {
       2001: { slug: 'derivatives', hash: 'h1' }, // card 55
       3001: { slug: 'ghost', hash: 'h2' },        // card 66 — page was deleted
@@ -145,7 +145,7 @@ describe('syncInbound', () => {
     });
     const anki = new AnkiClient(`http://127.0.0.1:${downPort}`);
     const fakeLw = { call: async () => { throw new Error('lw.call should not be invoked when Anki is down'); } };
-    const result = await syncInbound(fakeLw as unknown as Loreweaver, anki,
+    const result = await syncInbound(fakeLw as unknown as Engram, anki,
       { vault: mkdtempSync(join(tmpdir(), 'lwh-vault-')), student: 'x' } as HarnessConfig);
     expect(result).toEqual({ recorded: 0 });
   });

@@ -13,18 +13,18 @@ should be re-checked against the live product first.
 
 ## Why this product matters to us
 
-Paradigm is the closest public analogue to loreweaver-harness: "turn any goal into a personalized,
+Paradigm is the closest public analogue to myelin: "turn any goal into a personalized,
 adaptive learning path," with an AI tutor (**Clover**) where "notes feed the tutor, the tutor knows
 what you've practiced, and your practice adapts to where you're struggling." It ranked #1 on Product
 Hunt for 2026-07-16.
 
 The overlap is not superficial — it is the same thesis. Where we differ is instructive:
 
-| | Paradigm | loreweaver-harness |
+| | Paradigm | myelin |
 | --- | --- | --- |
 | Knowledge store | opaque, cloud | plain Obsidian markdown vault you own |
 | Student model | "graded as it happens" | evidence-graded, typed kinds, 45/21-day decay |
-| Writer boundary | unknown | Loreweaver is the only writer of pages/students |
+| Writer boundary | unknown | Engram is the only writer of pages/students |
 | Models | hosted | Anthropic API, local Ollama, or subscription via Agent SDK |
 | Coding practice | cloud machine + terminal + Claude Code | the-gap sidecar, gauntlet-graded ladders |
 | Reach | consumer, free tier | single-user localhost |
@@ -84,7 +84,7 @@ the compiler will write concept pages out of exam questions.
 
 **Theirs:** "your notes feed the tutor."
 
-**Ours today:** the vault is model-compiled. Every page is written by Loreweaver on an agent's
+**Ours today:** the vault is model-compiled. Every page is written by Engram on an agent's
 instruction. The learner has nowhere to put their own words that the tutor will read, and
 `buildBootstrapContext` has no notes channel.
 
@@ -92,7 +92,7 @@ instruction. The learner has nowhere to put their own words that the tutor will 
 or goal-relevant notes in the bootstrap context, and make them searchable alongside pages.
 
 **Why this one is architecturally clean:** it *strengthens* the single-writer rule rather than bending
-it. Three territories, one writer each: `pages/` + `students/` → Loreweaver; `.harness/` + `raw/` →
+it. Three territories, one writer each: `pages/` + `students/` → Engram; `.harness/` + `raw/` →
 the harness; `notes/` → the human. Obsidian already edits all of it.
 
 **Design question to settle first:** do notes become evidence? Recommendation: **no.** A note is
@@ -154,7 +154,7 @@ running end to end, rather than starting at an isolated exercise.
 
 Feature-mining a consumer product is how architecture erodes. These are not up for trade:
 
-1. **Single-writer vault.** Anything that writes `pages/` or `students/` outside Loreweaver.
+1. **Single-writer vault.** Anything that writes `pages/` or `students/` outside Engram.
 2. **Evidence integrity.** No feature may promote mastery without graded work. Notes, uploads,
    time-on-task, and self-report are not evidence. The Anki ceiling stays.
 3. **Decay.** A cheat sheet or a skills report must read *effective* level. Reporting raw `mastered`

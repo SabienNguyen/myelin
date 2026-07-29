@@ -25,7 +25,7 @@ Do not weaken either without deciding to:
 - **`capApplied`** (`src/server/grading.ts`) — only mechanically-verified grading may emit
   `applied-correctly`. `ev()` is the only evidence constructor and applies it; `source` is a
   required argument so a new block cannot forget to decide.
-- **The `mastered` ceiling** (`loreweaver/src/student/model.ts`) — `explained-correctly` caps at
+- **The `mastered` ceiling** (`engram/src/student/model.ts`) — `explained-correctly` caps at
   `practicing`. Progression is untouched (`isKnown` is true at `practicing`); what changes is that
   the top of the scale requires a machine.
 
@@ -236,10 +236,10 @@ Still open, and deliberately so:
 
 Closed: the app starts with nothing but an API key, and `npm run dist` produces one downloadable
 file. Every config field now has a working default, the config file itself is optional, the vault is
-created at boot in `~/Documents/Loreweaver`, Loreweaver is found rather than configured, and the API
+created at boot in `~/Documents/Engram`, Engram is found rather than configured, and the API
 key has a real first-run flow that probes Anthropic before saving and stores the key outside the
 vault. The desktop shell bundles both repos: the harness serves its own built client on one port and
-spawns the vendored Loreweaver over stdio exactly as in development.
+spawns the vendored Engram over stdio exactly as in development.
 
 Still open:
 

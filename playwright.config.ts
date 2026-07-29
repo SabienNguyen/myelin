@@ -4,15 +4,15 @@ import { defineConfig } from '@playwright/test';
 
 // Everything the e2e suite touches is derived from THIS file's location — the repo root — so a
 // fresh clone runs the suite wherever it sits, instead of only on the one machine whose home dir
-// the paths used to be baked against (`~/Dev/personal/…`). E2E_DIR/LOREWEAVER_SRC are handed to the
+// the paths used to be baked against (`~/Dev/personal/…`). E2E_DIR/ENGRAM_SRC are handed to the
 // backend servers via each webServer's `env` and expanded by the harness config loader's `${VAR}`
 // rule; global-setup.ts and the specs derive the same paths from their own import.meta.url.
 const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
 const E2E_DIR = join(REPO_ROOT, 'tests', 'e2e');
-// Sibling checkout — the same layout resolveLoreweaver() falls back to when no config names it.
-const LOREWEAVER_SRC = join(REPO_ROOT, '..', 'loreweaver', 'src', 'server.ts');
+// Sibling checkout — the same layout resolveEngram() falls back to when no config names it.
+const ENGRAM_SRC = join(REPO_ROOT, '..', 'engram', 'src', 'server.ts');
 // The env the harness backends read the portable fixture paths from (config `${E2E_DIR}` etc.).
-const backendEnv = { E2E_DIR, LOREWEAVER_SRC };
+const backendEnv = { E2E_DIR, ENGRAM_SRC };
 
 // Where global-setup.ts writes the fake microphone WAV, and where the launch args point Chromium.
 export const FAKE_AUDIO_WAV = join(E2E_DIR, '.tmp-fake-audio.wav');
@@ -58,7 +58,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      // Real backend + real Loreweaver MCP server (fake embeddings) + scripted model.
+      // Real backend + real Engram MCP server (fake embeddings) + scripted model.
       // fake-bin leads PATH so video-ingest.e2e.ts's Add-material drive resolves the fake yt-dlp
       // (tests/e2e/fake-bin/yt-dlp) — captions with no network, same observable surface.
       command:

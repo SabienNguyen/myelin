@@ -10,7 +10,7 @@
 //     came back weak.
 //
 // Nothing failed when they did that, because no test asserted the rule and `applyEvidence` treats
-// 'explained-correctly' and 'applied-correctly' identically (loreweaver src/student/model.ts — both
+// 'explained-correctly' and 'applied-correctly' identically (engram src/student/model.ts — both
 // step exactly one rung). The convention was doing all the work and there was no mechanism.
 //
 // The test below is deliberately a PROPERTY over every block type rather than one assertion per

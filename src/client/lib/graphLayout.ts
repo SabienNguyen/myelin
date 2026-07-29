@@ -1,4 +1,4 @@
-import { type MasteryLevel } from '../../shared/loreweaver.js';
+import { type MasteryLevel } from '../../shared/engram.js';
 
 // Mastery colours live in styles.css :root as --mastery-* so they have dark-scheme counterparts and
 // so GraphPanel's legend can render swatches with var() instead of re-literalling these values (it

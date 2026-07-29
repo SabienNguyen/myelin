@@ -1,24 +1,24 @@
-# Loreweaver Harness Implementation Plan
+# Engram Harness Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A localhost tutoring web app over the Loreweaver MCP server: chat tutor with subject blocks (math/writing/quiz), mastery DAG panel, evidence guardrail, review notifications, and two-way Anki sync.
+**Goal:** A localhost tutoring web app over the Engram MCP server: chat tutor with subject blocks (math/writing/quiz), mastery DAG panel, evidence guardrail, review notifications, and two-way Anki sync.
 
-**Architecture:** Single npm package, three source roots: `src/server` (Hono + AI SDK v7 agent loop, spawns Loreweaver over stdio MCP), `src/client` (Vite + React + assistant-ui), `src/shared` (zod schemas both sides import). The Loreweaver MCP server is the only writer of vault/student files; the harness's one read-only exception is globbing `pages/**/*.md` filenames to enumerate slugs (no markdown parsing).
+**Architecture:** Single npm package, three source roots: `src/server` (Hono + AI SDK v7 agent loop, spawns Engram over stdio MCP), `src/client` (Vite + React + assistant-ui), `src/shared` (zod schemas both sides import). The Engram MCP server is the only writer of vault/student files; the harness's one read-only exception is globbing `pages/**/*.md` filenames to enumerate slugs (no markdown parsing).
 
 **Tech Stack:** TypeScript, Hono, `ai@7`, `@ai-sdk/anthropic@4`, `@ai-sdk/mcp@2`, `@ai-sdk/react@4`, `@assistant-ui/react@0.14` (+ react-ai-sdk, react-markdown), Vite, MathLive, KaTeX, mathjs, dagre, node-cron, zod, vitest, Playwright.
 
 ## Global Constraints
 
 - Node >= 22. ESM only (`"type": "module"`).
-- Spec: `docs/superpowers/specs/2026-07-12-loreweaver-harness-design.md`. Read it before your task.
-- Loreweaver repo at `~/Dev/personal/loreweaver` is a **dependency — never modify it**.
-- **Single-writer rule:** all vault/student mutations go through Loreweaver MCP tools. Harness never writes under the vault except `vault/.harness/**`. Only vault read allowed: glob `pages/**/*.md` for slugs.
+- Spec: `docs/superpowers/specs/2026-07-12-myelin-design.md`. Read it before your task.
+- Engram repo at `~/Dev/personal/engram` is a **dependency — never modify it**.
+- **Single-writer rule:** all vault/student mutations go through Engram MCP tools. Harness never writes under the vault except `vault/.harness/**`. Only vault read allowed: glob `pages/**/*.md` for slugs.
 - **No hardcoded model ids in code.** Models come from `harness.config.json` roles (`tutor`, `grader`, `quiz_gen`, `card_gen`, `compile`).
 - Use canonical AI SDK v7 names, never deprecated aliases: `instructions` (not `system` on agents), `isStepCount` (not `stepCountIs`), `addToolOutput` (not `addToolResult`), `createUIMessageStreamResponse` (not `result.toUIMessageStreamResponse()`), `defineToolkit` (not `makeAssistantToolUI`). `convertToModelMessages` is **async — await it**.
 - MCP stdio transport import is exactly: `import { Experimental_StdioMCPTransport as StdioMCPTransport } from '@ai-sdk/mcp/mcp-stdio'` (docs prose says a different name; this is what the package exports).
 - `@assistant-ui/react-ai-sdk` bundles its own `ai@6` internally — never import `UIMessage`/types from inside it; always from `ai`.
-- Loreweaver constants duplicated here (documented divergence risk): `DECAY = { masteredDays: 45, practicingDays: 21 }`, `MasteryLevel = 'unseen'|'exposed'|'practicing'|'mastered'`, `EvidenceKind` includes `'struggled'`.
+- Engram constants duplicated here (documented divergence risk): `DECAY = { masteredDays: 45, practicingDays: 21 }`, `MasteryLevel = 'unseen'|'exposed'|'practicing'|'mastered'`, `EvidenceKind` includes `'struggled'`.
 - Anki evidence ceiling: sync maps success → kind `'exposed'` (maintains decay, never promotes), lapse → `'struggled'`. Never `applied-correctly`/`explained-correctly` from Anki.
 - TDD every task: failing test → minimal code → pass → commit. Run `npx tsc --noEmit` before each commit.
 - Commit messages end with: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
@@ -29,16 +29,16 @@
 
 **Files:**
 - Create: `package.json`, `tsconfig.json`, `vitest.config.ts`, `harness.config.example.json`
-- Create: `src/shared/loreweaver.ts`, `src/shared/blocks.ts`, `src/server/config.ts`
+- Create: `src/shared/engram.ts`, `src/shared/blocks.ts`, `src/server/config.ts`
 - Test: `tests/config.test.ts`, `tests/blocks.test.ts`
 
 **Interfaces:**
-- Produces: `loadConfig(path?): HarnessConfig` (zod-validated; env `HARNESS_CONFIG` overrides path, default `./harness.config.json`); types `HarnessConfig`, `ModelRole`; block schemas `BLOCK_TOOLS` map `{ quick_check, quiz, math_scratchpad, writing_draft }` each `{ input: ZodSchema, result: ZodSchema }`; `DECAY`, `MasteryLevel`, `EvidenceKind`, `PageMasteryDetail` from `src/shared/loreweaver.ts`.
+- Produces: `loadConfig(path?): HarnessConfig` (zod-validated; env `HARNESS_CONFIG` overrides path, default `./harness.config.json`); types `HarnessConfig`, `ModelRole`; block schemas `BLOCK_TOOLS` map `{ quick_check, quiz, math_scratchpad, writing_draft }` each `{ input: ZodSchema, result: ZodSchema }`; `DECAY`, `MasteryLevel`, `EvidenceKind`, `PageMasteryDetail` from `src/shared/engram.ts`.
 
 - [ ] **Step 1: Init package + toolchain**
 
 ```bash
-cd ~/Dev/personal/loreweaver-harness
+cd ~/Dev/personal/myelin
 npm init -y
 npm pkg set type=module scripts.test=vitest scripts.typecheck="tsc --noEmit"
 npm i ai @ai-sdk/anthropic @ai-sdk/mcp @ai-sdk/react hono @hono/node-server zod node-cron mathjs mathlive katex dagre react react-dom @assistant-ui/react @assistant-ui/react-ai-sdk @assistant-ui/react-markdown remark-gfm
@@ -84,7 +84,7 @@ const valid = {
     quiz_gen: { model: 'claude-sonnet-5' }, card_gen: { model: 'claude-haiku-4-5' },
     compile: { model: 'claude-sonnet-5' },
   },
-  loreweaver: { command: 'npx', args: ['tsx', 'server.ts'], embeddings: 'fake' },
+  engram: { command: 'npx', args: ['tsx', 'server.ts'], embeddings: 'fake' },
   schedule: { digestHour: 9, quietHours: [22, 8], ankiSyncMinutes: 30, ankiBacklogNudgeDays: 3 },
   port: 4820,
 };
@@ -133,9 +133,9 @@ describe('block schemas', () => {
 
 - [ ] **Step 4: Implement**
 
-`src/shared/loreweaver.ts`:
+`src/shared/engram.ts`:
 ```ts
-// Mirrors ~/Dev/personal/loreweaver/src/types.ts — source of truth lives there.
+// Mirrors ~/Dev/personal/engram/src/types.ts — source of truth lives there.
 export type MasteryLevel = 'unseen' | 'exposed' | 'practicing' | 'mastered';
 export const LEVELS: MasteryLevel[] = ['unseen', 'exposed', 'practicing', 'mastered'];
 export const DECAY = { masteredDays: 45, practicingDays: 21 };
@@ -242,7 +242,7 @@ const configSchema = z.object({
     tutor: roleSchema, grader: roleSchema, quiz_gen: roleSchema,
     card_gen: roleSchema, compile: roleSchema,
   }),
-  loreweaver: z.object({
+  engram: z.object({
     command: z.string(),
     args: z.array(z.string()),
     embeddings: z.enum(['ollama', 'fake', 'none']).default('ollama'),
@@ -263,7 +263,7 @@ const expand = (p: string) => p.replace(/^~(?=$|\/)/, homedir());
 export function loadConfig(path = process.env.HARNESS_CONFIG ?? './harness.config.json'): HarnessConfig {
   const raw = JSON.parse(readFileSync(expand(path), 'utf8'));
   const cfg = configSchema.parse(raw); // throws precise zod error at boot — by design
-  return { ...cfg, vault: expand(cfg.vault), loreweaver: { ...cfg.loreweaver, args: cfg.loreweaver.args.map(expand) } };
+  return { ...cfg, vault: expand(cfg.vault), engram: { ...cfg.engram, args: cfg.engram.args.map(expand) } };
 }
 ```
 
@@ -278,15 +278,15 @@ git add -A && git commit -m "feat: scaffold, shared block schemas, config loader
 
 ---
 
-### Task 2: Loreweaver MCP client + read REST endpoints
+### Task 2: Engram MCP client + read REST endpoints
 
 **Files:**
 - Create: `src/server/mcp.ts`, `src/server/restRoutes.ts`, `src/server/index.ts`
-- Test: `tests/mcp.test.ts` (uses the REAL Loreweaver server with a temp vault — same pattern as loreweaver's own `tests/integration.test.ts`)
+- Test: `tests/mcp.test.ts` (uses the REAL Engram server with a temp vault — same pattern as engram's own `tests/integration.test.ts`)
 
 **Interfaces:**
 - Consumes: `loadConfig`, `HarnessConfig` (Task 1).
-- Produces: `class Loreweaver` with `static async connect(cfg): Promise<Loreweaver>`; methods `tools(): Promise<ToolSet>` (for the agent), `call(name, args): Promise<any>` (direct call, JSON-parsed from content[0].text; throws on isError), `listSlugs(): Promise<string[]>` (glob, no parsing), `close()`; auto-respawn: if a `call` rejects with a transport error, reconnect once (100ms backoff) and retry the call. Also `buildRestRoutes(lw, cfg): Hono` mounting `GET /api/graph`, `GET /api/page/:slug`, `GET /api/student`, `GET /api/status`.
+- Produces: `class Engram` with `static async connect(cfg): Promise<Engram>`; methods `tools(): Promise<ToolSet>` (for the agent), `call(name, args): Promise<any>` (direct call, JSON-parsed from content[0].text; throws on isError), `listSlugs(): Promise<string[]>` (glob, no parsing), `close()`; auto-respawn: if a `call` rejects with a transport error, reconnect once (100ms backoff) and retry the call. Also `buildRestRoutes(lw, cfg): Hono` mounting `GET /api/graph`, `GET /api/page/:slug`, `GET /api/student`, `GET /api/status`.
 - `GET /api/graph` returns `{ nodes: [{slug, title, difficulty, status, prereqs, deepens, mastery: PageMasteryDetail|null}], goal: string|null }`.
 
 - [ ] **Step 1: Failing integration test**
@@ -297,11 +297,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
-let lw: Loreweaver;
+const LW_REPO = `${process.env.HOME}/Dev/personal/engram`;
+let lw: Engram;
 let vault: string;
 
 beforeAll(async () => {
@@ -311,14 +311,14 @@ beforeAll(async () => {
     '---\ntitle: Derivatives\ndifficulty: 1\nstatus: solid\n---\nrates of change');
   const cfg = {
     vault, student: 'testkid',
-    loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as HarnessConfig;
-  lw = await Loreweaver.connect(cfg);
+  lw = await Engram.connect(cfg);
 }, 30_000);
 
 afterAll(async () => { await lw.close(); });
 
-describe('Loreweaver client', () => {
+describe('Engram client', () => {
   it('lists slugs by glob without parsing', async () => {
     expect(await lw.listSlugs()).toEqual(['derivatives']);
   });
@@ -336,7 +336,7 @@ describe('Loreweaver client', () => {
 }, 30_000);
 ```
 
-- [ ] **Step 2: Run → FAIL** (`Loreweaver` not defined).
+- [ ] **Step 2: Run → FAIL** (`Engram` not defined).
 
 - [ ] **Step 3: Implement `src/server/mcp.ts`**
 
@@ -349,25 +349,25 @@ import type { HarnessConfig } from './config.js';
 
 type MCPClient = Awaited<ReturnType<typeof createMCPClient>>;
 
-export class Loreweaver {
+export class Engram {
   private constructor(private client: MCPClient, private cfg: HarnessConfig) {}
 
-  static async connect(cfg: HarnessConfig): Promise<Loreweaver> {
-    return new Loreweaver(await Loreweaver.spawn(cfg), cfg);
+  static async connect(cfg: HarnessConfig): Promise<Engram> {
+    return new Engram(await Engram.spawn(cfg), cfg);
   }
 
   private static spawn(cfg: HarnessConfig): Promise<MCPClient> {
     return createMCPClient({
       transport: new StdioMCPTransport({
-        command: cfg.loreweaver.command,
-        args: cfg.loreweaver.args,
+        command: cfg.engram.command,
+        args: cfg.engram.args,
         env: {
           ...process.env as Record<string, string>,
-          LOREWEAVER_VAULT: cfg.vault,
-          LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
+          ENGRAM_VAULT: cfg.vault,
+          ENGRAM_EMBEDDINGS: cfg.engram.embeddings,
         },
       }),
-      onUncaughtError: (e) => console.error('[loreweaver-mcp]', e),
+      onUncaughtError: (e) => console.error('[engram-mcp]', e),
     });
   }
 
@@ -377,7 +377,7 @@ export class Loreweaver {
     const exec = async () => {
       const res = await this.client.callTool({ name, arguments: args });
       const text = (res.content as { type: string; text: string }[])[0]?.text ?? '';
-      if (res.isError) throw new Error(`loreweaver ${name}: ${text}`);
+      if (res.isError) throw new Error(`engram ${name}: ${text}`);
       return JSON.parse(text);
     };
     try {
@@ -385,7 +385,7 @@ export class Loreweaver {
     } catch (e: any) {
       if (!/closed|EPIPE|transport|disconnected/i.test(String(e?.message))) throw e;
       await new Promise((r) => setTimeout(r, 100)); // single respawn with backoff
-      this.client = await Loreweaver.spawn(this.cfg);
+      this.client = await Engram.spawn(this.cfg);
       return exec();
     }
   }
@@ -408,10 +408,10 @@ export class Loreweaver {
 
 ```ts
 import { Hono } from 'hono';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import type { HarnessConfig } from './config.js';
 
-export function buildRestRoutes(lw: Loreweaver, cfg: HarnessConfig, status: Record<string, string> = {}) {
+export function buildRestRoutes(lw: Engram, cfg: HarnessConfig, status: Record<string, string> = {}) {
   const app = new Hono();
 
   app.get('/api/graph', async (c) => {
@@ -445,15 +445,15 @@ export function buildRestRoutes(lw: Loreweaver, cfg: HarnessConfig, status: Reco
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { loadConfig } from './config.js';
-import { Loreweaver } from './mcp.js';
+import { Engram } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
 
 const cfg = loadConfig();
-const lw = await Loreweaver.connect(cfg);
+const lw = await Engram.connect(cfg);
 const app = new Hono();
 app.route('/', buildRestRoutes(lw, cfg));
 serve({ fetch: app.fetch, port: cfg.port });
-console.log(`loreweaver-harness on :${cfg.port}`);
+console.log(`myelin on :${cfg.port}`);
 ```
 
 Add a route test to `tests/mcp.test.ts` (same suite, reuses `lw`):
@@ -468,7 +468,7 @@ it('GET /api/graph returns nodes with mastery', async () => {
 });
 ```
 
-- [ ] **Step 6: Run all → PASS; typecheck; commit** — `git commit -m "feat: loreweaver MCP client with respawn + read REST endpoints"`
+- [ ] **Step 6: Run all → PASS; typecheck; commit** — `git commit -m "feat: engram MCP client with respawn + read REST endpoints"`
 
 ---
 
@@ -557,7 +557,7 @@ export function cachedSystem(text: string): SystemModelMessage {
 }
 ```
 
-`src/server/tutor-system-prompt.md` — port the pedagogy rules from `~/Dev/personal/loreweaver/docs/tutor-prompt.md`, adapted: teach one concept at a time; probe before teaching; use blocks (`quick_check` for quick probes inline, `math_scratchpad`/`writing_draft`/`quiz` for real work); after EVERY graded block result call `record_evidence` (kinds: exposed / explained-correctly / applied-correctly / struggled / misconception+note); mere presentation of a concept ⇒ record `exposed`; never promote from recall alone; prefer `next_lessons` order; use `find_analogies` to bridge from mastered pages.
+`src/server/tutor-system-prompt.md` — port the pedagogy rules from `~/Dev/personal/engram/docs/tutor-prompt.md`, adapted: teach one concept at a time; probe before teaching; use blocks (`quick_check` for quick probes inline, `math_scratchpad`/`writing_draft`/`quiz` for real work); after EVERY graded block result call `record_evidence` (kinds: exposed / explained-correctly / applied-correctly / struggled / misconception+note); mere presentation of a concept ⇒ record `exposed`; never promote from recall alone; prefer `next_lessons` order; use `find_analogies` to bridge from mastered pages.
 
 `src/server/prompt.ts`:
 ```ts
@@ -667,7 +667,7 @@ import { convertLatexToAsciiMath } from 'mathlive';
 import { create, all } from 'mathjs';
 import { generateText, Output } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
-import type { EvidenceKind } from '../shared/loreweaver.js';
+import type { EvidenceKind } from '../shared/engram.js';
 import { modelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
 
@@ -802,7 +802,7 @@ Note: if `Output.object`/`experimental_output` has been renamed in `ai@7.0.x` (i
 - Test: `tests/session.test.ts`
 
 **Interfaces:**
-- Consumes: `Loreweaver` (Task 2), `modelFor`, `cachedSystem`, `buildInstructions`, `buildBootstrapContext`, `Mode` (Task 3), `gradeBlockOutput`, `BLOCK_TOOLS` (Tasks 1/4).
+- Consumes: `Engram` (Task 2), `modelFor`, `cachedSystem`, `buildInstructions`, `buildBootstrapContext`, `Mode` (Task 3), `gradeBlockOutput`, `BLOCK_TOOLS` (Tasks 1/4).
 - Produces: `createTutorSession(lw, cfg, opts?): TutorSession` with `respond(messages: UIMessage[], mode: Mode): Promise<Response>` (a `createUIMessageStreamResponse`). Guardrail rule implemented: **if the incoming messages' final assistant/tool exchange contains a block-tool output part and the new generation produces no `record_evidence` tool call, the session appends a system nudge and runs ONE follow-up generation, merged into the same UI stream; a second violation is recorded to `vault/.harness/guardrail.log` and emitted as a transient data part `data-guardrail`.** (The spec's "new concept presented" half of the trigger is prompt-enforced via tutor-system-prompt.md — not mechanically detectable; this narrowing is deliberate and documented here.)
 - `sessionStore`: `saveThread(vault, threadId, messages)` / `loadThread(vault, threadId)` — JSON file per thread under `vault/.harness/sessions/<threadId>.json`.
 - Chat route: `POST /api/chat` body `{ messages: UIMessage[], mode?: Mode, threadId?: string }`; `GET /api/thread/:id` returns saved messages.
@@ -817,11 +817,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV3 } from 'ai/test';
 import { simulateReadableStream } from 'ai';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import { createTutorSession } from '../src/server/session.js';
 
-const LW_REPO = `${process.env.HOME}/Dev/personal/loreweaver`;
-let lw: Loreweaver; let vault: string;
+const LW_REPO = `${process.env.HOME}/Dev/personal/engram`;
+let lw: Engram; let vault: string;
 
 // Stream chunks for: a text-only reply (no record_evidence) — used to trip the guardrail.
 const textOnly = () => new MockLanguageModelV3({
@@ -841,9 +841,9 @@ beforeAll(async () => {
   vault = mkdtempSync(join(tmpdir(), 'lwh-vault-'));
   mkdirSync(join(vault, 'pages'), { recursive: true });
   writeFileSync(join(vault, 'pages', 'arith.md'), '---\ntitle: Arithmetic\ndifficulty: 1\nstatus: solid\n---\nnumbers');
-  lw = await Loreweaver.connect({
+  lw = await Engram.connect({
     vault, student: 'kid',
-    loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as any);
 }, 30_000);
 afterAll(async () => { await lw.close(); });
@@ -937,7 +937,7 @@ import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
 import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput } from './grading.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { modelFor } from './models.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { logGuardrail } from './sessionStore.js';
@@ -972,7 +972,7 @@ function pendingBlockOutputs(messages: UIMessage[]) {
 }
 
 export function createTutorSession(
-  lw: Loreweaver, cfg: HarnessConfig,
+  lw: Engram, cfg: HarnessConfig,
   opts: { model?: LanguageModel; now?: () => Date } = {},
 ) {
   const model = opts.model ?? modelFor('tutor', cfg);
@@ -1062,12 +1062,12 @@ Implementation note for the executor: `agent.stream(...)` result exposes the UI 
 import { Hono } from 'hono';
 import type { UIMessage } from 'ai';
 import type { HarnessConfig } from './config.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { createTutorSession } from './session.js';
 import { loadThread, saveThread } from './sessionStore.js';
 import { MODES, type Mode } from './prompt.js';
 
-export function buildChatRoute(lw: Loreweaver, cfg: HarnessConfig) {
+export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
   const session = createTutorSession(lw, cfg);
 
@@ -1315,7 +1315,7 @@ export function App() {
     <Runtime mode={mode}>
       <div className="app">
         <header className="topbar">
-          <h1>Loreweaver</h1>
+          <h1>Engram</h1>
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
             {['learn', 'review', 'quiz', 'freeform'].map((m) => <option key={m}>{m}</option>)}
           </select>
@@ -1629,7 +1629,7 @@ describe('layoutGraph', () => {
 
 ```ts
 import dagre from 'dagre';
-import { DECAY, type MasteryLevel } from '../../shared/loreweaver.js';
+import { DECAY, type MasteryLevel } from '../../shared/engram.js';
 
 const COLORS: Record<MasteryLevel, string> = {
   unseen: '#9e9e9e', exposed: '#e0b040', practicing: '#5b8def', mastered: '#4caf7d',
@@ -1685,7 +1685,7 @@ export function layoutGraph(nodes: any[], now: Date) {
 - Test: `tests/scheduler.test.ts`
 
 **Interfaces:**
-- Consumes: `Loreweaver.call('get_student_state', ...)` (Task 2), `DECAY` (Task 1), config `schedule` (Task 1).
+- Consumes: `Engram.call('get_student_state', ...)` (Task 2), `DECAY` (Task 1), config `schedule` (Task 1).
 - Produces: `computeDigest(state: Record<string, PageMasteryDetail-ish>, ledger: Ledger, now: Date): { items: DigestItem[], newLedger: Ledger }` — pure. `DigestItem = { slug, kind: 'decays-soon'|'decayed'|'review-due', message }`. Rules: `decays-soon` when 0 < daysLeft <= 3 for effective mastered/practicing; `decayed` when stored level > effective level; each `(slug, kind, last_reinforced)` triple notifies once (ledger keyed on that triple). `startScheduler(lw, cfg): CronTask` — daily at `digestHour` (skip inside quietHours), reads state via MCP, sends ONE `notify-send` summarizing items, persists ledger to `vault/.harness/notify.json`. `sendNotification(title, body)` in `notify.ts` via `execFile('notify-send', [title, body])`, warn-once if binary missing.
 
 - [ ] **Step 1: Failing test** — `tests/scheduler.test.ts`:
@@ -1734,9 +1734,9 @@ describe('computeDigest', () => {
 import cron from 'node-cron';
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { DECAY, LEVELS, type MasteryLevel } from '../shared/loreweaver.js';
+import { DECAY, LEVELS, type MasteryLevel } from '../shared/engram.js';
 import type { HarnessConfig } from './config.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { sendNotification } from './notify.js';
 
 export type Ledger = Record<string, true>; // key: `${slug}|${kind}|${last_reinforced}`
@@ -1769,7 +1769,7 @@ const ledgerPath = (vault: string) => join(vault, '.harness', 'notify.json');
 const loadLedger = (vault: string): Ledger =>
   existsSync(ledgerPath(vault)) ? JSON.parse(readFileSync(ledgerPath(vault), 'utf8')) : {};
 
-export function startScheduler(lw: Loreweaver, cfg: HarnessConfig) {
+export function startScheduler(lw: Engram, cfg: HarnessConfig) {
   return cron.schedule(`0 ${cfg.schedule.digestHour} * * *`, async () => {
     const hour = new Date().getHours();
     const [qStart, qEnd] = cfg.schedule.quietHours;
@@ -1783,7 +1783,7 @@ export function startScheduler(lw: Loreweaver, cfg: HarnessConfig) {
     }
     const { items, newLedger } = computeDigest(details, loadLedger(cfg.vault), new Date());
     if (items.length) {
-      sendNotification('Loreweaver', items.map((i) => i.message).join('\n'));
+      sendNotification('Engram', items.map((i) => i.message).join('\n'));
       mkdirSync(join(cfg.vault, '.harness'), { recursive: true });
       writeFileSync(ledgerPath(cfg.vault), JSON.stringify(newLedger));
     }
@@ -1804,8 +1804,8 @@ Wire `startScheduler(lw, cfg)` in `index.ts`.
 - Test: `tests/anki-outbound.test.ts`
 
 **Interfaces:**
-- Consumes: `modelFor('card_gen', cfg)` (Task 3), `Loreweaver.call` (Task 2).
-- Produces: `AnkiClient` (`invoke(action, params)` → POST `http://127.0.0.1:8765` `{action, version: 6, params}`, throws on `error`; `isUp(): Promise<boolean>` via `version` action); `syncOutbound(lw, anki, cfg): Promise<{pushed: number, updated: number, skipped: number}>` — for each slug at effective `practicing`+ (from student state details): generate cards with `card_gen` role (zod schema `{cards: [{front, back}]}`, max 4/page, misconceptions become cloze-style front lines), `createDeck('Loreweaver::<domain>')`, `addNote` (model `Basic`, tag `loreweaver::<slug>`, `duplicateScope: 'deck'`); ledger `vault/.harness/anki-map.json`: `{ [noteId]: { slug, hash } }` where hash = sha256 of front+back — unchanged hash skips, changed page content (different generated cards for same slug beyond count) uses `updateNoteFields`.
+- Consumes: `modelFor('card_gen', cfg)` (Task 3), `Engram.call` (Task 2).
+- Produces: `AnkiClient` (`invoke(action, params)` → POST `http://127.0.0.1:8765` `{action, version: 6, params}`, throws on `error`; `isUp(): Promise<boolean>` via `version` action); `syncOutbound(lw, anki, cfg): Promise<{pushed: number, updated: number, skipped: number}>` — for each slug at effective `practicing`+ (from student state details): generate cards with `card_gen` role (zod schema `{cards: [{front, back}]}`, max 4/page, misconceptions become cloze-style front lines), `createDeck('Engram::<domain>')`, `addNote` (model `Basic`, tag `engram::<slug>`, `duplicateScope: 'deck'`); ledger `vault/.harness/anki-map.json`: `{ [noteId]: { slug, hash } }` where hash = sha256 of front+back — unchanged hash skips, changed page content (different generated cards for same slug beyond count) uses `updateNoteFields`.
 - Constructor takes `baseUrl` (default `http://127.0.0.1:8765`) — tests point it at a local fixture.
 
 - [ ] **Step 1: Failing test** — `tests/anki-outbound.test.ts` spins a fake AnkiConnect on an ephemeral port:
@@ -1843,11 +1843,11 @@ describe('AnkiClient', () => {
     expect(await anki.isUp()).toBe(true);
     const id = await anki.invoke('addNote', { note: { deckName: 'D', modelName: 'Basic',
       fields: { Front: 'q', Back: 'a' }, options: { allowDuplicate: false, duplicateScope: 'deck' },
-      tags: ['loreweaver::chain-rule'] } });
+      tags: ['engram::chain-rule'] } });
     expect(id).toBe(1000);
     const call = received.find((r) => r.action === 'addNote');
     expect(call.version).toBe(6);
-    expect(call.params.note.tags).toEqual(['loreweaver::chain-rule']);
+    expect(call.params.note.tags).toEqual(['engram::chain-rule']);
   });
   it('throws readable errors', async () => {
     const app = new Hono();
@@ -1879,11 +1879,11 @@ Plus a ledger test: call `syncOutbound` twice with a stubbed `cardGen` (inject v
 - Test: `tests/anki-inbound.test.ts`
 
 **Interfaces:**
-- Consumes: `AnkiClient` (Task 10), `Loreweaver.call('record_evidence', ...)` (Task 2), ledger file (Task 10).
-- Produces: `syncInbound(lw, anki, cfg, now?): Promise<{recorded: number}>` — cursor (`lastReviewMs`) stored in `vault/.harness/anki-map.json` under `_cursor`; pulls `cardReviews({deck: 'Loreweaver::*' — iterate decks from ledger slugs' domains, startID: cursor})`; tuple index 3 = ease (1=Again, 2=Hard, 3=Good, 4=Easy); resolve cardID → noteId → slug via `notesInfo`/ledger; aggregate per slug per local day: **any ease=1 → `record_evidence {kind: 'struggled', note: 'anki lapse (N cards)'}`; else all ≥2 → `record_evidence {kind: 'exposed', note: 'anki: N cards recalled'}`** (the maintain-never-promote ceiling — `exposed` refreshes `last_reinforced` without raising level). Advance cursor only after all evidence recorded. `recentLapses(vault, days=7): {slug, count}[]` reading a lapse log the sync appends to (`vault/.harness/anki-lapses.jsonl`: `{date, slug}` lines) — consumed by session bootstrap.
+- Consumes: `AnkiClient` (Task 10), `Engram.call('record_evidence', ...)` (Task 2), ledger file (Task 10).
+- Produces: `syncInbound(lw, anki, cfg, now?): Promise<{recorded: number}>` — cursor (`lastReviewMs`) stored in `vault/.harness/anki-map.json` under `_cursor`; pulls `cardReviews({deck: 'Engram::*' — iterate decks from ledger slugs' domains, startID: cursor})`; tuple index 3 = ease (1=Again, 2=Hard, 3=Good, 4=Easy); resolve cardID → noteId → slug via `notesInfo`/ledger; aggregate per slug per local day: **any ease=1 → `record_evidence {kind: 'struggled', note: 'anki lapse (N cards)'}`; else all ≥2 → `record_evidence {kind: 'exposed', note: 'anki: N cards recalled'}`** (the maintain-never-promote ceiling — `exposed` refreshes `last_reinforced` without raising level). Advance cursor only after all evidence recorded. `recentLapses(vault, days=7): {slug, count}[]` reading a lapse log the sync appends to (`vault/.harness/anki-lapses.jsonl`: `{date, slug}` lines) — consumed by session bootstrap.
 - `pause_turn`-style edge: if Anki is down, `syncInbound` returns `{recorded: 0}` without throwing.
 
-- [ ] **Step 1: Failing test** — fake AnkiConnect returning scripted `cardReviews` tuples + `notesInfo`; temp vault + real Loreweaver (reuse Task 2 pattern); assertions:
+- [ ] **Step 1: Failing test** — fake AnkiConnect returning scripted `cardReviews` tuples + `notesInfo`; temp vault + real Engram (reuse Task 2 pattern); assertions:
   - ease-4 reviews on a slug already `practicing` → student file's `last_reinforced` updates but `level` stays `practicing` (read back via `get_student_state {slug}`; this asserts the ceiling END-TO-END through the real server);
   - ease-1 review → evidence kind `struggled` recorded; `anki-lapses.jsonl` gains a line; `recentLapses` returns `{slug, count: 1}`;
   - second `syncInbound` with no new reviews records nothing (cursor advanced);
@@ -1908,7 +1908,7 @@ In `session.ts` bootstrap, replace `ankiLapses: []` with `ankiLapses: recentLaps
 ### Task 12: systemd service, README, scripted-model E2E
 
 **Files:**
-- Create: `systemd/loreweaver-harness.service`, `README.md`, `tests/e2e/scripted-model.cjs`, `tests/e2e/tutor-loop.spec.ts`, `playwright.config.ts`, `harness.config.json` (developer's real config — **gitignored**; add `harness.config.json` to `.gitignore`)
+- Create: `systemd/myelin.service`, `README.md`, `tests/e2e/scripted-model.cjs`, `tests/e2e/tutor-loop.spec.ts`, `playwright.config.ts`, `harness.config.json` (developer's real config — **gitignored**; add `harness.config.json` to `.gitignore`)
 - Modify: `package.json` (scripts: `e2e`, `start`)
 
 **Interfaces:**
@@ -1938,17 +1938,17 @@ test('full loop: bootstrap → quick_check → answer → evidence recorded', as
 
 - [ ] **Step 3: Implement** `scripted-model.cjs`, `playwright.config.ts` (webServer array: harness server + `vite preview --port 4173`, `baseURL: 'http://localhost:4173'`, proxy: build with `vite build` first in `webServer.command`), `globalSetup` creating the temp vault and exporting `E2E_VAULT`.
 
-`systemd/loreweaver-harness.service`:
+`systemd/myelin.service`:
 ```ini
 [Unit]
-Description=Loreweaver tutoring harness
+Description=Engram tutoring harness
 After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Dev/personal/loreweaver-harness
+WorkingDirectory=%h/Dev/personal/myelin
 ExecStart=/usr/bin/npx tsx src/server/index.ts
-Environment=HARNESS_CONFIG=%h/Dev/personal/loreweaver-harness/harness.config.json
+Environment=HARNESS_CONFIG=%h/Dev/personal/myelin/harness.config.json
 Restart=on-failure
 RestartSec=5
 
@@ -1956,7 +1956,7 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-`README.md`: what it is (one paragraph + screenshot placeholder-free description), setup (Node 22, `npm i`, copy `harness.config.example.json` → `harness.config.json`, set `ANTHROPIC_API_KEY` via systemd override or shell env, install Anki + AnkiConnect add-on `2055492159`, optional `ollama pull nomic-embed-text`), run (`npm run dev:server` + `npm run dev:client` for dev; `systemctl --user enable --now loreweaver-harness` + `npm run build` + serve `dist/` via the Hono server's static middleware — add `app.use('/*', serveStatic({ root: './dist' }))` from `@hono/node-server/serve-static` as the fallback route in `index.ts`), and the evidence model in five lines (levels, decay, the Anki ceiling).
+`README.md`: what it is (one paragraph + screenshot placeholder-free description), setup (Node 22, `npm i`, copy `harness.config.example.json` → `harness.config.json`, set `ANTHROPIC_API_KEY` via systemd override or shell env, install Anki + AnkiConnect add-on `2055492159`, optional `ollama pull nomic-embed-text`), run (`npm run dev:server` + `npm run dev:client` for dev; `systemctl --user enable --now myelin` + `npm run build` + serve `dist/` via the Hono server's static middleware — add `app.use('/*', serveStatic({ root: './dist' }))` from `@hono/node-server/serve-static` as the fallback route in `index.ts`), and the evidence model in five lines (levels, decay, the Anki ceiling).
 
 - [ ] **Step 4: Full suite green:**
 

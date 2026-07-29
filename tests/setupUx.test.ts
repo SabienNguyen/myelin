@@ -10,8 +10,8 @@ describe('displayPath', () => {
   it('shortens a path under home to the form a person would say', () => {
     // Screenshotting the first-run card showed four lines of absolute path as the first thing the
     // eye landed on, for the least useful information on the screen.
-    expect(displayPath('/home/sabien/Documents/Loreweaver', '/home/sabien'))
-      .toBe('~/Documents/Loreweaver');
+    expect(displayPath('/home/sabien/Documents/Myelin', '/home/sabien'))
+      .toBe('~/Documents/Myelin');
   });
 
   it('leaves a path outside home alone', () => {

@@ -17,25 +17,25 @@ export function isTransportError(e: unknown): boolean {
   return TRANSPORT_ERROR.test(msg);
 }
 
-export class Loreweaver {
+export class Engram {
   // A respawn in flight, shared by every caller that hits the dead client at once. null when none.
   private respawning: Promise<MCPClient> | null = null;
 
   private constructor(private client: MCPClient, private cfg: HarnessConfig) {}
 
-  static async connect(cfg: HarnessConfig): Promise<Loreweaver> {
-    return new Loreweaver(await Loreweaver.spawn(cfg), cfg);
+  static async connect(cfg: HarnessConfig): Promise<Engram> {
+    return new Engram(await Engram.spawn(cfg), cfg);
   }
 
   private static spawn(cfg: HarnessConfig): Promise<MCPClient> {
     return createMCPClient({
       transport: new StdioMCPTransport({
-        command: cfg.loreweaver.command,
-        args: cfg.loreweaver.args,
+        command: cfg.engram.command,
+        args: cfg.engram.args,
         env: {
           ...process.env as Record<string, string>,
-          LOREWEAVER_VAULT: cfg.vault,
-          LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
+          ENGRAM_VAULT: cfg.vault,
+          ENGRAM_EMBEDDINGS: cfg.engram.embeddings,
           // Inside the desktop app, `process.execPath` — which config.ts's runnerFor uses to run a
           // compiled entry — is the Electron binary, and launching it plainly would open a second
           // app window instead of a Node process. This makes it behave as Node. A no-op for a real
@@ -43,7 +43,7 @@ export class Loreweaver {
           ELECTRON_RUN_AS_NODE: '1',
         },
       }),
-      onUncaughtError: (e) => console.error('[loreweaver-mcp]', e),
+      onUncaughtError: (e) => console.error('[engram-mcp]', e),
     });
   }
 
@@ -62,14 +62,14 @@ export class Loreweaver {
 
   // Respawn the child, deduped: when the child dies mid-compile, all `concurrency` in-flight tool
   // calls hit the transport error at once. Without sharing, each one ran `this.client = await
-  // spawn()` — spawning a fresh loreweaver process per failed call and orphaning every one but the
+  // spawn()` — spawning a fresh engram process per failed call and orphaning every one but the
   // last (never closed, a leaked child). A shared in-flight promise means one death → one respawn,
   // and every waiter retries against that same fresh client.
   private respawn(): Promise<MCPClient> {
     if (!this.respawning) {
       this.respawning = (async () => {
         await new Promise((r) => setTimeout(r, 100)); // short backoff
-        this.client = await Loreweaver.spawn(this.cfg);
+        this.client = await Engram.spawn(this.cfg);
         return this.client;
       })().finally(() => { this.respawning = null; });
     }
@@ -113,9 +113,9 @@ export class Loreweaver {
   private execTool(name: string, args: any, opts: any): Promise<any> {
     return this.withRespawn(async (client) => {
       const tool = (await client.tools())[name];
-      if (!tool?.execute) throw new Error(`loreweaver tool "${name}" not found on client`);
+      if (!tool?.execute) throw new Error(`engram tool "${name}" not found on client`);
       const result = await tool.execute(args, opts);
-      Loreweaver.invalidateIfWrite(name);
+      Engram.invalidateIfWrite(name);
       return result;
     });
   }
@@ -124,9 +124,9 @@ export class Loreweaver {
     return this.withRespawn(async (client) => {
       const res = await client.callTool({ name, arguments: args });
       const text = (res.content as { type: string; text: string }[])[0]?.text ?? '';
-      if (res.isError) throw new Error(`loreweaver ${name}: ${text}`);
+      if (res.isError) throw new Error(`engram ${name}: ${text}`);
       const parsed = JSON.parse(text);
-      Loreweaver.invalidateIfWrite(name);
+      Engram.invalidateIfWrite(name);
       return parsed;
     });
   }

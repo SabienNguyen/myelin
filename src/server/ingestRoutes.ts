@@ -10,10 +10,10 @@ import { compileNext, readQueue, renameBook, startConversion } from './ingest.js
 import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
 import { fetchVideoTranscript, isVideoUrl, type VideoIngestDeps } from './videoIngest.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 
 export function buildIngestRoutes(
-  lw: Loreweaver, cfg: HarnessConfig,
+  lw: Engram, cfg: HarnessConfig,
   deps: {
     converter?: Converter; model?: LanguageModel; fetchImpl?: typeof fetch;
     ingestRepoDeps?: IngestRepoDeps; videoDeps?: VideoIngestDeps;

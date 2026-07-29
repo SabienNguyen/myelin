@@ -2,12 +2,12 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import { seedPatternPages } from '../src/server/seedPatternPages.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import { LW_REPO } from './lwRepo.js';
 
-let lw: Loreweaver;
+let lw: Engram;
 let vault: string;
 let cfg: HarnessConfig;
 
@@ -17,9 +17,9 @@ beforeAll(async () => {
   cfg = {
     vault, student: 'testkid',
     gap: { url: 'http://localhost:4930' },
-    loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as HarnessConfig;
-  lw = await Loreweaver.connect(cfg);
+  lw = await Engram.connect(cfg);
 }, 30_000);
 
 afterAll(async () => { await lw.close(); });
@@ -57,9 +57,9 @@ describe('seedPatternPages', () => {
     mkdirSync(join(vault2, 'pages'), { recursive: true });
     const cfgNoGap = {
       vault: vault2, student: 'testkid',
-      loreweaver: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+      engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
     } as HarnessConfig;
-    const lw2 = await Loreweaver.connect(cfgNoGap);
+    const lw2 = await Engram.connect(cfgNoGap);
     try {
       await seedPatternPages(lw2, cfgNoGap);
       expect(await lw2.listSlugs()).toContain('stream-consumer');

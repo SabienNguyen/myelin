@@ -4,9 +4,9 @@
 // somewhere to live in the graph/library/page tabs and a slug for code_exercise's `pageSlug` and
 // record_evidence to target, even before any tutor turn ever teaches it.
 //
-// Single-writer rationale (docs/superpowers/plans/2026-07-12-loreweaver-harness.md Global
-// Constraints: "all vault/student mutations go through Loreweaver MCP tools"): this still goes
-// through lw.call('write_page', ...) — Loreweaver remains the only thing that ever touches the
+// Single-writer rationale (docs/superpowers/plans/2026-07-12-myelin.md Global
+// Constraints: "all vault/student mutations go through Engram MCP tools"): this still goes
+// through lw.call('write_page', ...) — Engram remains the only thing that ever touches the
 // vault on disk. What makes this safe to run unattended at every boot, unlike a model-authored
 // write, is that the content is MECHANICAL: a fixed string baked into this file, not model
 // output — there's nothing here for a model to hallucinate or drift, so "write once, never again"
@@ -15,7 +15,7 @@
 import type { HarnessConfig } from './config.js';
 import { approvedGenerated } from './gap/generated.js';
 import { readBank } from './courseBank.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 
 interface PatternPageSeed {
   slug: string;
@@ -77,7 +77,7 @@ export function courseSeeds(vault: string): PatternPageSeed[] {
   }));
 }
 
-export async function seedPatternPages(lw: Loreweaver, cfg: HarnessConfig): Promise<void> {
+export async function seedPatternPages(lw: Engram, cfg: HarnessConfig): Promise<void> {
   const existing = new Set(await lw.listSlugs());
   // Approved GENERATED exercises seed pages too — derived from what is on disk, not from widening
   // the hardcoded list below (which the backlog's own self-criticism warns against). Same

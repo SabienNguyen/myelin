@@ -16,7 +16,7 @@ import { builtinPatterns } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { readQueue } from './ingest.js';
 import { invalidateGraphCache } from './graphCache.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { availableBlocks, sanitizeToolArgs, slugListLine, vaultGap, type VaultGap } from './session.js';
 import { loadSdkSession, logGuardrail, saveSdkSession, saveThread } from './sessionStore.js';
@@ -41,13 +41,13 @@ const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidenc
 //
 // unlink_pages belongs here too: it rewrites the page to DELETE an edge (graphTools.ts —
 // list.splice + store.writePage), a vault mutation exactly like link_pages, so spec §5's
-// single-writer rule confines it to freeform. It was the one write-family loreweaver tool this
+// single-writer rule confines it to freeform. It was the one write-family engram tool this
 // list forgot, and because the hook below only denies names IN this list, the SDK route was
 // auto-allowing unlink_pages in learn/review/quiz — able to prune graph edges mid-lesson, the
 // very thing the ai-sdk route blocks by leaving it out of TEACH_TOOLS.
 const FREEFORM_EXTRA_TOOLS = ['write_page', 'link_pages', 'unlink_pages', 'compile_source', 'create_path'];
 
-const LOREWEAVER_PREFIX = 'mcp__loreweaver__';
+const ENGRAM_PREFIX = 'mcp__engram__';
 const BLOCKS_PREFIX = 'mcp__blocks__';
 
 // Navigation-class block tools: they move the learner around or speak, they do not STAGE gradable
@@ -70,7 +70,7 @@ export function blockAllowlist(gradingOnly: boolean): string[] {
 }
 const COURSE_PREFIX = 'mcp__course__';
 const GENERATE_PREFIX = 'mcp__generate__';
-const RECORD_EVIDENCE_TOOL = `${LOREWEAVER_PREFIX}record_evidence`;
+const RECORD_EVIDENCE_TOOL = `${ENGRAM_PREFIX}record_evidence`;
 
 /** Injectable seam for tests: a fake must accept the same {prompt, options} shape query() does
  * and return an async-iterable of SDKMessage. The real Query interface also exposes control
@@ -304,7 +304,7 @@ export function generateMcpTools(cfg: HarnessConfig) {
 }
 
 export function createClaudeSdkTutorSession(
-  lw: Loreweaver, cfg: HarnessConfig, deps: ClaudeSdkTutorDeps = {},
+  lw: Engram, cfg: HarnessConfig, deps: ClaudeSdkTutorDeps = {},
 ) {
   const queryImpl = deps.queryImpl ?? query;
 
@@ -388,9 +388,9 @@ export function createClaudeSdkTutorSession(
     mode: Mode, slugs: string[], resumeId: string | undefined, gap: VaultGap | null,
     gradingOnly = false,
   ): Options {
-    const activeLoreweaverTools = mode === 'freeform' ? [...TEACH_TOOLS, ...FREEFORM_EXTRA_TOOLS] : TEACH_TOOLS;
+    const activeEngramTools = mode === 'freeform' ? [...TEACH_TOOLS, ...FREEFORM_EXTRA_TOOLS] : TEACH_TOOLS;
     const allowedTools = [
-      ...activeLoreweaverTools.map((n) => `${LOREWEAVER_PREFIX}${n}`),
+      ...activeEngramTools.map((n) => `${ENGRAM_PREFIX}${n}`),
       ...blockAllowlist(gradingOnly),
       // Every mode, matching session.ts: drilling a banked problem is a teaching activity.
       `${COURSE_PREFIX}course_problems`, `${COURSE_PREFIX}mark_course_problem`,
@@ -409,21 +409,21 @@ export function createClaudeSdkTutorSession(
       includePartialMessages: true,
       allowedTools,
       mcpServers: {
-        loreweaver: {
+        engram: {
           type: 'stdio',
-          command: cfg.loreweaver.command,
-          args: cfg.loreweaver.args,
+          command: cfg.engram.command,
+          args: cfg.engram.args,
           env: {
             ...process.env as Record<string, string>,
-            LOREWEAVER_VAULT: cfg.vault,
-            LOREWEAVER_EMBEDDINGS: cfg.loreweaver.embeddings,
+            ENGRAM_VAULT: cfg.vault,
+            ENGRAM_EMBEDDINGS: cfg.engram.embeddings,
           },
         },
         blocks: createSdkMcpServer({ name: 'blocks', tools: blockMcpTools(cfg.vault) }),
         course: createSdkMcpServer({ name: 'course', tools: courseMcpTools(cfg.vault) }),
         generate: createSdkMcpServer({ name: 'generate', tools: generateMcpTools(cfg) }),
       },
-      // Block/loreweaver tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK
+      // Block/engram tool inputs can't be arg-wrapped like session.ts's guardMcpTools (the SDK
       // executes them itself, not us). canUseTool would be the natural rewrite seam, but it is
       // SDK-CONFIRMED DEAD here, on two independent counts: the SDK's own runtime warning
       // (CLAUDE_SDK_CAN_USE_TOOL_SHADOWED, seen in the journal on a live subscription-login run)
@@ -461,8 +461,8 @@ export function createClaudeSdkTutorSession(
                 },
               };
             }
-            if (!input.tool_name.startsWith(LOREWEAVER_PREFIX)) return {};
-            const bare = input.tool_name.slice(LOREWEAVER_PREFIX.length);
+            if (!input.tool_name.startsWith(ENGRAM_PREFIX)) return {};
+            const bare = input.tool_name.slice(ENGRAM_PREFIX.length);
             // STRUCTURAL enforcement of spec §5's single-writer rule. allowedTools does not gate
             // anything under bypassPermissions (the comment above documents the shadowing), so
             // the freeform-only write tools were held back by PROMPT alone — and a live sitting
@@ -493,9 +493,9 @@ export function createClaudeSdkTutorSession(
           }],
         }],
         // Graph-cache invalidation for THIS route. The ai-sdk route's writes all pass through
-        // src/server/mcp.ts's invalidateIfWrite, but here the Agent SDK spawns its own Loreweaver
-        // stdio server (mcpServers.loreweaver above) and executes tool calls itself — a
-        // record_evidence on this route never touches the harness's Loreweaver wrapper, so without
+        // src/server/mcp.ts's invalidateIfWrite, but here the Agent SDK spawns its own Engram
+        // stdio server (mcpServers.engram above) and executes tool calls itself — a
+        // record_evidence on this route never touches the harness's Engram wrapper, so without
         // this hook a freshly recorded misconception kept its stale graph payload for up to a TTL
         // (the exact bug c5b64f4 fixed on the other route). PostToolUse fires only on success —
         // failures go to PostToolUseFailure — which preserves mcp.ts's only-invalidate-on-success
@@ -503,7 +503,7 @@ export function createClaudeSdkTutorSession(
         PostToolUse: [{
           hooks: [async (input) => {
             if (input.hook_event_name === 'PostToolUse'
-              && (input.tool_name === RECORD_EVIDENCE_TOOL || input.tool_name === `${LOREWEAVER_PREFIX}write_page`)) {
+              && (input.tool_name === RECORD_EVIDENCE_TOOL || input.tool_name === `${ENGRAM_PREFIX}write_page`)) {
               invalidateGraphCache();
             }
             return {};
@@ -698,7 +698,7 @@ export function createClaudeSdkTutorSession(
           // such fakes is preserved).
           let partialsStreamedText = false;
           let textCounter = 0;
-          const pendingLoreweaverCalls = new Set<string>(); // toolCallId awaiting a tool_result
+          const pendingEngramCalls = new Set<string>(); // toolCallId awaiting a tool_result
 
           for await (const message of queryImpl({ prompt, options })) {
             if (message.type === 'system' && message.subtype === 'init') {
@@ -750,17 +750,17 @@ export function createClaudeSdkTutorSession(
                       type: 'tool-input-available', toolCallId: block.id,
                       toolName: name.slice(BLOCKS_PREFIX.length), input: block.input,
                     });
-                  } else if (name.startsWith(LOREWEAVER_PREFIX)) {
+                  } else if (name.startsWith(ENGRAM_PREFIX)) {
                     if (name === RECORD_EVIDENCE_TOOL) { sawRecordEvidence = true; recorded.push(block.input); }
-                    pendingLoreweaverCalls.add(block.id);
+                    pendingEngramCalls.add(block.id);
                     emit({
                       type: 'tool-input-available', toolCallId: block.id,
-                      toolName: name.slice(LOREWEAVER_PREFIX.length), input: block.input,
+                      toolName: name.slice(ENGRAM_PREFIX.length), input: block.input,
                     });
                   } else if (SDK_RESEARCH_TOOLS.includes(name)) {
                     // Research must be visible: the sourcing honesty story rests on the learner
                     // seeing "searched the web" in the transcript when (and only when) it happened.
-                    pendingLoreweaverCalls.add(block.id);
+                    pendingEngramCalls.add(block.id);
                     emit({
                       type: 'tool-input-available', toolCallId: block.id,
                       toolName: name, input: block.input,
@@ -777,8 +777,8 @@ export function createClaudeSdkTutorSession(
               const content = (message.message as any).content;
               if (Array.isArray(content)) {
                 for (const block of content) {
-                  if (block.type === 'tool_result' && pendingLoreweaverCalls.has(block.tool_use_id)) {
-                    pendingLoreweaverCalls.delete(block.tool_use_id);
+                  if (block.type === 'tool_result' && pendingEngramCalls.has(block.tool_use_id)) {
+                    pendingEngramCalls.delete(block.tool_use_id);
                     let output = (message as any).tool_use_result
                       ?? (Array.isArray(block.content) ? block.content.map((c: any) => c?.text ?? '').join(' ') : { ok: true });
                     // A failed built-in tool (WebFetch dying on restricted egress) marks the

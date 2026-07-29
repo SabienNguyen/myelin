@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultVaultPath, loadConfig, resolveLoreweaver, configSource } from '../src/server/config.js';
+import { defaultVaultPath, loadConfig, resolveEngram, configSource } from '../src/server/config.js';
 import {
   credentialsPath, readCredentials, writeCredentials, applyCredentials, looksLikeAnthropicKey,
 } from '../src/server/credentials.js';
@@ -30,7 +30,7 @@ describe('zero-config startup', () => {
     expect(Object.keys(cfg.models).sort())
       .toEqual(['card_gen', 'compile', 'grader', 'quiz_gen', 'tutor']);
     expect(cfg.schedule.digestHour).toBe(9);
-    expect(cfg.loreweaver.args.length).toBeGreaterThan(0);
+    expect(cfg.engram.args.length).toBeGreaterThan(0);
   });
 
   it('lets a partial config override only what it names', () => {
@@ -53,38 +53,38 @@ describe('zero-config startup', () => {
 
   it('puts the vault where a person would look for it', () => {
     const home = tmp();
-    expect(defaultVaultPath(home)).toBe(join(home, 'loreweaver-vault'));
+    expect(defaultVaultPath(home)).toBe(join(home, 'myelin-vault'));
     mkdirSync(join(home, 'Documents'));
     // A vault is Obsidian-compatible markdown the learner is meant to open, so Documents wins
     // over any application-support directory whenever it exists.
-    expect(defaultVaultPath(home)).toBe(join(home, 'Documents', 'Loreweaver'));
+    expect(defaultVaultPath(home)).toBe(join(home, 'Documents', 'Myelin'));
   });
 });
 
-describe('finding the Loreweaver MCP server', () => {
-  const saved = process.env.LOREWEAVER_ENTRY;
+describe('finding the Engram MCP server', () => {
+  const saved = process.env.ENGRAM_ENTRY;
   afterEach(() => {
-    if (saved === undefined) delete process.env.LOREWEAVER_ENTRY;
-    else process.env.LOREWEAVER_ENTRY = saved;
+    if (saved === undefined) delete process.env.ENGRAM_ENTRY;
+    else process.env.ENGRAM_ENTRY = saved;
   });
 
   it('finds the sibling checkout this repo is developed against', () => {
-    delete process.env.LOREWEAVER_ENTRY;
-    const { command, args } = resolveLoreweaver();
-    expect(args[args.length - 1]).toMatch(/loreweaver\/(dist\/server\.js|src\/server\.ts)$/);
+    delete process.env.ENGRAM_ENTRY;
+    const { command, args } = resolveEngram();
+    expect(args[args.length - 1]).toMatch(/(engram|loreweaver)\/(dist\/server\.js|src\/server\.ts)$/);
     expect(existsSync(args[args.length - 1])).toBe(true);
     expect(command).toBeTruthy();
   });
 
   it('runs a compiled entry on this very Node binary, not npx', () => {
     // A packaged app has no npx on PATH, so `npx tsx` would be an unfixable failure there.
-    process.env.LOREWEAVER_ENTRY = '/opt/app/loreweaver/dist/server.js';
-    expect(resolveLoreweaver()).toEqual({ command: process.execPath, args: ['/opt/app/loreweaver/dist/server.js'] });
+    process.env.ENGRAM_ENTRY = '/opt/app/engram/dist/server.js';
+    expect(resolveEngram()).toEqual({ command: process.execPath, args: ['/opt/app/engram/dist/server.js'] });
   });
 
   it('uses tsx for a source entry, which only a dev checkout has', () => {
-    process.env.LOREWEAVER_ENTRY = '/home/dev/loreweaver/src/server.ts';
-    expect(resolveLoreweaver()).toEqual({ command: 'npx', args: ['tsx', '/home/dev/loreweaver/src/server.ts'] });
+    process.env.ENGRAM_ENTRY = '/home/dev/engram/src/server.ts';
+    expect(resolveEngram()).toEqual({ command: 'npx', args: ['tsx', '/home/dev/engram/src/server.ts'] });
   });
 });
 
@@ -99,8 +99,8 @@ describe('the API key, the one thing that cannot be defaulted', () => {
     // The vault gets opened in Obsidian, synced to a phone and pushed to a git remote. Every one of
     // those is a way to leak a key, so the key does not live there.
     const p = credentialsPath('/home/x', 'linux');
-    expect(p).not.toMatch(/vault|Loreweaver\/pages/);
-    expect(credentialsPath('/home/x', 'darwin')).toBe('/home/x/Library/Application Support/Loreweaver/credentials.json');
+    expect(p).not.toMatch(/vault|Engram\/pages/);
+    expect(credentialsPath('/home/x', 'darwin')).toBe('/home/x/Library/Application Support/Myelin/credentials.json');
   });
 
   it('round-trips, and the file is not world-readable', () => {
@@ -159,9 +159,9 @@ describe('the API key, the one thing that cannot be defaulted', () => {
 
 describe('the vault directory', () => {
   it('is created by the preflight rather than required to exist', () => {
-    // Mirrors index.ts's preflight. Loreweaver tolerates a missing vault (scanMd returns []), but
+    // Mirrors index.ts's preflight. Engram tolerates a missing vault (scanMd returns []), but
     // "the app made the folder" is the difference between working and looking broken on a first run.
-    const vault = join(tmp(), 'Loreweaver');
+    const vault = join(tmp(), 'Engram');
     mkdirSync(join(vault, 'pages'), { recursive: true });
     expect(existsSync(join(vault, 'pages'))).toBe(true);
     // And it must be safe to run twice.

@@ -1,4 +1,4 @@
-You are compiling one textbook chapter into Loreweaver vault pages. You will be given the chapter's
+You are compiling one textbook chapter into Engram vault pages. You will be given the chapter's
 markdown content inline below — do not try to read files or glob the vault; everything you need is
 in this prompt.
 

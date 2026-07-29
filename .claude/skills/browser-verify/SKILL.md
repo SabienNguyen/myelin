@@ -25,24 +25,24 @@ No `ANTHROPIC_API_KEY`, no Ollama, no Anki, no the-gap sidecar required.
 
 ## One-time environment setup
 
-**1. Install dependencies in BOTH repos.** The harness spawns Loreweaver as a child process
-(`npx tsx <loreweaver>/src/server.ts`), so Loreweaver needs its own `node_modules`:
+**1. Install dependencies in BOTH repos.** The harness spawns Engram as a child process
+(`npx tsx <engram>/src/server.ts`), so Engram needs its own `node_modules`:
 
 ```bash
 cd <harness> && npm install
-cd <loreweaver> && npm install
+cd <engram> && npm install
 ```
 
-**2. Loreweaver must be a sibling checkout.** The e2e configs and integration tests no longer bake
+**2. Engram must be a sibling checkout.** The e2e configs and integration tests no longer bake
 in one machine's home directory — they resolve the vault relative to the repo (`${E2E_DIR}`, set by
-`playwright.config.ts`) and the Loreweaver entrypoint as `../loreweaver/src/server.ts` (via
-`tests/lwRepo.ts` and `${LOREWEAVER_SRC}`). So the only requirement is that `loreweaver` sits
-alongside `loreweaver-harness`; no `~/Dev/personal` symlink is needed. If your Loreweaver lives
-elsewhere, either place a sibling symlink or set `LOREWEAVER_ENTRY` (see `src/server/config.ts`):
+`playwright.config.ts`) and the Engram entrypoint as `../engram/src/server.ts` (via
+`tests/lwRepo.ts` and `${ENGRAM_SRC}`). So the only requirement is that `engram` sits
+alongside `myelin`; no `~/Dev/personal` symlink is needed. If your Engram lives
+elsewhere, either place a sibling symlink or set `ENGRAM_ENTRY` (see `src/server/config.ts`):
 
 ```bash
-# only if loreweaver is NOT already a sibling of loreweaver-harness
-ln -sfn /path/to/loreweaver ../loreweaver
+# only if engram is NOT already a sibling of myelin
+ln -sfn /path/to/engram ../engram
 ```
 
 **3. Pinned-Chromium sandboxes.** If the image ships a Chromium build under

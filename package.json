@@ -1,5 +1,5 @@
 {
-  "name": "loreweaver-harness",
+  "name": "myelin",
   "version": "1.0.0",
   "description": "A localhost tutor with a teaching memory: it researches a subject, writes an Obsidian-compatible vault of pages, and grades your work against them.",
   "repository": {
@@ -17,9 +17,9 @@
     "e2e": "playwright test",
     "build:server": "tsc -p tsconfig.server.json && node scripts/copy-server-assets.mjs",
     "build:all": "npm run build && npm run build:server",
-    "bundle:loreweaver": "node scripts/bundle-loreweaver.mjs",
+    "bundle:engram": "node scripts/bundle-engram.mjs",
     "desktop": "npm run build:all && electron electron/main.mjs",
-    "dist": "npm run build:all && npm run bundle:loreweaver && electron-builder"
+    "dist": "npm run build:all && npm run bundle:engram && electron-builder"
   },
   "keywords": [],
   "author": "",
@@ -91,8 +91,8 @@
     "vitest": "^4.1.10"
   },
   "build": {
-    "appId": "dev.loreweaver.app",
-    "productName": "Loreweaver",
+    "appId": "dev.myelin.app",
+    "productName": "Engram",
     "files": [
       "dist/**",
       "dist-server/**",
@@ -107,7 +107,7 @@
         "AppImage"
       ],
       "category": "Education",
-      "executableName": "loreweaver",
+      "executableName": "myelin",
       "syncDesktopName": true
     },
     "mac": {
@@ -127,5 +127,5 @@
     ],
     "afterPack": "electron/afterPack.mjs"
   },
-  "desktopName": "loreweaver.desktop"
+  "desktopName": "myelin.desktop"
 }

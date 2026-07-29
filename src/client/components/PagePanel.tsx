@@ -15,7 +15,7 @@ import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
 type Dir = 'out' | 'in';
 type LinkType = 'prereq' | 'deepens' | 'related';
 
-// Direction matters and is easy to get backwards: buildEdges (loreweaver src/graph/graph.ts) writes
+// Direction matters and is easy to get backwards: buildEdges (engram src/graph/graph.ts) writes
 // `prereqs: [x]` on page A as A -prereq-> x, i.e. an OUT prereq edge means "A requires x". Labelling
 // both directions the same way would invert the teaching order for half the list.
 const GROUPS: { dir: Dir; type: LinkType; heading: string; blurb: string }[] = [
@@ -104,7 +104,7 @@ function EdgeList({
               <span className="page-edge-head">
                 <MasteryDot level={info?.mastery ?? null} />
                 {missing
-                  // A declared prereq with no page behind it. Loreweaver models this case
+                  // A declared prereq with no page behind it. Engram models this case
                   // (`missingTargets`), and naming it beats a link that silently lands on
                   // "Could not load" — the vault genuinely has a hole here.
                   ? <span className="page-edge-missing">{slug} <em>— no page yet</em></span>

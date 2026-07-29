@@ -17,7 +17,7 @@ import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './cla
 import type { HarnessConfig } from './config.js';
 import { fetchLadderPayload } from './gapProxy.js';
 import { buildHelpPrompt, type HelpRungContext } from './helpPrompt.js';
-import type { Loreweaver } from './mcp.js';
+import type { Engram } from './mcp.js';
 import { modelFor } from './models.js';
 
 const DRAFT_CAP = 20_000;
@@ -68,7 +68,7 @@ function validate(body: HelpRequestBody): { pattern: string; rung: string; quest
   };
 }
 
-export function buildGapHelpRoute(lw: Loreweaver, cfg: HarnessConfig, deps: GapHelpDeps = {}) {
+export function buildGapHelpRoute(lw: Engram, cfg: HarnessConfig, deps: GapHelpDeps = {}) {
   const app = new Hono();
   // No gate: with the built-in sandbox there is always a ladder to explain.
 

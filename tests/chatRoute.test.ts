@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // buildChatRoute pulls in session.ts (owned by a concurrent executor, spawns the real
-// Loreweaver MCP session) — mock it so this test only exercises the thread-list/delete
+// Engram MCP session) — mock it so this test only exercises the thread-list/delete
 // routes added here, not the tutor agent loop. The mock records the mode respond() was called
 // with, so the writeUp-promotion test can assert what the route resolved.
 const seenModes: string[] = [];

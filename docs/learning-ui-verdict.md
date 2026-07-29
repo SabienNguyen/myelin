@@ -147,7 +147,7 @@ Written after the sprint that followed the original verdict; each line names its
 - **The packaged binary itself — executed.** Every prior drive ran electron/main.mjs from
   source; packaging defects (asar path resolution, bundled-resource lookup) only show in the
   real artifact. The built AppImage was launched cold in a clean HOME: it booted, found the
-  bundled loreweaver memory engine inside its own resources, created a fresh vault, bound its
+  bundled engram memory engine inside its own resources, created a fresh vault, bound its
   server on a free port (API answering over HTTP), and rendered the first-run key screen with
   the correct fallback copy for "Claude Code installed but not signed in" — the honest no-key
   state, screenshotted. The packaging pipeline produces a runnable product, not just a file.
@@ -195,10 +195,10 @@ Written after the sprint that followed the original verdict; each line names its
   route that minted it, which is what "re-prove" means. Twelve seconds to staging, zero errors.
   All four modes now hold their contracts under a live model.
 - **The graph scales now.** A synthetic 500-page vault (300 with mastery) put the first graph
-  build at 10.9 SECONDS — fetchGraph made 1+2N stdio roundtrips, two per page. loreweaver grew a
+  build at 10.9 SECONDS — fetchGraph made 1+2N stdio roundtrips, two per page. engram grew a
   list_pages bulk tool and the whole-map student call already carried every field the graph
   reads, so the build is two calls total: 16ms cold on the same fixture, ~680× faster, with a
-  fallback to the old path for older bundled loreweavers. The client side holds up too: the
+  fallback to the old path for older bundled engrams. The client side holds up too: the
   contextual default renders 35 nodes instantly, the Whole-vault toggle renders all 501 in
   250ms with responsive zoom, and the session plan interleaves review/new correctly across the
   whole fixture. Probed further at 2,000 pages (1,200 with mastery): server still linear (127ms
@@ -212,8 +212,8 @@ Written after the sprint that followed the original verdict; each line names its
   against the built-in sandbox: 4 passed, 0 skipped, ~29s — and the restoration itself found a
   real bug (the first-run gate blocked every scripted run; a scripted model needs no
   authorisation). Both repos now run their suites in GitHub Actions on every push — the harness
-  workflow gates on a LOREWEAVER_CI_TOKEN secret (documented in the workflow) because the
-  integration tests spawn the real loreweaver server from a second private repo.
+  workflow gates on a ENGRAM_CI_TOKEN secret (documented in the workflow) because the
+  integration tests spawn the real engram server from a second private repo.
 - **Thread history — driven end to end.** The last undriven topbar surface: a cold load restores
   the persisted default conversation; the history menu lists every conversation titled by its
   first substantive question with relative times and the active row highlighted; "+ New
@@ -276,7 +276,7 @@ Written after the sprint that followed the original verdict; each line names its
   has a page to record against). The chat shows "What do you want to learn?" with three example
   prompts, the Library says plainly what doesn't exist yet and which control creates it, the
   graph renders its single node with legend and focus hint, and the first chat turn completes.
-  loreweaver's side also gained a permanent fuzz suite this cycle: 900 seeded hostile inputs
+  engram's side also gained a permanent fuzz suite this cycle: 900 seeded hostile inputs
   through parsePage/serializePage/slugify — the surface compiled pages are written to — with a
   parse→serialize→parse fixed-point invariant, all holding on first run (84/84).
 - **Axe re-swept with the new states in the tree — two real fixes.** The earlier zero-violation
@@ -398,7 +398,7 @@ Written after the sprint that followed the original verdict; each line names its
   outbound sync — no page after it got cards. That's a when-not-if failure for math-heavy vaults.
   syncOutbound now contains a generation failure to its page: logged loudly, counted in a new
   honest `failed` field, and the run carries on. Pinned by a unit test using the suite's real
-  loreweaver fixture.
+  engram fixture.
 - **Second card-gen find from the same probe: the fence.** The re-run with containment produced
   8 genuinely strong cards (atomic, correct, misconception-first where one was recorded) and one
   contained failure — whose raw text showed the model wrapping its JSON in a ```json fence
@@ -602,20 +602,20 @@ Written after the sprint that followed the original verdict; each line names its
   after the last '=' (every derivation's final-answer convention, and "x = 4"), then a lone
   number token in prose ("about 0.02"); genuine ambiguity ("between 3 and 5") still refuses to
   guess. Suite crossed 1000 tests with the five new cases.
-- **Loreweaver decay-semantics fix: confusion no longer extends trust.** Chasing the grader-bug
+- **Engram decay-semantics fix: confusion no longer extends trust.** Chasing the grader-bug
   fallout showed applyEvidence stamped last_reinforced=today for EVERY evidence kind — including
   'misconception', which changes no level and demonstrates the opposite of standing, so recording
   a learner's confusion about a practicing page handed it a whole fresh decay window.
   last_reinforced now means "the date the current standing was established": level-changing kinds
   still restart it ('struggled' correctly starts the demoted level's clock at the demotion);
   'misconception' keeps the previous date while its evidence entry still records the day. Two new
-  tests; loreweaver suite 86 green. ('struggled' demoting the page out of the due queue and into
+  tests; engram suite 86 green. ('struggled' demoting the page out of the due queue and into
   next_lessons as a re-teach target was examined and left alone — fail → reset → relearn is the
   right spaced-repetition shape.)
 - **AppImage rebuilt current (340 MB, gitignored artifact).** The distributed build now carries
   everything this window shipped: the cold-start freeform default, the MathLive-dialect KaTeX
   macros, the mode-switch context re-injection, server-side turn persistence, extractAnswerNumber,
-  the resume-title resolution, and — verified inside the bundled loreweaver's dist — the
+  the resume-title resolution, and — verified inside the bundled engram's dist — the
   misconception-decay fix. All confirmed by string inspection of the asar and bundle rather than
   trust in the build script; binary smoke-passed with --appimage-extract-and-run. Both repos'
   worktrees stayed clean through the build (the npm-ci bundling rule earning its keep).
@@ -623,7 +623,7 @@ Written after the sprint that followed the original verdict; each line names its
   wild.** The Library's set-as-goal writes the goal (kind/slug/setOn persisted, GOAL tag + clear
   goal rendered), and a brand-new sitting opened oriented to it unprompted: "I'm back — where
   were we?" got the goal path's resume point probed first, no re-teaching. Mid-turn the tutor
-  hallucinated a block under the wrong MCP prefix (mcp__loreweaver__quick_check) with the
+  hallucinated a block under the wrong MCP prefix (mcp__engram__quick_check) with the
   required `mode` field also missing: the SDK refused the nonexistent tool, the client's schema
   re-validation rendered the honest "✗ quick check could not be shown — the tutor sent it
   malformed", and the model retried correctly in the same turn. Examined and deliberately left
@@ -756,19 +756,19 @@ Written after the sprint that followed the original verdict; each line names its
   (inside video-ingest.e2e.ts to inherit its runs-last compile-ordering guarantee): a temp
   markdown file's path through the one Add-material field asserts the 200, the Library takeover,
   and the on-disk chapter split. Suite is 9 browser specs.
-- **loreweaver queries.ts audited clean.** The next_lessons engine read for correctness the way
+- **engram queries.ts audited clean.** The next_lessons engine read for correctness the way
   the decay bug was found: reviewDue keys on slipped-only (due-soon is the harness's layer),
   unmetPrereqs teaches deepest-first by post-order DFS with cycle protection, frontier respects
   decayed prereqs and falls back to easiest-first without embeddings, dedup and caps are sane.
   Nothing to fix. The dangling attention-scaling probe was also answered (√d_k growth →
   softmax saturation) — correct, evidence recorded.
-- **loreweaver linking audited — one edge-case hardened.** proposeLinks' lexical pass is
+- **engram linking audited — one edge-case hardened.** proposeLinks' lexical pass is
   verify-gated noise by design (short generic titles produce candidates the VERIFY_CONTRACT
   drops), but includes('') is always true: one explicitly-empty frontmatter title — which the
   vault loader passes through, it only checks typeof — would have lexically proposed against
-  the entire vault in both directions. Guarded: no title, no lexical signal. loreweaver suite
-  87 green; the loreweaver correctness sweep (student model, queries, linking) is complete.
-- **AppImage re-batched through the linking guard** — the bundled loreweaver's propose.js carries
+  the entire vault in both directions. Guarded: no title, no lexical signal. engram suite
+  87 green; the engram correctness sweep (student model, queries, linking) is complete.
+- **AppImage re-batched through the linking guard** — the bundled engram's propose.js carries
   the empty-title fix, verified by inspection. Artifact current with all eighteen fixes.
 - **courseBank audited — id collisions fixed.** The bank's "stable id" contract broke on real
   document shapes: psets repeat printed numbers across sections (two "Problem 1"s) and
@@ -787,7 +787,7 @@ Written after the sprint that followed the original verdict; each line names its
   escaped-stamp and already-a-link guards in linkifyTimestamps (traced against the actual
   emitted `[\[2:40\]](…)` shape), and the length-or-silence paragraph breaks all hold. With
   this, the session's contract-read sweep covers every harness server module that carries
-  learner-facing logic, plus loreweaver's three logic modules — four real fixes came out of the
+  learner-facing logic, plus engram's three logic modules — four real fixes came out of the
   reads (decay, empty-title, course-bank ids, and the earlier percent rule).
 - **A new capability, learner-driven: the `speak` "hear this" tool.** The user asked for a
   Vietnamese-learner run and, if the audio capability was missing, to research open-source

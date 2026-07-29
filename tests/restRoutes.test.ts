@@ -17,7 +17,7 @@ async function tick(times = 20) {
 }
 
 // compileNext/route tests elsewhere (tests/ingestRepo.test.ts, tests/ingestRoutes.test.ts) use the
-// same shape of plain-object stub for the Loreweaver client — a real MCP round-trip for
+// same shape of plain-object stub for the Engram client — a real MCP round-trip for
 // GET /api/graph is already covered by tests/mcp.test.ts.
 function fakeLw(opts: { slugs?: string[]; fail?: () => boolean } = {}) {
   const { slugs = ['a'], fail = () => false } = opts;
@@ -234,7 +234,7 @@ function pageLw(opts: {
         }
         const title = opts.pages[args.slug];
         // Mirrors the real tool: a slug with no page is an error, not an empty page.
-        if (title === undefined) throw new Error(`loreweaver read_page: page not found: ${args.slug}`);
+        if (title === undefined) throw new Error(`engram read_page: page not found: ${args.slug}`);
         return { page: { slug: args.slug, meta: { title } }, edges: { in: [], out: [] } };
       }
       throw new Error(`pageLw: unexpected call ${name}`);
@@ -375,12 +375,12 @@ describe('GET /api/page/:slug for a page that does not exist', () => {
   const missingLw = {
     listSlugs: async () => [],
     // Mirrors read_page's own wording, routed through lw.call's throw-on-isError.
-    call: async () => { throw new Error('loreweaver read_page: page not found: ghost'); },
+    call: async () => { throw new Error('engram read_page: page not found: ghost'); },
   } as any;
 
   it('answers 404, not 500', async () => {
     const res = await buildRestRoutes(missingLw, cfg).request('/api/page/ghost');
-    // A dangling wiki-link is the most ordinary thing a typed graph produces — Loreweaver models it
+    // A dangling wiki-link is the most ordinary thing a typed graph produces — Engram models it
     // (`missingTargets`) — so it must not be reported to the learner as a harness malfunction.
     expect(res.status).toBe(404);
     expect((await res.json()).error).toMatch(/no page for/i);
@@ -389,7 +389,7 @@ describe('GET /api/page/:slug for a page that does not exist', () => {
   it('still propagates a genuine failure as a 500', async () => {
     const brokenLw = {
       listSlugs: async () => [],
-      call: async () => { throw new Error('loreweaver read_page: ENOSPC writing index'); },
+      call: async () => { throw new Error('engram read_page: ENOSPC writing index'); },
     } as any;
     // Blanket-catching would have turned every backend fault into a soothing "not written yet".
     const res = await buildRestRoutes(brokenLw, cfg).request('/api/page/ghost');
@@ -402,7 +402,7 @@ describe('GET /api/due and /api/session-plan', () => {
 
   function spacedLw() {
     const state: Record<string, any> = {
-      // slipped: practicing, window passed, loreweaver reports slipped=true, days_left=null
+      // slipped: practicing, window passed, engram reports slipped=true, days_left=null
       slipped: { level: 'practicing', effective: 'exposed', last_reinforced: day(25), days_left: null, slipped: true, misconceptions: [] },
       // due soon
       soon: { level: 'practicing', effective: 'practicing', last_reinforced: day(19), days_left: 2, slipped: false, misconceptions: [] },

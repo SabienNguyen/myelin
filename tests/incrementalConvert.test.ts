@@ -6,7 +6,7 @@ import { startConversion, readQueue } from '../src/server/ingest.js';
 import type { IncrementalConverter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
-/** startConversion needs a Loreweaver for its post-completion ensureCompileDrain kick — these
+/** startConversion needs a Engram for its post-completion ensureCompileDrain kick — these
  * tests use cfg.models = {} (no compile role), so ensureCompileDrain's own defensive guard bails
  * out immediately without touching lw at all. A minimal stub is enough. */
 function fakeLw() {

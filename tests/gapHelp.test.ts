@@ -53,7 +53,7 @@ function fakeLw(page?: { body: string }): any {
   return {
     call: async (name: string, args: any) => {
       if (name === 'read_page') {
-        if (!page) throw new Error(`loreweaver read_page: page not found: ${args.slug}`);
+        if (!page) throw new Error(`engram read_page: page not found: ${args.slug}`);
         return { page };
       }
       throw new Error(`unexpected lw.call("${name}")`);

@@ -2,21 +2,21 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Loreweaver } from '../src/server/mcp.js';
+import { Engram } from '../src/server/mcp.js';
 import { courseMcpTools, createClaudeSdkTutorSession, generateMcpTools } from '../src/server/claudeSdkTutor.js';
 import { getGraphCached, invalidateGraphCache } from '../src/server/graphCache.js';
 import { loadSdkSession, loadThread, saveSdkSession } from '../src/server/sessionStore.js';
 import { LW_REPO } from './lwRepo.js';
 
-let lw: Loreweaver; let vault: string; let cfg: any;
+let lw: Engram; let vault: string; let cfg: any;
 
 beforeAll(async () => {
   vault = mkdtempSync(join(tmpdir(), 'lwh-sdk-vault-'));
   mkdirSync(join(vault, 'pages'), { recursive: true });
   writeFileSync(join(vault, 'pages', 'arith.md'), '---\ntitle: Arithmetic\ndifficulty: 1\nstatus: solid\n---\nnumbers');
-  const loreweaverCfg = { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' as const };
-  cfg = { student: 'kid', vault, models: { tutor: { model: 'claude-sdk:sonnet' } }, loreweaver: loreweaverCfg };
-  lw = await Loreweaver.connect({ vault, student: 'kid', loreweaver: loreweaverCfg } as any);
+  const engramCfg = { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' as const };
+  cfg = { student: 'kid', vault, models: { tutor: { model: 'claude-sdk:sonnet' } }, engram: engramCfg };
+  lw = await Engram.connect({ vault, student: 'kid', engram: engramCfg } as any);
 }, 30_000);
 afterAll(async () => { await lw.close(); });
 
@@ -114,7 +114,7 @@ describe('follow-up turn with a completed block output', () => {
       // Call record_evidence so the guardrail doesn't fire a second query in this test.
       yield assistantMsg('sess-stored', [
         { type: 'text', text: 'Good job.' },
-        { type: 'tool_use', id: 'tc-ev', name: 'mcp__loreweaver__record_evidence', input: { student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'x' } },
+        { type: 'tool_use', id: 'tc-ev', name: 'mcp__engram__record_evidence', input: { student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'x' } },
       ]);
       yield resultMsg('sess-stored');
     }
@@ -191,7 +191,7 @@ describe('evidence guardrail', () => {
       yield initMsg('sess-l0');
       yield assistantMsg('sess-l0', [
         { type: 'text', text: 'Recorded.' },
-        { type: 'tool_use', id: 'tc-ev2', name: 'mcp__loreweaver__record_evidence',
+        { type: 'tool_use', id: 'tc-ev2', name: 'mcp__engram__record_evidence',
           input: { student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'inflated' } },
       ]);
       yield resultMsg('sess-l0');
@@ -334,10 +334,10 @@ describe('Bug C: real SDK cadence — one assistant envelope PER content block, 
       // content_block_start(2, tool_use) — real API index 2.
       yield streamEventMsg('sess-cadence', 'u-cbs2', {
         type: 'content_block_start', index: 2,
-        content_block: { type: 'tool_use', id: 'tc-search', name: 'mcp__loreweaver__search', input: {} },
+        content_block: { type: 'tool_use', id: 'tc-search', name: 'mcp__engram__search', input: {} },
       });
       yield assistantMsg('sess-cadence', [
-        { type: 'tool_use', id: 'tc-search', name: 'mcp__loreweaver__search', input: { query: 'arith' } },
+        { type: 'tool_use', id: 'tc-search', name: 'mcp__engram__search', input: { query: 'arith' } },
       ]);
       yield streamEventMsg('sess-cadence', 'u-cbstop2', { type: 'content_block_stop', index: 2 });
       yield resultMsg('sess-cadence');
@@ -359,7 +359,7 @@ describe('Bug C: real SDK cadence — one assistant envelope PER content block, 
   }, 30_000);
 });
 
-describe('Bug B: loreweaver arg sanitization is wired through a live seam, not shadowed canUseTool', () => {
+describe('Bug B: engram arg sanitization is wired through a live seam, not shadowed canUseTool', () => {
   it('exposes a PreToolUse hook (not a bypassPermissions-shadowed canUseTool) that force-corrects the student id', async () => {
     const calls: any[] = [];
     async function* fakeQuery(params: any) {
@@ -388,7 +388,7 @@ describe('Bug B: loreweaver arg sanitization is wired through a live seam, not s
       {
         hook_event_name: 'PreToolUse',
         session_id: 'sess-hookcheck', transcript_path: '/tmp/x', cwd: '/tmp',
-        tool_name: 'mcp__loreweaver__record_evidence',
+        tool_name: 'mcp__engram__record_evidence',
         tool_input: { student: 'WRONG-ID', slug: 'arith', kind: 'applied-correctly', note: 'x' },
         tool_use_id: 'tu1',
       },
@@ -399,7 +399,7 @@ describe('Bug B: loreweaver arg sanitization is wired through a live seam, not s
   }, 30_000);
 });
 
-describe('single-writer rule: the SDK hook confines every vault-mutating loreweaver tool to freeform', () => {
+describe('single-writer rule: the SDK hook confines every vault-mutating engram tool to freeform', () => {
   // unlink_pages rewrites the page to delete an edge — a vault mutation like write_page/link_pages.
   // allowedTools does not gate under bypassPermissions (see the hook's own comment), so if the hook
   // does not name unlink_pages it is auto-allowed in learn/review/quiz — the drift this locks out.
@@ -420,7 +420,7 @@ describe('single-writer rule: the SDK hook confines every vault-mutating lorewea
   }
   const call = (hookFn: any, tool: string) => hookFn(
     { hook_event_name: 'PreToolUse', session_id: 'sess-sw', transcript_path: '/tmp/x', cwd: '/tmp',
-      tool_name: `mcp__loreweaver__${tool}`, tool_input: { src: 'a', dst: 'b', type: 'prereq' }, tool_use_id: 't' },
+      tool_name: `mcp__engram__${tool}`, tool_input: { src: 'a', dst: 'b', type: 'prereq' }, tool_use_id: 't' },
     't', { signal: new AbortController().signal },
   );
 
@@ -525,15 +525,15 @@ describe('graph-cache invalidation on the SDK route', () => {
     await getGraphCached(fetchGraph);
     expect(fetches).toBe(1); // warm cache serves without refetching
 
-    await hookFn(hookInput('mcp__loreweaver__read_page'), 'tu-cache', hookExtra);
+    await hookFn(hookInput('mcp__engram__read_page'), 'tu-cache', hookExtra);
     await getGraphCached(fetchGraph);
     expect(fetches).toBe(1); // reads must NOT invalidate
 
-    await hookFn(hookInput('mcp__loreweaver__record_evidence'), 'tu-cache', hookExtra);
+    await hookFn(hookInput('mcp__engram__record_evidence'), 'tu-cache', hookExtra);
     await getGraphCached(fetchGraph);
     expect(fetches).toBe(2); // evidence write dropped the cache
 
-    await hookFn(hookInput('mcp__loreweaver__write_page'), 'tu-cache', hookExtra);
+    await hookFn(hookInput('mcp__engram__write_page'), 'tu-cache', hookExtra);
     await getGraphCached(fetchGraph);
     expect(fetches).toBe(3); // page write dropped it too
   }, 30_000);
@@ -654,7 +654,7 @@ describe('step boundary — a grade turn must not re-trigger the client auto-res
       yield initMsg('sess-step');
       yield assistantMsg('sess-step', [
         { type: 'text', text: 'Graded.' },
-        { type: 'tool_use', id: 'tc-ev2', name: 'mcp__loreweaver__record_evidence', input: { student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'x' } },
+        { type: 'tool_use', id: 'tc-ev2', name: 'mcp__engram__record_evidence', input: { student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'x' } },
       ]);
       yield resultMsg('sess-step');
     }
@@ -714,7 +714,7 @@ describe('freeform research grant', () => {
 
     expect(calls[0].options.allowedTools).toContain('WebSearch');
     expect(calls[0].options.allowedTools).toContain('WebFetch');
-    expect(calls[0].options.allowedTools).toContain('mcp__loreweaver__create_path');
+    expect(calls[0].options.allowedTools).toContain('mcp__engram__create_path');
     expect(calls[0].options.systemPrompt).toMatch(/available on every turn in this mode/);
     expect(calls[0].options.systemPrompt).not.toMatch(/HARNESS gap line/);
 
@@ -828,7 +828,7 @@ describe('PreToolUse hook enforces freeform-only writes', () => {
     return calls[0].options.hooks.PreToolUse[0].hooks[0];
   }
   const call = (hook: any, tool: string) => hook({
-    hook_event_name: 'PreToolUse', tool_name: `mcp__loreweaver__${tool}`, tool_input: { student: 'kid' },
+    hook_event_name: 'PreToolUse', tool_name: `mcp__engram__${tool}`, tool_input: { student: 'kid' },
   });
 
   it('denies write_page in learn, allows it in freeform, always allows teach tools', async () => {

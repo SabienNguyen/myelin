@@ -3,7 +3,7 @@ import { create, all } from 'mathjs';
 import { generateText, Output } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
 import { TONE_SYSTEMS, type ToneSystem } from '../shared/toneContour.js';
-import type { EvidenceKind } from '../shared/loreweaver.js';
+import type { EvidenceKind } from '../shared/engram.js';
 import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import { modelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
@@ -502,7 +502,7 @@ export interface Grade {
  * stays honest.
  *
  * Note for whoever changes applyEvidence next: today this cap has NO effect on mastery, because
- * loreweaver's student/model.ts puts 'explained-correctly' and 'applied-correctly' in the same
+ * engram's student/model.ts puts 'explained-correctly' and 'applied-correctly' in the same
  * branch — both step exactly one rung. So the two kinds currently differ in truthfulness and
  * nothing else. That is a live design question (should applied work resist decay longer? should
  * explaining alone be unable to reach 'mastered'?) and this is the seam where it would be answered.
@@ -850,7 +850,7 @@ export async function gradeBlockOutput(
 
   // writing_draft with an explicit rubric — the judged-work path for essay subjects. The grader
   // marks each stated criterion pass/fail; passing ALL of them mints 'rubric-passed', the third
-  // positive evidence kind (loreweaver caps it at practicing and decays it on its own shorter
+  // positive evidence kind (engram caps it at practicing and decays it on its own shorter
   // window). It is deliberately NOT 'applied-correctly' — a rubric is a model applying criteria,
   // and naming it keeps it from ever laundering into the evidence that gates 'mastered'.
   if (Array.isArray(input.rubric) && input.rubric.length > 0) {
