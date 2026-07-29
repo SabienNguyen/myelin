@@ -2,7 +2,7 @@ name: ci
 
 # The harness's unit suite spawns the REAL engram MCP server (tests/mcp.test.ts and friends
 # resolve it at ~/Dev/personal/engram), and the e2e backend does the same — so CI needs a
-# checkout of SabienNguyen/loreweaver next to this repo. The checkout is ATTEMPTED on every run:
+# checkout of SabienNguyen/engram next to this repo. The checkout is ATTEMPTED on every run:
 # with engram public it succeeds on the default GITHUB_TOKEN (forks included, no setup); if
 # it is private, a fine-grained PAT with read (contents) access saved as the repository secret
 # ENGRAM_CI_TOKEN authorises it instead.
@@ -30,14 +30,14 @@ jobs:
         timeout-minutes: 3
         uses: actions/checkout@v4
         with:
-          repository: SabienNguyen/loreweaver
+          repository: SabienNguyen/engram
           token: ${{ secrets.ENGRAM_CI_TOKEN || github.token }}
           path: engram
 
       - name: Report a skipped engram checkout
         if: steps.gate.outcome != 'success'
         run: |
-          echo "::warning::Could not check out SabienNguyen/loreweaver — skipping the suites that spawn it. A public engram needs no setup; a private one needs a fine-grained PAT with read access saved as ENGRAM_CI_TOKEN."
+          echo "::warning::Could not check out SabienNguyen/engram — skipping the suites that spawn it. A public engram needs no setup; a private one needs a fine-grained PAT with read access saved as ENGRAM_CI_TOKEN."
 
       # The suites resolve both repos through ~/Dev/personal (see tests/mcp.test.ts and
       # tests/e2e/*.config.json) — mirror that layout with symlinks.
