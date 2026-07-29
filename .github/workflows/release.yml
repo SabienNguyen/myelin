@@ -44,13 +44,24 @@ jobs:
 
       - run: npm ci
 
-      # build:all + bundle:engram + electron-builder. CSC_IDENTITY_AUTO_DISCOVERY=false keeps the
-      # macOS build from trying to sign with a certificate that isn't there.
+      # build:all + bundle:engram + electron-builder.
+      #
+      # Signing is opt-in via repository secrets and OFF by default — with none set, every var below
+      # is empty and electron-builder produces the same unsigned installers as before (see
+      # docs/SIGNING.md for what to add). CSC_LINK carries the platform's certificate: on the macOS
+      # runner a Developer ID .p12, on the Windows runner a code-signing .pfx — each job reads its own
+      # secret. CSC_IDENTITY_AUTO_DISCOVERY=false stops a keychain search when no cert is provided; an
+      # explicit CSC_LINK still signs. The APPLE_* trio drives notarization in electron/notarize.mjs.
       - name: Build installer
         run: npm run dist
         env:
           ENGRAM_REPO: ${{ github.workspace }}/engram
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_LINK || runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || runner.os == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload to the release
