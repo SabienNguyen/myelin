@@ -1,6 +1,6 @@
 # 2026-07-28 — Autonomous hardening pass: findings and open decisions
 
-**Status:** summary of an autonomous session. **Seven fixes are shipped** on
+**Status:** summary of an autonomous session. **Eight fixes are shipped** on
 `claude/analyze-repos-dinnsr` and green at unit + type + browser tiers. **Four items are left for the
 owner** — three product/pedagogy decisions and one verification that needs a real Claude
 subscription. None of those four is actioned: each changes behavior on a judgment call (or can't be
@@ -14,7 +14,7 @@ transfers: a structured page template — see `2026-07-28-structured-page-templa
 broader pass: drive every flow in the real app, cross-check state-view and route pairs, sweep bug
 classes, and read + test the core engine.
 
-## Shipped fixes (7)
+## Shipped fixes (8)
 
 | Commit | Fix | How it was found |
 | --- | --- | --- |
@@ -23,6 +23,7 @@ classes, and read + test the core engine.
 | `0ffa950` | Due-count badge aria-label: "1 page", not "1 pages". | Drove the ReviewQueue with a crafted slipped-page fixture. |
 | `0e85603` | Graph node aria-label: "1 day until decay", not "1 days". | Swept the pluralization class the badge bug revealed. |
 | `0d55b78` (+ `9c1bd3e` test) | `generate_exercise` restored on the Claude-subscription tutor route — it was wired on the API-key route only, so subscription learners couldn't have the tutor author a practice exercise. See "The port" below. | Cross-checked the two tutor routes against the code's own "keep in sync by hand" invariant. |
+| `3ff0161` | **`quick_check` and `quiz` also failed the whole turn on a malformed result** — completing the class `24f7382` opened. `quick_check` read `result.answer.trim()`, `quiz` read `result.answers.find(...)`, both unguarded; `structured_check`/`label_diagram`/`pronounce`/`code_exercise` already coerced. Block outputs are NOT schema-validated before grading (session.ts validates the tool input, not the submitted result) and are persisted/reloaded from thread JSON, so a malformed result reaches grading directly. Coerced to safe defaults (missing answer → miss; missing answers array → all-incorrect). | Swept the turn-safety class across all seven graded branches after `24f7382`. |
 | `24f7382` | **A malformed `math_scratchpad` submission failed the whole turn.** The `stepMode` `badStep` read `result.steps.findIndex(...)` with no `Array.isArray` guard — while the breakNote walk 12 lines below guards the same field. A submission with `stepMode` input true but no `steps` array (not the UI, but reachable from a direct API call / buggy client) threw `findIndex of undefined`; since `gradeBlockOutput` runs inside the turn's `execute()` under `onError:turnError`, the throw lost the grade AND the tutor reply instead of grading the final answer. Mirrored the guard. | Drove step-mode multi-step derivations (add/edit/save/submit); probed the malformed edge at the unit layer. |
 | `8bc1983` | **A blank `math_scratchpad` answer graded "correct".** `sampledEqual` returned `true` whenever every sample point was skipped — an empty/blank/non-evaluable answer compiles to a node that throws or yields a non-number, so the loop only ever `continue`d and fell through to `return true`, minting fabricated `applied-correctly` evidence. Guarded exactly as its sibling `residualsProportional` already is (nothing checked → not equivalent). This was a grading-honesty defect in the core evidence layer — the highest-severity class in the system. | Drove the real `math_scratchpad` flow; a blank submit came back green. Confirmed at the unit layer (`mathEquivalent('', '2x') === true`) and swept the sibling structured checkers (all already reject empty). |
 
@@ -65,6 +66,11 @@ a regression), but it's the honest last mile.
   reach, Space to select, Enter to submit — no focus trap).
 - **Anki sync**: outbound/inbound share one ledger (`anki-map.json`); the `_cursor` key is filtered
   on both sides.
+- **Turn-safety on a malformed submission** (the class the `math_scratchpad` steps bug revealed):
+  swept all seven graded branches of `gradeBlockOutput`. `quick_check`/`quiz`/`math_scratchpad` read
+  a required result field unguarded and threw inside the turn's `execute()` (failing the whole turn) —
+  all three now coerce (`24f7382`, `3ff0161`). `structured_check`/`label_diagram`/`pronounce`/
+  `code_exercise` already coerced (`?? []`, scalar compares). No branch throws on an absent field.
 - **Empty/no-op submit → false evidence** (the class the `math_scratchpad` bug revealed, then swept
   across every graded block): `math_scratchpad` was the SOLE hole (fixed, `8bc1983`). The others
   each already guard it — `structured_check`'s `clean` filter drops blanks before grading,
