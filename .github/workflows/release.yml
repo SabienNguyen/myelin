@@ -1,0 +1,76 @@
+name: release
+
+# Cut a release by pushing a version tag (e.g. `git tag v0.1.0 && git push origin v0.1.0`).
+# Each OS runner builds its own installer with electron-builder and uploads it to the GitHub
+# Release for the tag: an AppImage (Linux), a dmg (macOS), and an NSIS .exe (Windows). The build
+# is UNSIGNED — macOS and Windows will warn on first launch until signing/notarization is set up.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # electron-builder bundles the Engram core into the app (scripts/bundle-engram.mjs), so the
+      # core has to be present. Checked out INSIDE the workspace; ENGRAM_REPO points the bundler at
+      # it. A public engram needs no secret; a private one needs ENGRAM_CI_TOKEN (falls back to the
+      # old LOREWEAVER_CI_TOKEN name so an un-renamed secret still works).
+      - name: Check out engram beside the harness
+        uses: actions/checkout@v4
+        with:
+          repository: SabienNguyen/engram
+          token: ${{ secrets.ENGRAM_CI_TOKEN || secrets.LOREWEAVER_CI_TOKEN || github.token }}
+          path: engram
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # build:all + bundle:engram + electron-builder. CSC_IDENTITY_AUTO_DISCOVERY=false keeps the
+      # macOS build from trying to sign with a certificate that isn't there.
+      - name: Build installer
+        run: npm run dist
+        env:
+          ENGRAM_REPO: ${{ github.workspace }}/engram
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          fail_on_unmatched_files: false
+          body: |
+            Myelin ${{ github.event.inputs.tag || github.ref_name }} — a learn-anything desktop tutor.
+
+            Download the installer for your platform below and run it; nothing else to install and
+            no config to write. Builds are **unsigned**, so macOS and Windows will warn on first
+            launch (right-click → Open on macOS; "More info → Run anyway" on Windows).
+          files: |
+            release/*.AppImage
+            release/*.dmg
+            release/*.exe
+            release/*.zip
+            release/*.blockmap
+            release/latest*.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

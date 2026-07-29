@@ -1,6 +1,6 @@
 {
   "name": "myelin",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "A localhost tutor with a teaching memory: it researches a subject, writes an Obsidian-compatible vault of pages, and grades your work against them.",
   "repository": {
     "type": "git",
@@ -92,7 +92,7 @@
   },
   "build": {
     "appId": "dev.myelin.app",
-    "productName": "Engram",
+    "productName": "Myelin",
     "files": [
       "dist/**",
       "dist-server/**",
