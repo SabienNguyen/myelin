@@ -568,8 +568,14 @@ export async function gradeBlockOutput(
   tool: BlockToolName, input: any, result: any, cfg: HarnessConfig, deps: GradingDeps = {},
 ): Promise<Grade> {
   if (tool === 'quick_check') {
+    // Coerce once: the client always sends a string `answer`, but block outputs are not
+    // schema-validated before grading (session.ts validates the tool INPUT, not the submitted
+    // result), and a malformed/legacy output reaching `result.answer.trim()` threw inside the
+    // turn's execute() — failing the whole turn. A missing answer becomes '', which already grades
+    // as a miss on the path below; existing empty-submission behavior is unchanged.
+    const answer = String(result.answer ?? '');
     if (input.expected != null) {
-      const ok = result.answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
+      const ok = answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
       if (ok) {
         return {
           verdict: 'correct',
@@ -584,9 +590,9 @@ export async function gradeBlockOutput(
       // kind (capApplied keeps it from minting applied-correctly — a model judged it, honestly so),
       // and a genuinely wrong one still records struggled. Free-text punishing phrasing teaches
       // learners to guess the grader's wording, which is the opposite of knowing the thing.
-      return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps, input.expected);
+      return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected);
     }
-    return gradeOpenAnswer(input.question, result.answer, input.pageSlug, cfg, deps);
+    return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps);
   }
 
   if (tool === 'math_scratchpad') {
@@ -640,8 +646,12 @@ export async function gradeBlockOutput(
     // are exact-matched, short-answer items go to the grader model. The per-ITEM source therefore
     // has to be carried through the aggregation, because evidence is emitted per SLUG and one
     // model-graded item is enough to make that slug's verdict a judgement rather than a check.
+    // Same guard as quick_check/math_scratchpad: block outputs aren't schema-validated before
+    // grading, so a malformed submission with no `answers` array reaching `.find` threw inside the
+    // turn's execute() and failed the whole turn. No answers → every item is unanswered → incorrect.
+    const submitted = Array.isArray(result.answers) ? result.answers : [];
     const perItem = await Promise.all(input.items.map(async (item: any) => {
-      const answer = result.answers.find((a: any) => a.id === item.id)?.answer ?? '';
+      const answer = submitted.find((a: any) => a.id === item.id)?.answer ?? '';
       if (item.type !== 'short' && item.expected != null) {
         return {
           id: item.id, source: 'mechanical' as GradeSource,
