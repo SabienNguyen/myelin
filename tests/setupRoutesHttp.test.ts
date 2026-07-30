@@ -277,3 +277,53 @@ describe('GET/PUT /api/setup/models', () => {
     });
   });
 });
+
+describe('POST /api/setup/models/pull — choose a model, we install it', () => {
+  const ndjson = (lines: object[]) => new ReadableStream<Uint8Array>({
+    start(controller) {
+      const enc = new TextEncoder();
+      for (const l of lines) controller.enqueue(enc.encode(`${JSON.stringify(l)}\n`));
+      controller.close();
+    },
+  });
+
+  it('proxies Ollama /api/pull with {name,stream} and relays its NDJSON body verbatim', async () => {
+    process.env.OLLAMA_BASE_URL = 'http://ollama.test/v1';
+    const body = ndjson([
+      { status: 'pulling manifest' },
+      { status: 'downloading', total: 100, completed: 40 },
+      { status: 'success' },
+    ]);
+    const probeFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(url).toBe('http://ollama.test/api/pull'); // root, not the /v1 compat prefix
+      expect(JSON.parse(String(init?.body))).toEqual({ name: 'qwen3:8b', stream: true });
+      return { ok: true, body, status: 200 };
+    });
+    const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
+    const res = await app.request('/api/setup/models/pull', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'qwen3:8b' }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/x-ndjson');
+    const text = await res.text();
+    expect(text).toContain('"status":"downloading"');
+    expect(text).toContain('"completed":40');
+    expect(text.trim().split('\n')).toHaveLength(3); // passed through line-for-line
+  });
+
+  it('a missing model name is a 400, and Ollama unreachable is a 502 that names ollama.com', async () => {
+    const app400 = buildSetupRoutes(cfgWith(plainModels()));
+    expect((await app400.request('/api/setup/models/pull', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+    })).status).toBe(400);
+
+    const probeFetch = vi.fn(async () => { throw new Error('connect ECONNREFUSED'); });
+    const app502 = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
+    const res = await app502.request('/api/setup/models/pull', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'qwen3:8b' }),
+    });
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toMatch(/ollama\.com/);
+  });
+});

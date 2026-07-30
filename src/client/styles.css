@@ -2614,6 +2614,29 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .models-preset button { font-size: 0.78rem; padding: 0.2rem 0.6rem; white-space: nowrap; }
 .models-group { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; }
 .models-hint { font-size: 0.72rem; color: var(--text-muted); }
+
+/* "Choose a model, we install it" — the pull-and-configure list, shared by the models dialog and
+   the first-run card. One row per recommended model: name + note on the left, a Get/use-it button
+   or a live progress bar on the right. Token-based, so light and dark come free. */
+.local-getter { display: flex; flex-direction: column; gap: 0.35rem; }
+.local-getter-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
+  padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+}
+.local-getter-info { display: flex; flex-direction: column; min-width: 0; }
+.local-getter-name { font-size: 0.85rem; font-weight: 600; }
+.local-getter-note { font-size: 0.72rem; color: var(--text-muted); }
+.local-getter-get {
+  font-size: 0.8rem; padding: 0.25rem 0.8rem; white-space: nowrap;
+  background: var(--accent); color: var(--accent-text); border: none; border-radius: 5px; cursor: pointer;
+}
+.local-getter-get:disabled { opacity: 0.5; cursor: default; }
+.local-getter-use { font-size: 0.78rem; padding: 0.2rem 0.6rem; white-space: nowrap; }
+.local-getter-progress { display: flex; align-items: center; gap: 0.5rem; min-width: 11rem; }
+.local-getter-progress progress { flex: 1; min-width: 0; height: 0.6rem; accent-color: var(--accent); }
+.local-getter-status { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.local-getter-error { font-size: 0.75rem; color: var(--bad); margin: 0.2rem 0 0; }
+.firstrun-getter-lede { font-size: 0.85rem; margin: 0.4rem 0 0; }
 .models-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3rem; }
 .models-note { font-size: 0.78rem; color: var(--text-muted); }
 .models-note.err { color: var(--warn); }
