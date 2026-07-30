@@ -2,9 +2,7 @@ import { BLOCK_TOOL_NAMES } from '../../shared/blocks.js';
 import type { UIMessage } from '../../shared/uiMessages.js';
 
 /**
- * Auto-resubmit predicate — chatCore's copy of runtime.tsx's `blockOutputsComplete`, identical
- * in semantics (runtime.tsx keeps its own until E2 swaps the runtime and consolidates). Its two
- * load-bearing narrowings, each pinned by tests:
+ * Auto-resubmit predicate. Its two load-bearing narrowings, each pinned by tests:
  *
  * - BLOCK tool parts only (quick_check / quiz / … — the ones a human answers in the browser).
  *   The stock "any completed tool call" rule re-fires on the follow-up turn's server-side MCP

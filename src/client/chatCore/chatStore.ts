@@ -16,9 +16,9 @@ export interface ChatState {
 export interface ChatStoreOptions {
   threadId: string;
   initialMessages: UIMessage[];
-  /** Resolved per REQUEST, not captured at construction — same rule as runtime.tsx's
-   * body-as-a-function: `mode` must track the topbar selector (which never remounts), and
-   * `writeUp` is a one-shot flag armed just before a single send. */
+  /** Resolved per REQUEST, not captured at construction: `mode` must track the topbar selector
+   * (which changes without remounting the store), and `writeUp` is a one-shot flag armed just
+   * before a single send — only that request should carry it. */
   requestContext: () => { mode: string; writeUp: boolean };
   /** Test seam; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
@@ -28,6 +28,12 @@ export class ChatStore {
   private state: ChatState;
   private listeners = new Set<() => void>();
   private inflight: AbortController | null = null;
+  // Tool outputs added while a stream is RUNNING. Every onUpdate/onFinish snapshot comes from
+  // the stream's assembler, which knows nothing of client-added outputs — without re-applying
+  // them to each snapshot, the next chunk silently undoes the learner's answer (ai@6 never had
+  // the race: its addToolResult wrote into the stream's own working state). Cleared at run
+  // start: by then any patch is already part of the history being POSTed.
+  private midRunOutputs = new Map<string, { output: unknown; isError: boolean }>();
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly opts: ChatStoreOptions) {
@@ -68,8 +74,9 @@ export class ChatStore {
   }
 
   /** Write a tool result into its part, then apply the auto-resubmit predicate — the
-   * sendAutomaticallyWhen equivalent. Mid-run results only patch; the finish-time check in
-   * run() picks them up once the stream settles, same as ai@6 deferring auto-send to run end. */
+   * sendAutomaticallyWhen equivalent. Mid-run results patch AND are recorded for re-application
+   * over later stream snapshots (see midRunOutputs); the finish-time check in run() picks them
+   * up once the stream settles, same as ai@6 deferring auto-send to run end. */
   addToolOutput({ toolCallId, output, isError = false }: { toolCallId: string; output: unknown; isError?: boolean }): void {
     const messages = patchToolOutput(this.state.messages, toolCallId, output, isError);
     if (messages === null) {
@@ -79,7 +86,11 @@ export class ChatStore {
       return;
     }
     this.setState({ messages });
-    if (!this.state.isRunning && blockOutputsComplete({ messages })) this.resubmit();
+    if (this.state.isRunning) {
+      this.midRunOutputs.set(toolCallId, { output, isError });
+      return;
+    }
+    if (blockOutputsComplete({ messages })) this.resubmit();
   }
 
   abort(): void {
@@ -88,10 +99,21 @@ export class ChatStore {
     this.setState({ isRunning: false });
   }
 
+  /** Re-apply mid-run tool outputs over a stream snapshot (they are absent from the assembler's
+   * view of the message). A patch that no longer finds its part passes through unchanged. */
+  private withMidRunOutputs(messages: UIMessage[]): UIMessage[] {
+    let out = messages;
+    for (const [toolCallId, { output, isError }] of this.midRunOutputs) {
+      out = patchToolOutput(out, toolCallId, output, isError) ?? out;
+    }
+    return out;
+  }
+
   private async run(): Promise<void> {
     this.inflight?.abort(); // a superseded send loses the stream, not the history
     const controller = new AbortController();
     this.inflight = controller;
+    this.midRunOutputs.clear();
     const { mode, writeUp } = this.opts.requestContext();
     // Clearing a previous turn's error re-clones the last message: assistant-ui's converter
     // caches per message reference and an explicit error status is sticky in that cache, so
@@ -104,7 +126,7 @@ export class ChatStore {
       body: { messages: this.state.messages, mode, threadId: this.opts.threadId, writeUp },
       signal: controller.signal,
       fetchImpl: this.fetchImpl,
-      onUpdate: (inProgress) => { this.setState({ messages: inProgress }); },
+      onUpdate: (inProgress) => { this.setState({ messages: this.withMidRunOutputs(inProgress) }); },
       // Setting the error also re-clones the last message, for the same converter-cache reason
       // clearing one does (refreshLast below): the error status rides the last assistant
       // message's conversion, and without a fresh identity the cached conversion would win.
@@ -120,17 +142,18 @@ export class ChatStore {
       this.setState({ isRunning: false });
       return;
     }
-    this.setState({ messages: finished, isRunning: false });
+    const settled = this.withMidRunOutputs(finished);
+    this.setState({ messages: settled, isRunning: false });
     // Response-side persistence: the server's chatRoute only saves the REQUEST side; the
     // assembled response is saved here. Fire-and-forget, same as the runtime it replaces.
     void this.fetchImpl(`/api/thread/${this.opts.threadId}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(finished),
+      body: JSON.stringify(settled),
     }).catch(() => {});
     // The finish-time predicate check (a result added while the previous stream was still
     // running). Never after an errored turn — a resubmit that errors again would loop.
-    if (this.state.error === undefined && blockOutputsComplete({ messages: finished })) this.resubmit();
+    if (this.state.error === undefined && blockOutputsComplete({ messages: settled })) this.resubmit();
   }
 }
 

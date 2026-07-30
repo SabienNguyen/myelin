@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 //
-// chatCore's copy of the auto-resubmit predicate. Every case here carries the same meaning as
-// its counterpart in tests/client/runtime.test.tsx (which pins runtime.tsx's copy until E2
-// consolidates the two): the T12 MCP runaway, the last-step scoping runaway, and the one
-// legitimate resubmit.
+// The auto-resubmit predicate (formerly pinned via runtime.tsx's copy in
+// tests/client/runtime.test.tsx; consolidated here when chatCore became the runtime): the T12
+// MCP runaway, the last-step scoping runaway, and the one legitimate resubmit.
 import { describe, it, expect } from 'vitest';
 import { blockOutputsComplete } from '../../../src/client/chatCore/blockOutputsComplete.js';
 
