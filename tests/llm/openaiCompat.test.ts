@@ -106,6 +106,42 @@ describe('openai-compat request shaping', () => {
     expect(sent.body.stream_options).toBeUndefined();
   });
 
+  it('a user message with an image becomes array content — text and image_url parts in original order', async () => {
+    respond = okText;
+    await model().generate({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'file', mediaType: 'image/png', data: 'aW1n', filename: 'shot.png' },
+          // No portable compat shape for documents: dropped, never sent malformed (and a local
+          // 7B can't read a PDF anyway).
+          { type: 'file', mediaType: 'application/pdf', data: 'cGRm', filename: 'notes.pdf' },
+          { type: 'text', text: 'what does this show?' },
+        ],
+      }],
+    });
+    expect(captured[0].body.messages).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'image_url', image_url: { url: 'data:image/png;base64,aW1n' } },
+        { type: 'text', text: 'what does this show?' },
+      ],
+    }]);
+  });
+
+  it('a text-only user message keeps the plain-string content shape; a document-only one is dropped whole', async () => {
+    respond = okText;
+    await model().generate({
+      messages: [
+        // Every part of this message drops (document, no text) — no empty-content user message.
+        { role: 'user', content: [{ type: 'file', mediaType: 'application/pdf', data: 'cGRm', filename: 'n.pdf' }] },
+        { role: 'user', content: [{ type: 'text', text: 'q' }] },
+      ],
+    });
+    // The no-attachment body is BYTE-identical to what this adapter always sent: plain string.
+    expect(captured[0].body.messages).toEqual([{ role: 'user', content: 'q' }]);
+  });
+
   it('sends no Authorization header without a key — the local Ollama case', async () => {
     respond = okText;
     await model().generate({ messages: USER_Q, toolChoice: 'auto' });

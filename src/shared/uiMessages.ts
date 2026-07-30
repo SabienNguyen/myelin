@@ -53,7 +53,21 @@ export interface DataUIPart {
   data: unknown;
 }
 
-export type UIPart = TextUIPart | ReasoningUIPart | StepStartUIPart | ToolUIPart | DataUIPart;
+/** A learner-attached file (image or PDF) on a USER message — ai@6's FileUIPart shape, payload
+ * riding a data: URL. The one UIPart that never crosses the response stream: the composer creates
+ * it, uiMessagesToChatMessages reads it back, and the chunk vocabulary (see the header note)
+ * stays untouched because files travel the request direction only. */
+export interface FileUIPart {
+  type: 'file';
+  /** MIME type, e.g. 'image/png' or 'application/pdf'. */
+  mediaType: string;
+  /** data: URL ('data:<mediaType>;base64,<payload>') — exactly what FileReader.readAsDataURL
+   * yields and what an <img src> renders without decoding. */
+  url: string;
+  filename?: string;
+}
+
+export type UIPart = TextUIPart | ReasoningUIPart | StepStartUIPart | ToolUIPart | DataUIPart | FileUIPart;
 
 export interface UIMessage {
   id: string;

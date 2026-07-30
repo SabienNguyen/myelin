@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import {
   createUiStream, generateMessageId, uiMessagesToChatMessages,
@@ -450,6 +450,51 @@ describe('uiMessagesToChatMessages', () => {
         content: [{ type: 'tool-result', toolCallId: 'tc1', toolName: 'quick_check', output: { answer: '4' } }],
       },
     ]);
+  });
+
+  it('converts user file parts from their data: URLs — mediaType from the prefix, bare base64 payload', () => {
+    const messages: UIMessage[] = [{
+      id: 'u1', role: 'user',
+      parts: [
+        { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,aW1n', filename: 'shot.png' },
+        { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,cGRm' },
+        { type: 'text', text: 'see attached' },
+      ],
+    }];
+    expect(uiMessagesToChatMessages(messages)).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'file', mediaType: 'image/png', data: 'aW1n', filename: 'shot.png' },
+        { type: 'file', mediaType: 'application/pdf', data: 'cGRm' },
+        { type: 'text', text: 'see attached' },
+      ],
+    }]);
+  });
+
+  it('skips a file part whose URL is not a well-formed base64 data: URL — history must not kill a turn', () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const messages: UIMessage[] = [{
+        id: 'u1', role: 'user',
+        parts: [
+          { type: 'file', mediaType: 'image/png', url: 'https://example.com/x.png', filename: 'x.png' },
+          { type: 'file', mediaType: 'image/png', url: 'data:image/png,not-base64-framed' },
+          { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,b2s=', filename: 'ok.png' },
+          { type: 'text', text: 'hi' },
+        ],
+      }];
+      // The two malformed parts vanish (each logged); the good file and the text survive.
+      expect(uiMessagesToChatMessages(messages)).toEqual([{
+        role: 'user',
+        content: [
+          { type: 'file', mediaType: 'image/png', data: 'b2s=', filename: 'ok.png' },
+          { type: 'text', text: 'hi' },
+        ],
+      }]);
+      expect(errors).toHaveBeenCalledTimes(2);
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it('groups a multi-step assistant message so each step\'s calls pair with THEIR results', () => {

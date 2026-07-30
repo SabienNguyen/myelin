@@ -7,7 +7,7 @@ import type { LoopEvent } from './loop.js';
 import type { ChatMessage, ContentPart, FinishReason } from './types.js';
 import {
   getToolName, isToolUIPart,
-  type TextUIPart, type UIMessage, type UIPart,
+  type UIMessage, type UIPart,
 } from '../../shared/uiMessages.js';
 import {
   generateMessageId, MessageAssembler, type UiChunk, type UiFinishReason,
@@ -192,7 +192,9 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
  *   (the provider ran the call inside its own turn; replaying it as a client tool_use would
  *   misstate history on the Anthropic wire), and the model's own prose keeps what it learned.
  * - data-* parts, step-start markers, and never-completed (input-streaming) calls are skipped.
- *   A paused block tool (input-available) keeps its tool-call; the resubmit supplies the result. */
+ *   A paused block tool (input-available) keeps its tool-call; the resubmit supplies the result.
+ * - file parts convert on USER messages only (attachments ride the request direction); a file
+ *   part on an assistant message has no producer in this app and is ignored. */
 export function uiMessagesToChatMessages(messages: UIMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const msg of messages) {
@@ -200,9 +202,28 @@ export function uiMessagesToChatMessages(messages: UIMessage[]): ChatMessage[] {
       case 'system':
         throw new Error('system messages ride ChatRequest.system, not the transcript');
       case 'user': {
-        const content: ContentPart[] = msg.parts
-          .filter((p): p is TextUIPart => p.type === 'text')
-          .map((p) => ({ type: 'text', text: p.text }));
+        const content: ContentPart[] = [];
+        for (const part of msg.parts) {
+          if (part.type === 'text') {
+            content.push({ type: 'text', text: part.text });
+          } else if (part.type === 'file') {
+            // The UI part carries a data: URL; the wire part wants bare base64 plus mediaType —
+            // both read from the URL itself (the prefix is what the encoder actually wrote; the
+            // part's mediaType field is display metadata). A non-data: URL or malformed prefix
+            // is SKIPPED with a console.error: history read back from disk must degrade to a
+            // lost attachment, never kill the turn.
+            const parsed = /^data:([^;,]+);base64,(.*)$/s.exec(part.url);
+            if (!parsed) {
+              console.error(`uiMessagesToChatMessages: unparseable file-part URL on message ${msg.id}`
+                + ` (${part.filename ?? part.mediaType}) — attachment dropped`);
+              continue;
+            }
+            content.push({
+              type: 'file', mediaType: parsed[1]!, data: parsed[2]!,
+              ...(part.filename !== undefined ? { filename: part.filename } : {}),
+            });
+          }
+        }
         if (content.length) out.push({ role: 'user', content });
         break;
       }

@@ -53,6 +53,38 @@ describe('dietUiMessages', () => {
     expect(out[0]).toBe(msgs[0]);
   });
 
+  it('stubs file parts on EARLIER user messages, keeping only the last user message\'s attachments', () => {
+    const msgs: UIMessage[] = [
+      {
+        id: 'u1', role: 'user',
+        parts: [
+          { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,aaaa', filename: 'shot.png' },
+          { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,bbbb' },
+          { type: 'text', text: 'what is this?' },
+        ],
+      },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'a diagram' }] },
+      {
+        id: 'u2', role: 'user',
+        parts: [
+          { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,cccc', filename: 'next.png' },
+          { type: 'text', text: 'and this?' },
+        ],
+      },
+    ];
+    const out = dietUiMessages(msgs, new Set());
+    // Earlier attachments: base64 gone, a one-line stub in position (filename, or mediaType
+    // when the part never carried one).
+    expect(out[0]!.parts).toEqual([
+      { type: 'text', text: '[image attached earlier: shot.png]' },
+      { type: 'text', text: '[file attached earlier: application/pdf]' },
+      { type: 'text', text: 'what is this?' },
+    ]);
+    // The LAST user message — what this turn is about — keeps its files, by reference.
+    expect(out[2]).toBe(msgs[2]);
+    expect(out[1]).toBe(msgs[1]);
+  });
+
   it('is deterministic: the same history compacts identically on every call', () => {
     const msgs = asMessages([gradedBlock('old')]);
     const a = JSON.stringify(dietUiMessages(msgs, new Set()));

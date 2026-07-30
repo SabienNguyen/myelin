@@ -2,7 +2,7 @@
 // useExternalStoreRuntime / ExternalStoreAdapter / ThreadMessageLike, re-exported from
 // @assistant-ui/core). The adapter's job is shape translation only; all chat behavior lives in
 // the store.
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   useExternalStoreRuntime,
   type AppendMessage, type AssistantRuntime, type ThreadMessageLike,
@@ -48,6 +48,14 @@ export function uiMessageToThreadMessage(message: UIMessage, error?: string): Th
       });
     } else if (isDataUIPart(part)) {
       content.push({ type: 'data', name: part.type.slice('data-'.length), data: part.data });
+    } else if (part.type === 'file') {
+      // Learner attachments (user messages only — the response stream never emits files).
+      // ThreadMessageLike carries both natively: images as an Image part whose `image` is the
+      // data: URL (rendered inline), PDFs and anything else as a File part (rendered as a
+      // filename chip) — Thread.tsx supplies the components for both.
+      content.push(part.mediaType.startsWith('image/')
+        ? { type: 'image', image: part.url, ...(part.filename !== undefined ? { filename: part.filename } : {}) }
+        : { type: 'file', data: part.url, mimeType: part.mediaType, ...(part.filename !== undefined ? { filename: part.filename } : {}) });
     }
   }
   return {
@@ -76,10 +84,25 @@ export interface ChatCoreRuntimeOptions {
   initialMessages: UIMessage[];
 }
 
-/** Drop-in replacement shape for runtime.tsx's useChatRuntime call: same inputs, an
- * AssistantRuntime out. The caller remounts per threadId (App's key), so the store is created
- * once per thread; `mode` rides a ref so each request reads the CURRENT topbar selection. */
-export function useChatCoreRuntime({ mode, threadId, initialMessages }: ChatCoreRuntimeOptions): AssistantRuntime {
+/** The live ChatStore, for the ONE consumer that must reach past assistant-ui's composer: the
+ * attach-aware composer in Thread.tsx sends text + files straight to the store, because the
+ * primitive's own send() only carries attachments through an AttachmentAdapter this app does not
+ * configure (and its canSend gate would block a files-only send outright). Provided by
+ * runtime.tsx alongside the AssistantRuntimeProvider; everything else keeps going through the
+ * runtime. */
+export const ChatStoreContext = createContext<ChatStore | null>(null);
+
+export function useChatStore(): ChatStore {
+  const store = useContext(ChatStoreContext);
+  if (store === null) throw new Error('useChatStore: no ChatStoreContext provider above');
+  return store;
+}
+
+/** Replacement shape for runtime.tsx's useChatRuntime call: same inputs, an AssistantRuntime out
+ * plus the backing store (for ChatStoreContext — see above). The caller remounts per threadId
+ * (App's key), so the store is created once per thread; `mode` rides a ref so each request reads
+ * the CURRENT topbar selection. */
+export function useChatCoreRuntime({ mode, threadId, initialMessages }: ChatCoreRuntimeOptions): { runtime: AssistantRuntime; store: ChatStore } {
   const modeRef = useRef(mode);
   modeRef.current = mode;
   const [store] = useState(() => new ChatStore({
@@ -106,14 +129,16 @@ export function useChatCoreRuntime({ mode, threadId, initialMessages }: ChatCore
     return uiMessageToThreadMessage(message, idx === lastIndex ? error : undefined);
   }, []);
 
-  return useExternalStoreRuntime<UIMessage>({
+  const runtime = useExternalStoreRuntime<UIMessage>({
     isRunning: state.isRunning,
     messages,
     setMessages: (messages) => { store.setMessages([...messages]); },
     onCancel: async () => { store.abort(); },
     onNew: async (message: AppendMessage) => {
-      // Every send path in this app (composer, example asks, Ask-Tutor bridge, session-plan CTA)
-      // goes through the composer as user text; anything else reaching here is a bug.
+      // The programmatic send paths (example asks, Ask-Tutor bridge, session-plan CTA) reach
+      // here through composer.send() as user text; anything else is a bug. The composer FORM
+      // itself no longer does — its submit goes straight to store.sendMessage so attachments can
+      // ride along (Thread.tsx's Composer) — so no files ever arrive on this path.
       if (message.role !== 'user') throw new Error(`chatCore only sends user messages, got "${message.role}"`);
       const text = message.content
         .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
@@ -125,4 +150,5 @@ export function useChatCoreRuntime({ mode, threadId, initialMessages }: ChatCore
     },
     convertMessage,
   });
+  return { runtime, store };
 }

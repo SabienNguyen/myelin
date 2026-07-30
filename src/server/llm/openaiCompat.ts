@@ -109,9 +109,25 @@ function wireMessages(req: ChatRequest): Json[] {
       // Tool results become role:'tool' messages, emitted before any user text so they sit
       // directly after the assistant tool_calls message they answer.
       let text = '';
+      // Text and image parts also accumulate in ORIGINAL order for the array-content form. Only
+      // a message that actually carries an image switches to that form — a text-only message
+      // keeps the plain-string body it always had, byte for byte, so the transcript prefix stays
+      // stable for endpoints that cache by content.
+      const parts: Json[] = [];
+      let hasImage = false;
       for (const part of msg.content) {
-        if (part.type === 'text') text += part.text;
-        else if (part.type === 'tool-result') {
+        if (part.type === 'text') {
+          text += part.text;
+          parts.push({ type: 'text', text: part.text });
+        } else if (part.type === 'file') {
+          // Only images have a portable chat-completions encoding (the data-URL image_url part).
+          // PDFs and unknown types are DROPPED on this wire: there is no compat document shape,
+          // and the local 7-9B models this adapter serves cannot read a PDF anyway.
+          if (part.mediaType.startsWith('image/')) {
+            hasImage = true;
+            parts.push({ type: 'image_url', image_url: { url: `data:${part.mediaType};base64,${part.data}` } });
+          }
+        } else if (part.type === 'tool-result') {
           out.push({
             role: 'tool',
             tool_call_id: part.toolCallId,
@@ -119,7 +135,8 @@ function wireMessages(req: ChatRequest): Json[] {
           });
         }
       }
-      if (text) out.push({ role: 'user', content: text });
+      if (hasImage) out.push({ role: 'user', content: parts });
+      else if (text) out.push({ role: 'user', content: text });
     }
   }
   return out;
