@@ -14,6 +14,9 @@ export interface ChatRequestBody {
   mode: string;
   threadId: string;
   writeUp: boolean;
+  /** Structured slash command for THIS turn only (shared/commands.ts) — absent on ordinary
+   * sends and on resubmits, so a block answer can never replay the command that staged it. */
+  command?: string;
 }
 
 export interface ConsumeChatStreamOptions {

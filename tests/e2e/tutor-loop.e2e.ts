@@ -38,7 +38,7 @@ test('full loop: bootstrap → quick_check → answer → auto-resubmit → evid
 
   const firstChat = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.goto('/');
-  await page.getByPlaceholder('Ask your tutor…').fill('hi');
+  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('hi');
   await page.keyboard.press('Enter');
   await firstChat;
 

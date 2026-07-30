@@ -130,6 +130,14 @@ describe('generateRailsQuickCheck', () => {
     expect(prompts[0]).toMatch(/NEVER append "and why\?"/); // choice mode forbids the why
     expect(prompts[0]).toMatch(/Slopes/);                    // analogy bridge named
     expect(prompts[0]).toMatch(/student: hi/);               // history line rides
+    expect(prompts[0]).not.toMatch(/stance/);                // no stance set, no stance line
+  });
+
+  it('threads the thread stance into the generation prompt when one is set', async () => {
+    const { model, prompts } = textModel(JSON.stringify(good));
+    await generateRailsQuickCheck({ model, cfg }, item, page, [], [], 'beginner');
+    expect(prompts[0]).toMatch(/The student's stance is beginner: explain from zero/);
+    expect(prompts[0]).toMatch(/Pitch the question and its framing at that level\./);
   });
 });
 
@@ -145,6 +153,13 @@ describe('generateRailsFeedback', () => {
     expect(fb).toEqual({ feedback: 'You picked "4".', next: 'continue' });
     expect(prompts[0]).toMatch(/Machine grade: correct — exact match/);
     expect(prompts[0]).toMatch(/only what the student actually did/); // rule 3a rides the prompt
+    expect(prompts[0]).not.toMatch(/stance/);
+  });
+
+  it('threads the thread stance into the feedback prompt when one is set', async () => {
+    const { model, prompts } = textModel(JSON.stringify({ feedback: 'You picked "4".', next: 'continue' }));
+    await generateRailsFeedback({ model, cfg }, graded, 'advanced');
+    expect(prompts[0]).toMatch(/The student's stance is advanced — pitch the feedback at that level\./);
   });
 
   it('falls back to reading the machine grade aloud with a stop-offer on a failed call', async () => {

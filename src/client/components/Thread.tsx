@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useThread, useThreadRuntime } from '@assistant-ui/react';
 import { FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, XIcon as X } from '@phosphor-icons/react';
 import type { FileUIPart } from '../../shared/uiMessages.js';
 import { useChatStore } from '../chatCore/index.js';
+import { CommandEditor, type CommandEditorHandle } from './CommandEditor.js';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
@@ -39,10 +40,23 @@ function UserFilePart({ filename, mimeType }: { filename?: string; mimeType: str
   );
 }
 
+/** The transcript record of a sent slash command (the `data-command` part chatStore puts first
+ * on the user message): a muted chip, so replayed history shows the same command state the send
+ * carried — the raw "/beginner" text never existed as message text. */
+function UserCommandPart({ data }: { data: unknown }) {
+  const command = (data as { command?: unknown } | null)?.command;
+  if (typeof command !== 'string') return null;
+  return <span className="msg-command-chip">{command}</span>;
+}
+
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="msg user">
-      <MessagePrimitive.Parts components={{ Image: UserImagePart, File: UserFilePart }} />
+      <MessagePrimitive.Parts components={{
+        Image: UserImagePart,
+        File: UserFilePart,
+        data: { by_name: { command: UserCommandPart } },
+      }} />
     </MessagePrimitive.Root>
   );
 }
@@ -218,23 +232,28 @@ const ATTACH_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,application/pdf
 const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
 
 /**
- * The composer, with attachments. Text still lives in assistant-ui's composer state (so the
- * programmatic senders — example asks, Ask-Tutor bridge, session-plan CTA — keep working through
- * composer.setText + send), but the FORM submit is taken over: the handler preventDefaults before
- * the primitive's own submit runs and sends through the store directly, because assistant-ui's
- * send() can only carry attachments via an AttachmentAdapter this app does not configure, and its
- * canSend gate would veto a files-only send. Pending files are plain local state; they become
- * FileUIParts on the user message ahead of the text part (chatStore.sendMessage).
+ * The composer: a Tiptap CommandEditor (slash commands as atomic chips) inside the same
+ * attachment-aware form. The FORM submit is taken over as before: the handler preventDefaults
+ * before assistant-ui's own submit runs and sends through the store directly, because
+ * assistant-ui's send() can carry neither attachments (no AttachmentAdapter configured) nor the
+ * structured command. Pending files are plain local state; they become FileUIParts on the user
+ * message between the data-command part and the text part (chatStore.sendMessage).
+ *
+ * The programmatic senders (example asks, Ask-Tutor bridge, session-plan CTA, OfferWrite) are
+ * deliberately NOT mirrored into the editor: they still call composer.setText + send, which
+ * flows through assistant-ui's onNew → store.sendMessage — a path that never touched the visible
+ * input even when it was a textarea (setText+send is synchronous; nothing renders in between).
+ * Two send paths, one store method, no editor/composer state syncing to get wrong.
  */
 function Composer() {
   const store = useChatStore();
-  const composer = useComposerRuntime();
-  // isEmpty tracks composer text (assistant-ui memoizes the state object, so the snapshot is
-  // stable between notifications); the send gate must ALSO open for a files-only message.
-  const isEmpty = useSyncExternalStore(composer.subscribe, () => composer.getState().isEmpty);
   const [files, setFiles] = useState<FileUIPart[]>([]);
   const [note, setNote] = useState<string | null>(null);
+  // The send gate: tracks the EDITOR's emptiness (a lone command chip counts as content — a bare
+  // "/beginner" is a valid send), and must also open for a files-only message.
+  const [editorEmpty, setEditorEmpty] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<CommandEditorHandle | null>(null);
 
   const addFiles = (picked: FileList | null) => {
     for (const file of Array.from(picked ?? [])) {
@@ -253,17 +272,22 @@ function Composer() {
     }
   };
 
+  // One send path for the Send button, the form, and the editor's Enter keymap. serialize()
+  // already trims: whitespace-only text beside files sends as files-only — no junk text part.
+  const doSubmit = () => {
+    const payload = editorRef.current?.serialize() ?? { text: '' };
+    if (payload.text === '' && payload.command === undefined && files.length === 0) return;
+    store.sendMessage(payload.text, files, { command: payload.command });
+    editorRef.current?.clear();
+    setFiles([]);
+    setNote(null);
+  };
+
   const submit = (e: FormEvent) => {
     // preventDefault BEFORE assistant-ui's handler: ComposerPrimitive.Root composes this handler
     // first and skips its own send once the event is defaultPrevented.
     e.preventDefault();
-    const text = composer.getState().text;
-    if (!text.trim() && files.length === 0) return;
-    // Whitespace-only text beside files sends as files-only — no junk text part in the history.
-    store.sendMessage(text.trim() ? text : '', files);
-    composer.setText('');
-    setFiles([]);
-    setNote(null);
+    doSubmit();
   };
 
   return (
@@ -305,10 +329,10 @@ function Composer() {
           hidden
           onChange={(e) => { addFiles(e.currentTarget.files); e.currentTarget.value = ''; }}
         />
-        <ComposerPrimitive.Input placeholder="Ask your tutor…" autoFocus />
+        <CommandEditor handleRef={editorRef} onEnter={doSubmit} onEmptyChange={setEditorEmpty} />
         {/* Not ComposerPrimitive.Send: its disabled state reads assistant-ui's canSend, which
-            knows nothing of the local files and would stay disabled on a files-only message. */}
-        <button type="submit" disabled={isEmpty && files.length === 0}>Send</button>
+            knows nothing of the local editor or files and would stay disabled on both. */}
+        <button type="submit" disabled={editorEmpty && files.length === 0}>Send</button>
       </div>
     </ComposerPrimitive.Root>
   );

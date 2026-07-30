@@ -80,7 +80,9 @@ export function App() {
     // Setup gate first: with no API key there is no tutor, so a Runtime that cannot answer must not
     // mount and invite a question. Renders `children` untouched once the key is in place.
     <FirstRun>
-    <Runtime key={threadId} mode={mode} threadId={threadId}>
+    {/* onSetMode: a /learn-family slash command must land on this selector too — the server only
+        overrides the one turn the command rides; persistence is the selector's job. */}
+    <Runtime key={threadId} mode={mode} threadId={threadId} onSetMode={setMode}>
       <div className={appClass}>
         <header className="topbar">
           <h1><BookOpenText size={20} weight="duotone" /> Myelin</h1>

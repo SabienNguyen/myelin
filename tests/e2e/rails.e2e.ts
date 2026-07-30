@@ -22,7 +22,7 @@ test('rails: plan → staged quick_check → answer → harness-recorded evidenc
 
   const firstChat = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.goto('http://localhost:4178/');
-  await page.getByPlaceholder('Ask your tutor…').fill('drill me');
+  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('drill me');
   await page.keyboard.press('Enter');
   await firstChat;
 

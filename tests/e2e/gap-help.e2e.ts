@@ -39,7 +39,7 @@ test('Help tab: composer submits, a hint exchange renders in the transcript insi
   // counter (scripted-model.cjs), so this test's one chat turn consumes script turn 3 — the
   // staging turn added for it — and a fresh thread keeps that staging the only thing on stage.
   await page.goto('/#/t/e2e-gap-help');
-  await page.getByPlaceholder('Ask your tutor…').fill('Practice stream-consumer with a code exercise');
+  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('Practice stream-consumer with a code exercise');
   await page.keyboard.press('Enter');
   await firstChat;
 

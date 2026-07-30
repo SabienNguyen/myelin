@@ -12,7 +12,7 @@ import { test, expect } from '@playwright/test';
 test('an escaped-SVG diagram with coincident pins and a duplicate label completes to a grade', async ({ page }) => {
   const first = page.waitForResponse((r) => r.url().endsWith('/api/chat'));
   await page.goto('http://localhost:4175/');
-  await page.getByPlaceholder('Ask your tutor…').fill('teach me the water cycle');
+  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('teach me the water cycle');
   await page.keyboard.press('Enter');
   await first;
 
