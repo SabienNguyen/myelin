@@ -80,6 +80,22 @@ export interface ChatRequest {
    * request inside the adapter. The anthropic adapter ignores it — its forced-tool path already
    * yields schema-shaped tool input. Only generateStructured sets this. */
   responseSchema?: { name: string; schema: Record<string, unknown> };
+  /** Decoding knobs beyond temperature, one nested object so config and the withRequestDefaults
+   * wrapper move it opaquely — call sites never read individual fields. The openai-compat adapter
+   * maps each defined field to its snake_case wire name (endpoints ignore what they don't
+   * support); the anthropic adapter ignores the whole object (see its buildBody). topK/minP/
+   * repetitionPenalty are the levers that actually tame a 7-9B local model — the reason this
+   * exists. */
+  sampler?: {
+    topP?: number;
+    topK?: number;
+    minP?: number;
+    seed?: number;
+    stop?: string[];
+    repetitionPenalty?: number;
+    frequencyPenalty?: number;
+    presencePenalty?: number;
+  };
   /** Reasoning-depth hint from the role's config. The anthropic adapter sends it as
    * output_config.effort and NOTHING else — never a `thinking` field (current Claude models run
    * adaptive thinking by default, and budget_tokens is rejected outright). The openai-compat

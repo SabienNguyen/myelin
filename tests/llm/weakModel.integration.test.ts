@@ -69,6 +69,24 @@ describe('weak model: pathology cycle through the real rails path', () => {
   });
 });
 
+describe('weak model: think-tag prefixed JSON (qwen3-class) through the real rails path', () => {
+  // A new MODE rather than a new CHECK_CYCLE entry, so the pathology cycle's exact counts above
+  // stay untouched: this pathology is not a retry story — the adapter's tag extraction absorbs it
+  // before rails ever sees the text.
+  it('recovers the quick check FIRST TRY — extraction in the adapter, not a rails retry', async () => {
+    weak = await startWeakModel('think-tags');
+    const model = openaiCompatModel({ modelId: 'weak-7b', baseUrl: weak.baseUrl });
+
+    const r = await generateRailsQuickCheck({ model, cfg }, item('p0'), page, [], []);
+    railsCheckSchema.parse(r);
+    expect(r.choices).toContain(r.expected);
+    expect(r.question.startsWith(FALLBACK_PREFIX)).toBe(false);
+    // ONE model call: the <think> block came out in the adapter, so the JSON parsed on the first
+    // attempt — no rejection round-trip burned, no template fallback.
+    expect(weak.calls()).toBe(1);
+  });
+});
+
 describe('weak model: response_format rejection and endpoint memory', () => {
   it('pays the rejected round-trip once, then every trial runs forced-tool — mangled args recovered by the rails retry', async () => {
     weak = await startWeakModel('reject-rf');

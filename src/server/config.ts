@@ -5,7 +5,26 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
 
-const roleSchema = z.object({ model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() });
+// Per-role decoding knobs, the same shape as ChatRequest.sampler — the whole block rides the
+// resolved model opaquely (models.ts withRequestDefaults) and only the openai-compat wire
+// serializes it; Anthropic-routed roles ignore it. topK/minP/repetitionPenalty are the levers
+// that tame a 7-9B local model, which is why sampling is configurable per role at all.
+const samplerSchema = z.object({
+  topP: z.number().optional(),
+  topK: z.number().int().optional(),
+  minP: z.number().optional(),
+  seed: z.number().int().optional(),
+  stop: z.array(z.string()).optional(),
+  repetitionPenalty: z.number().optional(),
+  frequencyPenalty: z.number().optional(),
+  presencePenalty: z.number().optional(),
+}).optional();
+
+const roleSchema = z.object({
+  model: z.string(),
+  effort: z.enum(['low', 'medium', 'high']).optional(),
+  sampler: samplerSchema,
+});
 
 // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the teaching
 // loop and the tutor model only generates — for small local models that cannot hold the full

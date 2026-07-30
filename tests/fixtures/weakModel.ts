@@ -13,7 +13,11 @@ export type WeakMode =
   | 'pathology'
   /** 400s any request carrying response_format (naming it), so the adapter's forced-tool
    * fallback + endpoint memory engage; answers tool calls valid/malformed by its own cycle. */
-  | 'reject-rf';
+  | 'reject-rf'
+  /** Serves every quick_check as valid JSON prefixed by a <think>…</think> block — the
+   * qwen3-class habit of inlining reasoning in content. The adapter's tag extraction must
+   * recover it FIRST TRY: one model call, no retry, no template fallback. */
+  | 'think-tags';
 
 const validCheck = JSON.stringify({
   question: 'Which quantity is the prior in Bayes’ theorem?',
@@ -48,6 +52,10 @@ export const CHECK_CYCLE = [
 
 /** Feedback replies: valid, then chatty prose (schema failure → machine-grade fallback). */
 export const FEEDBACK_CYCLE = [validFeedback, 'Great job!! Keep going :)'];
+
+/** think-tags mode's one shape: reasoning inlined ahead of an otherwise-clean JSON body, tags
+ * padded with newlines exactly the way qwen3 emits them. */
+const thinkPrefixedCheck = '<think>\nThe student is new to this page; probe the prior.\n</think>\n\n' + validCheck;
 
 export interface WeakModelServer {
   baseUrl: string;
@@ -107,7 +115,9 @@ export async function startWeakModel(mode: WeakMode): Promise<WeakModelServer> {
       const name = body.response_format?.json_schema?.name ?? '';
       const content = name === 'rails_feedback'
         ? FEEDBACK_CYCLE[feedbackCalls++ % FEEDBACK_CYCLE.length]
-        : CHECK_CYCLE[contentCalls++ % CHECK_CYCLE.length];
+        : mode === 'think-tags'
+          ? thinkPrefixedCheck
+          : CHECK_CYCLE[contentCalls++ % CHECK_CYCLE.length];
       res.end(JSON.stringify({
         choices: [{ message: { content }, finish_reason: 'stop' }],
         usage: { prompt_tokens: 90, completion_tokens: 60 },
