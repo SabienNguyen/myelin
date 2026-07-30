@@ -796,7 +796,7 @@ export function createTutorSession(
         const run = async (msgs: ChatMessage[]) => {
           const result = await runLoop({
             model, system, messages: msgs, tools, serverTools: webTools.serverTools,
-            maxSteps: 24, cache: true, signal: runSignal,
+            maxSteps: 24, cache: true, cacheTtl: cfg.cacheTtl, signal: runSignal,
             onEvent: (e) => writer.forward(e),
           });
           // Charged to the CONFIGURED tutor id even when opts.model/LW_MOCK_MODEL injected the

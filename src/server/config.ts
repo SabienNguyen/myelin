@@ -136,6 +136,10 @@ const configSchema = z.object({
   // no jargon, gentle pace" and "brisk, expert, skip the analogies" are different tutors. One
   // line, because tone is a preference, not a curriculum.
   voice: z.string().optional(),
+  // Prompt-cache entry lifetime on the Anthropic wire. '1h' costs more to write but survives a
+  // learner who reads a page for twenty minutes between turns — the 5m default expires inside a
+  // single thoughtful pause. Compat/local routes have no explicit cache and ignore it.
+  cacheTtl: z.enum(['5m', '1h']).optional(),
   models: z.object({
     // Sonnet for the roles that write prose the learner reads, Haiku for the mechanical ones.
     // Deliberately not Opus by default: the tutor role runs on every single turn, and choosing to

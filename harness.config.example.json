@@ -13,6 +13,8 @@
   },
   "gap": { "url": "http://localhost:4930" },
   "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
+  "_cacheTtl": "Prompt-cache entry lifetime on Anthropic-routed roles: '5m' (the wire default) or '1h' — the long TTL survives a learner's twenty-minute pause between turns at a higher cache-write cost. Local/compat routes ignore it.",
+  "cacheTtl": "5m",
   "port": 4820,
   "autoCompile": true
 }
