@@ -6,7 +6,7 @@ import { Engram } from '../src/server/mcp.js';
 import { sawToolResult, streamModel, turnsModel } from './mockModel.js';
 import { writeQueue } from '../src/server/queueStore.js';
 import {
-  canCompileNow, compileConcurrencyFor, ensureCompileDrain, readQueue, startConversion,
+  canCompileNow, compileConcurrencyFor, ensureCompileDrain, ingestBook, readQueue, startConversion,
 } from '../src/server/ingest.js';
 import type { Converter, IncrementalConverter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
@@ -203,4 +203,77 @@ describe('ensureCompileDrain — autoCompile end to end', () => {
     releaseGate!();
     await until(() => !readQueue(vault).some((e) => e.status === 'converting'));
   }, 30_000);
+});
+
+describe('ensureCompileDrain — the drain hands the book\'s order to a path', () => {
+  // Its own vault and engram: the drain is a module singleton, so sharing a vault with the tests
+  // above would leave this one racing whichever drain they kicked last.
+  let lw: Engram;
+  let vault: string;
+  let cfg: HarnessConfig;
+
+  beforeAll(async () => {
+    vault = mkdtempSync(join(tmpdir(), 'lwh-artifact-drain-'));
+    mkdirSync(join(vault, 'pages'), { recursive: true });
+    cfg = {
+      vault, student: 'kid', autoCompile: true,
+      models: { compile: { model: 'claude-drain-test' } },
+      engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
+    } as unknown as HarnessConfig;
+    lw = await Engram.connect(cfg);
+  }, 30_000);
+  afterAll(async () => { await lw.close(); });
+
+  it('turns the book\'s own chapter order into a path once the drain settles', async () => {
+    // The end-to-end wiring: two chapters compile, and the source's own order comes back out of
+    // engram as a path — chapter 1's pages, then chapter 2's, in the order write_page was called.
+    // Nothing between here and the path re-sequences anything.
+    const perChapter: Record<string, string[]> = {
+      'Spine Drain Chapter One': ['spine-drain-alpha', 'spine-drain-beta'],
+      'Spine Drain Chapter Two': ['spine-drain-gamma'],
+    };
+    const model = streamModel((req) => {
+      if (sawToolResult(req)) return { text: 'done' };
+      const prompt = req.messages
+        .map((m) => m.content.filter((c) => c.type === 'text').map((c: any) => c.text).join('\n'))
+        .join('\n');
+      const chapter = Object.keys(perChapter).find((t) => prompt.includes(t))!;
+      return {
+        toolCalls: perChapter[chapter].map((slug) => ({
+          toolName: 'write_page',
+          input: {
+            slug, title: slug, body: `Body for ${slug}, written by the artifact-path drain test.`,
+            sources: ['Artifact Order Book'], difficulty: 2, status: 'draft',
+          },
+        })),
+      };
+    });
+    await ingestBook(cfg, '/uploads/Artifact Order Book.pdf', {
+      converter: async () => ({
+        markdown: [
+          '# Spine Drain Chapter One', 'The first chapter, as the author ordered it.',
+          '# Spine Drain Chapter Two', 'The second chapter, which the author put second.',
+        ].join('\n'),
+      }),
+    });
+
+    // Kicking repeatedly is a documented no-op while one is running (the singleton), which is what
+    // makes this safe to poll on.
+    await until(() => {
+      ensureCompileDrain(lw, cfg, { model });
+      const rows = readQueue(vault).filter((e) => e.book === 'Artifact Order Book');
+      return rows.length === 2 && rows.every((e) => e.status === 'done');
+    });
+
+    // The path is written after the drain loop settles, so poll for it rather than assume it is
+    // there the instant the last chapter flips to 'done'.
+    let doc: any = null;
+    for (let i = 0; i < 200 && !doc; i++) {
+      doc = await lw.call('read_path', { slug: 'source-artifact-order-book' }).catch(() => null);
+      if (!doc) await new Promise((r) => { setTimeout(r, 50); });
+    }
+    expect(doc.pages).toEqual(['spine-drain-alpha', 'spine-drain-beta', 'spine-drain-gamma']);
+    expect(doc.title).toBe('Artifact Order Book');
+    expect(doc.body).toContain('order the source itself presents');
+  }, 60_000);
 });

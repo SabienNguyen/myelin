@@ -15,6 +15,13 @@
 // renders the warning; recordSource also drops it in the vault's guardrail log next to the other
 // integrity findings). Nothing here silently corrects a model — the correction is the product.
 //
+// The record also carries the source's SPINE — its own chapter order and which pages each chapter
+// produced. It belongs here for the same reason the byline does: it is a fact about the artifact,
+// not about work still owed, and it has to outlive the queue rows that produced it (the ledger's
+// rows are pruned and rewritten; the order Strogatz put his chapters in is not). What reads it is
+// artifactPath.ts, which turns that order into a learning path so the model prunes WITHIN the
+// author's sequence instead of inventing a competing one.
+//
 // Storage stance is queueStore.ts's and usageLedger.ts's, for their reasons: a corrupt or
 // unreadable file READS AS EMPTY rather than throwing (readSources runs on a chat turn's compile
 // and on every Library poll — a raw JSON.parse throw would 500 both), a write failure is logged
@@ -39,7 +46,14 @@ export interface SourceRecord {
   /** Set ONLY when a model's claimed attribution disagreed with the artifact's own. Human-readable,
    *  names both sides. */
   attributionWarning?: string;
+  /** The source's OWN ordering: which pages came from which chapter, in the order the artifact
+   *  presents them. This is the thing an artifact-led path exists to preserve. */
+  spine?: { chapter: string; chapterOrdinal: number; title: string; pages: string[] }[];
 }
+
+/** One chapter's slice of a source's spine — the element type of SourceRecord.spine, named so
+ * compileOne and artifactPath.ts can pass one around without restating the shape. */
+export type SpineChapter = NonNullable<SourceRecord['spine']>[number];
 
 const sourcesPath = (vault: string) => join(vault, '.harness', 'sources.json');
 
@@ -87,6 +101,46 @@ export function recordSource(vault: string, rec: SourceRecord): void {
 
 export function sourceFor(vault: string, book: string): SourceRecord | undefined {
   return readSources(vault).find((r) => r.book === book);
+}
+
+/**
+ * Upsert ONE chapter's slice of a source's spine, keyed by `chapter` — the same identity rule, for
+ * the same reason, as enqueueChapters (queueStore.ts): recompiling a chapter must REPLACE its
+ * pages, never append a second slice, or the artifact's order grows a duplicate stop every time a
+ * chapter is compiled again. The spine is kept sorted by `chapterOrdinal` on every write, so a
+ * chapter compiled out of order (the drain runs four at a time) still lands where the book puts it.
+ *
+ * Synchronous from read to write, and that is what makes it safe under the drain's four concurrent
+ * compiles: Node never preempts synchronous code, so two workers finishing chapters at the same
+ * moment cannot interleave a read-modify-write here and lose each other's slice (queueStore.ts's
+ * module doc has the incident where an awaited one did exactly that).
+ *
+ * A source nobody filed provenance for still gets a spine: ingestBook and the older doors record no
+ * SourceRecord, and an artifact must not lose its ordering because the door it came through did not
+ * know its byline. The synthesized record says exactly what is known — a file, authors unknown.
+ */
+export function recordSpineChapter(vault: string, book: string, entry: SpineChapter): void {
+  if (!vault) return;
+  try {
+    const all = readSources(vault);
+    const existing = all.find((r) => r.book === book);
+    const rec: SourceRecord = existing ?? {
+      book,
+      title: book,
+      authors: [],
+      attribution: 'unknown',
+      origin: { kind: 'file' },
+      addedAt: new Date().toISOString(),
+    };
+    rec.spine = [...(rec.spine ?? []).filter((s) => s.chapter !== entry.chapter), entry]
+      .sort((a, b) => a.chapterOrdinal - b.chapterOrdinal);
+    const kept = all.filter((r) => r.book !== book);
+    kept.push(rec);
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    writeFileSync(sourcesPath(vault), JSON.stringify(kept, null, 2));
+  } catch (e) {
+    console.error('[provenance] spine record failed:', e instanceof Error ? e.message : e);
+  }
 }
 
 // ── the guardrail ───────────────────────────────────────────────────────────────────────────
