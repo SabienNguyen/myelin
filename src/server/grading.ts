@@ -1,32 +1,16 @@
 import { convertLatexToAsciiMath } from 'mathlive';
 import { create, all } from 'mathjs';
-import { generateText, Output } from 'ai';
+import { generateText, Output, type LanguageModel } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
 import { TONE_SYSTEMS, type ToneSystem } from '../shared/toneContour.js';
 import type { EvidenceKind } from '../shared/engram.js';
-import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import { modelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
 
-/** Injectable seam for tests — see claudeSdk.ts. Real callers omit this; it defaults to the
- * real Agent SDK call. */
+/** Injectable grader-model seam for tests (mirrors gapHelp.ts's GapHelpDeps.model). Real callers
+ * omit it; the configured grader role's model is used. */
 export interface GradingDeps {
-  sdkGenerate?: typeof claudeSdkGenerate;
-}
-
-/** The Agent SDK path has no Output.object, so its graders ask for JSON-only text — and the live
- *  model still sometimes wraps the JSON in a markdown fence despite that instruction (a probe
- *  lost an entire grade turn to the resulting JSON.parse throw). Unwrap one fence when present;
- *  text that still fails to parse throws with the raw head attached so the failure stays
- *  readable. */
-export function parseSdkJson<T>(text: string, who: string): T {
-  const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-  const body = fenced ? fenced[1] : text.trim();
-  try {
-    return JSON.parse(body) as T;
-  } catch (e) {
-    throw new Error(`${who} returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
-  }
+  model?: LanguageModel;
 }
 
 // predictable: true makes functions like log()/sqrt() return NaN (not a Complex) outside
@@ -525,8 +509,8 @@ const ev = (slug: string, kind: EvidenceKind, note: string, source: GradeSource)
   ({ slug, kind: capApplied(kind, source), note });
 
 /**
- * Recording-side integrity check (DETECTION ONLY — see the two call sites in session.ts /
- * claudeSdkTutor.ts). capApplied makes the COMPUTATION honest: only a machine grade can produce
+ * Recording-side integrity check (DETECTION ONLY — see the call site in session.ts).
+ * capApplied makes the COMPUTATION honest: only a machine grade can produce
  * 'applied-correctly'. But the RECORDING is model-mediated — the harness hands the tutor the exact
  * evidence and instructs "record this", yet record_evidence's `kind` is the model's own tool
  * argument, and nothing structurally enforces the copy. This surfaces the one deviation that would
@@ -863,22 +847,13 @@ export async function gradeBlockOutput(
     const rubricSchema = z.object({
       criteria: z.array(z.object({ criterion: z.string(), pass: z.boolean(), note: z.string() })),
     });
-    const graderId = cfg.models.grader.model;
     const judgeRubric = async (criteria: string[]): Promise<{ criteria: { criterion: string; pass: boolean; note: string }[] }> => {
       const rubricPrompt = `Judge this draft against each rubric criterion. Prompt: "${input.prompt}"\n`
         + `Draft:\n${result.draft}\n\nCriteria:\n${criteria.map((r: string, i: number) => `${i + 1}. ${r}`).join('\n')}\n`
         + 'For each criterion, decide pass or fail and give a one-line note quoting the draft where possible.';
-      if (isClaudeSdkModel(graderId)) {
-        const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-        const { text } = await sdkGenerate({
-          model: stripClaudeSdkPrefix(graderId),
-          prompt: `${rubricPrompt}\n\nRespond with ONLY valid JSON: {"criteria": [{"criterion": <string>, "pass": <boolean>, "note": <string>}]}`,
-          maxTurns: 1,
-        });
-        return parseSdkJson(text, 'claude-sdk rubric judge');
-      }
       const { output } = await generateText({
-        model: modelFor('grader', cfg), prompt: rubricPrompt, output: Output.object({ schema: rubricSchema }),
+        model: deps.model ?? modelFor('grader', cfg), prompt: rubricPrompt,
+        output: Output.object({ schema: rubricSchema }),
       });
       return output as { criteria: { criterion: string; pass: boolean; note: string }[] };
     };
@@ -972,22 +947,8 @@ async function annotateDraft(
 ): Promise<WritingAnnotations> {
   const draftPrompt = `Grade this student draft. Prompt: "${prompt}"\nDraft:\n${draft}\n`
     + `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`;
-  const graderModelId = cfg.models.grader.model;
-  if (isClaudeSdkModel(graderModelId)) {
-    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-    const { text } = await sdkGenerate({
-      model: stripClaudeSdkPrefix(graderModelId),
-      // The Agent SDK path has no Output.object — ask for JSON-only and parse it ourselves.
-      prompt: `${draftPrompt}\n\nRespond with ONLY valid JSON (no markdown fences, no commentary) `
-        + 'matching this exact shape: {"annotations": [{"span": <string>, "category": '
-        + '<"strong"|"wordy"|"vague"|"structure"|"grammar">, "note": <string>}], "skillGrades": '
-        + '{"claim": <"good"|"weak">, "concision": <"good"|"weak">, "specificity": <"good"|"weak">}}',
-      maxTurns: 1,
-    });
-    return parseSdkJson<WritingAnnotations>(text, 'claude-sdk grader');
-  }
   const { output } = await generateText({
-    model: modelFor('grader', cfg),
+    model: deps.model ?? modelFor('grader', cfg),
     prompt: draftPrompt,
     output: Output.object({ schema: annotationSchema }),
   });
@@ -1019,14 +980,7 @@ async function gradeOpenAnswer(
   // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
   // model, never copied into the evidence note.
   const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
-  const graderModelId = cfg.models.grader.model;
-  let text: string;
-  if (isClaudeSdkModel(graderModelId)) {
-    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-    ({ text } = await sdkGenerate({ model: stripClaudeSdkPrefix(graderModelId), prompt, maxTurns: 1 }));
-  } else {
-    ({ text } = await generateText({ model: modelFor('grader', cfg), prompt }));
-  }
+  const { text } = await generateText({ model: deps.model ?? modelFor('grader', cfg), prompt });
   const ok = /^CORRECT/i.test(text.trim());
   return {
     verdict: ok ? 'correct' : 'incorrect', source: 'model', detail: text.trim(),

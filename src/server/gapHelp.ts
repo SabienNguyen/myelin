@@ -1,8 +1,8 @@
 // Track A (docs/superpowers/plans/2026-07-21-coding-stage.md "A. In-IDE tutor help"):
 // POST /api/gap/help — a one-shot, ephemeral hint generation for a learner stuck mid-exercise.
-// Deliberately NOT the chat thread (see claudeSdk.ts's "one-shot" doc comment: the interactive
-// tutor role is a separate concern) — help exchanges live only in the client's session-local Help
-// tab state, never saved to the lesson thread.
+// Deliberately NOT the chat thread (the interactive tutor role is a separate concern) — help
+// exchanges live only in the client's session-local Help tab state, never saved to the lesson
+// thread.
 //
 // Answer-integrity invariant, mechanically enforced (not just prompt-worded): this route fetches
 // rung data ONLY via gapProxy.ts's fetchLadderPayload — the exact same fetch the GET /api/gap/
@@ -13,7 +13,6 @@
 // input type to carry a reference answer even if one were mistakenly forwarded.
 import { generateText, type LanguageModel } from 'ai';
 import { Hono } from 'hono';
-import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import type { HarnessConfig } from './config.js';
 import { fetchLadderPayload } from './gapProxy.js';
 import { buildHelpPrompt, type HelpRungContext } from './helpPrompt.js';
@@ -27,10 +26,8 @@ const QUESTION_CAP = 2_000;
 const PRIOR_HINT_CAP = 6;
 
 export interface GapHelpDeps {
-  /** Injectable seam for the ollama:/anthropic ai-sdk route (mirrors ingestRoutes.ts's deps.model). */
+  /** Injectable model seam for tests (mirrors ingestRoutes.ts's deps.model). */
   model?: LanguageModel;
-  /** Injectable seam for the claude-sdk: route (mirrors grading.ts's GradingDeps.sdkGenerate). */
-  sdkGenerate?: typeof claudeSdkGenerate;
 }
 
 interface HelpRequestBody {
@@ -108,14 +105,7 @@ export function buildGapHelpRoute(lw: Engram, cfg: HarnessConfig, deps: GapHelpD
 
     const { system, prompt } = buildHelpPrompt({ pattern, rung: rungContext, draft, failures, vaultPage, question, priorHints });
 
-    const tutorModelId = cfg.models.tutor.model;
-    let text: string;
-    if (isClaudeSdkModel(tutorModelId)) {
-      const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-      ({ text } = await sdkGenerate({ model: stripClaudeSdkPrefix(tutorModelId), system, prompt, maxTurns: 1 }));
-    } else {
-      ({ text } = await generateText({ model: deps.model ?? modelFor('tutor', cfg), system, prompt }));
-    }
+    const { text } = await generateText({ model: deps.model ?? modelFor('tutor', cfg), system, prompt });
 
     return c.json({ hint: text.trim() });
   });

@@ -12,7 +12,7 @@ const ANKI_LABEL: Record<string, string> = {
 /**
  * The tutor model, said in words rather than in a model id.
  *
- * The badge used to read `claude-sdk:sonnet`, which is an implementation detail of how the harness
+ * The badge used to read the raw model id, which is an implementation detail of how the harness
  * routes a request — and on a first run it is the second thing in the toolbar, next to the learner's
  * own name. What they actually want to know is which model and whose bill.
  */
@@ -22,9 +22,6 @@ export function modelLabel(id: string): { name: string; how: string } {
     .replace(/-(\d)-(\d)$/, ' $1.$2')     // haiku-4-5 -> haiku 4.5
     .replace(/-(\d+)$/, ' $1')             // sonnet-5   -> sonnet 5
     .replace(/^(.)/, (c) => c.toUpperCase());
-  if (id.startsWith('claude-sdk:')) {
-    return { name: pretty(id.slice('claude-sdk:'.length)), how: 'Claude subscription' };
-  }
   if (id.startsWith('ollama:')) {
     return { name: id.slice('ollama:'.length), how: 'local model via Ollama' };
   }

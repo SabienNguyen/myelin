@@ -1921,9 +1921,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 
 /* ── First-run setup gate (FirstRun.tsx) ──────────────────────────────────────
    A gate, not a banner: it replaces the app entirely, because without authorisation
-   there is no tutor behind it. Two paths, and the visual weight is the design — the
-   subscription button is the primary action when a login exists, and the key form
-   collapses behind a link so it is not competing for attention. */
+   there is no tutor behind it. One question — the API key — asked as a single step. */
 .firstrun {
   min-height: 100vh;
   display: grid;
@@ -2002,27 +2000,14 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   border-color: var(--accent);
 }
 .firstrun-card button:disabled { opacity: 0.55; cursor: default; }
-/* The de-emphasised escape hatch to the other path. A button for keyboard and screen-reader
-   semantics, styled as a link because it is a change of mind, not an action. */
-.firstrun-link {
-  align-self: flex-start;
-  padding: 0 !important;
-  font-weight: 400 !important;
-  font-size: 0.88rem;
-  color: var(--accent) !important;
-  background: none !important;
-  border: none !important;
-  text-decoration: underline;
-}
 .firstrun-error { margin: 0; color: var(--bad); font-size: 0.9rem; line-height: 1.5; }
 /* The reassurance paragraph — smaller and muted: it answers "where does my key go", which
    matters, but only to someone who thought to ask. */
 .firstrun-note { margin: 0; font-size: 0.81rem; color: var(--text-muted); line-height: 1.55; }
-.firstrun-hint { padding-top: 0.9rem; border-top: 1px solid var(--border); }
 .firstrun-getkey { margin: 0; font-size: 0.88rem; }
 /* Full-width, own line, muted: the "where things live" footer. */
 .firstrun-paths { padding-top: 0.9rem; border-top: 1px solid var(--border); }
-.firstrun-note code, .firstrun-lede code, .firstrun-hint code {
+.firstrun-note code, .firstrun-lede code {
   font-family: var(--mono, ui-monospace, monospace);
   font-size: 0.95em;
   padding: 0.05rem 0.3rem;

@@ -20,6 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import { gradeBlockOutput, capApplied, type Grade, type GradeSource } from '../src/server/grading.js';
 import type { HarnessConfig } from '../src/server/config.js';
+import { textModel } from './mockModel.js';
 
 /** Grader that always approves, so every model-graded path takes its most generous branch — the
  *  only branch that could ever produce 'applied-correctly'. A grader that failed everything would
@@ -29,8 +30,8 @@ import type { HarnessConfig } from '../src/server/config.js';
  *  leading CORRECT/INCORRECT, writing_draft parses JSON. Keyed off the prompt rather than a flag,
  *  so adding a third model-graded block does not silently get the wrong shape. */
 const yesGrader = {
-  sdkGenerate: async ({ prompt }: { prompt: string }) => ({
-    text: /criteria/i.test(prompt) && /rubric|criterion/i.test(prompt)
+  model: textModel((prompt) => (
+    /criteria/i.test(prompt) && /rubric|criterion/i.test(prompt)
       ? JSON.stringify({
         criteria: [
           { criterion: 'thesis is arguable', pass: true, note: 'yes' },
@@ -42,11 +43,10 @@ const yesGrader = {
           annotations: [],
           skillGrades: { claim: 'good', concision: 'good', specificity: 'good' },
         })
-        : 'CORRECT — fine.',
-  }),
+        : 'CORRECT — fine.')).model,
 };
 const cfg = {
-  models: { grader: { model: 'claude-sdk:sonnet' } },
+  models: { grader: { model: 'claude-haiku-4-5' } },
 } as unknown as HarnessConfig;
 
 /** A best case for every block: the input and result that earn the highest evidence each can give. */
@@ -184,9 +184,9 @@ describe('THE RULE: a model-graded verdict can never mint applied-correctly', ()
 
   it('a criterion the grader forgot to address FAILS — the rubric is authoritative, not the model', async () => {
     const forgetful = {
-      sdkGenerate: async () => ({
-        text: JSON.stringify({ criteria: [{ criterion: 'thesis is arguable', pass: true, note: 'ok' }] }),
-      }),
+      model: textModel(JSON.stringify({
+        criteria: [{ criterion: 'thesis is arguable', pass: true, note: 'ok' }],
+      })).model,
     };
     const rubricCase = BEST_CASE.find((c) => c.tool === 'writing_draft' && c.input.rubric)!;
     const g = await gradeBlockOutput(rubricCase.tool, rubricCase.input, rubricCase.result, cfg, forgetful as any);
@@ -273,7 +273,7 @@ describe('quiz short items with an expected answer (audit 27)', () => {
 
   it('an exact match is mechanically correct — the model is never consulted', async () => {
     const angryGrader = {
-      sdkGenerate: async () => { throw new Error('the model must not be consulted for an exact match'); },
+      model: textModel(() => { throw new Error('the model must not be consulted for an exact match'); }).model,
     };
     const g = await gradeBlockOutput('quiz', input, { answers: [{ id: 's1', answer: ' Stream: TRUE ' }] }, cfg, angryGrader as any);
     expect(g.verdict).toBe('correct');
@@ -282,11 +282,8 @@ describe('quiz short items with an expected answer (audit 27)', () => {
   });
 
   it('a miss goes to the judge WITH the expected answer as context', async () => {
-    const prompts: string[] = [];
-    const spyGrader = {
-      sdkGenerate: async ({ prompt }: { prompt: string }) => { prompts.push(prompt); return { text: 'CORRECT — same thing.' }; },
-    };
-    const g = await gradeBlockOutput('quiz', input, { answers: [{ id: 's1', answer: 'the streaming flag' }] }, cfg, spyGrader as any);
+    const { model, prompts } = textModel('CORRECT — same thing.');
+    const g = await gradeBlockOutput('quiz', input, { answers: [{ id: 's1', answer: 'the streaming flag' }] }, cfg, { model } as any);
     expect(g.perItem).toEqual([{ id: 's1', source: 'model', correct: true }]);
     expect(prompts.join('\n')).toContain('stream: true');
   });

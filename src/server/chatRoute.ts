@@ -1,37 +1,14 @@
 import { Hono } from 'hono';
 import type { UIMessage } from 'ai';
-import { isClaudeSdkModel } from './claudeSdk.js';
-import { createClaudeSdkTutorSession } from './claudeSdkTutor.js';
 import type { HarnessConfig } from './config.js';
 import type { Engram } from './mcp.js';
 import { createTutorSession } from './session.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { MODES, type Mode } from './prompt.js';
 
-// Both session implementations expose `respond`, but createTutorSession's ignores the extra
-// threadId param (it doesn't need Agent SDK session-resume bookkeeping) — a function with fewer
-// declared params is assignable to a wider call signature, so this union stays simple.
-type Respond = (messages: UIMessage[], mode: Mode, threadId: string) => Promise<Response>;
-
 export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
-
-  // Chosen PER REQUEST, not once at boot, and memoised per tutor model id. The route depends on
-  // cfg.models.tutor.model, and that can change while the app is running: signing in with a Claude
-  // subscription rewrites it (signin.ts's applyRoute). Deciding once meant the learner had to
-  // restart the app to finish signing in, which is exactly the friction the setup flow removes.
-  const sessions = new Map<string, Respond>();
-  const respond: Respond = (messages, mode, threadId) => {
-    const id = cfg.models.tutor.model;
-    let existing = sessions.get(id);
-    if (!existing) {
-      existing = isClaudeSdkModel(id)
-        ? createClaudeSdkTutorSession(lw, cfg).respond
-        : createTutorSession(lw, cfg).respond;
-      sessions.set(id, existing);
-    }
-    return existing(messages, mode, threadId);
-  };
+  const { respond } = createTutorSession(lw, cfg);
 
   app.post('/api/chat', async (c) => {
     const body = await c.req.json() as {

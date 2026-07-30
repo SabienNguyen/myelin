@@ -18,17 +18,12 @@ exclusively through the MCP client in `src/server/mcp.ts`. Never `writeFileSync`
 `pages/` or `students/`. The harness's own territory is `vault/.harness/` (ledgers, logs, session
 maps) and `vault/raw/uploads/`.
 
-The one acknowledged exception — `compileOne` spawning a second MCP server — is documented in the
-README as a known gap. Do not add a second exception; do not "clean up" the first by writing
-directly.
-
 **2. Never parse vault markdown in harness code.** `Engram.listSlugs()` deliberately reads
 filenames only. Page structure is Engram's business; ask it via `read_page`.
 
 **3. Model routing goes through the prefix scheme.** A role's model id is a plain id (Anthropic
-API), `ollama:` (local, OpenAI-compatible), or `claude-sdk:` (Agent SDK, subscription login). Add
-capability by extending `modelFor` in `src/server/models.ts` — never by hardcoding a provider at a
-call site.
+API) or `ollama:` (local, OpenAI-compatible). Add capability by extending `modelFor` in
+`src/server/models.ts` — never by hardcoding a provider at a call site.
 
 **4. Ledger writes go through `updateQueue`.** `src/server/queueStore.ts` exists because a
 hand-rolled `readQueue`-then-`writeQueue` pair caused a lost-update bug. Never reintroduce that
@@ -52,8 +47,8 @@ Delete on sight: `// Create the client`, `// Loop through pages`, `// Error hand
 The house rule is that failures reach a human. They do not vanish into a `catch {}`.
 
 - Surface to the learner *and* to stderr, like `session.ts`'s `turnError`.
-- A fallback path logs why it fell back — see `claudeSdkTutor.ts`'s stale-session resume, which
-  overwrites the stored id and `console.error`s loudly.
+- A fallback path logs why it fell back — see `session.ts`'s goal-scoped `next_lessons`, which
+  falls back to the unscoped call and `console.error`s the rejected goal.
 - Only mark a side effect done when it actually succeeded. The notification ledger is written on
   delivery, not on attempt, so a headless boot retries.
 
@@ -71,7 +66,7 @@ comment says which — e.g. `readRationales()` treating a corrupt cache as empty
 
 ## Abstraction: earned, not speculative
 
-This repo *does* use injected seams — `CompileDeps`, `GradingDeps`, `IngestRepoDeps`. They exist so
+This repo *does* use injected seams — `GradingDeps`, `GapHelpDeps`, `IngestRepoDeps`. They exist so
 `ingestRepo()` is testable without a network, a git binary, the-gap's CLI, or systemd. That is
 earned abstraction: a test consumes it today.
 
@@ -86,8 +81,8 @@ If you cannot name the caller that needs it now, do not build it.
 ## Do not re-implement what exists
 
 Search before writing. Known utilities: `slugify` (`ingest.ts`), `sanitizeToolArgs` / `repairSlug`
-(`session.ts`, shared with the Agent SDK path), `splitChapters` (`convert.ts`), `panelBus`
-(client cross-component events), `urlState` (hash deep-links), `graphCache`.
+(`session.ts`), `splitChapters` (`convert.ts`), `panelBus` (client cross-component events),
+`urlState` (hash deep-links), `graphCache`.
 
 `slugify` already exists in three places across the two repos, and `DECAY`/`MasteryLevel` are
 mirrored in `src/shared/engram.ts`. These are documented divergence risks. Do not add a fourth

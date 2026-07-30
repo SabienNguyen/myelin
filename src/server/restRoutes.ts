@@ -395,9 +395,9 @@ export function buildRestRoutes(
   /**
    * Student profiles — the homeschool-parent persona: one vault, several learners, separate
    * evidence. Engram has always keyed evidence by student id; these two routes and the
-   * topbar switcher are the missing surface. Switching mutates cfg.student IN PLACE (the
-   * signin.ts applyRoute precedent — every handler reads cfg.student per request, so the next
-   * request is the new learner) and persists to the config file so a restart keeps it.
+   * topbar switcher are the missing surface. Switching mutates cfg.student IN PLACE (every
+   * handler reads cfg.student per request, so the next request is the new learner) and
+   * persists to the config file so a restart keeps it.
    */
   app.get('/api/students', (c) => {
     const dir = join(cfg.vault, 'students');
@@ -611,11 +611,10 @@ export function buildRestRoutes(
   });
   app.get('/api/status', async (c) => {
     // Read the tutor model AND the student from cfg HERE, not from the snapshot passed in at boot.
-    // Both change while the app runs — signing in with a Claude subscription rewrites the tutor
-    // (signin.ts's applyRoute), and switching learners rewrites cfg.student (PUT /api/student). A
-    // captured value meant the badge kept naming the model the app had stopped using, and — the
-    // switcher bug this fixes — reverted the displayed learner to the boot-time one on the next
-    // 60s poll, even though /api/students and /api/progress had already moved to the new student.
+    // Switching learners rewrites cfg.student while the app runs (PUT /api/student). A captured
+    // value reverted the displayed learner to the boot-time one on the next 60s poll — the
+    // switcher bug this fixes — even though /api/students and /api/progress had already moved to
+    // the new student.
     const extra: Record<string, string> = { tutor: cfg.models.tutor.model, student: cfg.student };
     if (anki) {
       const up = await anki.isUp();

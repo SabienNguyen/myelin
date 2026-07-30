@@ -76,6 +76,20 @@ describe('loadConfig', () => {
     }));
     expect(() => loadConfig(p)).toThrow(/grader/);
   });
+  it('refuses a claude-sdk: model id at boot, naming the role and the replacement routes', () => {
+    // The subscription route was removed. Failing loud here is the safety property: a silent
+    // fall-through would hand 'claude-sdk:sonnet' to the Anthropic API provider and bill a key
+    // the user never meant to use for these calls.
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'harness.config.json');
+    writeFileSync(p, JSON.stringify({
+      ...valid, models: { ...valid.models, tutor: { model: 'claude-sdk:sonnet' } },
+    }));
+    expect(() => loadConfig(p)).toThrow(/claude-sdk:.*removed/s);
+    expect(() => loadConfig(p)).toThrow(/tutor: "claude-sdk:sonnet"/);
+    expect(() => loadConfig(p)).toThrow(/API key|ollama:/);
+  });
+
   it('honors an explicit autoCompile: false', () => {
     const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
     const p = join(dir, 'harness.config.json');

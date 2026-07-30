@@ -20,9 +20,6 @@ vi.mock('../src/server/session.js', () => ({
 const { buildChatRoute } = await import('../src/server/chatRoute.js');
 const { saveThread } = await import('../src/server/sessionStore.js');
 
-// buildChatRoute now picks a session impl (AI-SDK vs Agent-SDK) by inspecting
-// cfg.models.tutor.model at construction time (T43) — a non-claude-sdk: model id here keeps
-// these thread-route tests on the mocked session.js stub above.
 const makeCfg = (vault: string) => ({ vault, student: 'kid', models: { tutor: { model: 'claude-sonnet-5' } } } as any);
 
 describe('GET /api/threads', () => {

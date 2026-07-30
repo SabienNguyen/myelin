@@ -76,10 +76,10 @@ export function sanitizeToolArgs(args: any, toolName: string, student: string, k
   // `misconceptions[]` array — the array the graph ⚠ marker, the session plan's repair queue, and
   // the page panel all read; `kind: 'misconception'` alone merely tags the evidence log. The tutor
   // prompt teaches "kind misconception, the confusion verbatim in the note", and a tutor following
-  // that convention recorded evidence NO surface could ever show (the T43 lifecycle audit watched
-  // every surface stay blank). Both tutor paths pass through here — guardMcpTools on the ai-sdk
-  // loop, the PreToolUse hook on the Agent SDK — so defaulting the param from the note makes the
-  // documented convention work everywhere; an explicit `misconception` still wins.
+  // that convention recorded evidence NO surface could ever show (a lifecycle audit watched every
+  // surface stay blank). Every tutor tool call passes through here via guardMcpTools, so
+  // defaulting the param from the note makes the documented convention work; an explicit
+  // `misconception` still wins.
   if (toolName === 'record_evidence' && out.kind === 'misconception'
     && out.misconception == null && typeof out.note === 'string' && out.note) {
     out.misconception = out.note;
@@ -145,9 +145,8 @@ function guardMcpTools(tools: ToolSet, student: string, knownSlugs: string[]): T
  * backend cannot exist is not a tool — a fresh install's first programming lesson ended in "This
  * exercise can't start right now." The right fix turned out to be one level down: the sandbox now
  * ships INSIDE the harness (gap/service.ts, child-process runner and all), so the backend always
- * exists and the gate came back out. Kept as a named function because claudeSdkTutor builds its
- * allowlist from the same answer, and because the next conditional block (if one ever appears)
- * belongs here, not scattered across two tutors.
+ * exists and the gate came back out. Kept as a named function so the next conditional block (if
+ * one ever appears) belongs here rather than inline at a call site.
  */
 export function availableBlocks(): BlockToolName[] {
   return [...BLOCK_TOOL_NAMES];
@@ -338,8 +337,7 @@ export async function vaultGap(
  * The course bank's session tools — available in EVERY mode, because drilling a banked problem is
  * a teaching activity, not a vault-writing one. The contract they serve (courseBank.ts): banked
  * problems are drilled VERBATIM, so course_problems hands the tutor the exact text plus a stable
- * id, and mark_course_problem is how a correct answer reaches the bank's spacing. Exported for
- * claudeSdkTutor.ts's SDK-flavored wrappers to stay behaviorally identical.
+ * id, and mark_course_problem is how a correct answer reaches the bank's spacing.
  */
 export function buildCourseTools(vault: string): ToolSet {
   return {
@@ -382,7 +380,7 @@ export function buildCourseTools(vault: string): ToolSet {
  * Frontier research: "what is the newest work on X" answered by LOOKING — arXiv + Crossref,
  * sorted by recency — never from training memory, whose cutoff is exactly what the question is
  * about. Every mode gets it: asking about the frontier is a reading activity, not a vault write.
- * `fetchImpl` injected for tests. Exported for claudeSdkTutor.ts's SDK wrappers.
+ * `fetchImpl` injected for tests.
  */
 export function buildFrontierTools(vault?: string, fetchImpl: typeof fetch = fetch): ToolSet {
   return {
@@ -538,11 +536,11 @@ export function createTutorSession(
     return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}`;
   }
 
-  // Which mode each thread's LAST turn ran in — mirrors claudeSdkTutor.ts's map, same live find:
-  // session context is first-turn-only, so a mid-thread mode switch left the tutor acting on the
-  // context of the mode the learner left (a decay sitting watched "review" answered from a
-  // history where nothing was due). In-memory on purpose: post-restart the map is empty and no
-  // re-injection happens — pre-existing behavior, not a new failure.
+  // Which mode each thread's LAST turn ran in. Session context is first-turn-only, so a mid-thread
+  // mode switch left the tutor acting on the context of the mode the learner left (a decay sitting
+  // watched "review" answered from a history where nothing was due). In-memory on purpose:
+  // post-restart the map is empty and no re-injection happens — pre-existing behavior, not a new
+  // failure.
   const lastModeByThread = new Map<string, Mode>();
 
   async function respond(messages: UIMessage[], mode: Mode, threadId = 'default'): Promise<Response> {
@@ -561,11 +559,10 @@ export function createTutorSession(
       // client falls back to pushing the snapshot-plus-new-content as an extra sibling message, and
       // the turn-1 content (e.g. "Let's warm up.") ends up rendered twice.
       originalMessages: messages,
-      // Same server-side persistence as claudeSdkTutor.ts (see its onEnd comment): the client's
-      // own PUT only happens when ITS stream finishes, so a disconnect mid-answer lost the
-      // assistant turn the server had completed. generateId makes both sides name the
-      // response message identically, so this save and the client's PUT converge in
-      // saveThread's union-by-id.
+      // Server-side turn persistence (the disconnect fix): the client's own PUT only happens when
+      // ITS stream finishes, so a disconnect mid-answer lost the assistant turn the server had
+      // completed. generateId makes both sides name the response message identically, so this
+      // save and the client's PUT converge in saveThread's union-by-id.
       generateId,
       onEnd: ({ messages: finalMessages }) => {
         try {
@@ -599,8 +596,7 @@ export function createTutorSession(
         // NOT on a grade turn: vaultGap keys off the last USER text, which on a block submission is
         // the already-answered message that staged the block — re-running it re-issues the same
         // research directive over the graded card, so the tutor re-researches and re-teaches the
-        // whole topic instead of landing the grade. The SDK route (claudeSdkTutor.ts) gates this the
-        // same way for the same reason; this brings the ai-sdk route into parity.
+        // whole topic instead of landing the grade.
         const gap = pending.length ? null : await vaultGap(mode, messages, slugs, {
           search: (query) => lw.call('search', { query }) as Promise<any>,
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
