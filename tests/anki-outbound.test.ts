@@ -163,47 +163,6 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
   }, 30_000);
 });
 
-describe('syncOutbound — claude-sdk: prefixed card_gen model', () => {
-  it('routes llmGenerateCards to the injected fake and parses the FRONT/BACK format', async () => {
-    const { cfg, lw } = await makeVaultEngram('kid5', 'integrals', 'Integrals');
-    await bringToPracticing(lw, 'kid5', 'integrals');
-    const anki = new AnkiClient(url);
-
-    const calls: any[] = [];
-    const sdkGenerate = async (opts: any) => {
-      calls.push(opts);
-      return { text: 'FRONT: Q1\nBACK: A1\n===', toolCallNames: [] };
-    };
-    const sdkCfg = { ...cfg, models: { card_gen: { model: 'claude-sdk:sonnet' } } } as HarnessConfig;
-
-    const result = await syncOutbound(lw, anki, sdkCfg, { deps: { sdkGenerate } });
-    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0, failed: 0 });
-    expect(calls).toHaveLength(1);
-    expect(calls[0].model).toBe('sonnet');
-    expect(calls[0].prompt).toContain('Integrals');
-
-    await lw.close();
-  }, 30_000);
-});
-
-describe('syncOutbound — claude-sdk card_gen wrapped in a markdown fence', () => {
-  it('tolerates a whole-response fence around the FRONT/BACK blocks', async () => {
-    const { cfg, lw } = await makeVaultEngram('kid7', 'fenced-page', 'Fenced Page');
-    await bringToPracticing(lw, 'kid7', 'fenced-page');
-    (cfg as any).models = { card_gen: { model: 'claude-sdk:sonnet' } };
-    const anki = new AnkiClient(url);
-    const result = await syncOutbound(lw, anki, cfg, {
-      deps: {
-        sdkGenerate: async () => ({
-          text: '```\nFRONT: Q\nBACK: A\n===\n```',
-        }) as any,
-      },
-    });
-    expect(result).toEqual({ pushed: 1, updated: 0, skipped: 0, failed: 0 });
-    await lw.close();
-  }, 30_000);
-});
-
 describe('syncOutbound — Anki offline', () => {
   it('skips silently without touching Engram when Anki is down', async () => {
     // Bind then immediately close a server to get a port nothing is listening on.
@@ -223,7 +182,7 @@ describe('syncOutbound — Anki offline', () => {
   });
 });
 
-// A live probe saw the sdk card_gen emit unparseable JSON for one math-heavy page — and the
+// A live probe saw card_gen emit unparseable output for one math-heavy page — and the
 // whole sync die with it. One page's bad generation must not abort every other page's cards.
 describe('syncOutbound — one page failing generation does not abort the run', () => {
   it('counts the failure and still pushes the other page', async () => {
@@ -236,7 +195,7 @@ describe('syncOutbound — one page failing generation does not abort the run', 
 
     const result = await syncOutbound(lw, anki, cfg, {
       generateCards: async (slug) => {
-        if (slug === 'bad-page') throw new Error('claude-sdk card_gen returned invalid JSON');
+        if (slug === 'bad-page') throw new Error('card_gen returned invalid JSON');
         return [{ front: `q-${slug}`, back: `a-${slug}` }];
       },
     });

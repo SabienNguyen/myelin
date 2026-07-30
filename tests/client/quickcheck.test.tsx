@@ -51,6 +51,70 @@ describe('QuickCheck verdict live region', () => {
   });
 });
 
+// Confidence-before-reveal: an OPTIONAL pre-answer rating. The output must carry `confidence`
+// only when the learner actually chose one — the calibration built on it (/api/progress) is only
+// honest if every counted rating was deliberate.
+describe('QuickCheck confidence toggle', () => {
+  afterEach(cleanup);
+  const args = { question: '2+2?', mode: 'choice', choices: ['3', '4'], pageSlug: 'arith' };
+
+  it('renders a radiogroup with two unchecked radios', () => {
+    render(<QuickCheck args={args} result={undefined} addResult={vi.fn()} />);
+    const group = screen.getByRole('radiogroup', { name: 'How confident?' });
+    expect(group).toBeTruthy();
+    const radios = screen.getAllByRole('radio');
+    expect(radios.map((r) => r.textContent)).toEqual(['sure', 'unsure']);
+    for (const r of radios) expect(r.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('selecting sure then answering includes confidence in the result', () => {
+    const addResult = vi.fn();
+    render(<QuickCheck args={args} result={undefined} addResult={addResult} />);
+    fireEvent.click(screen.getByRole('radio', { name: 'sure' }));
+    expect(screen.getByRole('radio', { name: 'sure' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: '4' }));
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({ answer: '4', confidence: 'sure' });
+  });
+
+  it('answering without selecting sends no confidence key at all', () => {
+    const addResult = vi.fn();
+    render(<QuickCheck args={args} result={undefined} addResult={addResult} />);
+    fireEvent.click(screen.getByRole('button', { name: '4' }));
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({ answer: '4' });
+    expect(addResult.mock.calls[0][0]).not.toHaveProperty('confidence');
+  });
+
+  it('re-clicking the chosen chip clears it — a mis-click must not force a rating', () => {
+    const addResult = vi.fn();
+    render(<QuickCheck args={args} result={undefined} addResult={addResult} />);
+    fireEvent.click(screen.getByRole('radio', { name: 'unsure' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'unsure' }));
+    fireEvent.click(screen.getByRole('button', { name: '4' }));
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({ answer: '4' });
+  });
+
+  it('text mode carries the chosen confidence through the input submit', () => {
+    const addResult = vi.fn();
+    render(<QuickCheck args={{ question: 'q?', pageSlug: 'p' }} result={undefined} addResult={addResult} />);
+    fireEvent.click(screen.getByRole('radio', { name: 'unsure' }));
+    const input = screen.getByRole('textbox');
+    fireEvent.change(input, { target: { value: '2x' } });
+    fireEvent.submit(input.closest('form')!);
+    expect(addResult).toHaveBeenCalledExactlyOnceWith({ answer: '2x', confidence: 'unsure' });
+  });
+
+  it('the done card echoes the rating, and stays silent when none was sent', () => {
+    const { unmount } = render(<QuickCheck args={args}
+      result={{ answer: '4', confidence: 'sure', grading: { verdict: 'correct', detail: 'exact match' } }}
+      addResult={vi.fn()} />);
+    expect(screen.getByText(/you said sure/)).toBeTruthy();
+    unmount();
+    render(<QuickCheck args={args}
+      result={{ answer: '4', grading: { verdict: 'correct', detail: 'exact match' } }} addResult={vi.fn()} />);
+    expect(screen.queryByText(/you said/)).toBeNull();
+  });
+});
+
 describe('QuickCheck graded card with no answer', () => {
   // Scoped to this block: the tests above predate it and render without cleanup, and unmounting
   // between cases here is what keeps the two blank variants from matching each other's output.

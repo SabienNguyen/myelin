@@ -19,10 +19,9 @@ const MAX_SEARCHES_PER_TURN = 8;
  *  Anthropic-routed model. An `ollama:` tutor gets nothing back from it. */
 function isAnthropicRouted(modelId: string | undefined): boolean {
   if (!modelId) return false;
-  // Mirrors models.ts's routing: `ollama:` goes to the OpenAI-compatible provider, `claude-sdk:`
-  // never reaches this tool set (claudeSdkTutor.ts owns that route and brings its own tools),
-  // anything else is an Anthropic model id.
-  return !modelId.startsWith('ollama:') && !modelId.startsWith('claude-sdk:');
+  // Mirrors models.ts's routing: `ollama:` goes to the OpenAI-compatible provider, anything else
+  // is an Anthropic model id.
+  return !modelId.startsWith('ollama:');
 }
 
 /** Research tools for the tutor: web search plus a readable-page fetcher.

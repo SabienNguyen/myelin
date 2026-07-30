@@ -22,10 +22,6 @@ export function credentialsPath(home = homedir(), os = platform()): string {
 
 export interface Credentials {
   anthropicApiKey?: string;
-  /** Which auth route the learner chose — see signin.ts. Stored here rather than in
-   *  harness.config.json because a packaged app's own directory is read-only, and because it is a
-   *  per-machine fact (which login exists HERE), not a per-project one. */
-  route?: 'api-key' | 'subscription';
 }
 
 export function readCredentials(path = credentialsPath()): Credentials {

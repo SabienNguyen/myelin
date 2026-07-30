@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PencilSimpleIcon as PencilSimple } from '@phosphor-icons/react';
 import { PracticePanel } from './PracticePanel.js';
 import { ProgressCard } from './ProgressCard.js';
+import { DecayHorizon } from './DecayHorizon.js';
 import { ReviewQueue } from './ReviewQueue.js';
 import { PathsSection } from './PathsSection.js';
 import { CoursePractice } from './CoursePractice.js';
@@ -194,6 +195,9 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
         {/* Honest progress first — what you know, earned, and are about to lose — then the review
             that acts on the slipping count it names. */}
         <ProgressCard visible={visible} />
+        {/* Under the card in both branches: the card says how much is slipping, the rail says how
+            soon everything else follows. An empty compile queue can still have a full vault. */}
+        <DecayHorizon visible={visible} />
         {/* Review first in BOTH branches — what is about to slip outranks adding new material,
             which is the whole argument of spaced repetition. */}
         <ReviewQueue visible={visible} />
@@ -217,6 +221,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   return (
     <div className="library-panel">
       <ProgressCard visible={visible} />
+      <DecayHorizon visible={visible} />
       <ReviewQueue visible={visible} />
       {/* Paths next — the syllabus is the frame the books and practice rows sit inside. */}
       <PathsSection visible={visible} />

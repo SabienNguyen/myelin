@@ -1,16 +1,11 @@
-// The FirstRun routes over real HTTP — the file where the stranded-signin bug lived, previously
-// tested only at the applyRoute unit level. Credentials redirect to a temp dir via
-// XDG_CONFIG_HOME; the `claude` CLI and the Anthropic key probe are injected fakes.
+// The FirstRun routes over real HTTP. Credentials redirect to a temp dir via XDG_CONFIG_HOME; the
+// Anthropic key probe is an injected fake.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSetupRoutes } from '../src/server/setupRoutes.js';
 import type { HarnessConfig } from '../src/server/config.js';
-
-const loggedIn = async () => ({ cliFound: true, cliVersion: '2.0 (test)', loggedIn: true, email: 'e@x.test' });
-const notSignedIn = async () => ({ cliFound: true, cliVersion: '2.0 (test)', loggedIn: false });
-const noCli = async () => ({ cliFound: false, loggedIn: false });
 
 const plainModels = () => ({
   tutor: { model: 'claude-sonnet-5' }, grader: { model: 'claude-haiku-4-5' },
@@ -39,52 +34,21 @@ const cfgWith = (models: Record<string, { model: string }>) =>
 
 describe('GET /api/setup', () => {
   it('plain Anthropic models with no key anywhere: blocked, naming every role', async () => {
-    const app = buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn });
+    const app = buildSetupRoutes(cfgWith(plainModels()));
     const state = await (await app.request('/api/setup')).json();
     expect(state.blocked).toBe(true);
     expect(state.apiKey.rolesNeeding).toEqual(['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile']);
     expect(state.apiKey.present).toBe(false);
   });
 
-  it('a config already on claude-sdk everywhere is ready without any key', async () => {
+  it('a fully ollama: config is ready without any key', async () => {
     const models = Object.fromEntries(
-      Object.keys(plainModels()).map((r) => [r, { model: 'claude-sdk:sonnet' }]),
+      Object.keys(plainModels()).map((r) => [r, { model: 'ollama:qwen' }]),
     );
-    const app = buildSetupRoutes(cfgWith(models), { subscription: notSignedIn });
+    const app = buildSetupRoutes(cfgWith(models));
     const state = await (await app.request('/api/setup')).json();
     expect(state.blocked).toBe(false);
     expect(state.apiKey.rolesNeeding).toEqual([]);
-  });
-});
-
-describe('PUT /api/setup/subscription', () => {
-  const put = (app: ReturnType<typeof buildSetupRoutes>) =>
-    app.request('/api/setup/subscription', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{}' });
-
-  it('one click unblocks: models ride the login, the route persists, blocked clears', async () => {
-    const cfg = cfgWith(plainModels());
-    const app = buildSetupRoutes(cfg, { subscription: loggedIn });
-    const res = await put(app);
-    expect(res.status).toBe(200);
-    const state = await res.json();
-    expect(state.blocked).toBe(false);
-    expect(state.route).toBe('subscription');
-    expect(cfg.models.tutor.model).toBe('claude-sdk:sonnet');
-    // Persisted for the next boot, beside the key, not in the project config.
-    const stored = JSON.parse(readFileSync(join(confDir, 'myelin', 'credentials.json'), 'utf8'));
-    expect(stored.route).toBe('subscription');
-  });
-
-  it('installed but not signed in: a 400 that says to run `claude` once', async () => {
-    const res = await put(buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn }));
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/not signed in.*Run `claude`/s);
-  });
-
-  it('no CLI at all: a 400 that offers the API-key path', async () => {
-    const res = await put(buildSetupRoutes(cfgWith(plainModels()), { subscription: noCli }));
-    expect(res.status).toBe(400);
-    expect((await res.json()).error).toMatch(/No `claude` command.*API key/s);
   });
 });
 
@@ -97,7 +61,7 @@ describe('PUT /api/setup/api-key', () => {
 
   it('a probe-approved key saves, enters the environment, and unblocks', async () => {
     const probeFetch = vi.fn(async (..._args: Parameters<typeof fetch>) => ({ ok: true, status: 200 }) as Response);
-    const app = buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn, probeFetch });
+    const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch });
     const res = await put(app, REAL_SHAPE);
     expect(res.status).toBe(200);
     const state = await res.json();
@@ -112,7 +76,7 @@ describe('PUT /api/setup/api-key', () => {
 
   it('a key Anthropic rejects is never saved', async () => {
     const probeFetch = async () => ({ ok: false, status: 401 }) as Response;
-    const app = buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn, probeFetch });
+    const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch });
     const res = await put(app, REAL_SHAPE);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/Anthropic rejected/);
@@ -120,14 +84,14 @@ describe('PUT /api/setup/api-key', () => {
   });
 
   it('a truncated sk-ant- paste gets the truncation sentence, not "wrong prefix"', async () => {
-    const app = buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn });
+    const app = buildSetupRoutes(cfgWith(plainModels()));
     const res = await put(app, 'sk-ant-tooshort');
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/truncated/);
   });
 
   it('a non-Anthropic-shaped paste names the expected prefix', async () => {
-    const app = buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn });
+    const app = buildSetupRoutes(cfgWith(plainModels()));
     const res = await put(app, 'hunter2');
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/sk-ant-/);
@@ -135,7 +99,7 @@ describe('PUT /api/setup/api-key', () => {
 
   it('an unreachable probe is a could-not-check error, not a saved key', async () => {
     const probeFetch = async () => { throw new Error('getaddrinfo ENOTFOUND'); };
-    const app = buildSetupRoutes(cfgWith(plainModels()), { subscription: notSignedIn, probeFetch: probeFetch as any });
+    const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as any });
     const res = await put(app, REAL_SHAPE);
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/Could not reach Anthropic/);

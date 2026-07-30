@@ -152,8 +152,8 @@ describe('the API key, the one thing that cannot be defaulted', () => {
     const roles = (models: Record<string, string>) =>
       needsApiKey({ models: Object.fromEntries(Object.entries(models).map(([k, v]) => [k, { model: v }])) } as any);
     expect(roles({ tutor: 'claude-sonnet-5', grader: 'ollama:qwen' })).toEqual(['tutor']);
-    // A fully local or fully subscription-backed setup needs no key at all, and must not be nagged.
-    expect(roles({ tutor: 'ollama:qwen', grader: 'claude-sdk:sonnet' })).toEqual([]);
+    // A fully local setup needs no key at all, and must not be nagged.
+    expect(roles({ tutor: 'ollama:qwen', grader: 'ollama:llama3' })).toEqual([]);
   });
 });
 

@@ -46,5 +46,56 @@ describe('model router', () => {
       expect(m.provider).not.toMatch(/anthropic/);
       expect(m.provider).toBe('ollama.chat');
     });
+
+    it('still resolves with its localhost default when OLLAMA_BASE_URL is unset', () => {
+      const prev = process.env.OLLAMA_BASE_URL;
+      delete process.env.OLLAMA_BASE_URL;
+      try {
+        expect((modelFor('grader', ollamaCfg) as any).modelId).toBe('qwen2.5-coder:14B');
+      } finally {
+        if (prev !== undefined) process.env.OLLAMA_BASE_URL = prev;
+      }
+    });
+  });
+
+  describe('openai: OpenAI-compatible provider routing', () => {
+    const openaiCfg = { models: { grader: { model: 'openai:foo/bar' } } } as any;
+    const prevBase = process.env.OPENAI_COMPAT_BASE_URL;
+    const prevKey = process.env.OPENAI_COMPAT_API_KEY;
+    afterEach(() => {
+      if (prevBase === undefined) delete process.env.OPENAI_COMPAT_BASE_URL;
+      else process.env.OPENAI_COMPAT_BASE_URL = prevBase;
+      if (prevKey === undefined) delete process.env.OPENAI_COMPAT_API_KEY;
+      else process.env.OPENAI_COMPAT_API_KEY = prevKey;
+    });
+
+    it('strips the openai: prefix and routes to the configured base URL, not anthropic', () => {
+      process.env.OPENAI_COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
+      const m = modelFor('grader', openaiCfg) as any;
+      expect(m.modelId).toBe('foo/bar');
+      expect(m.provider).not.toMatch(/anthropic/);
+      expect(m.provider).toBe('openai-compatible.chat');
+    });
+
+    it('works without an api key — some proxies are keyless; a 401 belongs to the provider', () => {
+      process.env.OPENAI_COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
+      delete process.env.OPENAI_COMPAT_API_KEY;
+      expect((modelFor('grader', openaiCfg) as any).modelId).toBe('foo/bar');
+    });
+
+    it('with no base URL, fails loudly naming OPENAI_COMPAT_BASE_URL — never defaults to localhost', () => {
+      delete process.env.OPENAI_COMPAT_BASE_URL;
+      expect(() => modelFor('grader', openaiCfg))
+        .toThrow(/OPENAI_COMPAT_BASE_URL/);
+      expect(() => modelFor('grader', openaiCfg))
+        .toThrow(/openai:foo\/bar/);
+    });
+
+    it('reads the base URL per call, not at module load', () => {
+      process.env.OPENAI_COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
+      expect((modelFor('grader', openaiCfg) as any).modelId).toBe('foo/bar');
+      delete process.env.OPENAI_COMPAT_BASE_URL;
+      expect(() => modelFor('grader', openaiCfg)).toThrow(/OPENAI_COMPAT_BASE_URL/);
+    });
   });
 });

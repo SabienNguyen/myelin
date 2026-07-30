@@ -56,6 +56,13 @@ export interface Progress {
   byLevel: { mastered: number; practicing: number; exposed: number };
   earnedThisWeek: number;
   slipping: number;
+  /** TODAY's evidence by outcome; `repaired` counts misconceptions cleared today. */
+  today: { applied: number; explained: number; rubric: number; struggled: number; repaired: number };
+  /** The not-yet-slipped page whose decay window closes soonest; null when nothing is on a clock. */
+  nextSlip: { slug: string; title: string; daysLeft: number } | null;
+  /** Of the quick-check answers rated "sure" before answering, how many graded positive. Null
+   *  until at least one sure-rating exists in the ledger. */
+  calibration: { sureRight: number; sureTotal: number } | null;
 }
 export const getProgress = () => getJson<Progress>('/api/progress', 'your progress');
 

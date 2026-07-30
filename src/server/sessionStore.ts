@@ -101,32 +101,3 @@ export function logGuardrail(vault: string, entry: string) {
   mkdirSync(join(vault, '.harness'), { recursive: true });
   appendFileSync(join(vault, '.harness', 'guardrail.log'), `${new Date().toISOString()} ${entry}\n`);
 }
-
-// T43: threadId -> Agent SDK session id, so a claude-sdk: tutor turn can `resume` instead of
-// replaying the whole transcript as prompt text. One JSON file, same directory as the AI-SDK
-// session threads (both are harness-owned bookkeeping, not vault content).
-const sdkSessionsPath = (vault: string) => join(vault, '.harness', 'sdk-sessions.json');
-
-function readSdkSessions(vault: string): Record<string, string> {
-  const p = sdkSessionsPath(vault);
-  if (!existsSync(p)) return {};
-  try {
-    const data = JSON.parse(readFileSync(p, 'utf8'));
-    return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
-  } catch {
-    return {}; // corrupt file — treat as empty rather than failing the turn
-  }
-}
-
-export function loadSdkSession(vault: string, threadId: string): string | undefined {
-  assertThreadId(threadId);
-  return readSdkSessions(vault)[threadId];
-}
-
-export function saveSdkSession(vault: string, threadId: string, sdkSessionId: string) {
-  assertThreadId(threadId);
-  mkdirSync(join(vault, '.harness'), { recursive: true });
-  const all = readSdkSessions(vault);
-  all[threadId] = sdkSessionId;
-  writeFileSync(sdkSessionsPath(vault), JSON.stringify(all));
-}

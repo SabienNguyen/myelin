@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
-import { MockLanguageModelV3 } from 'ai/test';
 import { buildGapHelpRoute } from '../src/server/gapHelp.js';
-import type { ClaudeSdkGenerateOpts, ClaudeSdkResult } from '../src/server/claudeSdk.js';
+import { textModel } from './mockModel.js';
 
 // The true reference solution for the fixture's full_body rung — this string is NEVER placed
 // anywhere in the fake sidecar's GET /api/ladder response below (mirroring the real the-gap
@@ -61,28 +60,7 @@ function fakeLw(page?: { body: string }): any {
   };
 }
 
-function fakeSdk(text: string) {
-  const calls: ClaudeSdkGenerateOpts[] = [];
-  const sdkGenerate = async (opts: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
-    calls.push(opts);
-    return { text, toolCallNames: [] };
-  };
-  return { calls, sdkGenerate };
-}
-
-function mockModel(text: string) {
-  return new MockLanguageModelV3({
-    doGenerate: {
-      content: [{ type: 'text', text }],
-      finishReason: { unified: 'stop', raw: 'stop' },
-      usage: {
-        inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-        outputTokens: { total: 1, text: 1, reasoning: undefined },
-      },
-      warnings: [],
-    },
-  });
-}
+const mockModel = (text: string) => textModel(text).model;
 
 const validBody = {
   pattern: 'stream-consumer',
@@ -144,23 +122,9 @@ describe('POST /api/gap/help', () => {
     expect(body.hint).toContain('null response.body');
   });
 
-  it('happy path — claude-sdk: tutor route returns {hint} and dispatches via sdkGenerate', async () => {
-    const { calls, sdkGenerate } = fakeSdk('check what happens when the body is null before reading.');
-    const app = buildGapHelpRoute(fakeLw({ body: 'vault page body' }), cfgFor(base, 'claude-sdk:sonnet'), { sdkGenerate });
-    const res = await app.request('/api/gap/help', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(validBody),
-    });
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.hint).toBe('check what happens when the body is null before reading.');
-    expect(calls).toHaveLength(1);
-    expect(calls[0].model).toBe('sonnet'); // prefix stripped
-    expect(calls[0].maxTurns).toBe(1);
-  });
-
   it('tolerates a missing vault page (read_page throws "page not found") without failing the request', async () => {
-    const { sdkGenerate } = fakeSdk('a concept-level hint with no vault page available.');
-    const app = buildGapHelpRoute(fakeLw(undefined), cfgFor(base, 'claude-sdk:sonnet'), { sdkGenerate });
+    const app = buildGapHelpRoute(fakeLw(undefined), cfgFor(base, 'claude-sonnet-5'),
+      { model: mockModel('a concept-level hint with no vault page available.') });
     const res = await app.request('/api/gap/help', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(validBody),
     });
@@ -169,8 +133,8 @@ describe('POST /api/gap/help', () => {
   });
 
   it('no matching rung for the requested template -> 400', async () => {
-    const { sdkGenerate } = fakeSdk('unused');
-    const app = buildGapHelpRoute(fakeLw({ body: 'x' }), cfgFor(base, 'claude-sdk:sonnet'), { sdkGenerate });
+    const app = buildGapHelpRoute(fakeLw({ body: 'x' }), cfgFor(base, 'claude-sonnet-5'),
+      { model: mockModel('unused') });
     const res = await app.request('/api/gap/help', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ...validBody, rung: 'inline_completion' }), // fixture only has full_body
@@ -181,21 +145,17 @@ describe('POST /api/gap/help', () => {
   // Answer-integrity regression test (the point of this feature's safety): the fake gap upstream's
   // "full artifact" reference solution is REFERENCE_SOLUTION_SENTINEL, but its GET /api/ladder
   // response — the only endpoint this route (or anything else in the harness) ever calls — never
-  // carries it. Capture the exact prompt handed to the tutor model via the injectable sdkGenerate
-  // seam and assert the sentinel has no path into it.
+  // carries it. Capture the exact prompt (system included) handed to the tutor model via the
+  // injectable model seam and assert the sentinel has no path into it.
   it('answer-integrity: the built prompt never contains the reference solution', async () => {
-    const calls: ClaudeSdkGenerateOpts[] = [];
-    const sdkGenerate = async (opts: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
-      calls.push(opts);
-      return { text: 'a proximity hint', toolCallNames: [] };
-    };
-    const app = buildGapHelpRoute(fakeLw({ body: 'vault page body' }), cfgFor(base, 'claude-sdk:sonnet'), { sdkGenerate });
+    const { model, prompts } = textModel('a proximity hint');
+    const app = buildGapHelpRoute(fakeLw({ body: 'vault page body' }), cfgFor(base, 'claude-sonnet-5'), { model });
     const res = await app.request('/api/gap/help', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(validBody),
     });
     expect(res.status).toBe(200);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].prompt).not.toContain(REFERENCE_SOLUTION_SENTINEL);
-    expect(calls[0].system ?? '').not.toContain(REFERENCE_SOLUTION_SENTINEL);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('full_body'); // the rung really reached the prompt…
+    expect(prompts[0]).not.toContain(REFERENCE_SOLUTION_SENTINEL); // …and the answer never did
   });
 });

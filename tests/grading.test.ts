@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { appliedGradeBypass, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
-import type { ClaudeSdkGenerateOpts, ClaudeSdkResult } from '../src/server/claudeSdk.js';
+import { textModel } from './mockModel.js';
 
 describe('mathEquivalent (numeric sampling)', () => {
   it('accepts algebraically equal forms', () => {
@@ -451,56 +451,44 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
   });
 });
 
-describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {
-  function fakeSdk(text: string) {
-    const calls: ClaudeSdkGenerateOpts[] = [];
-    const sdkGenerate = async (opts: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
-      calls.push(opts);
-      return { text, toolCallNames: [] };
-    };
-    return { calls, sdkGenerate };
-  }
+describe('gradeBlockOutput — model-graded paths (injected grader model)', () => {
+  const cfg = { models: { grader: { model: 'claude-haiku-4-5' } } } as any;
 
-  it('routes an open quick_check answer to the fake with the question/answer in the prompt', async () => {
-    const { calls, sdkGenerate } = fakeSdk('CORRECT nice work');
-    const cfg = { models: { grader: { model: 'claude-sdk:sonnet' } } } as any;
+  it('sends an open quick_check answer to the grader with the question/answer in the prompt', async () => {
+    const { model, prompts } = textModel('CORRECT nice work');
     const g = await gradeBlockOutput('quick_check',
       { question: 'Why does the chain rule apply here?', pageSlug: 'derivatives' },
-      { answer: 'because f is composed with g' }, cfg, { sdkGenerate });
+      { answer: 'because f is composed with g' }, cfg, { model });
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].model).toBe('sonnet'); // prefix stripped, no leaked 'claude-sdk:'
-    expect(calls[0].prompt).toContain('Why does the chain rule apply here?');
-    expect(calls[0].prompt).toContain('because f is composed with g');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('Why does the chain rule apply here?');
+    expect(prompts[0]).toContain('because f is composed with g');
     expect(g.verdict).toBe('correct');
   });
 
-  it('routes the writing_draft grader to the fake and parses its JSON-only response', async () => {
+  it('sends the writing_draft to the grader and parses its annotation payload', async () => {
     const payload = {
       annotations: [{ span: 'the cat sat', category: 'vague', note: 'be specific' }],
       skillGrades: { claim: 'good', concision: 'weak', specificity: 'weak' },
     };
-    const { calls, sdkGenerate } = fakeSdk(JSON.stringify(payload));
-    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
+    const { model, prompts } = textModel(JSON.stringify(payload));
     const g = await gradeBlockOutput('writing_draft',
       { prompt: 'Describe the cat.', round: 1, pageSlug: 'writing-1' },
-      { draft: 'the cat sat' }, cfg, { sdkGenerate });
+      { draft: 'the cat sat' }, cfg, { model });
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].prompt).toContain('the cat sat');
-    expect(calls[0].prompt.toLowerCase()).toContain('json');
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('the cat sat');
     expect(g.verdict).toBe('reviewed');
     expect(g.annotations).toEqual(payload);
     expect(g.evidence[0].kind).toBe('struggled'); // a weak skill is present
   });
 
-  it('throws a readable error when the claude-sdk writing_draft response is not valid JSON', async () => {
-    const { sdkGenerate } = fakeSdk('not json at all');
-    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
+  it('an unparseable writing_draft grade throws rather than minting a verdict', async () => {
+    const { model } = textModel('not json at all');
     await expect(gradeBlockOutput('writing_draft',
       { prompt: 'Describe the cat.', round: 1, pageSlug: 'writing-1' },
-      { draft: 'the cat sat' }, cfg, { sdkGenerate }))
-      .rejects.toThrow(/invalid JSON/i);
+      { draft: 'the cat sat' }, cfg, { model }))
+      .rejects.toThrow();
   });
 
   // Audit 40: a rubric'd draft used to return bare pass/fail lines — the annotation feedback
@@ -518,33 +506,20 @@ describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {
   });
 
   it("a rubric'd draft carries annotation feedback alongside the rubric verdict", async () => {
-    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> =>
-      ({ text: /rubric criterion/i.test(prompt) ? rubricJson : annJson, toolCallNames: [] });
-    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
-    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { sdkGenerate });
+    const { model } = textModel((prompt) => (/rubric criterion/i.test(prompt) ? rubricJson : annJson));
+    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { model });
     expect(g.rubric).toEqual([{ criterion: 'thesis takes a side', pass: true, note: 'clear side' }]);
     expect(g.annotations?.annotations[0].span).toBe('the cat sat');
     expect(g.annotations?.skillGrades).toEqual({ claim: 'good' });
     expect(g.evidence.map((e) => e.kind)).toEqual(['rubric-passed']);
   });
 
-  it('accepts grader JSON wrapped in a markdown fence — live sonnet does this despite the JSON-only instruction', async () => {
-    const fence = (s: string) => '```json\n' + s + '\n```';
-    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> =>
-      ({ text: fence(/rubric criterion/i.test(prompt) ? rubricJson : annJson), toolCallNames: [] });
-    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
-    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { sdkGenerate });
-    expect(g.rubric?.[0].pass).toBe(true); // a fenced rubric-judge reply must not lose the turn
-    expect(g.annotations?.skillGrades).toEqual({ claim: 'good' });
-  });
-
   it('a failed annotation call does not lose the rubric verdict, and says so', async () => {
-    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
-      if (/rubric criterion/i.test(prompt)) return { text: rubricJson, toolCallNames: [] };
+    const { model } = textModel((prompt) => {
+      if (/rubric criterion/i.test(prompt)) return rubricJson;
       throw new Error('grader down');
-    };
-    const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
-    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { sdkGenerate });
+    });
+    const g = await gradeBlockOutput('writing_draft', rubricInput, { draft: 'the cat sat' }, cfg, { model });
     expect(g.rubric?.[0].pass).toBe(true);
     expect(g.annotations).toBeUndefined();
     expect(g.detail).toContain('annotations unavailable');
@@ -553,40 +528,63 @@ describe('gradeBlockOutput — claude-sdk: prefixed grader model', () => {
 });
 
 describe('quick_check phrasing tolerance (audit: correct answer graded wrong on wording)', () => {
-  function fakeSdk2(text: string) {
-    const calls: ClaudeSdkGenerateOpts[] = [];
-    const sdkGenerate = async (opts: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
-      calls.push(opts);
-      return { text, toolCallNames: [] };
-    };
-    return { calls, sdkGenerate };
-  }
   const input = { question: 'What must the parser hold between reads?', mode: 'text', expected: 'buffer', pageSlug: 'p' };
-  const cfg = { models: { grader: { model: 'claude-sdk:sonnet' } } } as any;
+  const cfg = { models: { grader: { model: 'claude-haiku-4-5' } } } as any;
 
   it('an exact match stays mechanical applied-correctly, no model consulted', async () => {
-    const { calls, sdkGenerate } = fakeSdk2('should not be called');
-    const g = await gradeBlockOutput('quick_check', input, { answer: ' Buffer ' }, cfg, { sdkGenerate });
+    const { model, prompts } = textModel('should not be called');
+    const g = await gradeBlockOutput('quick_check', input, { answer: ' Buffer ' }, cfg, { model });
     expect(g.source).toBe('mechanical');
     expect(g.evidence[0].kind).toBe('applied-correctly');
-    expect(calls).toHaveLength(0);
+    expect(prompts).toHaveLength(0);
   });
 
   it('a rephrased-but-right answer falls back to the model grader, expected passed as context', async () => {
-    const { calls, sdkGenerate } = fakeSdk2('CORRECT — names the cross-read buffer');
-    const g = await gradeBlockOutput('quick_check', input, { answer: 'a buffer carried across reads' }, cfg, { sdkGenerate });
+    const { model, prompts } = textModel('CORRECT — names the cross-read buffer');
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'a buffer carried across reads' }, cfg, { model });
     expect(g.verdict).toBe('correct');
     expect(g.source).toBe('model');
     // capApplied: a model judged it — it must not mint applied-correctly.
     expect(g.evidence[0].kind).toBe('explained-correctly');
-    expect(calls[0].prompt).toContain('A correct answer conveys: buffer');
+    expect(prompts[0]).toContain('A correct answer conveys: buffer');
   });
 
   it('a wrong answer still records struggled through the fallback', async () => {
-    const { sdkGenerate } = fakeSdk2('INCORRECT — that is not it');
-    const g = await gradeBlockOutput('quick_check', input, { answer: 'the file descriptor' }, cfg, { sdkGenerate });
+    const { model } = textModel('INCORRECT — that is not it');
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'the file descriptor' }, cfg, { model });
     expect(g.verdict).toBe('incorrect');
     expect(g.evidence[0].kind).toBe('struggled');
+  });
+});
+
+// Confidence-before-reveal (QuickCheck.tsx): the optional pre-answer rating rides the block
+// result into the evidence NOTE, where /api/progress's calibration count reads it back out.
+describe('quick_check confidence in the evidence note', () => {
+  const cfg = { models: { grader: { model: 'claude-haiku-4-5' } } } as any;
+  const input = { question: 'q?', mode: 'text', expected: 'buffer', pageSlug: 'p' };
+
+  it('appends " · felt sure" on the mechanical exact-match path', async () => {
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'buffer', confidence: 'sure' }, cfg);
+    expect(g.evidence[0].note).toBe('quick_check: q? · felt sure');
+  });
+
+  it('appends " · felt unsure" on the model-graded fallback path', async () => {
+    const { model } = textModel('INCORRECT — no');
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'wrong', confidence: 'unsure' }, cfg, { model });
+    expect(g.evidence[0].note).toBe('open answer: q? · felt unsure');
+    expect(g.evidence[0].kind).toBe('struggled');
+  });
+
+  it('no confidence in the result → no suffix', async () => {
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'buffer' }, cfg);
+    expect(g.evidence[0].note).toBe('quick_check: q?');
+  });
+
+  it('an unrecognized confidence value is dropped, not recorded', async () => {
+    // Block outputs are not schema-validated; a garbage rating must not pollute the ledger the
+    // calibration count is built from.
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'buffer', confidence: 'kinda' }, cfg);
+    expect(g.evidence[0].note).toBe('quick_check: q?');
   });
 });
 
@@ -709,7 +707,7 @@ describe('extractAnswerNumber — the number a free-text answer means', () => {
 // grader laziness. Same-length replies now zip by index (the prompt enumerates); true omissions
 // get one narrowed retry; anything still unanswered keeps the fail-closed verdict.
 describe('rubric judging — paraphrase tolerance and the omission retry', () => {
-  const cfg = { models: { grader: { model: 'claude-sdk:opus' } } } as any;
+  const cfg = { models: { grader: { model: 'claude-haiku-4-5' } } } as any;
   const twoCriteria = {
     prompt: 'Explain it.', round: 1, pageSlug: 'writing-1',
     rubric: ['states the mechanism accurately', 'gives an intuitive reason why'],
@@ -721,28 +719,23 @@ describe('rubric judging — paraphrase tolerance and the omission retry', () =>
       { criterion: 'mechanism correctness', pass: true, note: 'right' },
       { criterion: 'intuition provided', pass: true, note: 'clock hands' },
     ] });
-    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> =>
-      ({ text: /rubric criterion/i.test(prompt) ? judged : annJson, toolCallNames: [] });
-    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { sdkGenerate });
+    const { model } = textModel((prompt) => (/rubric criterion/i.test(prompt) ? judged : annJson));
+    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { model });
     expect(g.rubric?.map((r: any) => r.pass)).toEqual([true, true]);
     expect(g.evidence.map((e) => e.kind)).toEqual(['rubric-passed']);
   });
 
   it('an omitted criterion gets one narrowed retry, and the retry verdict lands', async () => {
     const rubricCalls: string[] = [];
-    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
-      if (!/rubric criterion/i.test(prompt)) return { text: annJson, toolCallNames: [] };
+    const { model } = textModel((prompt) => {
+      if (!/rubric criterion/i.test(prompt)) return annJson;
       rubricCalls.push(prompt);
       // First call: answers only criterion 1. Retry (names only the missing one): answers it.
-      const first = rubricCalls.length === 1;
-      return {
-        text: JSON.stringify({ criteria: first
-          ? [{ criterion: 'states the mechanism accurately', pass: true, note: 'right' }]
-          : [{ criterion: 'gives an intuitive reason why', pass: false, note: 'no intuition offered' }] }),
-        toolCallNames: [],
-      };
-    };
-    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { sdkGenerate });
+      return JSON.stringify({ criteria: rubricCalls.length === 1
+        ? [{ criterion: 'states the mechanism accurately', pass: true, note: 'right' }]
+        : [{ criterion: 'gives an intuitive reason why', pass: false, note: 'no intuition offered' }] });
+    });
+    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { model });
     expect(rubricCalls).toHaveLength(2);
     expect(rubricCalls[1]).toContain('gives an intuitive reason why');
     expect(rubricCalls[1]).not.toContain('states the mechanism accurately');
@@ -751,15 +744,14 @@ describe('rubric judging — paraphrase tolerance and the omission retry', () =>
 
   it('a retry that fails leaves the fail-closed verdict standing', async () => {
     let rubricCalls = 0;
-    const sdkGenerate = async ({ prompt }: ClaudeSdkGenerateOpts): Promise<ClaudeSdkResult> => {
-      if (!/rubric criterion/i.test(prompt)) return { text: annJson, toolCallNames: [] };
+    const { model } = textModel((prompt) => {
+      if (!/rubric criterion/i.test(prompt)) return annJson;
       rubricCalls++;
-      if (rubricCalls === 1) {
-        return { text: JSON.stringify({ criteria: [{ criterion: 'states the mechanism accurately', pass: true, note: 'right' }] }), toolCallNames: [] };
-      }
-      return { text: 'not json', toolCallNames: [] };
-    };
-    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { sdkGenerate });
+      return rubricCalls === 1
+        ? JSON.stringify({ criteria: [{ criterion: 'states the mechanism accurately', pass: true, note: 'right' }] })
+        : 'not json';
+    });
+    const g = await gradeBlockOutput('writing_draft', twoCriteria, { draft: 'd' }, cfg, { model });
     expect(g.rubric?.[1].pass).toBe(false);
     expect(g.rubric?.[1].note).toMatch(/did not address/);
   });

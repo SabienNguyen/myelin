@@ -25,6 +25,9 @@ export interface LaidOutNode {
   color: string;
   ringFraction: number | null;
   daysLeft: number | null;
+  /** The memory layer's own "already dropped a rung" signal (get_student_state's `slipped`, the
+   * same field /api/due and the review queue read) — never re-derived from decay windows here. */
+  slipped: boolean;
   misconceptions: string[];
   effective: MasteryLevel;
   /** Count of edges (prereq + deepens, either direction) touching this node in the WHOLE vault —
@@ -103,6 +106,7 @@ export function graphMeta(nodes: any[], now: Date): { nodes: GraphNodeMeta[]; ed
     return {
       slug: n.slug, title: n.title,
       color: colors[effective], effective, daysLeft, ringFraction,
+      slipped: n.mastery?.slipped === true,
       misconceptions: n.mastery?.misconceptions ?? [],
       degree: degree.get(n.slug) ?? 0,
     };

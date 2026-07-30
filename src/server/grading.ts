@@ -1,33 +1,17 @@
 import { convertLatexToAsciiMath } from 'mathlive';
 import { create, all } from 'mathjs';
-import { generateText, Output } from 'ai';
+import { generateText, Output, type LanguageModel } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
 import { TONE_SYSTEMS, type ToneSystem } from '../shared/toneContour.js';
 import { mmss } from '../shared/videoUrl.js';
 import type { EvidenceKind } from '../shared/engram.js';
-import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from './claudeSdk.js';
 import { modelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
 
-/** Injectable seam for tests — see claudeSdk.ts. Real callers omit this; it defaults to the
- * real Agent SDK call. */
+/** Injectable grader-model seam for tests (mirrors gapHelp.ts's GapHelpDeps.model). Real callers
+ * omit it; the configured grader role's model is used. */
 export interface GradingDeps {
-  sdkGenerate?: typeof claudeSdkGenerate;
-}
-
-/** The Agent SDK path has no Output.object, so its graders ask for JSON-only text — and the live
- *  model still sometimes wraps the JSON in a markdown fence despite that instruction (a probe
- *  lost an entire grade turn to the resulting JSON.parse throw). Unwrap one fence when present;
- *  text that still fails to parse throws with the raw head attached so the failure stays
- *  readable. */
-export function parseSdkJson<T>(text: string, who: string): T {
-  const fenced = text.trim().match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
-  const body = fenced ? fenced[1] : text.trim();
-  try {
-    return JSON.parse(body) as T;
-  } catch (e) {
-    throw new Error(`${who} returned invalid JSON: ${(e as Error).message}. Raw: ${text.slice(0, 300)}`);
-  }
+  model?: LanguageModel;
 }
 
 // predictable: true makes functions like log()/sqrt() return NaN (not a Complex) outside
@@ -502,11 +486,11 @@ export interface Grade {
  * code_exercise's reveal ceiling. In each case the affordance stays available and the evidence
  * stays honest.
  *
- * Note for whoever changes applyEvidence next: today this cap has NO effect on mastery, because
- * engram's student/model.ts puts 'explained-correctly' and 'applied-correctly' in the same
- * branch — both step exactly one rung. So the two kinds currently differ in truthfulness and
- * nothing else. That is a live design question (should applied work resist decay longer? should
- * explaining alone be unable to reach 'mastered'?) and this is the seam where it would be answered.
+ * The cap now has real mastery consequences: engram's student/model.ts ceilings
+ * 'explained-correctly' and 'rubric-passed' at 'practicing' — only 'applied-correctly' can reach
+ * 'mastered', and standing that rests on a rubric verdict decays fastest. So a model-graded pass
+ * no longer just labels the evidence honestly; it keeps the top of the scale out of reach until a
+ * machine confirms the work.
  */
 export function capApplied(kind: EvidenceKind, source: GradeSource): EvidenceKind {
   if (source === 'model' && kind === 'applied-correctly') return 'explained-correctly';
@@ -526,8 +510,8 @@ const ev = (slug: string, kind: EvidenceKind, note: string, source: GradeSource)
   ({ slug, kind: capApplied(kind, source), note });
 
 /**
- * Recording-side integrity check (DETECTION ONLY — see the two call sites in session.ts /
- * claudeSdkTutor.ts). capApplied makes the COMPUTATION honest: only a machine grade can produce
+ * Recording-side integrity check (DETECTION ONLY — see the call site in session.ts).
+ * capApplied makes the COMPUTATION honest: only a machine grade can produce
  * 'applied-correctly'. But the RECORDING is model-mediated — the harness hands the tutor the exact
  * evidence and instructs "record this", yet record_evidence's `kind` is the model's own tool
  * argument, and nothing structurally enforces the copy. This surfaces the one deviation that would
@@ -575,6 +559,12 @@ export async function gradeBlockOutput(
     // turn's execute() — failing the whole turn. A missing answer becomes '', which already grades
     // as a miss on the path below; existing empty-submission behavior is unchanged.
     const answer = String(result.answer ?? '');
+    // Confidence-before-reveal (QuickCheck.tsx): the optional self-rating rides into the evidence
+    // NOTE, where /api/progress's calibration count reads it back out ("felt sure" is the marker).
+    // Unrecognized values are dropped, not recorded — the note is the ledger of what the learner
+    // deliberately said, and the block result is not schema-validated.
+    const conf = result.confidence === 'sure' || result.confidence === 'unsure'
+      ? ` · felt ${result.confidence}` : '';
     if (input.expected != null) {
       const ok = answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
       if (ok) {
@@ -582,7 +572,7 @@ export async function gradeBlockOutput(
           verdict: 'correct',
           source: 'mechanical',
           detail: 'exact match',
-          evidence: [ev(input.pageSlug, 'applied-correctly', `quick_check: ${input.question}`, 'mechanical')],
+          evidence: [ev(input.pageSlug, 'applied-correctly', `quick_check: ${input.question}${conf}`, 'mechanical')],
         };
       }
       // A miss on the EXACT string is not yet a wrong answer — the audit caught "a buffer carried
@@ -591,9 +581,9 @@ export async function gradeBlockOutput(
       // kind (capApplied keeps it from minting applied-correctly — a model judged it, honestly so),
       // and a genuinely wrong one still records struggled. Free-text punishing phrasing teaches
       // learners to guess the grader's wording, which is the opposite of knowing the thing.
-      return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected);
+      return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected), conf);
     }
-    return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps);
+    return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps), conf);
   }
 
   if (tool === 'math_scratchpad') {
@@ -882,22 +872,13 @@ export async function gradeBlockOutput(
     const rubricSchema = z.object({
       criteria: z.array(z.object({ criterion: z.string(), pass: z.boolean(), note: z.string() })),
     });
-    const graderId = cfg.models.grader.model;
     const judgeRubric = async (criteria: string[]): Promise<{ criteria: { criterion: string; pass: boolean; note: string }[] }> => {
       const rubricPrompt = `Judge this draft against each rubric criterion. Prompt: "${input.prompt}"\n`
         + `Draft:\n${result.draft}\n\nCriteria:\n${criteria.map((r: string, i: number) => `${i + 1}. ${r}`).join('\n')}\n`
         + 'For each criterion, decide pass or fail and give a one-line note quoting the draft where possible.';
-      if (isClaudeSdkModel(graderId)) {
-        const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-        const { text } = await sdkGenerate({
-          model: stripClaudeSdkPrefix(graderId),
-          prompt: `${rubricPrompt}\n\nRespond with ONLY valid JSON: {"criteria": [{"criterion": <string>, "pass": <boolean>, "note": <string>}]}`,
-          maxTurns: 1,
-        });
-        return parseSdkJson(text, 'claude-sdk rubric judge');
-      }
       const { output } = await generateText({
-        model: modelFor('grader', cfg), prompt: rubricPrompt, output: Output.object({ schema: rubricSchema }),
+        model: deps.model ?? modelFor('grader', cfg), prompt: rubricPrompt,
+        output: Output.object({ schema: rubricSchema }),
       });
       return output as { criteria: { criterion: string; pass: boolean; note: string }[] };
     };
@@ -991,26 +972,20 @@ async function annotateDraft(
 ): Promise<WritingAnnotations> {
   const draftPrompt = `Grade this student draft. Prompt: "${prompt}"\nDraft:\n${draft}\n`
     + `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`;
-  const graderModelId = cfg.models.grader.model;
-  if (isClaudeSdkModel(graderModelId)) {
-    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-    const { text } = await sdkGenerate({
-      model: stripClaudeSdkPrefix(graderModelId),
-      // The Agent SDK path has no Output.object — ask for JSON-only and parse it ourselves.
-      prompt: `${draftPrompt}\n\nRespond with ONLY valid JSON (no markdown fences, no commentary) `
-        + 'matching this exact shape: {"annotations": [{"span": <string>, "category": '
-        + '<"strong"|"wordy"|"vague"|"structure"|"grammar">, "note": <string>}], "skillGrades": '
-        + '{"claim": <"good"|"weak">, "concision": <"good"|"weak">, "specificity": <"good"|"weak">}}',
-      maxTurns: 1,
-    });
-    return parseSdkJson<WritingAnnotations>(text, 'claude-sdk grader');
-  }
   const { output } = await generateText({
-    model: modelFor('grader', cfg),
+    model: deps.model ?? modelFor('grader', cfg),
     prompt: draftPrompt,
     output: Output.object({ schema: annotationSchema }),
   });
   return output as WritingAnnotations;
+}
+
+/** Suffix a quick_check confidence marker onto a grade's evidence notes. gradeOpenAnswer is shared
+ * with quiz items (which carry no confidence), so the suffix is applied by the one caller that has
+ * it rather than threaded through as a parameter every other caller would pass as ''. */
+function withConfidenceNote(grade: Grade, conf: string): Grade {
+  if (!conf) return grade;
+  return { ...grade, evidence: grade.evidence.map((e) => ({ ...e, note: `${e.note}${conf}` })) };
 }
 
 function latexParses(latex: string): boolean {
@@ -1030,14 +1005,7 @@ async function gradeOpenAnswer(
   // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
   // model, never copied into the evidence note.
   const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
-  const graderModelId = cfg.models.grader.model;
-  let text: string;
-  if (isClaudeSdkModel(graderModelId)) {
-    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-    ({ text } = await sdkGenerate({ model: stripClaudeSdkPrefix(graderModelId), prompt, maxTurns: 1 }));
-  } else {
-    ({ text } = await generateText({ model: modelFor('grader', cfg), prompt }));
-  }
+  const { text } = await generateText({ model: deps.model ?? modelFor('grader', cfg), prompt });
   const ok = /^CORRECT/i.test(text.trim());
   return {
     verdict: ok ? 'correct' : 'incorrect', source: 'model', detail: text.trim(),

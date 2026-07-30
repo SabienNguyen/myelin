@@ -88,9 +88,8 @@ and decays it over time, so the picture moves down as well as up.
 
 1. **Node ≥ 22**
 2. `npm i`
-3. `npm start`, open the app, and connect a way to reach Claude when it asks — your **Claude
-   Pro/Max subscription** (via a local Claude Code login, no key involved) or an **Anthropic API
-   key**.
+3. `npm start`, open the app, and paste an **Anthropic API key** when it asks (or point the model
+   roles at a local `ollama:` model — see below).
 
 That is the whole required setup. **There is no config file to write** — every field has a working
 default (`src/server/config.ts`):
@@ -116,7 +115,7 @@ before saving (a wrong key fails at the prompt, not mid-lesson), and stores it i
 directory — `~/.config/myelin/credentials.json`, `~/Library/Application Support/Myelin/`
 on macOS, `%APPDATA%\Myelin\` on Windows — **not** in the vault, since vaults get synced and
 pushed. `ANTHROPIC_API_KEY` in the environment always wins over the saved key. A fully `ollama:`
-or `claude-sdk:` setup is never asked for a key.
+setup is never asked for a key.
 </details>
 
 ### Optional extras
@@ -128,19 +127,26 @@ or `claude-sdk:` setup is never asked for a key.
 - **YouTube ingest** — `pipx install yt-dlp` (captions only; a caption-less video gets an honest
   error, not a fake transcript).
 
-## Model routes: subscription, API key, or local
+## Model routes: API key, local, or any OpenAI-compatible provider
 
 Every `models.*.model` id is routed by prefix, so a config can freely mix routes per role:
 
-| Prefix | Route | Billing |
+| Prefix | Route | Auth |
 |---|---|---|
 | *plain id* (`claude-sonnet-5`) | Anthropic API | `ANTHROPIC_API_KEY` |
-| `claude-sdk:sonnet` | [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/typescript) via your machine's Claude Code login | your Claude Pro/Max subscription — **no key** |
-| `ollama:qwen2.5-coder:14B` | local Ollama (OpenAI-compatible endpoint) | free, local |
+| `ollama:qwen2.5-coder:14B` | local Ollama (OpenAI-compatible endpoint) | free, local; `OLLAMA_BASE_URL` to move it, `OLLAMA_API_KEY` only for a key-protected proxy |
+| `openai:deepseek/deepseek-chat` | any OpenAI-compatible provider | `OPENAI_COMPAT_BASE_URL` (required) + `OPENAI_COMPAT_API_KEY` |
 
-Recommended split for local mixing: keep `tutor` and `compile` on Claude (they need the strongest
-reasoning and tool use); route `grader`, `quiz_gen`, `card_gen` to a local model — higher-volume,
-lower-stakes calls a good local model handles fine.
+For OpenRouter, set `OPENAI_COMPAT_BASE_URL=https://openrouter.ai/api/v1`, put your OpenRouter key
+in `OPENAI_COMPAT_API_KEY`, and use their model ids: `"grader": { "model":
+"openai:deepseek/deepseek-chat" }`. Nous Portal works the same way with
+`https://inference-api.nousresearch.com/v1`; any other OpenAI-compatible provider works with the
+base URL from its docs. An `openai:` role with no `OPENAI_COMPAT_BASE_URL` fails at call time with
+a message naming the variable — there is no localhost fallback to guess wrong.
+
+Recommended split for mixing: keep `tutor` and `compile` on Claude (they need the strongest
+reasoning and tool use); route `grader`, `quiz_gen`, `card_gen` to a cheap OpenAI-compatible or
+local model — higher-volume, lower-stakes calls a good small model handles fine.
 
 <details>
 <summary><b>Ollama caveats: context length and leaked chat-template tokens</b></summary>
@@ -154,36 +160,6 @@ overrides the default `http://localhost:11434/v1`.
 A degenerate local model can echo raw ChatML control tokens (`<|im_start|>assistant`, …) as
 literal chat text; the harness scrubs these at render (`scrubModelArtifacts` in
 `src/client/lib/panelBus.ts`).
-</details>
-
-<details>
-<summary><b>How the tutor runs on the Agent SDK (the <code>claude-sdk:</code> chat path)</b></summary>
-
-Setting `models.tutor.model` to a `claude-sdk:` id routes the interactive tutor through
-`src/server/claudeSdkTutor.ts` instead of the AI-SDK `ToolLoopAgent` path in
-`src/server/session.ts` — picked at server construction in `chatRoute.ts`. It streams the same
-UIMessage chunk shapes the chat client already understands, so no client changes are needed.
-
-- **Blocks pause the turn via an MCP sentinel**, not a real pause primitive: the graded blocks are
-  registered as an in-process MCP server whose handler tells the model to end its turn; the
-  student's answer arrives as the next chat message, exactly like the ai-sdk path.
-- **Session continuity uses SDK session resume**, not transcript replay:
-  `vault/.harness/sdk-sessions.json` maps `threadId → sdkSessionId`; a failed resume falls back to
-  a fresh session seeded with rebuilt bootstrap context and logs loudly to stderr.
-- **Streaming** uses `includePartialMessages` for live text; complete `assistant` messages carry
-  tool-call input (partial JSON deltas aren't useful to a UI that needs the whole object).
-- **Argument sanitization** (forcing the configured student id, repairing hallucinated slugs) runs
-  through a `PreToolUse` hook's `updatedInput` — verified against a live subscription login;
-  `canUseTool` is shadowed on this path (the SDK's own `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED` warning
-  names the fix).
-- **Research is wired through the SDK's own WebSearch/WebFetch** — always on in freeform (where
-  subjects get researched and compiled), and unlocked in teaching modes only when the vault has a
-  real gap for what the student asked (same `vaultGap` contract as the ai-sdk path). The system
-  prompt renames the tools accordingly so the model never claims phantom `web_search`/`read_url`.
-- **The freeform-only write rule is enforced structurally**, not just by prompt: the same
-  `PreToolUse` hook denies `write_page`/`link_pages`/`compile_source`/`create_path` outside
-  freeform (`allowedTools` gates nothing under `bypassPermissions`, so prompt-only restraint was
-  overridable — a live sitting proved it).
 </details>
 
 ## Desktop app

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { getGraph } from '../lib/api.js';
 import { panelBus, type PanelTab } from '../lib/panelBus.js';
 import { parseHash, serializeHash } from '../lib/urlState.js';
 import { GraphPanel } from './GraphPanel.js';
@@ -34,11 +35,34 @@ export function SidePanel() {
     const id = setInterval(load, DUE_POLL_MS);
     return () => { cancelled = true; clearInterval(id); };
   }, []);
+  // True once ANYTHING has chosen a tab on purpose — a click, a panelBus event, a hash change.
+  // Read by the map-as-home effect below, which must lose every race against a deliberate choice.
+  const tabTouchedRef = useRef(false);
   useEffect(() => panelBus.subscribe((e) => {
-    if (e.type === 'openPage') { setPageSlug(e.slug); setSource(null); setTab('page'); }
-    if (e.type === 'openSource') { setSource({ path: e.path, title: e.title }); setTab('page'); }
-    if (e.type === 'setTab') setTab(e.tab);
+    if (e.type === 'openPage') { tabTouchedRef.current = true; setPageSlug(e.slug); setSource(null); setTab('page'); }
+    if (e.type === 'openSource') { tabTouchedRef.current = true; setSource({ path: e.path, title: e.title }); setTab('page'); }
+    if (e.type === 'setTab') { tabTouchedRef.current = true; setTab(e.tab); }
   }), []);
+
+  // Map-as-home: when the hash named NO tab (urlState's tabExplicit — the stage default, not a
+  // deep link) and the vault already holds pages the learner can do, open on the graph — the map
+  // of what they know is a better home than an empty stage. Same guard shape as App.tsx's
+  // coldStartMode effect: the functional updater only ever switches AWAY from the untouched
+  // default, so a click, a panelBus setTab, or a hash change that lands before the fetch resolves
+  // wins and this does nothing. Graph unreachable → stay put; TopbarStatus owns that failure.
+  useEffect(() => {
+    if (parseHash(location.hash).tabExplicit) return;
+    let cancelled = false;
+    getGraph()
+      .then((g) => {
+        if (cancelled) return;
+        const known = (g.nodes ?? []).some((n: any) =>
+          n.mastery?.effective === 'practicing' || n.mastery?.effective === 'mastered');
+        if (known) setTab((t) => (t === 'stage' && !tabTouchedRef.current ? 'graph' : t));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Deep-linking (T27): SidePanel owns the tab/page slice of the hash. It re-parses the
   // current hash to preserve App's threadId slice, and only writes (via replaceState, so tab
@@ -58,6 +82,7 @@ export function SidePanel() {
   useEffect(() => {
     const onHashChange = () => {
       const parsed = parseHash(location.hash);
+      tabTouchedRef.current = true;
       setTab(parsed.tab);
       // A hash that names a NEW page is an explicit navigation to the compiled page — deep links
       // and browser back both arrive here, and with the reader open they landed behind it: the
@@ -93,7 +118,7 @@ export function SidePanel() {
             // within it, rather than Tab walking all four.
             tabIndex={tab === t ? 0 : -1}
             role="tab"
-            onClick={() => setTab(t)}
+            onClick={() => { tabTouchedRef.current = true; setTab(t); }}
           >
             {t}
             {t === 'library' && dueCount > 0 && (

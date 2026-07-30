@@ -63,10 +63,9 @@ const human = (name: keyof typeof BLOCK_TOOLS, description: string, Component: a
   // fabricated submission. Same honesty rule as ToolStatusChip's failed column.
   render: ({ args, result, addResult, isError }: any) => {
     if (isError) return <span className="tool-note failed" title={name}>{errorNote(name, result)}</span>;
-    // The claude-sdk route bridges EVERY tool_use to the client, including ones the SDK's own
-    // validation then rejects (the model sees the rejection and retries; the client used to keep
-    // the rejected call as a live block). Re-validate here against the same schema the server
-    // uses — the parsed value also applies schema defaults, so components see canonical args.
+    // Re-validate against the same schema the server uses: a malformed tool call must render as
+    // a note, never mount a block over garbage args — and the parsed value applies schema
+    // defaults, so components see canonical args.
     const parsed = BLOCK_TOOLS[name].input.safeParse(args);
     if (!parsed.success) return malformedNote(name);
     return (

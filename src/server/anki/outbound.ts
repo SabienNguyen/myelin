@@ -3,16 +3,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
-import { claudeSdkGenerate, isClaudeSdkModel, stripClaudeSdkPrefix } from '../claudeSdk.js';
 import type { HarnessConfig } from '../config.js';
 import type { Engram } from '../mcp.js';
 import { modelFor } from '../models.js';
 import type { AnkiClient } from './client.js';
-
-/** Injectable seam for tests — see claudeSdk.ts. */
-export interface OutboundDeps {
-  sdkGenerate?: typeof claudeSdkGenerate;
-}
 
 export type GenerateCards = (
   slug: string,
@@ -65,25 +59,8 @@ function contentHash(front: string, back: string): string {
   return createHash('sha256').update(`${front} ${back}`).digest('hex');
 }
 
-/** FRONT/BACK/=== blocks out of sdk card_gen text. Tolerates a whole-response fence and blank
- * blocks; a response with no parseable card at all throws with the raw head attached, matching
- * the JSON path's readable-failure convention. */
-export function parseSdkCards(text: string): { front: string; back: string }[] {
-  const fenced = text.trim().match(/^```[a-z]*\s*([\s\S]*?)\s*```$/);
-  const body = fenced ? fenced[1] : text.trim();
-  const cards: { front: string; back: string }[] = [];
-  for (const block of body.split(/^\s*===\s*$/m)) {
-    const m = block.match(/FRONT:\s*([\s\S]*?)\nBACK:\s*([\s\S]*?)$/);
-    if (m && m[1].trim() && m[2].trim()) cards.push({ front: m[1].trim(), back: m[2].trim() });
-  }
-  if (cards.length === 0) {
-    throw new Error(`claude-sdk card_gen returned no parseable FRONT/BACK cards. Raw: ${text.slice(0, 300)}`);
-  }
-  return cards;
-}
-
 async function llmGenerateCards(
-  cfg: HarnessConfig, slug: string, page: any, misconceptions: string[], deps: OutboundDeps = {},
+  cfg: HarnessConfig, slug: string, page: any, misconceptions: string[],
 ): Promise<{ front: string; back: string }[]> {
   const parts = [
     `Page: ${page?.meta?.title ?? slug}`,
@@ -91,23 +68,6 @@ async function llmGenerateCards(
     misconceptions.length ? `Known misconceptions: ${misconceptions.join('; ')}` : '',
     CARD_PROMPT,
   ].filter(Boolean);
-  const cardModelId = cfg.models.card_gen.model;
-
-  if (isClaudeSdkModel(cardModelId)) {
-    const sdkGenerate = deps.sdkGenerate ?? claudeSdkGenerate;
-    // The Agent SDK path has no Output.object, and asking for JSON prose proved structurally
-    // fragile on math-heavy pages: three live probes over the same taught vault produced three
-    // parse failures (a ```json fence once, unescaped characters inside LaTeX-bearing strings
-    // twice). Cards are plain text pairs — a delimiter format has nothing quotes or backslashes
-    // can break.
-    const prompt = `${parts.join('\n\n')}\n\nRespond with up to 4 flashcards in EXACTLY this `
-      + 'format and nothing else (no JSON, no fences):\n'
-      + 'FRONT: <one precise question>\nBACK: <the answer in at most 2 sentences>\n===\n'
-      + 'Repeat FRONT/BACK/=== for each card.';
-    const { text } = await sdkGenerate({ model: stripClaudeSdkPrefix(cardModelId), prompt, maxTurns: 1 });
-    return parseSdkCards(text).slice(0, 4);
-  }
-
   const { output } = await generateText({
     model: modelFor('card_gen', cfg),
     prompt: parts.join('\n\n'),
@@ -126,13 +86,13 @@ export async function syncOutbound(
   lw: Engram,
   anki: AnkiClient,
   cfg: HarnessConfig,
-  opts: { generateCards?: GenerateCards; deps?: OutboundDeps } = {},
+  opts: { generateCards?: GenerateCards } = {},
 ): Promise<SyncOutboundResult> {
   const result: SyncOutboundResult = { pushed: 0, updated: 0, skipped: 0, failed: 0 };
   if (!(await anki.isUp())) return result; // Anki closed / connection refused — skip silently
 
   const generateCards: GenerateCards = opts.generateCards
-    ?? ((slug, page, misconceptions) => llmGenerateCards(cfg, slug, page, misconceptions, opts.deps));
+    ?? ((slug, page, misconceptions) => llmGenerateCards(cfg, slug, page, misconceptions));
 
   const state = (await lw.call('get_student_state', { student: cfg.student })) as Record<
     string, { effective: string; misconceptions: string[] }
@@ -153,7 +113,7 @@ export async function syncOutbound(
     if (!page) continue; // page gone; skipped silently (skipped counts up-to-date CARDS, not this)
     const misconceptions = state[slug]?.misconceptions ?? [];
     // One page's bad generation must not abort the run for every other page — a live probe saw
-    // the sdk card_gen emit unparseable JSON for one math-heavy page and the whole sync die.
+    // card_gen emit unparseable output for one math-heavy page and the whole sync die.
     let cards: { front: string; back: string }[];
     try {
       cards = (await generateCards(slug, page, misconceptions)).slice(0, 4);

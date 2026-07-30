@@ -10,11 +10,40 @@ import type { HarnessConfig, ModelRole } from './config.js';
 // whatever was set at module load, which made the first-run flow impossible to fix without one.
 const anthropic = createAnthropic({});
 
+// Both OpenAI-compatible routes construct their provider per call, for the same reason: the
+// provider bakes baseURL and Authorization into closures at construction, so a module-level
+// instance would freeze whatever the env held at import time. Construction is cheap (no I/O).
 const OLLAMA_PREFIX = 'ollama:';
-const ollama = createOpenAICompatible({
-  name: 'ollama',
-  baseURL: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1',
-});
+function ollamaModel(modelId: string) {
+  return createOpenAICompatible({
+    name: 'ollama',
+    baseURL: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1',
+    // Unset means no Authorization header — the common local case. Set it for a key-protected
+    // Ollama reverse proxy.
+    apiKey: process.env.OLLAMA_API_KEY,
+  }).chatModel(modelId);
+}
+
+const OPENAI_PREFIX = 'openai:';
+function openaiCompatModel(modelId: string) {
+  const baseURL = process.env.OPENAI_COMPAT_BASE_URL;
+  // No localhost fallback here: unlike Ollama there is no conventional default port, and a guessed
+  // URL would surface as a confusing connection error mid-lesson instead of this message at call
+  // time. A missing OPENAI_COMPAT_API_KEY is fine (keyless proxies exist); a wrong one is the
+  // provider's 401 to report.
+  if (!baseURL) {
+    throw new Error(
+      `model "openai:${modelId}" needs OPENAI_COMPAT_BASE_URL set to the provider's `
+      + `OpenAI-compatible endpoint, e.g. https://openrouter.ai/api/v1 `
+      + `(and OPENAI_COMPAT_API_KEY if the provider requires a key)`,
+    );
+  }
+  return createOpenAICompatible({
+    name: 'openai-compatible',
+    baseURL,
+    apiKey: process.env.OPENAI_COMPAT_API_KEY,
+  }).chatModel(modelId);
+}
 
 // One scripted instance per script path, so every role pops from the SAME turn sequence. Without
 // this, the tutor session (which holds its model) advances the counter while each grading call
@@ -36,7 +65,10 @@ export function modelFor(role: ModelRole, cfg: HarnessConfig) {
   }
   const modelId = cfg.models[role].model;
   if (modelId.startsWith(OLLAMA_PREFIX)) {
-    return ollama.chatModel(modelId.slice(OLLAMA_PREFIX.length));
+    return ollamaModel(modelId.slice(OLLAMA_PREFIX.length));
+  }
+  if (modelId.startsWith(OPENAI_PREFIX)) {
+    return openaiCompatModel(modelId.slice(OPENAI_PREFIX.length));
   }
   return anthropic(modelId);
 }
