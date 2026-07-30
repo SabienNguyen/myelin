@@ -13,6 +13,8 @@ type Ownership = 'owned' | 'rented' | 'new';
 interface Row {
   pattern: string;
   ownership: Ownership;
+  /** Factory-shipped demo ladder (`/api/gap/patterns` marks these). Hidden while untouched. */
+  builtin: boolean;
 }
 
 // B2c: GET /api/gap/ladder's `mined` array (gapProxy.ts's GapMinedEntry) — one row per
@@ -108,7 +110,7 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
       // happily serving more. The external sidecar has no /patterns route; its 404 falls back to
       // the one ladder-derived row, the exact old behaviour.
       const patternsRes = await fetch('/api/gap/patterns').catch(() => null);
-      const patterns: { pattern: string }[] = patternsRes?.ok
+      const patterns: { pattern: string; builtin?: boolean }[] = patternsRes?.ok
         ? (await patternsRes.json()).patterns ?? []
         : (payload?.ladder?.pattern ? [{ pattern: payload.ladder.pattern }] : []);
       if (patterns.length === 0) { if (!cancelled) { setRows([]); setMined(minedRows); } return; }
@@ -116,9 +118,15 @@ export function PracticePanel({ visible = true }: { visible?: boolean }) {
       const studentRes = await fetch('/api/student').catch(() => null);
       const student = studentRes?.ok ? await studentRes.json() : {};
       if (cancelled) return;
-      setRows(patterns.map(({ pattern }) => ({
-        pattern, ownership: ownershipFor(student?.[pattern]?.effective),
-      })));
+      // An untouched factory demo stays out of the list — the graph applies the same rule to its
+      // seeded stub. It appears (with its badge) once real engagement puts a mastery record on it;
+      // the tutor can still assign it any time, and an external sidecar's rows (no builtin flag)
+      // are the operator's own choice of patterns, so they always show.
+      setRows(patterns
+        .map(({ pattern, builtin }) => ({
+          pattern, builtin: builtin === true, ownership: ownershipFor(student?.[pattern]?.effective),
+        }))
+        .filter((row) => !(row.builtin && row.ownership === 'new')));
       setMined(minedRows);
     })();
     return () => { cancelled = true; };
