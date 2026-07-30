@@ -98,7 +98,7 @@ default (`src/server/config.ts`):
 |---|---|---|
 | Vault | `~/Documents/Myelin` (created at boot) | `vault` |
 | Student id | your OS username | `student` |
-| Models | Sonnet for tutor/quiz/compile, Haiku for grader/card_gen | `models.*.model` |
+| Models | Sonnet for tutor/quiz/compile, Haiku for grader/card_gen | click the model badge in the top bar, or `models.*.model` |
 | Engram server | found automatically: installed dependency, then a sibling checkout | `ENGRAM_ENTRY`, or `engram.command`/`args` |
 | Port | 4820 | `port` |
 
@@ -136,6 +136,11 @@ Every `models.*.model` id is routed by prefix, so a config can freely mix routes
 | *plain id* (`claude-sonnet-5`) | Anthropic API | `ANTHROPIC_API_KEY` |
 | `ollama:qwen2.5-coder:14B` | local Ollama (OpenAI-compatible endpoint) | free, local; `OLLAMA_BASE_URL` to move it, `OLLAMA_API_KEY` only for a key-protected proxy |
 | `openai:deepseek/deepseek-chat` | any OpenAI-compatible provider | `OPENAI_COMPAT_BASE_URL` (required) + `OPENAI_COMPAT_API_KEY` |
+
+All of this is editable in-app: click the model badge in the top bar to change any role or the
+provider endpoints while the app runs — saves land in `settings.json` beside the credentials file
+and take effect on the next call. Precedence: defaults < `harness.config.json` < what you save
+in-app, except that a provider variable set in the real environment always beats a saved one.
 
 For OpenRouter, set `OPENAI_COMPAT_BASE_URL=https://openrouter.ai/api/v1`, put your OpenRouter key
 in `OPENAI_COMPAT_API_KEY`, and use their model ids: `"grader": { "model":

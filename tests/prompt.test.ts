@@ -37,6 +37,16 @@ describe('prompt assembly', () => {
     expect(instructions).toMatch(/never call a handful of searches comprehensive/);
   });
 
+  // Fourth report: even with intake, answers went straight into the build montage — the learner
+  // never saw the syllabus as a proposal they could bend. The sketch beat is the fix; the
+  // escape-hatch collapse keeps it from becoming a toll for just-start-me learners.
+  it('instructions require sketching the path in conversation before building it', () => {
+    const instructions = buildInstructions();
+    expect(instructions).toMatch(/sketch\s+the path in the chat/);
+    expect(instructions).toMatch(/co-authors the syllabus/);
+    expect(instructions).toMatch(/confirmation is never a toll/);
+  });
+
   // Goal + cold start. Both exist because the system could previously answer "what next across the
   // whole vault" but not "how far through THIS subject am I", and because learn/review/quiz expose no
   // page-writing tools — so an empty vault left the tutor silently unable to act.

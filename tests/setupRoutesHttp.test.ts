@@ -5,6 +5,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSetupRoutes } from '../src/server/setupRoutes.js';
+import { modelFor } from '../src/server/models.js';
+import { PROVIDER_ENV_KEYS, readSettings, resetEnvShadow } from '../src/server/settings.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
 const plainModels = () => ({
@@ -104,5 +106,124 @@ describe('PUT /api/setup/api-key', () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/Could not reach Anthropic/);
     expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+});
+
+describe('GET/PUT /api/setup/models', () => {
+  // applyEnvValues writes the provider vars into the real process.env, and envShadow snapshots it
+  // lazily — both need a clean slate per test and restoration after.
+  let savedEnv: Record<string, string | undefined>;
+  beforeEach(() => {
+    savedEnv = {};
+    for (const k of PROVIDER_ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+    resetEnvShadow();
+  });
+  afterEach(() => {
+    for (const k of PROVIDER_ENV_KEYS) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    resetEnvShadow();
+  });
+
+  const put = (app: ReturnType<typeof buildSetupRoutes>, body: unknown) =>
+    app.request('/api/setup/models', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    });
+
+  it('GET reports per-role effective ids and where saves land', async () => {
+    const app = buildSetupRoutes(cfgWith(plainModels()));
+    const state = await (await app.request('/api/setup/models')).json();
+    expect(Object.keys(state.roles)).toEqual(['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile']);
+    expect(state.roles.grader).toEqual({ effective: 'claude-haiku-4-5', saved: null });
+    expect(state.savedAt).toContain('settings.json');
+  });
+
+  it('an unknown role is a 400 naming the known ones; an empty id is a 400 too', async () => {
+    const app = buildSetupRoutes(cfgWith(plainModels()));
+    const bad = await put(app, { models: { paint_mixer: 'claude-haiku-4-5' } });
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toMatch(/unknown model role: "paint_mixer".*tutor, grader/);
+    const empty = await put(app, { models: { grader: '   ' } });
+    expect(empty.status).toBe(400);
+    expect((await empty.json()).error).toMatch(/model for grader is empty/);
+  });
+
+  it('a claude-sdk: id is refused with the removed-route message, and nothing is saved', async () => {
+    const cfg = cfgWith(plainModels());
+    const app = buildSetupRoutes(cfg);
+    const res = await put(app, { models: { tutor: 'claude-sdk:opus' } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error)
+      .toMatch(/claude-sdk:' has been removed.*tutor: "claude-sdk:opus"/s);
+    expect(cfg.models.tutor.model).toBe('claude-sonnet-5');
+    expect(readSettings()).toEqual({});
+  });
+
+  it('an openai: role with no base URL anywhere is refused; one in the same request saves', async () => {
+    const cfg = cfgWith(plainModels());
+    const app = buildSetupRoutes(cfg);
+    const bare = await put(app, { models: { grader: 'openai:test/model' } });
+    expect(bare.status).toBe(400);
+    expect((await bare.json()).error).toMatch(/openai:test\/model.*base URL/);
+    expect(cfg.models.grader.model).toBe('claude-haiku-4-5'); // the refused save changed nothing
+
+    const ok = await put(app, {
+      models: { grader: 'openai:test/model' },
+      env: { OPENAI_COMPAT_BASE_URL: 'https://x.example/v1' },
+    });
+    expect(ok.status).toBe(200);
+    const state = await ok.json();
+    expect(state.roles.grader).toEqual({ effective: 'openai:test/model', saved: 'openai:test/model' });
+    expect(state.env.OPENAI_COMPAT_BASE_URL).toEqual({ value: 'https://x.example/v1', shadowed: false });
+    // Persisted, and live in the environment models.ts reads per call.
+    expect(readSettings().models?.grader).toBe('openai:test/model');
+    expect(process.env.OPENAI_COMPAT_BASE_URL).toBe('https://x.example/v1');
+  });
+
+  it('a save is live: modelFor serves the new id from the same cfg object, no reconstruction', async () => {
+    const cfg = cfgWith(plainModels());
+    const app = buildSetupRoutes(cfg);
+    expect((modelFor('grader', cfg) as any).modelId).toBe('claude-haiku-4-5');
+    await put(app, {
+      models: { grader: 'openai:test/model' },
+      env: { OPENAI_COMPAT_BASE_URL: 'https://x.example/v1' },
+    });
+    const after = modelFor('grader', cfg) as any;
+    expect(after.modelId).toBe('test/model');
+    expect(after.provider).not.toMatch(/anthropic/);
+  });
+
+  it('saved API keys come back as set:true, never as the value', async () => {
+    const app = buildSetupRoutes(cfgWith(plainModels()));
+    const res = await put(app, { env: { OPENAI_COMPAT_API_KEY: 'sk-or-supersecret-123' } });
+    expect(res.status).toBe(200);
+    const state = await res.json();
+    expect(state.env.OPENAI_COMPAT_API_KEY).toEqual({ set: true, shadowed: false });
+    expect(JSON.stringify(state)).not.toContain('supersecret');
+    const again = await (await app.request('/api/setup/models')).json();
+    expect(again.env.OPENAI_COMPAT_API_KEY.set).toBe(true);
+    expect(JSON.stringify(again)).not.toContain('supersecret');
+    // The key itself lives only in settings.json.
+    expect(readSettings().env?.OPENAI_COMPAT_API_KEY).toBe('sk-or-supersecret-123');
+  });
+
+  it('a real environment variable shadows the saved value: reported, and never overwritten', async () => {
+    process.env.OLLAMA_BASE_URL = 'http://real:9/v1'; // present before first capture = a real var
+    const app = buildSetupRoutes(cfgWith(plainModels()));
+    const state = await (await app.request('/api/setup/models')).json();
+    expect(state.env.OLLAMA_BASE_URL.shadowed).toBe(true);
+    const res = await put(app, { env: { OLLAMA_BASE_URL: 'http://saved:1/v1' } });
+    const after = await res.json();
+    expect(process.env.OLLAMA_BASE_URL).toBe('http://real:9/v1'); // the real var kept winning
+    expect(readSettings().env?.OLLAMA_BASE_URL).toBe('http://saved:1/v1'); // intent persisted
+    expect(after.env.OLLAMA_BASE_URL).toEqual({ value: 'http://saved:1/v1', shadowed: true });
+  });
+
+  it('an unknown env field is a 400 naming the four real ones', async () => {
+    const app = buildSetupRoutes(cfgWith(plainModels()));
+    const res = await put(app, { env: { PATH: '/tmp' } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/unknown env field: "PATH".*OLLAMA_BASE_URL/);
   });
 });
