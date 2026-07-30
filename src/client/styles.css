@@ -2428,6 +2428,14 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* The rails checkbox rides the tutor row's grid; the checkbox must not stretch to the column. */
 .models-rails { display: flex; align-items: center; gap: 0.4rem; }
 .models-rails input { width: auto; accent-color: var(--accent); }
+/* Discovery: installed models as compact chips that fill the last-focused role input, and the
+   one-row local preset. Chip padding is deliberately tighter than the global button default —
+   these are suggestions riding a dense dialog, not primary actions. */
+.models-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: baseline; }
+.models-chip { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+.models-preset { display: flex; gap: 0.4rem; min-width: 0; }
+.models-preset select { flex: 1; min-width: 0; font-size: 0.85rem; padding: 0.2rem 0.5rem; }
+.models-preset button { font-size: 0.78rem; padding: 0.2rem 0.6rem; white-space: nowrap; }
 .models-group { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; }
 .models-hint { font-size: 0.72rem; color: var(--text-muted); }
 .models-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3rem; }

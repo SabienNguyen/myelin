@@ -142,6 +142,14 @@ provider endpoints while the app runs — saves land in `settings.json` beside t
 and take effect on the next call. Precedence: defaults < `harness.config.json` < what you save
 in-app, except that a provider variable set in the real environment always beats a saved one.
 
+Installed models appear in the dialog automatically: opening it probes Ollama's tag list and the
+OpenAI-compatible endpoint's `/models`, so every model you've pulled is a pick, not an id typed
+from memory. A one-row local preset points the teaching roles (tutor, grader, quiz_gen, card_gen)
+at an installed model and turns rails on in one click — compile stays where it is, because compile
+writes the vault and belongs on the strongest model you have. Structured generations are
+schema-constrained at the decoder on providers that support `response_format` (Ollama, LiteLLM,
+OpenRouter); others fall back to forced tool calls automatically.
+
 For OpenRouter, set `OPENAI_COMPAT_BASE_URL=https://openrouter.ai/api/v1`, put your OpenRouter key
 in `OPENAI_COMPAT_API_KEY`, and use their model ids: `"grader": { "model":
 "openai:deepseek/deepseek-chat" }`. Nous Portal works the same way with
@@ -211,6 +219,10 @@ it on with the **rails** checkbox beside the tutor id in the models dialog, or
 `"tutor": { "model": "ollama:…", "rails": true }` in the config. Phase-1 scope is quick_check
 drills in learn/review/quiz; freeform always runs the full agentic loop (writing pages needs real
 tool use). Off by default — off means the loop is byte-for-byte what it was.
+
+To vet a model before pointing rails at it: `npm run eval:model -- ollama:qwen3:8b [--n 20]
+[--feedback]` runs the real rails generation prompts against it and reports first-try validity,
+retries, fallbacks, and latency.
 
 <details>
 <summary><b>Ollama caveats: context length and leaked chat-template tokens</b></summary>

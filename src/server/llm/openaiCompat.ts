@@ -43,6 +43,41 @@ interface WireChunk {
   usage?: WireUsage | null;
 }
 
+/** Endpoints (by baseUrl) that rejected `response_format: json_schema`. Module-level because
+ * models.ts builds a fresh adapter per call — instance state would forget every turn and pay the
+ * rejected round-trip on every structured generation instead of once per endpoint. */
+const responseFormatRejected = new Set<string>();
+
+/** Test seam: forget rejected endpoints, so one fake server can exercise both paths. */
+export function resetResponseFormatMemory(): void {
+  responseFormatRejected.clear();
+}
+
+/** A rejection OF response_format, as opposed to a call that failed for its own reasons: the
+ * 400/422 validation band, or an error message naming the feature. A 5xx or auth failure must
+ * throw through — falling back there would mask a real outage as a capability gap. */
+function isResponseFormatRejection(e: unknown): boolean {
+  if (!(e instanceof LlmHttpError)) return false;
+  return e.status === 400 || e.status === 422 || /response_format|json_schema/i.test(e.message);
+}
+
+/** The forced-tool form of a responseSchema request — what the same call looked like before
+ * constrained decoding, and what an endpoint without response_format still understands. The
+ * description matches generateStructured's synthetic tool so both paths read the same to a model. */
+function toolFallback(req: ChatRequest): ChatRequest {
+  const { responseSchema, ...rest } = req;
+  if (!responseSchema) return req;
+  return {
+    ...rest,
+    tools: [{
+      name: responseSchema.name,
+      description: 'Report the result in the required structure.',
+      inputSchema: responseSchema.schema,
+    }],
+    toolChoice: { name: responseSchema.name },
+  };
+}
+
 function wireMessages(req: ChatRequest): Json[] {
   const out: Json[] = [];
   if (req.system !== undefined) out.push({ role: 'system', content: req.system });
@@ -97,6 +132,14 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
       ? 'auto'
       : { type: 'function', function: { name: req.toolChoice.name } };
   }
+  // Constrained decoding: the schema binds the decoder itself, never alongside forced tools —
+  // generate() strips responseSchema before any fallback tool request reaches this builder.
+  if (req.responseSchema && !fnTools.length) {
+    body.response_format = {
+      type: 'json_schema',
+      json_schema: { name: req.responseSchema.name, schema: req.responseSchema.schema, strict: true },
+    };
+  }
   if (req.maxTokens !== undefined) body.max_tokens = req.maxTokens;
   if (req.temperature !== undefined) body.temperature = req.temperature;
   if (stream) {
@@ -144,26 +187,45 @@ function parseArgs(args: string): unknown {
 }
 
 export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
+  const baseKey = opts.baseUrl.replace(/\/$/, '');
+
+  async function generateOnce(req: ChatRequest): Promise<GenerateResult> {
+    const res = await post(opts, buildBody(opts.modelId, req, false));
+    const data = await res.json() as {
+      choices?: { message?: { content?: string | null; tool_calls?: WireToolCall[] }; finish_reason?: string | null }[];
+      usage?: WireUsage;
+    };
+    const choice = data.choices?.[0];
+    const toolCalls: ToolCallPart[] = (choice?.message?.tool_calls ?? []).map((c) => ({
+      type: 'tool-call',
+      toolCallId: c.id,
+      toolName: c.function.name,
+      input: parseArgs(c.function.arguments),
+    }));
+    return {
+      text: choice?.message?.content ?? '',
+      toolCalls,
+      usage: usageOf(data.usage),
+      finishReason: mapFinish(choice?.finish_reason),
+    };
+  }
+
   return {
+    supportsResponseFormat: true,
+
     async generate(req: ChatRequest): Promise<GenerateResult> {
-      const res = await post(opts, buildBody(opts.modelId, req, false));
-      const data = await res.json() as {
-        choices?: { message?: { content?: string | null; tool_calls?: WireToolCall[] }; finish_reason?: string | null }[];
-        usage?: WireUsage;
-      };
-      const choice = data.choices?.[0];
-      const toolCalls: ToolCallPart[] = (choice?.message?.tool_calls ?? []).map((c) => ({
-        type: 'tool-call',
-        toolCallId: c.id,
-        toolName: c.function.name,
-        input: parseArgs(c.function.arguments),
-      }));
-      return {
-        text: choice?.message?.content ?? '',
-        toolCalls,
-        usage: usageOf(data.usage),
-        finishReason: mapFinish(choice?.finish_reason),
-      };
+      if (!req.responseSchema || req.tools?.length) return generateOnce(req);
+      // Attempt-and-remember: try constrained decoding, and on a rejection fall back to the
+      // forced-tool form ONCE — the endpoint is remembered so every later call skips straight to
+      // the tool path with no double round-trip.
+      if (responseFormatRejected.has(baseKey)) return generateOnce(toolFallback(req));
+      try {
+        return await generateOnce(req);
+      } catch (e) {
+        if (!isResponseFormatRejection(e)) throw e;
+        responseFormatRejected.add(baseKey);
+        return generateOnce(toolFallback(req));
+      }
     },
 
     async *stream(req: ChatRequest): AsyncIterable<StreamEvent> {

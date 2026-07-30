@@ -71,3 +71,42 @@ describe('generateStructured', () => {
       .rejects.toThrow(/no grade tool call/);
   });
 });
+
+describe('generateStructured over constrained decoding (supportsResponseFormat)', () => {
+  const schema = z.object({ score: z.number(), note: z.string() });
+
+  function rfModel(result: Partial<GenerateResult>) {
+    const { model, requests } = fakeModel(result);
+    return { model: { ...model, supportsResponseFormat: true } as ChatModel, requests };
+  }
+
+  it('sends responseSchema instead of a forced tool and parses the text as JSON', async () => {
+    const { model, requests } = rfModel({ text: '{"score":4,"note":"solid"}' });
+    const out = await generateStructured({ model, prompt: 'grade', schema, schemaName: 'grade' });
+    expect(out.object).toEqual({ score: 4, note: 'solid' });
+    expect(requests[0].responseSchema).toEqual({ name: 'grade', schema: z.toJSONSchema(schema) });
+    expect(requests[0].tools).toBeUndefined();
+    expect(requests[0].toolChoice).toBeUndefined();
+  });
+
+  it('reads the forced-tool shape when the adapter fell back on a rejecting endpoint', async () => {
+    const { model } = rfModel({
+      toolCalls: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'grade', input: { score: 2, note: 'n' } }],
+      finishReason: 'tool-calls',
+    });
+    const out = await generateStructured({ model, prompt: 'grade', schema, schemaName: 'grade' });
+    expect(out.object).toEqual({ score: 2, note: 'n' });
+  });
+
+  it('unparseable text throws with the schema name and the head of the text', async () => {
+    const { model } = rfModel({ text: 'not json at all' });
+    await expect(generateStructured({ model, prompt: 'p', schema, schemaName: 'grade' }))
+      .rejects.toThrow(/unparseable JSON for grade: not json at all/);
+  });
+
+  it('valid JSON that violates the schema still throws through schema.parse', async () => {
+    const { model } = rfModel({ text: '{"score":"high","note":"n"}' });
+    await expect(generateStructured({ model, prompt: 'p', schema, schemaName: 'grade' }))
+      .rejects.toThrow(z.ZodError);
+  });
+});

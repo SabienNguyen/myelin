@@ -230,4 +230,50 @@ describe('GET/PUT /api/setup/models', () => {
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/unknown env field: "PATH".*OLLAMA_BASE_URL/);
   });
+
+  describe('model discovery on GET', () => {
+    it('lists Ollama tags and openai-compat ids, with the compat key as a bearer header', async () => {
+      process.env.OLLAMA_BASE_URL = 'http://ollama.test/v1';
+      process.env.OPENAI_COMPAT_BASE_URL = 'http://compat.test/v1';
+      process.env.OPENAI_COMPAT_API_KEY = 'sk-proxy';
+      const probeFetch = vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const u = String(args[0]);
+        if (u === 'http://ollama.test/api/tags') {
+          return { ok: true, json: async () => ({ models: [{ name: 'qwen3:8b' }, { name: 'llama3.1:8b' }] }) };
+        }
+        if (u === 'http://compat.test/v1/models') {
+          return { ok: true, json: async () => ({ data: [{ id: 'mistralai/mistral-7b' }] }) };
+        }
+        throw new Error(`unexpected probe: ${u}`);
+      });
+      const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
+      const state = await (await app.request('/api/setup/models')).json();
+      expect(state.available).toEqual({
+        ollama: ['qwen3:8b', 'llama3.1:8b'],
+        openaiCompat: ['mistralai/mistral-7b'],
+      });
+      const compatCall = probeFetch.mock.calls.find(([u]) => String(u).includes('/models'));
+      expect(compatCall?.[1]?.headers).toEqual({ authorization: 'Bearer sk-proxy' });
+    });
+
+    it('unreachable endpoints yield absent fields, never an error — the dialog opens offline', async () => {
+      process.env.OPENAI_COMPAT_BASE_URL = 'http://compat.test/v1';
+      const probeFetch = vi.fn(async () => { throw new Error('connect ECONNREFUSED'); });
+      const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
+      const res = await app.request('/api/setup/models');
+      expect(res.status).toBe(200);
+      expect((await res.json()).available).toEqual({});
+    });
+
+    it('no OPENAI_COMPAT_BASE_URL means no compat probe at all', async () => {
+      process.env.OLLAMA_BASE_URL = 'http://ollama.test/v1';
+      const probeFetch = vi.fn(async (..._args: Parameters<typeof fetch>) => ({ ok: true, json: async () => ({ models: [] }) }));
+      const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
+      const state = await (await app.request('/api/setup/models')).json();
+      // Reachable but empty is the same as absent: nothing worth a line in the dialog.
+      expect(state.available).toEqual({});
+      expect(probeFetch).toHaveBeenCalledTimes(1);
+      expect(String(probeFetch.mock.calls[0][0])).toBe('http://ollama.test/api/tags');
+    });
+  });
 });

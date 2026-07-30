@@ -64,6 +64,9 @@ function contentBlock(part: ContentPart): Json {
 }
 
 function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
+  // req.responseSchema is deliberately ignored: this wire has no response_format, and the
+  // forced-tool mechanism generateStructured uses here already constrains tool input to the
+  // schema. The adapter never sets supportsResponseFormat, so the field never arrives anyway.
   const messages = req.messages.map((m) => ({ role: m.role, content: m.content.map(contentBlock) }));
   if (req.cache) {
     // Second breakpoint: the final block of the last message, so the growing history is reused

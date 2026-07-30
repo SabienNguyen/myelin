@@ -29,23 +29,51 @@ export interface GenerateStructuredOptions<T> {
   maxTokens?: number;
 }
 
-/** Structured output as a forced tool call — the same mechanism the AI SDK used for Anthropic
- * under the hood. The one synthetic tool carries the JSON Schema; the call's input is validated
- * with schema.parse so malformed model output throws instead of flowing on half-shaped. */
+/** JSON.parse with an error a rejection prompt can carry: names the schema and quotes the head of
+ * the text. Reached only when a provider ACCEPTED response_format and still emitted non-JSON. */
+function parseStructuredText(text: string, name: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`structured output: model returned unparseable JSON for ${name}: ${text.slice(0, 200)}`);
+  }
+}
+
+/**
+ * Structured output, by whichever mechanism the model's wire supports.
+ *
+ * Adapters that honor ChatRequest.responseSchema (supportsResponseFormat — openai-compat) get
+ * constrained decoding: the decoder itself is held to the JSON Schema, so a small model cannot
+ * produce invalid JSON. The result is usually the JSON as text; when the endpoint rejected
+ * response_format the adapter fell back to the forced-tool request, and the same call arrives as a
+ * tool call — both shapes are read here. Everything else (anthropic) runs the forced tool call
+ * directly, the same mechanism the AI SDK used under the hood. Either way the value goes through
+ * schema.parse, so malformed model output throws instead of flowing on half-shaped.
+ */
 export async function generateStructured<T>(
   opts: GenerateStructuredOptions<T>,
 ): Promise<{ object: T; usage: Usage }> {
   const name = opts.schemaName ?? 'structured_output';
-  const result = await opts.model.generate({
+  const jsonSchema = z.toJSONSchema(opts.schema) as Record<string, unknown>;
+  const base = {
     system: opts.system,
-    messages: [{ role: 'user', content: [{ type: 'text', text: opts.prompt }] }],
+    messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: opts.prompt }] }],
+    maxTokens: opts.maxTokens,
+  };
+  if (opts.model.supportsResponseFormat) {
+    const result = await opts.model.generate({ ...base, responseSchema: { name, schema: jsonSchema } });
+    const call = result.toolCalls.find((c) => c.toolName === name);
+    const raw = call ? call.input : parseStructuredText(result.text, name);
+    return { object: opts.schema.parse(raw), usage: result.usage };
+  }
+  const result = await opts.model.generate({
+    ...base,
     tools: [{
       name,
       description: 'Report the result in the required structure.',
-      inputSchema: z.toJSONSchema(opts.schema) as Record<string, unknown>,
+      inputSchema: jsonSchema,
     }],
     toolChoice: { name },
-    maxTokens: opts.maxTokens,
   });
   const call = result.toolCalls.find((c) => c.toolName === name);
   if (!call) throw new Error(`structured output: model returned no ${name} tool call`);
