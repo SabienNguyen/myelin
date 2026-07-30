@@ -324,13 +324,16 @@ button.badge:hover { color: var(--text); }
 .msg.assistant pre code { background: none; padding: 0; }
 
 /* ── Composer ────────────────────────────────────────── */
+/* Column: the pending-attachment chip row (when present) stacks above the input row. */
 .composer {
   display: flex;
-  gap: 0.6rem;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 0.9rem 1.25rem;
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
 }
+.composer-row { display: flex; gap: 0.6rem; align-items: center; }
 .composer textarea, .composer input { flex: 1; border-radius: 999px; padding: 0.55rem 1.1rem; }
 .composer button {
   background: var(--accent);
@@ -342,6 +345,70 @@ button.badge:hover { color: var(--text); }
 }
 .composer button:hover { filter: brightness(1.08); background: var(--accent); }
 .composer button:disabled { opacity: 0.45; cursor: default; filter: none; }
+/* The attach control is quiet, not a second filled-accent pill beside Send. */
+.composer button.composer-attach {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+  padding: 0.4rem 0.6rem;
+  display: inline-flex;
+  align-items: center;
+}
+.composer button.composer-attach:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  filter: none;
+}
+
+/* Pending attachments (composer) — filename chips, thumbnail for images, inline remove. */
+.composer-attachments { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+  padding: 0.15rem 0.25rem 0.15rem 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text);
+}
+.attachment-chip-name { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-thumb { width: 26px; height: 26px; object-fit: cover; border-radius: var(--radius-sm); }
+.composer .attachment-chip button {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.1rem 0.2rem;
+  display: inline-flex;
+  align-items: center;
+  font-weight: 400;
+}
+.composer .attachment-chip button:hover { background: var(--bg-panel); color: var(--bad); filter: none; }
+/* Oversize rejection — same quiet-failure idiom as .syntax-error-note. */
+.attachment-note { color: var(--bad); font-size: 0.8rem; }
+
+/* Sent attachments (transcript user bubble). */
+.msg.user .msg-attachment-img {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  margin: 0.2rem 0;
+}
+.msg-attachment-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-panel);
+  padding: 0.1rem 0.6rem;
+  font-size: 0.8rem;
+  margin: 0.2rem 0;
+}
 
 /* ── Blocks (shared card look) ───────────────────────── */
 .block {
@@ -2023,6 +2090,16 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
    matters, but only to someone who thought to ask. */
 .firstrun-note { margin: 0; font-size: 0.81rem; color: var(--text-muted); line-height: 1.55; }
 .firstrun-getkey { margin: 0; font-size: 0.88rem; }
+/* The divider between the two ways in (key vs local model): a small centered word, not a heading —
+   both options carry equal weight and neither is an afterthought. */
+.firstrun-or {
+  margin: 0.2rem 0 -0.5rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
 /* Full-width, own line, muted: the "where things live" footer. */
 .firstrun-paths { padding-top: 0.9rem; border-top: 1px solid var(--border); }
 .firstrun-note code, .firstrun-lede code {

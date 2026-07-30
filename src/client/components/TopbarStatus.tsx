@@ -250,6 +250,10 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   });
   const [note, setNote] = useState<{ text: string; err: boolean } | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  // The Anthropic key: input stays empty (the value never returns from the server; typing here
+  // means "replace it"), meta says whether one exists and whether the environment shadows it.
+  const [anthropicKey, setAnthropicKey] = useState('');
+  const [anthropicMeta, setAnthropicMeta] = useState<{ present: boolean; source: string | null }>({ present: false, source: null });
   const [available, setAvailable] = useState<Available>({});
   // Which local model the preset row would apply — '' until the user picks, so the first
   // discovered model is the default without an effect syncing state to fetches.
@@ -280,6 +284,11 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
     setNote(null);
     fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(() => {});
     fetch('/api/usage').then((r) => r.json()).then(setUsage).catch(() => {});
+    // The Anthropic key's presence/source lives on the setup state, not the models state — the
+    // first-run card writes it, this dialog is where it gets CHANGED afterwards.
+    fetch('/api/setup').then((r) => r.json())
+      .then((d) => setAnthropicMeta({ present: Boolean(d?.apiKey?.present), source: d?.apiKey?.source ?? null }))
+      .catch(() => {});
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -326,6 +335,22 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { setNote({ text: d.error ?? 'save failed', err: true }); return; }
       takeState(d as ModelsState);
+      // A typed Anthropic key rides the same save press, through the endpoint that VALIDATES it
+      // against Anthropic — so a wrong key fails here with its own message, and a key failure
+      // after a successful models save says exactly which half went through.
+      if (anthropicKey.trim() && anthropicMeta.source !== 'environment') {
+        const keyRes = await fetch('/api/setup/api-key', {
+          method: 'PUT', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ key: anthropicKey.trim() }),
+        });
+        if (!keyRes.ok) {
+          const kd = await keyRes.json().catch(() => ({}));
+          setNote({ text: `models saved, but the Anthropic key was rejected: ${(kd as any).error ?? 'invalid key'}`, err: true });
+          return;
+        }
+        setAnthropicKey('');
+        setAnthropicMeta({ present: true, source: 'saved' });
+      }
       setNote({ text: 'saved — takes effect on the next call', err: false });
       onSaved((d as ModelsState).roles.tutor?.effective ?? tutor);
     } catch (err: any) {
@@ -437,6 +462,22 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             cheap or local one
           </span>
           <span className="models-group">provider endpoints</span>
+          {/* The Anthropic key, changeable after first run (the first-run card only sets it once).
+              Same conventions as the other key fields: value never round-trips, typing replaces,
+              the environment variable shadows the saved one. */}
+          <span className="models-row">
+            <label htmlFor="models-anthropic-key">anthropic api key</label>
+            <input
+              id="models-anthropic-key" type="password" autoComplete="off" spellCheck={false}
+              placeholder={anthropicMeta.source === 'environment' ? '' : anthropicMeta.present ? 'saved — type to replace' : 'sk-ant-…'}
+              disabled={anthropicMeta.source === 'environment'}
+              value={anthropicKey}
+              onChange={(e) => setAnthropicKey(e.target.value)}
+            />
+            {anthropicMeta.source === 'environment' && (
+              <span className="models-shadow-note">overridden by ANTHROPIC_API_KEY in the environment</span>
+            )}
+          </span>
           {/* Paired per provider: each base url sits directly above its key. */}
           {([URL_FIELDS[0], KEY_FIELDS[0], URL_FIELDS[1], KEY_FIELDS[1]] as const).map((f) => {
             const meta = loaded?.env[f.key];
