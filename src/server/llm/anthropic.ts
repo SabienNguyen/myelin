@@ -3,7 +3,7 @@
 import {
   errorFromResponse, isServerTool, zeroUsage, LlmHttpError,
   type ChatModel, type ChatRequest, type ContentPart, type FinishReason,
-  type GenerateResult, type StreamEvent, type ToolCallPart, type Usage,
+  type GenerateResult, type StreamEvent, type ThinkingPart, type ToolCallPart, type Usage,
 } from './types.js';
 import { sseFrames } from './sse.js';
 import { withRetries, type RetryOptions } from './retry.js';
@@ -38,6 +38,9 @@ interface WireUsage {
 
 type WireBlock =
   | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string; signature?: string }
+  // Redacted thinking is opaque: no deltas, the whole payload rides content_block_start.
+  | { type: 'redacted_thinking'; data: string }
   | { type: 'tool_use'; id: string; name: string; input: unknown }
   | { type: 'server_tool_use'; id: string; name: string; input: unknown }
   | { type: 'web_search_tool_result'; tool_use_id: string; content: unknown };
@@ -46,7 +49,11 @@ type WireEvent =
   | { type: 'message_start'; message?: { usage?: WireUsage } }
   | { type: 'content_block_start'; index: number; content_block: WireBlock }
   | { type: 'content_block_delta'; index: number;
-      delta: { type: 'text_delta'; text: string } | { type: 'input_json_delta'; partial_json: string } }
+      delta:
+        | { type: 'text_delta'; text: string }
+        | { type: 'input_json_delta'; partial_json: string }
+        | { type: 'thinking_delta'; thinking: string }
+        | { type: 'signature_delta'; signature: string } }
   | { type: 'content_block_stop'; index: number }
   | { type: 'message_delta'; delta?: { stop_reason?: string | null }; usage?: WireUsage }
   | { type: 'message_stop' }
@@ -57,6 +64,16 @@ function contentBlock(part: ContentPart): Json {
   switch (part.type) {
     case 'text':
       return { type: 'text', text: part.text };
+    case 'thinking':
+      // Serialized in its original position (thinking leads an assistant turn): with thinking
+      // active the API rejects a tool_use whose preceding thinking block is missing, so echoing
+      // these — signature and redacted payload intact — is what keeps the tool loop alive.
+      return part.redacted
+        ? { type: 'redacted_thinking', data: part.redacted.data }
+        : {
+          type: 'thinking', thinking: part.text,
+          ...(part.signature !== undefined ? { signature: part.signature } : {}),
+        };
     case 'tool-call':
       return { type: 'tool_use', id: part.toolCallId, name: part.toolName, input: part.input };
     case 'tool-result':
@@ -92,6 +109,10 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
     body.system = [{ type: 'text', text: req.system, ...(req.cache ? { cache_control: CACHE } : {}) }];
   }
   if (req.temperature !== undefined) body.temperature = req.temperature;
+  // Effort is the ONLY thinking control sent: current Claude models run adaptive thinking by
+  // default when the request has no `thinking` field, and budget_tokens is rejected with a 400 —
+  // so neither is ever serialized here.
+  if (req.effort !== undefined) body.output_config = { effort: req.effort };
   if (req.tools?.length) {
     body.tools = req.tools.map((t) => isServerTool(t)
       ? t // provider-executed: the provider-shaped object goes to the wire verbatim
@@ -172,15 +193,29 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
       };
       let text = '';
       const toolCalls: ToolCallPart[] = [];
+      const thinking: ThinkingPart[] = [];
       for (const block of msg.content ?? []) {
         if (block.type === 'text') text += block.text;
         else if (block.type === 'tool_use') {
           toolCalls.push({ type: 'tool-call', toolCallId: block.id, toolName: block.name, input: block.input });
+        } else if (block.type === 'thinking') {
+          // Kept out of `text`: one-shot callers read prose, and reasoning leaking into a graded
+          // answer or a generated card would be a correctness bug, not a display nit.
+          thinking.push({
+            type: 'thinking', text: block.thinking,
+            ...(block.signature !== undefined ? { signature: block.signature } : {}),
+          });
+        } else if (block.type === 'redacted_thinking') {
+          thinking.push({ type: 'thinking', text: '', redacted: { data: block.data } });
         }
         // server_tool_use / web_search_tool_result are provider-side artifacts; the one-shot
         // generate() callers never request server tools, so they are ignored here.
       }
-      return { text, toolCalls, usage: usageOf(msg.usage), finishReason: mapStop(msg.stop_reason) };
+      return {
+        text, toolCalls,
+        ...(thinking.length ? { thinking } : {}),
+        usage: usageOf(msg.usage), finishReason: mapStop(msg.stop_reason),
+      };
     },
 
     async *stream(req: ChatRequest): AsyncIterable<StreamEvent> {
@@ -189,8 +224,13 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
       const usage = zeroUsage();
       let stopReason: string | null | undefined;
       // Per-index state for open content blocks. tool_use input arrives as string fragments and
-      // is only parseable once the block stops, so it accumulates here.
-      const blocks = new Map<number, { kind: 'text' | 'tool' | 'server-tool'; id: string; name: string; json: string }>();
+      // is only parseable once the block stops, so it accumulates here — as do a thinking block's
+      // text and signature fragments, since thinking-end promises the assembled block.
+      const blocks = new Map<number, {
+        kind: 'text' | 'tool' | 'server-tool' | 'thinking';
+        id: string; name: string; json: string;
+        thinking: string; signature?: string; redacted?: { data: string };
+      }>();
       const serverToolNames = new Map<string, string>();
 
       for await (const frame of sseFrames(res.body)) {
@@ -207,14 +247,26 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
             const block = ev.content_block;
             if (block.type === 'text') {
               const id = String(ev.index);
-              blocks.set(ev.index, { kind: 'text', id, name: '', json: '' });
+              blocks.set(ev.index, { kind: 'text', id, name: '', json: '', thinking: '' });
               yield { type: 'text-start', id };
+            } else if (block.type === 'thinking') {
+              const id = String(ev.index);
+              blocks.set(ev.index, { kind: 'thinking', id, name: '', json: '', thinking: '' });
+              yield { type: 'thinking-start', id };
+            } else if (block.type === 'redacted_thinking') {
+              // Opaque and whole on arrival: start/end bracket it anyway so downstream sees the
+              // one thinking shape, with the payload riding thinking-end's `redacted`.
+              const id = String(ev.index);
+              blocks.set(ev.index, {
+                kind: 'thinking', id, name: '', json: '', thinking: '', redacted: { data: block.data },
+              });
+              yield { type: 'thinking-start', id };
             } else if (block.type === 'tool_use') {
-              blocks.set(ev.index, { kind: 'tool', id: block.id, name: block.name, json: '' });
+              blocks.set(ev.index, { kind: 'tool', id: block.id, name: block.name, json: '', thinking: '' });
               yield { type: 'tool-input-start', toolCallId: block.id, toolName: block.name };
             } else if (block.type === 'server_tool_use') {
               // Buffered silently: a provider-executed call is announced whole at block stop.
-              blocks.set(ev.index, { kind: 'server-tool', id: block.id, name: block.name, json: '' });
+              blocks.set(ev.index, { kind: 'server-tool', id: block.id, name: block.name, json: '', thinking: '' });
               serverToolNames.set(block.id, block.name);
             } else if (block.type === 'web_search_tool_result') {
               yield {
@@ -231,6 +283,13 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
             if (!st) break;
             if (ev.delta.type === 'text_delta') {
               yield { type: 'text-delta', id: st.id, text: ev.delta.text };
+            } else if (ev.delta.type === 'thinking_delta') {
+              st.thinking += ev.delta.thinking;
+              yield { type: 'thinking-delta', id: st.id, text: ev.delta.thinking };
+            } else if (ev.delta.type === 'signature_delta') {
+              // Accumulated silently: the signature is echo plumbing, not display, and it is
+              // announced whole on thinking-end.
+              st.signature = (st.signature ?? '') + ev.delta.signature;
             } else if (ev.delta.type === 'input_json_delta') {
               st.json += ev.delta.partial_json;
               if (st.kind === 'tool') yield { type: 'tool-input-delta', toolCallId: st.id, delta: ev.delta.partial_json };
@@ -243,6 +302,12 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
             blocks.delete(ev.index);
             if (st.kind === 'text') {
               yield { type: 'text-end', id: st.id };
+            } else if (st.kind === 'thinking') {
+              yield {
+                type: 'thinking-end', id: st.id, text: st.thinking,
+                ...(st.signature !== undefined ? { signature: st.signature } : {}),
+                ...(st.redacted !== undefined ? { redacted: st.redacted } : {}),
+              };
             } else {
               // A no-argument tool streams no input_json_delta at all: empty accumulation is {}.
               const input: unknown = st.json ? JSON.parse(st.json) : {};
