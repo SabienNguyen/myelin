@@ -733,9 +733,16 @@ export function createTutorSession(
         const prevMode = lastModeByThread.get(threadId);
         const modeSwitched = !isFirstTurn && !pending.length && prevMode !== undefined && prevMode !== mode;
         lastModeByThread.set(threadId, mode);
-        const context: ChatMessage[] = [];
-        if (isFirstTurn) context.push(userTurn(await bootstrap(mode, slugs)));
-        else if (modeSwitched) context.push(userTurn(
+        // Context placement is a caching decision as much as a prompting one. The transcript's
+        // prefix (system + history) is what the anthropic adapter's cache breakpoints reuse turn
+        // to turn, so per-turn HARNESS notes must sit at the TAIL — a message prepended before
+        // the history shifts every byte of it and forces a full input re-read this turn AND next
+        // (when the prepend disappears again). Only the first turn's bootstrap leads, where it is
+        // the natural head of a brand-new transcript.
+        const leading: ChatMessage[] = [];
+        const trailing: ChatMessage[] = [];
+        if (isFirstTurn) leading.push(userTurn(await bootstrap(mode, slugs)));
+        else if (modeSwitched) trailing.push(userTurn(
           `HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
           + 'Fresh session context follows — trust it over anything earlier in this conversation '
           + '(mastery and due reviews may have changed since the conversation started).\n\n'
@@ -745,7 +752,7 @@ export function createTutorSession(
         // has already been sent. Say it here or the tutor holds a tool it was told it does not have.
         // The REASON goes in too: "there is no page" and "the page is unsourced guesswork" call for
         // visibly different work, and the second one should not be taught from as if it were fine.
-        if (gap && gap.reason !== 'freeform' && hasWebSearch) context.push(userTurn(
+        if (gap && gap.reason !== 'freeform' && hasWebSearch) trailing.push(userTurn(
           `HARNESS: your memory has a gap here — ${gap.detail}. `
           + 'web_search and read_url are unlocked for this turn. Research it, cite what you read '
           + 'in your answer, and teach from that rather than from '
@@ -754,12 +761,12 @@ export function createTutorSession(
           + `switch to freeform so ${gap.slug ? `“${gap.slug}” can be rewritten properly` : 'the subject can be researched and compiled'} `
           + 'into pages that track their progress.',
         ));
-        if (grades.length) context.push(userTurn(
+        if (grades.length) trailing.push(userTurn(
           `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
           + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
         ));
 
-        const model_messages = [...context, ...uiMessagesToChatMessages(messages)];
+        const model_messages = [...leading, ...uiMessagesToChatMessages(messages), ...trailing];
 
         // Bug 2 fix: the grading above only mutated the REQUEST's copy of the tool output
         // (p.output.grading, kept so the model sees student work + machine grade together in the
