@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
+import {
+  buildReadingList, indexedBylineFor, rememberIndexedByline,
+  type AuthorAffinityRow, type CurateDeps,
+} from './curate.js';
 import { downloadToTemp } from './download.js';
+import { findCanonicalPapers } from './frontierResearch.js';
+import { searchVideos } from './videoSearch.js';
 import { compileNext, readQueue, renameBook, startConversion } from './ingest.js';
 import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
@@ -19,6 +25,8 @@ export function buildIngestRoutes(
   deps: {
     converter?: Converter; model?: ChatModel; fetchImpl?: typeof fetch;
     ingestRepoDeps?: IngestRepoDeps; videoDeps?: VideoIngestDeps;
+    /** Curation seams — tests inject all three so no suite needs Crossref, yt-dlp, or a live MCP. */
+    curateDeps?: Partial<CurateDeps>;
   } = {},
 ) {
   const app = new Hono();
@@ -97,7 +105,12 @@ export function buildIngestRoutes(
         // A downloaded PDF carries no machine-readable byline this pipeline reads (the converted
         // text does, but only a model would be reading it — which is the claim side, not the
         // reported side), so nothing here is `reported`.
-        provenance: { origin: { kind: 'url', url: body.url }, claimed },
+        provenance: {
+          origin: { kind: 'url', url: body.url },
+          claimed,
+          // Never from the request body: only a URL this server itself looked up in an index.
+          reported: indexedBylineFor(body.url),
+        },
       });
       return c.json(result);
     }
@@ -122,6 +135,36 @@ export function buildIngestRoutes(
       provenance: { origin: { kind: 'file' } },
     });
     return c.json(result);
+  });
+
+  /**
+   * "Who should I read about X?" — a ranked list of human artifacts and the people behind them.
+   *
+   * It lives beside the ingest doors because that is where it ends: every row is a url the learner
+   * hands straight back to POST /api/ingest. No model is involved on either side of this route —
+   * curate.ts is arithmetic over Crossref and yt-dlp results — so it answers the same under a weak
+   * local model as under a frontier one.
+   */
+  app.post('/api/curate', async (c) => {
+    const body = await c.req.json().catch(() => null) as { topic?: string } | null;
+    const topic = typeof body?.topic === 'string' ? body.topic.trim() : '';
+    if (!topic) return c.json({ error: 'JSON body requires a non-empty "topic" field' }, 400);
+    const cd = deps.curateDeps ?? {};
+    const list = await buildReadingList(topic, {
+      findCanonicalPapers: cd.findCanonicalPapers
+        ?? ((t) => findCanonicalPapers(t, deps.fetchImpl ?? fetch)),
+      searchVideos: cd.searchVideos ?? searchVideos,
+      authorAffinity: cd.authorAffinity ?? (async () => {
+        const res = await lw.call('author_affinity', { student: cfg.student }) as
+          { authors?: AuthorAffinityRow[] };
+        return res?.authors ?? [];
+      }),
+    });
+    // The server asked an index for each of these URLs and the index answered — so a later ingest
+    // of that exact URL can treat the byline as reported-by-the-artifact rather than claimed by
+    // whoever posts the ingest. See curate.ts's note on why this is a map and not a request field.
+    for (const rec of list.recommendations) rememberIndexedByline(rec.url, rec.by);
+    return c.json(list);
   });
 
   app.get('/api/ingest/queue', (c) => c.json(readQueue(cfg.vault)));

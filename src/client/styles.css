@@ -245,6 +245,27 @@ button.badge:hover { color: var(--text); }
 .add-material-file button { flex: none; }
 .add-material-hint { font-size: 0.78rem; color: var(--text-muted); }
 
+/* "Who should I read?" — same panel, same idiom as the paste form above it, separated by a rule
+   because it answers a different question (no url yet) rather than being another way to paste one. */
+.add-material-curate { padding-top: 0.7rem; border-top: 1px solid var(--border); }
+.curate-results { display: flex; flex-direction: column; gap: 0.5rem; }
+.curate-note { margin: 0; font-size: 0.78rem; color: var(--text-muted); }
+/* The panel is 22rem of dialog, not a page: a long list scrolls inside itself. */
+.curate-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 0.55rem;
+  max-height: 17rem; overflow-y: auto;
+}
+.curate-row { display: flex; align-items: flex-start; gap: 0.5rem; }
+.curate-row-text { flex: 1; min-width: 0; }
+.curate-row button { flex: none; }
+/* The byline gets the display face and the larger size, the title the smaller one — the choice
+   this list exists to support is WHO to learn from. */
+.curate-by { margin: 0; font-family: var(--font-serif); font-size: 0.95rem; color: var(--text); }
+.curate-title { margin: 0.1rem 0 0; font-size: 0.8rem; color: var(--text); }
+.curate-known { margin: 0.15rem 0 0; font-size: 0.75rem; color: var(--accent); }
+.curate-why { margin: 0.15rem 0 0; font-size: 0.75rem; color: var(--text-muted); }
+
 /* ── Layout ──────────────────────────────────────────── */
 .workspace { display: grid; grid-template-columns: 1.4fr 1fr; min-height: 0; }
 .workspace > * { min-width: 0; } /* wide content (graph SVG) must scroll, not steal the chat column */
