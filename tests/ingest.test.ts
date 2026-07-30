@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Engram } from '../src/server/mcp.js';
 import { ingestBook, compileNext, readQueue, startConversion } from '../src/server/ingest.js';
-import { sawToolResult, streamModel, turnsModel } from './mockModel.js';
+import { LlmHttpError } from '../src/server/llm/index.js';
+import { sawToolResult, streamModel, textModel, turnsModel } from './mockModel.js';
 import type { Converter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import { readLinkDirectories } from '../src/server/linkList.js';
@@ -300,7 +301,10 @@ describe('compileNext', () => {
     await ingestBook(cfg, '/uploads/Broken Book.pdf', {
       converter: async () => ({ markdown: '# Some Concept\nSome content.' }),
     });
-    const model = streamModel(() => { throw new Error('model unavailable'); });
+    // Transport-shaped on purpose: an unreachable endpoint must STILL fail the entry (the queue
+    // retries when it recovers). Mere model weakness no longer fails compile — see the
+    // weak-model fallback tests below.
+    const model = streamModel(() => { throw new LlmHttpError('openai-compat', 503, 'model unavailable'); });
     const summary = await compileNext(lw, cfg, 1, { model });
     expect(summary).toEqual({ compiled: 0, failed: 1 });
 
@@ -308,6 +312,43 @@ describe('compileNext', () => {
     const entry = ledger.find((e) => e.book === 'Broken Book');
     expect(entry?.status).toBe('error');
     expect(entry?.error).toMatch(/model unavailable/);
+  }, 30_000);
+
+  it('a weak model that narrates instead of calling tools still compiles: harness distillation', async () => {
+    await ingestBook(cfg, '/uploads/Weak Distill Book.pdf', {
+      converter: async () => ({ markdown: '# Mitochondria\nThe powerhouse of the cell.' }),
+    });
+    // textModel: stream() narrates the reply as TEXT (no tool calls — the weak-agentic shape),
+    // while generate() answers the forced schema tool with the same JSON — so one fake plays both
+    // halves of the ladder: agentic pass empty, structured distillation succeeds.
+    const { model } = textModel(JSON.stringify({
+      title: 'Mitochondria Distilled',
+      body: 'Mitochondria produce ATP — the powerhouse of the cell.',
+    }));
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    const page = readFileSync(join(vault, 'pages', 'mitochondria-distilled.md'), 'utf8');
+    expect(page).toContain('powerhouse of the cell');
+    // The mechanical citation guarantee holds on the fallback path too — the harness writes
+    // through the same citation-wrapped write_page the agentic loop uses.
+    expect(page).toContain('Weak Distill Book');
+    expect(readQueue(vault).find((e) => e.book === 'Weak Distill Book')?.status).toBe('done');
+  }, 30_000);
+
+  it('a model that cannot produce structured JSON lands on the verbatim floor — never zero pages', async () => {
+    await ingestBook(cfg, '/uploads/Verbatim Floor Book.pdf', {
+      converter: async () => ({ markdown: '# Krebs Cycle\nEight steps oxidize acetyl-CoA.' }),
+    });
+    const { model } = textModel('Sure! Great chapter, happy to help — but no JSON from me.');
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    const entry = readQueue(vault).find((e) => e.book === 'Verbatim Floor Book');
+    expect(entry?.status).toBe('done');
+    const slug = 'krebs-cycle'; // slugified chapter title — the floor names the page after the source
+    const page = readFileSync(join(vault, 'pages', `${slug}.md`), 'utf8');
+    expect(page).toContain('Compiled verbatim');
+    expect(page).toContain('Eight steps oxidize acetyl-CoA'); // the source text IS the page
+    expect(page).toContain('Verbatim Floor Book'); // citation still mechanical
   }, 30_000);
 
   describe('concurrency', () => {
@@ -363,21 +404,27 @@ describe('compileNext', () => {
       expect(inFlight.max).toBe(1);
     }, 30_000);
 
-    it('keeps the per-entry honesty gate intact under concurrency: a no-op model fails every entry, none stolen as false "done"', async () => {
+    it('keeps per-entry attribution intact under concurrency: a no-op model lands every entry on ITS OWN fallback page', async () => {
       const chapters = Array.from({ length: 3 }, (_, i) => `# Pool Chapter C${i + 1}\nContent ${i + 1}.`).join('\n');
       await ingestBook(cfg, '/uploads/Pool Test Book C.pdf', { converter: async () => ({ markdown: chapters }) });
 
+      // A narrating no-tool model used to fail every entry here; with the weak-model fallback it
+      // now compiles every entry — the invariant this test keeps is ATTRIBUTION under
+      // concurrency: each worker's fallback page is its own chapter's, none stolen or shared.
+      // (streamModel's generate() throws, so the ladder lands on the verbatim floor.)
       const noToolModel = streamModel(() => ({ text: 'narrating instead of writing pages' }));
 
       const summary = await compileNext(lw, cfg, 3, { model: noToolModel, concurrency: 3 });
 
-      expect(summary).toEqual({ compiled: 0, failed: 3 });
+      expect(summary).toEqual({ compiled: 3, failed: 0 });
       const ledger = readQueue(vault);
       const entries = ledger.filter((e) => e.book === 'Pool Test Book C');
       expect(entries).toHaveLength(3);
-      for (const e of entries) {
-        expect(e.status).toBe('error');
-        expect(e.error).toMatch(/no pages/);
+      for (const [i, e] of entries.entries()) {
+        expect(e.status).toBe('done');
+        const page = readFileSync(join(vault, 'pages', `pool-chapter-c${i + 1}.md`), 'utf8');
+        expect(page).toContain('Compiled verbatim');
+        expect(page).toContain(`Content ${i + 1}.`); // this chapter's own text, not a sibling's
       }
     }, 30_000);
   });

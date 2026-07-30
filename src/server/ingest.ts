@@ -11,7 +11,8 @@ import {
 } from './convert.js';
 import { extractProblems, saveProblems } from './courseBank.js';
 import { analyzeLinkList, saveLinkDirectory } from './linkList.js';
-import { runLoop, type ChatModel, type LoopTool } from './llm/index.js';
+import { generateStructured, runLoop, LlmHttpError, type ChatModel, type LoopTool } from './llm/index.js';
+import { z } from 'zod';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import {
@@ -503,6 +504,107 @@ export function buildCompilePrompt(
   ].join('\n\n');
 }
 
+// ---- weak-model compile fallback ---------------------------------------------------------------
+//
+// The agentic compile above expects the model to DRIVE write_page — which a 7-9B model reliably
+// cannot do (it narrates instead of calling tools; observed live: every chapter erroring with
+// "no write_page calls — try a stronger compile model"). Same medicine as rails mode: when the
+// loop comes back empty, the HARNESS does the orchestration and the model does one narrow
+// structured generation (title + distilled body, constrained decoding + one retry); if even that
+// fails, the deterministic floor writes the source text itself as a draft page, honestly labeled.
+// Material always lands in the vault; only an unreachable endpoint still fails the entry — that
+// must stay an error so the queue retries when the endpoint recovers, instead of consuming the
+// entry with undistilled content during an outage.
+
+/** Endpoint-unreachable/erroring — not model-too-weak. LlmHttpError covers every non-2xx the
+ * adapters surface (post-retry); undici's "fetch failed" TypeError is the connection-level face. */
+function isTransportFailure(e: unknown): boolean {
+  if (e instanceof LlmHttpError) return true;
+  return e instanceof TypeError && /fetch failed/i.test(e.message);
+}
+
+const distilledPageSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+});
+
+function buildDistillPrompt(book: string, chapterTitle: string, partLabel: string, chunk: string): string {
+  return [
+    `Distill this chapter part into ONE study page.`,
+    `Book: "${book}" — chapter: "${chapterTitle}"${partLabel}.`,
+    'Fields:',
+    '- title: a clear page title for the main concept of this part.',
+    '- body: 150-400 words of plain markdown explaining it, self-contained, faithful to the text. '
+    + 'No links, no frontmatter, no code fences around the whole body.',
+    'Source text:',
+    '"""',
+    chunk,
+    '"""',
+  ].join('\n');
+}
+
+/** slugify + collision suffix: write_page UPDATES on an existing slug, and a fallback page must
+ * never silently overwrite someone's real page. */
+function freshSlug(title: string, taken: Set<string>): string {
+  const base = slugify(title) || 'compiled-page';
+  let slug = base;
+  for (let n = 2; taken.has(slug); n++) slug = `${base}-${n}`;
+  taken.add(slug);
+  return slug;
+}
+
+/**
+ * The fallback ladder for one part: structured distillation (one rejection-retry, the rails
+ * recipe) then the verbatim floor. Throws ONLY transport failures and write_page failures —
+ * model weakness never escapes this function.
+ */
+async function weakCompileFallback(
+  model: ChatModel, cfg: HarnessConfig,
+  book: string, chapterTitle: string, partLabel: string, chunk: string,
+  existingSlugs: Set<string>,
+  writePage: (args: unknown) => Promise<unknown>,
+): Promise<'distilled' | 'verbatim'> {
+  const prompt = buildDistillPrompt(book, chapterTitle, partLabel, chunk);
+  const distillOnce = async (rejection?: string) => {
+    const { object, usage } = await generateStructured({
+      model,
+      prompt: rejection
+        ? `${prompt}\n\nYour previous attempt was rejected: ${rejection}. Return a corrected page.`
+        : prompt,
+      schema: distilledPageSchema,
+      schemaName: 'compiled_page',
+    });
+    recordUsage(cfg.vault, { role: 'compile', model: cfg.models?.compile?.model ?? 'unknown', usage });
+    return object;
+  };
+  const write = (title: string, body: string) => writePage({
+    slug: freshSlug(title, existingSlugs), title, body, status: 'draft',
+  });
+
+  try {
+    const page = await distillOnce();
+    await write(page.title, page.body);
+    return 'distilled';
+  } catch (first) {
+    if (isTransportFailure(first)) throw first;
+    try {
+      const page = await distillOnce(first instanceof Error ? first.message : String(first));
+      await write(page.title, page.body);
+      return 'distilled';
+    } catch (second) {
+      if (isTransportFailure(second)) throw second;
+      // The floor: the source itself becomes the page — honest, useful, and replaceable. A
+      // stronger compile model recompiling the chapter writes real distillations alongside.
+      await write(
+        `${chapterTitle}${partLabel}`,
+        '> Compiled verbatim: the compile model could not distill this part, so the source text '
+        + 'below is the page. Recompile with a stronger model to replace it.\n\n' + chunk,
+      );
+      return 'verbatim';
+    }
+  }
+}
+
 /**
  * Compiles one 'pending' (now 'compiling', flipped by the caller's claimNext) ledger entry through
  * a one-shot compile agent, passing the chapter markdown inline (never globbing the vault).
@@ -550,6 +652,7 @@ export async function compileOne(
 
     let wroteAny = false;
     const partErrors: string[] = [];
+    const partNotes: string[] = [];
     for (let i = 0; i < chunks.length; i++) {
       // Refresh slugs per part: part 2's prereq/link candidates include part 1's new pages.
       const slugs = await lw.listSlugs();
@@ -557,6 +660,28 @@ export async function compileOne(
       const prompt = buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel);
 
       const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
+      // The citation-wrapped execute, so fallback pages get the same mechanical source guarantee
+      // (and video-timestamp linkify) every agentic write_page gets.
+      const writePage = tools.find((t) => t.name === 'write_page')?.execute;
+      // Weak-model fallback for THIS part: harness-driven distillation, then the verbatim floor.
+      // Only transport failures (endpoint unreachable) surface as part errors — a reachable model
+      // that is merely too weak always ends in a written page.
+      const fallback = async (agenticFailure?: string) => {
+        if (!writePage) {
+          partErrors.push(`part ${i + 1}: ${agenticFailure ?? 'no write_page calls'}`);
+          return;
+        }
+        try {
+          const how = await weakCompileFallback(
+            model, cfg, entry.book, entry.title, partLabel, chunks[i], new Set(slugs), writePage,
+          );
+          wroteAny = true;
+          partNotes.push(`part ${i + 1}: ${how} fallback${agenticFailure ? ` after: ${agenticFailure}` : ''}`);
+        } catch (fbErr) {
+          const msg = fbErr instanceof Error ? fbErr.message : String(fbErr);
+          partErrors.push(`part ${i + 1}: ${agenticFailure ? `${agenticFailure}; ` : ''}fallback: ${msg.slice(0, 120)}`);
+        }
+      };
       try {
         const result = await runLoop({
           model,
@@ -573,9 +698,13 @@ export async function compileOne(
         // concurrency; a global vault-slug diff would misattribute other workers' pages).
         const wrotePage = result.steps.some((step) => step.toolCalls.some((tc) => tc.toolName === 'write_page'));
         if (wrotePage) wroteAny = true;
-        else partErrors.push(`part ${i + 1}: no write_page calls`);
+        else await fallback();
       } catch (partErr: any) {
-        partErrors.push(`part ${i + 1}: ${(partErr instanceof Error ? partErr.message : String(partErr)).slice(0, 120)}`);
+        const msg = (partErr instanceof Error ? partErr.message : String(partErr)).slice(0, 120);
+        // A transport failure fails the part outright — the fallback would hit the same dead
+        // endpoint; anything else (a weak model mangling the agentic turn) gets the ladder.
+        if (isTransportFailure(partErr)) partErrors.push(`part ${i + 1}: ${msg}`);
+        else await fallback(msg);
       }
     }
 
