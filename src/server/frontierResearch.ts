@@ -21,6 +21,10 @@ export interface FrontierPaper {
   /** PDF URL when the index provides one (arXiv always does) — what ingest_url wants. */
   pdfUrl?: string;
   summary?: string;
+  /** Crossref's is-referenced-by-count for this DOI. Absent for arXiv, and absent rather than 0
+   *  when Crossref reported nothing — a caller showing this to a learner (curate.ts) must be able
+   *  to say "no count reported" instead of claiming an uncited paper. */
+  citations?: number;
 }
 
 const MAX_PER_SOURCE = 8;
@@ -61,7 +65,7 @@ export async function searchCrossref(
 ): Promise<FrontierPaper[]> {
   const url = `https://api.crossref.org/works?query=${encodeURIComponent(topic)}`
     + `&sort=${sort}&order=desc&rows=${MAX_PER_SOURCE}`
-    + '&select=title,author,created,URL,DOI,container-title';
+    + '&select=title,author,created,URL,DOI,container-title,is-referenced-by-count';
   const res = await fetchImpl(url);
   if (!res.ok) throw new Error(`Crossref responded ${res.status}`);
   const body = await res.json() as any;
@@ -72,6 +76,9 @@ export async function searchCrossref(
     date: it.created?.['date-time']?.slice(0, 10) ?? '',
     source: 'Crossref',
     url: it.URL ?? (it.DOI ? `https://doi.org/${it.DOI}` : ''),
+    ...(typeof it['is-referenced-by-count'] === 'number'
+      ? { citations: it['is-referenced-by-count'] }
+      : {}),
   })).filter((p) => p.title && p.date && p.url);
 }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,10 @@ import { readQueue } from '../src/server/ingest.js';
 import { saveLinkDirectory } from '../src/server/linkList.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import type { Converter } from '../src/server/convert.js';
+import {
+  indexedBylineFor as indexedBylineForTest, resetIndexedBylines, type CurateDeps,
+} from '../src/server/curate.js';
+import { reconcileAttribution as reconcileFor } from '../src/server/provenance.js';
 
 const fakeConverter: Converter = async () => ({
   markdown: '# Only Chapter\nSome fixture content for the route test.',
@@ -314,5 +318,126 @@ describe('POST /api/ingest — local file by path', () => {
     });
     expect(missing.status).toBe(400);
     expect((await missing.json()).error).toMatch(/no file at/);
+  });
+});
+
+// "Who should I read?" — the curation door. The list itself is pinned in tests/curate.test.ts;
+// these pin the route's contract: a named 400, and that engram being down costs the affinity
+// bonus rather than the whole answer.
+describe('POST /api/curate', () => {
+  const curateApp = (curateDeps: Partial<CurateDeps>, lw = fakeLw()) =>
+    buildIngestRoutes(lw, cfgFor(mkdtempSync(join(tmpdir(), 'lwh-curate-'))), { curateDeps });
+
+  const post = (app: ReturnType<typeof buildIngestRoutes>, body: unknown) => app.request('/api/curate', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+
+  // THE property that keeps `verified` meaningful. A byline is verified only when the SERVER
+  // obtained it from an index for that exact URL — never because a caller said so. Curating first
+  // is what earns it; posting the same authors without curating must not.
+  it('a curated URL ingests as verified, but the same authors posted cold stay claimed', async () => {
+    resetIndexedBylines();
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-curate-prov-'));
+    const cfg = cfgFor(vault);
+    const paper = {
+      title: 'Attention Is All You Need', authors: ['Ashish Vaswani'], date: '2017-06-12',
+      source: 'Crossref' as const, url: 'https://doi.org/10/aiayn', citations: 4182,
+    };
+    const app = buildIngestRoutes(fakeLw(), cfg, {
+      curateDeps: { findCanonicalPapers: async () => ({ papers: [paper], sourceErrors: [] }),
+        searchVideos: async () => [] },
+    });
+
+    // Cold post first: nothing has been indexed for this URL, so the byline is only a claim.
+    const cold = reconcileFor(['Ashish Vaswani'], undefined);
+    expect(cold.attribution).toBe('claimed');
+
+    // Curate — the server itself asks the index and remembers what it was told for that URL.
+    await post(app, { topic: 'transformers' });
+    const warm = reconcileFor(['Ashish Vaswani'], indexedBylineForTest(paper.url));
+    expect(warm.attribution).toBe('verified');
+    expect(warm.authors).toEqual(['Ashish Vaswani']);
+
+    // And a URL the server never indexed stays unverifiable no matter what a caller sends.
+    expect(indexedBylineForTest('https://example.com/never-curated')).toBeUndefined();
+  });
+
+  it('names the missing field on an empty or absent topic', async () => {
+    const app = curateApp({});
+    for (const body of [{}, { topic: '   ' }, { topic: 42 }]) {
+      const res = await post(app, body);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/"topic"/);
+    }
+  });
+
+  it('returns the ranked list for a topic', async () => {
+    const app = curateApp({
+      findCanonicalPapers: async () => ({
+        papers: [{
+          title: 'Attention Is All You Need', authors: ['Ashish Vaswani'], date: '2017-06-12',
+          source: 'Crossref' as const, url: 'https://doi.org/10/aiayn', citations: 4182,
+        }],
+        sourceErrors: [],
+      }),
+      searchVideos: async () => [],
+      authorAffinity: async () => [],
+    });
+    const res = await post(app, { topic: ' transformers ' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.topic).toBe('transformers');
+    expect(body.recommendations).toEqual([{
+      kind: 'paper', title: 'Attention Is All You Need', by: ['Ashish Vaswani'],
+      url: 'https://doi.org/10/aiayn', why: ['4,182 citations'], knownAuthor: false,
+    }]);
+  });
+
+  it('engram being down degrades to knownAuthor:false — it never 500s the request', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const deadLw = { ...fakeLw(), call: async () => { throw new Error('mcp transport closed'); } } as any;
+    const app = curateApp({
+      findCanonicalPapers: async () => ({
+        papers: [{
+          title: 'A Paper', authors: ['Ada Lovelace'], date: '2011-01-01',
+          source: 'Crossref' as const, url: 'https://doi.org/10/p', citations: 7,
+        }],
+        sourceErrors: [],
+      }),
+      searchVideos: async () => [],
+    }, deadLw);
+
+    const res = await post(app, { topic: 'memory' });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.recommendations[0].knownAuthor).toBe(false);
+    expect(body.sourceErrors).toEqual([]);
+    err.mockRestore();
+  });
+
+  it('reads real affinity through engram author_affinity for cfg.student', async () => {
+    const calls: any[] = [];
+    const lw = {
+      ...fakeLw(),
+      call: async (name: string, args: any) => {
+        calls.push([name, args]);
+        return { authors: [{ author: 'Ada Lovelace', provenEvidence: 6, pages: 2 }] };
+      },
+    } as any;
+    const app = curateApp({
+      findCanonicalPapers: async () => ({
+        papers: [{
+          title: 'A Paper', authors: ['Ada Lovelace'], date: '2011-01-01',
+          source: 'Crossref' as const, url: 'https://doi.org/10/p', citations: 7,
+        }],
+        sourceErrors: [],
+      }),
+      searchVideos: async () => [],
+    }, lw);
+
+    const body = await (await post(app, { topic: 'memory' })).json();
+    expect(calls).toEqual([['author_affinity', { student: 'kid' }]]);
+    expect(body.recommendations[0].knownAuthor).toBe(true);
+    expect(body.recommendations[0].why[0]).toMatch(/you have proven 6 evidence entries/);
   });
 });

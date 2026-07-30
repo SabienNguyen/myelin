@@ -154,3 +154,97 @@ describe('AddMaterial — the one entry point', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
+
+// "Who should I read?" — the curation surface inside the same door. The ranking is the server's
+// (tests/curate.test.ts); what is pinned here is that the humans and the mechanical reasons reach
+// the screen, that Add rides the same /api/ingest {url} path with the index's `authors` attached
+// so provenance can check the byline, and that an empty list is never rendered as if it were an
+// answer.
+describe('AddMaterial — ask who to read', () => {
+  const list = {
+    topic: 'spaced repetition',
+    recommendations: [
+      {
+        kind: 'paper', title: 'Memory: A Contribution to Experimental Psychology',
+        by: ['Hermann Ebbinghaus'], url: 'https://doi.org/10/ebbinghaus',
+        why: ['you have proven 6 evidence entries across 2 pages by Hermann Ebbinghaus', '4,182 citations'],
+        knownAuthor: true,
+      },
+      {
+        kind: 'video', title: 'How to remember anything',
+        by: ['Veritasium'], url: 'https://www.youtube.com/watch?v=abc',
+        why: ['1,200,000 views', '14 min'], knownAuthor: false,
+      },
+    ],
+    sourceErrors: [],
+  };
+
+  async function ask(fetchMock: any, topic = 'spaced repetition') {
+    vi.stubGlobal('fetch', fetchMock);
+    render(<AddMaterial />);
+    openPanel();
+    fireEvent.change(screen.getByLabelText(/ask who to read/i), { target: { value: topic } });
+    fireEvent.click(screen.getByRole('button', { name: /^ask$/i }));
+  }
+
+  it('renders the by-lines and the mechanical reasons, and marks a known author', async () => {
+    await ask(vi.fn(async () => jsonRes(list)));
+
+    await screen.findByText('Hermann Ebbinghaus');
+    expect(screen.getByText('Veritasium')).not.toBeNull();
+    expect(screen.getByText(/4,182 citations/)).not.toBeNull();
+    expect(screen.getByText(/1,200,000 views · 14 min/)).not.toBeNull();
+    // The affinity payoff — earned from recorded evidence, so it is shown, not merely counted.
+    expect(screen.getByText(/you.ve learned from them/i)).not.toBeNull();
+  });
+
+  it('Add posts the row through /api/ingest with the index\'s authors attached', async () => {
+    const fetchMock = vi.fn(async (url: string) => (url === '/api/curate'
+      ? jsonRes(list)
+      : jsonRes({ book: 'Memory', converting: true })));
+    await ask(fetchMock);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^add memory: a contribution/i }));
+
+    await screen.findByText(/Memory: converting in the background/i);
+    expect(fetchMock).toHaveBeenCalledWith('/api/ingest', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        url: 'https://doi.org/10/ebbinghaus', authors: ['Hermann Ebbinghaus'],
+      }),
+    }));
+  });
+
+  it('a video row goes through the same /api/ingest url door, channel as authors', async () => {
+    const fetchMock = vi.fn(async (url: string) => (url === '/api/curate'
+      ? jsonRes(list)
+      : jsonRes({ book: 'How to remember anything' })));
+    await ask(fetchMock);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^add how to remember anything$/i }));
+
+    await screen.findByText(/How to remember anything: converting/i);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/ingest', expect.objectContaining({
+      body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=abc', authors: ['Veritasium'] }),
+    }));
+  });
+
+  it('an empty list from reachable indexes says nothing was found for that topic', async () => {
+    await ask(vi.fn(async () => jsonRes({ topic: 'quantum basket weaving', recommendations: [], sourceErrors: [] })),
+      'quantum basket weaving');
+
+    await screen.findByText(/nothing found for .quantum basket weaving./i);
+  });
+
+  it('names the index that could not be reached rather than showing a short list as the answer', async () => {
+    await ask(vi.fn(async () => jsonRes({
+      topic: 'spaced repetition',
+      recommendations: [list.recommendations[1]],
+      sourceErrors: ['Crossref: Crossref responded 503'],
+    })));
+
+    await screen.findByText(/could not reach Crossref: Crossref responded 503/i);
+    // The one reachable index's row still shows — one source down does not blank the other.
+    expect(screen.getByText('Veritasium')).not.toBeNull();
+  });
+});

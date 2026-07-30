@@ -29,6 +29,7 @@ const CROSSREF_JSON = {
         created: { 'date-time': '2026-07-22T00:00:00Z' },
         URL: 'https://doi.org/10.1000/paged',
         DOI: '10.1000/paged',
+        'is-referenced-by-count': 4182,
       },
       {
         title: ['Quantization in the Wild'],
@@ -106,5 +107,14 @@ describe('findCanonicalPapers', () => {
     const { papers } = await findCanonicalPapers('kv cache', spy);
     expect(urls[0]).toContain('sort=is-referenced-by-count');
     expect(papers.length).toBeGreaterThan(0);
+  });
+
+  it('carries the citation count through, and leaves it ABSENT when Crossref reported none', async () => {
+    // curate.ts shows this number to the learner as a checkable reason to read a paper, so a
+    // missing count has to stay missing — a defaulted 0 would read as "never cited".
+    const spy: typeof fetch = (async () => new Response(JSON.stringify(CROSSREF_JSON), { status: 200 })) as typeof fetch;
+    const { papers } = await findCanonicalPapers('kv cache', spy);
+    expect(papers[0].citations).toBe(4182);
+    expect(papers[1].citations).toBeUndefined();
   });
 });
