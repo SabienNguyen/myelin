@@ -90,6 +90,28 @@ describe('loadConfig', () => {
     expect(() => loadConfig(p)).toThrow(/API key|ollama:/);
   });
 
+  it('a role\'s sampler block parses and survives load intact', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'harness.config.json');
+    const sampler = { topK: 20, minP: 0.05, repetitionPenalty: 1.05, stop: ['</s>'] };
+    writeFileSync(p, JSON.stringify({
+      ...valid, models: { ...valid.models, grader: { model: 'ollama:qwen3:8b', sampler } },
+    }));
+    const cfg = loadConfig(p);
+    // The block rides through whole — models.ts hands it to the adapter opaquely.
+    expect(cfg.models.grader.sampler).toEqual(sampler);
+    // Absent stays absent: no defaults are invented for roles that never asked for tuning.
+    expect(cfg.models.tutor.sampler).toBeUndefined();
+  });
+  it('still fails loud on a sampler knob of the wrong type', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'bad-sampler.json');
+    writeFileSync(p, JSON.stringify({
+      ...valid, models: { ...valid.models, grader: { model: 'ollama:q', sampler: { topK: 'high' } } },
+    }));
+    expect(() => loadConfig(p)).toThrow(/topK/);
+  });
+
   it('honors an explicit autoCompile: false', () => {
     const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
     const p = join(dir, 'harness.config.json');

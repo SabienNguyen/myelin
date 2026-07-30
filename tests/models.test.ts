@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { chatModelFor, withEffort } from '../src/server/models.js';
+import { chatModelFor, withRequestDefaults } from '../src/server/models.js';
 import type { ChatModel, ChatRequest } from '../src/server/llm/index.js';
 
 const cfg = { models: { tutor: { model: 'claude-sonnet-5' }, grader: { model: 'claude-haiku-4-5' } } } as any;
@@ -56,7 +56,7 @@ describe('chatModelFor (the model router)', () => {
     }
   });
 
-  it('withEffort injects the role\'s effort into every request without touching the rest', async () => {
+  it('withRequestDefaults injects the role\'s effort and sampler into every request without touching the rest', async () => {
     const seen: ChatRequest[] = [];
     const stub: ChatModel = {
       supportsResponseFormat: true,
@@ -66,15 +66,23 @@ describe('chatModelFor (the model router)', () => {
       },
       async *stream(req) { seen.push(req); },
     };
-    const wrapped = withEffort(stub, 'low');
+    const sampler = { topK: 20, minP: 0.05 };
+    const wrapped = withRequestDefaults(stub, { effort: 'low', sampler });
     expect(wrapped.supportsResponseFormat).toBe(true);
     await wrapped.generate({ messages: [], maxTokens: 9 });
     for await (const _ of wrapped.stream({ messages: [] })) void _;
-    expect(seen[0]).toMatchObject({ effort: 'low', maxTokens: 9 });
-    expect(seen[1]).toMatchObject({ effort: 'low' });
-    // A request that already carries an effort wins over the role default.
-    await wrapped.generate({ messages: [], effort: 'high' });
-    expect(seen[2]).toMatchObject({ effort: 'high' });
+    expect(seen[0]).toMatchObject({ effort: 'low', sampler, maxTokens: 9 });
+    expect(seen[1]).toMatchObject({ effort: 'low', sampler });
+    // A request that already carries a value wins over the role default, per field: the request's
+    // sampler replaces the role's whole block (no per-knob merging), and effort follows suit.
+    await wrapped.generate({ messages: [], effort: 'high', sampler: { topP: 0.9 } });
+    expect(seen[2]).toMatchObject({ effort: 'high', sampler: { topP: 0.9 } });
+    expect((seen[2].sampler as Record<string, unknown>).topK).toBeUndefined();
+    // A defaults object with neither field set leaves requests untouched.
+    const bare = withRequestDefaults(stub, {});
+    await bare.generate({ messages: [] });
+    expect(seen[3].effort).toBeUndefined();
+    expect(seen[3].sampler).toBeUndefined();
   });
 
   it('LW_MOCK_MODEL resolves the scripted chat model via createRequire (no bare require in ESM)', () => {
@@ -84,5 +92,16 @@ describe('chatModelFor (the model router)', () => {
     const m = chatModelFor('grader', cfg);
     expect(typeof m.generate).toBe('function');
     expect(typeof m.stream).toBe('function');
+  });
+
+  it('scripted models stay unwrapped even when the role configures effort/sampler', () => {
+    // The cache must return the SAME instance per script path (the shared-turn-sequence
+    // contract); a defaults wrapper would mint a fresh object per call, so reference identity is
+    // the observable proof the scripted path skips withRequestDefaults.
+    process.env.LW_MOCK_MODEL = 'scripted';
+    const tuned = {
+      models: { grader: { model: 'ollama:q', effort: 'low', sampler: { topK: 20 } } },
+    } as any;
+    expect(chatModelFor('grader', tuned)).toBe(chatModelFor('grader', tuned));
   });
 });

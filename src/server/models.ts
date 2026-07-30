@@ -15,15 +15,25 @@ const OPENAI_PREFIX = 'openai:';
 // turn forever instead of reaching its scripted verdict.
 const scriptedChatCache = new Map<string, ChatModel>();
 
-/** The role's configured effort rides the resolved model, not the call sites: every ChatRequest
- * built through runLoop or the generate* helpers picks it up with no signature changes anywhere
- * between config and adapter. An effort already on the request wins (no caller sets one today). */
-export function withEffort(model: ChatModel, effort: NonNullable<ChatRequest['effort']>): ChatModel {
+/** The role's configured request defaults — effort, sampler — ride the resolved model, not the
+ * call sites: every ChatRequest built through runLoop or the generate* helpers picks them up with
+ * no signature changes anywhere between config and adapter. A value already on the request wins
+ * over the role default, per field (no caller sets either today). The sampler block moves whole:
+ * config wrote it as one object and the adapter reads it as one — no per-knob merging. */
+export function withRequestDefaults(
+  model: ChatModel,
+  defaults: { effort?: ChatRequest['effort']; sampler?: ChatRequest['sampler'] },
+): ChatModel {
+  const apply = (req: ChatRequest): ChatRequest => ({
+    ...req,
+    ...(defaults.effort !== undefined ? { effort: req.effort ?? defaults.effort } : {}),
+    ...(defaults.sampler !== undefined ? { sampler: req.sampler ?? defaults.sampler } : {}),
+  });
   return {
     ...(model.supportsResponseFormat !== undefined
       ? { supportsResponseFormat: model.supportsResponseFormat } : {}),
-    generate: (req) => model.generate({ ...req, effort: req.effort ?? effort }),
-    stream: (req) => model.stream({ ...req, effort: req.effort ?? effort }),
+    generate: (req) => model.generate(apply(req)),
+    stream: (req) => model.stream(apply(req)),
   };
 }
 
@@ -38,11 +48,13 @@ export function chatModelFor(role: ModelRole, cfg: HarnessConfig): ChatModel {
       const { createChatModel } = require('../../tests/e2e/scripted-model.cjs');
       scriptedChatCache.set(scriptPath, createChatModel(scriptPath) as ChatModel);
     }
-    // Unwrapped on purpose: scripted models replay fixed turns and ignore effort by design.
+    // Unwrapped on purpose: scripted models replay fixed turns and ignore effort and sampler
+    // by design.
     return scriptedChatCache.get(scriptPath)!;
   }
-  const { model: modelId, effort } = cfg.models[role];
-  const wrap = (m: ChatModel) => (effort !== undefined ? withEffort(m, effort) : m);
+  const { model: modelId, effort, sampler } = cfg.models[role];
+  const wrap = (m: ChatModel) =>
+    (effort !== undefined || sampler !== undefined ? withRequestDefaults(m, { effort, sampler }) : m);
   if (modelId.startsWith(OLLAMA_PREFIX)) {
     return wrap(openaiCompatModel({
       modelId: modelId.slice(OLLAMA_PREFIX.length),

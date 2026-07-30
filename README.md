@@ -208,6 +208,25 @@ Recommended split for mixing: keep `tutor` and `compile` on Claude (they need th
 reasoning and tool use); route `grader`, `quiz_gen`, `card_gen` to a cheap OpenAI-compatible or
 local model — higher-volume, lower-stakes calls a good small model handles fine.
 
+### Per-role sampling (local models)
+
+Any role can carry a `sampler` block — decoding knobs sent to OpenAI-compatible endpoints
+(`ollama:` and `openai:` routes) as `top_p` / `top_k` / `min_p` / `seed` / `stop` /
+`repetition_penalty` / `frequency_penalty` / `presence_penalty`. Endpoints ignore knobs they
+don't support, and Anthropic-routed roles ignore the whole block — it exists because a 7-9B
+local model often needs taming that a hosted Claude does not. For a qwen-style model, `topK`
+and `minP` are the levers that cut rambling and choice-list loops:
+
+```json
+"grader": {
+  "model": "ollama:qwen3:8b",
+  "sampler": { "topP": 0.95, "topK": 20, "minP": 0.05, "repetitionPenalty": 1.05 }
+}
+```
+
+The block applies to every request that role makes; requests keep their existing `temperature`
+and `effort` handling unchanged.
+
 ### Rails mode (small local models)
 
 The agentic tutor loop asks a lot of a model — pick the next topic across the vault, drive a dozen
