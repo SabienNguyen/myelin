@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildSetupRoutes } from '../src/server/setupRoutes.js';
-import { modelFor } from '../src/server/models.js';
+import { chatModelFor } from '../src/server/models.js';
 import { PROVIDER_ENV_KEYS, readSettings, resetEnvShadow } from '../src/server/settings.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
@@ -181,17 +181,21 @@ describe('GET/PUT /api/setup/models', () => {
     expect(process.env.OPENAI_COMPAT_BASE_URL).toBe('https://x.example/v1');
   });
 
-  it('a save is live: modelFor serves the new id from the same cfg object, no reconstruction', async () => {
+  it('a save is live: chatModelFor serves the new id from the same cfg object, no reconstruction', async () => {
+    // chatModelFor is opaque ({generate, stream} — no modelId to read), so liveness is pinned by
+    // its one id-revealing observable: an openai: id with no base URL fails loudly NAMING the id.
+    // Before the save, grader resolves as a plain Anthropic model; after it, the same cfg object
+    // must resolve — and, with the base URL deleted again, fail naming — the NEW id.
     const cfg = cfgWith(plainModels());
     const app = buildSetupRoutes(cfg);
-    expect((modelFor('grader', cfg) as any).modelId).toBe('claude-haiku-4-5');
+    expect(typeof chatModelFor('grader', cfg).generate).toBe('function');
     await put(app, {
       models: { grader: 'openai:test/model' },
       env: { OPENAI_COMPAT_BASE_URL: 'https://x.example/v1' },
     });
-    const after = modelFor('grader', cfg) as any;
-    expect(after.modelId).toBe('test/model');
-    expect(after.provider).not.toMatch(/anthropic/);
+    expect(typeof chatModelFor('grader', cfg).generate).toBe('function');
+    delete process.env.OPENAI_COMPAT_BASE_URL;
+    expect(() => chatModelFor('grader', cfg)).toThrow(/openai:test\/model/);
   });
 
   it('saved API keys come back as set:true, never as the value', async () => {

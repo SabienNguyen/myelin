@@ -1,8 +1,8 @@
-import { anthropic } from '@ai-sdk/anthropic';
-import { tool, type ToolSet } from 'ai';
 import { convert } from 'html-to-text';
 import { z } from 'zod';
 import type { HarnessConfig } from './config.js';
+import type { LoopTool, ServerTool } from './llm/index.js';
+import { zodTool } from './zodTool.js';
 
 const MAX_PAGE_CHARS = 9_000;
 const MAX_RESULTS = 6;
@@ -13,7 +13,7 @@ const MAX_SEARCHES_PER_TURN = 8;
 
 /** Which search backend a model route can actually use.
  *
- *  `webSearch_20260209` is a PROVIDER-EXECUTED tool: Anthropic runs the search on their side and
+ *  `web_search_20260209` is a PROVIDER-EXECUTED tool: Anthropic runs the search on their side and
  *  the results never pass through this process. That makes it free of local infrastructure — the
  *  API key the tutor already needs is the whole setup — but it also means it only exists on an
  *  Anthropic-routed model. An `ollama:` tutor gets nothing back from it. */
@@ -22,6 +22,14 @@ function isAnthropicRouted(modelId: string | undefined): boolean {
   // Mirrors models.ts's routing: `ollama:` goes to the OpenAI-compatible provider, anything else
   // is an Anthropic model id.
   return !modelId.startsWith('ollama:');
+}
+
+/** Loop-executed tools plus provider-executed ones, carried separately because they travel
+ *  different routes: `tools` join the turn's LoopTool registry; `serverTools` go to runLoop's
+ *  serverTools and reach the provider wire verbatim. */
+export interface WebTools {
+  tools: LoopTool[];
+  serverTools: ServerTool[];
 }
 
 /** Research tools for the tutor: web search plus a readable-page fetcher.
@@ -45,13 +53,13 @@ function isAnthropicRouted(modelId: string | undefined): boolean {
  * The single-writer rule holds either way: findings only reach the vault when the tutor calls
  * write_page with source URLs.
  */
-export function buildWebTools(cfg: HarnessConfig, modelId?: string): ToolSet {
-  const tools: ToolSet = {
-    read_url: tool({
+export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
+  const tools: LoopTool[] = [
+    zodTool('read_url', {
       description: 'Fetch a web page and return its readable text (truncated). Use on the most '
         + 'promising search results, or on any URL the student names, before writing or updating '
         + 'vault pages.',
-      inputSchema: z.object({ url: z.string().url() }),
+      input: z.object({ url: z.string().url() }),
       execute: async ({ url }) => {
         try {
           const res = await fetch(url, {
@@ -81,20 +89,24 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): ToolSet {
         }
       },
     }),
-  };
+  ];
 
   if (isAnthropicRouted(modelId)) {
-    tools.web_search = anthropic.tools.webSearch_20260209({ maxUses: MAX_SEARCHES_PER_TURN });
-    return tools;
+    // Pinned deliberately: web_search_20250305 is the older basic variant; _20260209 is the one
+    // with dynamic filtering, and it is what the model actually behaves well with.
+    return {
+      tools,
+      serverTools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: MAX_SEARCHES_PER_TURN }],
+    };
   }
 
   if (cfg.search?.searxng) {
     const base = cfg.search.searxng.replace(/\/$/, '');
-    tools.web_search = tool({
+    tools.push(zodTool('web_search', {
       description: 'Search the web (local SearXNG). Use when starting or refreshing a subject: '
         + 'cross-check at least two sources before writing pages, and cite result URLs in the '
         + 'page\'s sources frontmatter.',
-      inputSchema: z.object({ query: z.string(), category: z.enum(['general', 'science', 'it', 'news']).optional() }),
+      input: z.object({ query: z.string(), category: z.enum(['general', 'science', 'it', 'news']).optional() }),
       execute: async ({ query, category }) => {
         try {
           const url = `${base}/search?format=json&q=${encodeURIComponent(query)}`
@@ -110,12 +122,13 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): ToolSet {
           return { error: `search unavailable: ${e?.message ?? e}` };
         }
       },
-    });
+    }));
+    return { tools, serverTools: [] };
   }
 
   // No search backend at all — a local model with no SearXNG. read_url still ships, and
   // instruction 13 tells the tutor to mark pages as unverified model knowledge when it cannot
   // search. Registering a web_search that always errors would be worse: the model would keep
   // retrying a tool that cannot ever work.
-  return tools;
+  return { tools, serverTools: [] };
 }

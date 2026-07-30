@@ -291,6 +291,33 @@ describe('createUiStream wire shape', () => {
     expect(part).toMatchObject({ state: 'output-available', providerExecuted: true });
   });
 
+  it('forwards loop tool-result events as output-available or output-error chunks', async () => {
+    let finalMessages: UIMessage[] = [];
+    const res = createUiStream({
+      originalMessages: USER_TURN,
+      execute: async (writer) => {
+        writer.forward({ type: 'step-start' });
+        writer.forward({ type: 'tool-call', toolCallId: 'ok1', toolName: 'lookup', input: {} });
+        writer.forward({ type: 'tool-call', toolCallId: 'bad1', toolName: 'broken', input: {} });
+        writer.forward({ type: 'tool-result', toolCallId: 'ok1', toolName: 'lookup', output: { found: true } });
+        writer.forward({ type: 'tool-result', toolCallId: 'bad1', toolName: 'broken', output: 'backend down', isError: true });
+        writer.forward({ type: 'step-finish' });
+      },
+      onEnd: ({ messages }) => { finalMessages = messages; },
+    });
+    const { chunks } = await collect(res);
+    expect(chunks.find((c) => c.type === 'tool-output-available')).toEqual({
+      type: 'tool-output-available', toolCallId: 'ok1', output: { found: true },
+    });
+    expect(chunks.find((c) => c.type === 'tool-output-error')).toEqual({
+      type: 'tool-output-error', toolCallId: 'bad1', errorText: 'backend down',
+    });
+    await expectValidChunks(chunks);
+    const parts = finalMessages[1].parts as any[];
+    expect(parts.find((p) => p.toolCallId === 'ok1')).toMatchObject({ state: 'output-available' });
+    expect(parts.find((p) => p.toolCallId === 'bad1')).toMatchObject({ state: 'output-error', errorText: 'backend down' });
+  });
+
   it('generateMessageId matches the SDK default format', () => {
     for (let i = 0; i < 20; i++) expect(generateMessageId()).toMatch(/^[0-9A-Za-z]{16}$/);
   });

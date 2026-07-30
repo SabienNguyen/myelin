@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { UIMessage } from 'ai';
+import type { UIMessage } from '../shared/uiMessages.js';
 import type { HarnessConfig } from './config.js';
 import type { Engram } from './mcp.js';
 import { createTutorSession } from './session.js';

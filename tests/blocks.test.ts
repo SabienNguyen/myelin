@@ -63,12 +63,12 @@ describe('block schemas', () => {
   });
 });
 
-describe('structural rule 1a on the ai-sdk route', () => {
+describe('structural rule 1a on the tutor route', () => {
   it('grading turns get only the navigation UI tools; user turns get every block', async () => {
     const { turnBlockTools } = await import('../src/server/session.js');
     // open_source, speak, offer_write are navigation, not graded work — all survive the withhold.
-    expect(Object.keys(turnBlockTools(true)).sort()).toEqual(['offer_write', 'open_source', 'speak']);
-    const full = Object.keys(turnBlockTools(false));
+    expect(turnBlockTools(true).map((t) => t.name).sort()).toEqual(['offer_write', 'open_source', 'speak']);
+    const full = turnBlockTools(false).map((t) => t.name);
     expect(full).toContain('quiz');
     expect(full).toContain('writing_draft');
     expect(full).toContain('open_source');

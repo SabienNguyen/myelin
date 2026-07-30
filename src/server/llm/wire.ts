@@ -256,6 +256,13 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
                 type: 'tool-output-available',
                 toolCallId: event.toolCallId, output: event.output, providerExecuted: true,
               });
+            case 'tool-result':
+              return emit(event.isError
+                ? {
+                  type: 'tool-output-error', toolCallId: event.toolCallId,
+                  errorText: typeof event.output === 'string' ? event.output : JSON.stringify(event.output),
+                }
+                : { type: 'tool-output-available', toolCallId: event.toolCallId, output: event.output });
             case 'finish':
               finishReason = mapFinishReason(event.reason);
               return;

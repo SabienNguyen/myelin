@@ -10,3 +10,11 @@ export {
   generateText, generateStructured,
   type GenerateTextOptions, type GenerateStructuredOptions,
 } from './generate.js';
+export {
+  createUiStream, generateMessageId, uiMessagesToChatMessages,
+  type CreateUiStreamOptions, type UiChunk, type UiStreamWriter,
+} from './wire.js';
+export {
+  spawnMcpServer,
+  type McpConnection, type McpToolDecl, type McpToolResult, type SpawnMcpServerOptions,
+} from './mcpClient.js';

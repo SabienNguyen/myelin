@@ -5,7 +5,7 @@
 // call with a transport-shaped error ("closed") that isTransportError recognizes.
 import { spawn } from 'node:child_process';
 
-// What @ai-sdk/mcp sends today; engram's @modelcontextprotocol/sdk supports it and echoes it
+// What the replaced SDK client sent; engram's @modelcontextprotocol/sdk supports it and echoes it
 // back. The negotiated version in the reply is not enforced — tools/list and tools/call are
 // identical across every protocol revision this client could meet.
 const PROTOCOL_VERSION = '2025-11-25';

@@ -2,33 +2,25 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MockLanguageModelV3 } from 'ai/test';
-import { simulateReadableStream } from 'ai';
+import type { ChatRequest } from '../src/server/llm/index.js';
 import { Engram } from '../src/server/mcp.js';
 import { createTutorSession } from '../src/server/session.js';
+import { streamModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
 
 let lw: Engram; let vault: string;
 
-// Stream chunks for: a text-only reply (no record_evidence) — used to trip the guardrail.
-const textOnly = () => new MockLanguageModelV3({
-  doStream: async () => ({
-    stream: simulateReadableStream({
-      chunks: [
-        { type: 'text-start', id: 't1' },
-        { type: 'text-delta', id: 't1', delta: 'Nice work!' },
-        { type: 'text-end', id: 't1' },
-        {
-          type: 'finish' as const, finishReason: { unified: 'stop' as const, raw: 'stop' },
-          usage: {
-            inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 1, text: 1, reasoning: undefined },
-          },
-        },
-      ],
-    }),
-  }),
-});
+// A text-only reply (no record_evidence) — used to trip the guardrail — recording every
+// ChatRequest the session sends so tests can assert the tools and context of each model call.
+// structuredClone is safe here: the loop hands the model plain declarations (no execute closures).
+const textOnly = () => {
+  const calls: ChatRequest[] = [];
+  const model = streamModel((req) => {
+    calls.push(structuredClone(req));
+    return { text: 'Nice work!' };
+  });
+  return { model, calls };
+};
 
 beforeAll(async () => {
   vault = mkdtempSync(join(tmpdir(), 'lwh-vault-'));
@@ -65,10 +57,7 @@ const blockOutputHistory = [
 
 describe('evidence guardrail', () => {
   it('nudges once when block output arrives but no record_evidence is called', async () => {
-    const calls: any[] = [];
-    const model = textOnly();
-    const origDoStream = model.doStream.bind(model);
-    (model as any).doStream = async (opts: any) => { calls.push(opts); return origDoStream(opts); };
+    const { model, calls } = textOnly();
 
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
       { model, now: () => new Date('2026-07-12') });
@@ -76,7 +65,7 @@ describe('evidence guardrail', () => {
     await res.text(); // drain the stream
 
     expect(calls.length).toBe(2); // original + one nudged retry
-    const secondPrompt = JSON.stringify(calls[1].prompt);
+    const secondPrompt = JSON.stringify(calls[1].messages);
     expect(secondPrompt).toMatch(/record_evidence/);
     // second violation logged
     expect(existsSync(join(vault, '.harness', 'guardrail.log'))).toBe(true);
@@ -84,10 +73,7 @@ describe('evidence guardrail', () => {
   }, 30_000);
 
   it('does not nudge on plain conversation', async () => {
-    const calls: any[] = [];
-    const model = textOnly();
-    const orig = model.doStream.bind(model);
-    (model as any).doStream = async (o: any) => { calls.push(o); return orig(o); };
+    const { model, calls } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
     const res = await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any, 'learn');
     await res.text();
@@ -95,25 +81,19 @@ describe('evidence guardrail', () => {
   }, 30_000);
 
   it('injects bootstrap context on first turn', async () => {
-    const calls: any[] = [];
-    const model = textOnly();
-    const orig = model.doStream.bind(model);
-    (model as any).doStream = async (o: any) => { calls.push(o); return orig(o); };
+    const { model, calls } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
     await (await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn')).text();
-    expect(JSON.stringify(calls[0].prompt)).toMatch(/SESSION CONTEXT/);
+    expect(JSON.stringify(calls[0].messages)).toMatch(/SESSION CONTEXT/);
   }, 30_000);
 });
 
 describe('cold-start research unlock', () => {
   // researchGate.test.ts covers the DECISION against a stubbed scorer. This covers the WIRING:
   // that a teaching-mode turn actually hands the tutor the tools, and tells it they are there.
-  // Those are separable — the gate returning true is worthless if session.ts still builds `{}`.
+  // Those are separable — the gate returning true is worthless if session.ts still builds `[]`.
   const drive = async (text: string) => {
-    const calls: any[] = [];
-    const model = textOnly();
-    const orig = model.doStream.bind(model);
-    (model as any).doStream = async (o: any) => { calls.push(o); return orig(o); };
+    const { model, calls } = textOnly();
     const session = createTutorSession(lw, {
       student: 'kid', vault, models: {},
       // A SearXNG that is never reached: the tool only has to EXIST for this test. The provider-
@@ -124,11 +104,11 @@ describe('cold-start research unlock', () => {
     await (await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] as any, 'learn')).text();
     return {
       tools: (calls[0].tools ?? []).map((t: any) => t.name),
-      // USER messages only, deliberately. The whole serialized prompt includes the system prompt,
-      // which now documents the gap-unlock line verbatim — so a whole-prompt regex matched the
+      // USER messages only, deliberately. The whole request includes the system prompt, which now
+      // documents the gap-unlock line verbatim — so a whole-request regex matched the
       // documentation and the withheld-research assertion below passed and failed for the same
       // reason. What is under test is what the HARNESS injected this turn.
-      prompt: JSON.stringify((calls[0].prompt ?? []).filter((m: any) => m.role === 'user')),
+      prompt: JSON.stringify((calls[0].messages ?? []).filter((m: any) => m.role === 'user')),
     };
   };
 
@@ -166,11 +146,8 @@ describe('cold-start research unlock', () => {
     // The staging message names a topic the vault cannot cover (a no-page gap), but THIS turn is a
     // block submission — grading, not a fresh ask. vaultGap keys off that stale user text, so without
     // the grade-turn guard the tutor got a "research this" directive over the graded card and
-    // re-taught the whole topic instead of landing the grade (the SDK route already gates this).
-    const calls: any[] = [];
-    const model = textOnly();
-    const orig = model.doStream.bind(model);
-    (model as any).doStream = async (o: any) => { calls.push(o); return orig(o); };
+    // re-taught the whole topic instead of landing the grade.
+    const { model, calls } = textOnly();
     const session = createTutorSession(lw, {
       student: 'kid', vault, models: {}, search: { searxng: 'http://127.0.0.1:1' },
     } as any, { model });
@@ -184,7 +161,7 @@ describe('cold-start research unlock', () => {
     ] as any[];
     await (await session.respond(history, 'learn')).text();
     const tools = (calls[0].tools ?? []).map((t: any) => t.name);
-    const userPrompt = JSON.stringify((calls[0].prompt ?? []).filter((m: any) => m.role === 'user'));
+    const userPrompt = JSON.stringify((calls[0].messages ?? []).filter((m: any) => m.role === 'user'));
     expect(tools).not.toContain('web_search'); // research withheld on the grade turn…
     expect(userPrompt).not.toMatch(/your memory has a gap here/);
     expect(userPrompt).toMatch(/record_evidence/); // …because it IS a grade turn
@@ -201,7 +178,7 @@ describe('grading round-trip (Bug 2)', () => {
     // message (originalMessages below), the client seeds its working message state from THAT
     // message — which already has a part with this toolCallId — so the chunk finds and patches it
     // through the normal tool-result code path, same as any other tool result.
-    const model = textOnly();
+    const { model } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
     // A fresh, never-graded history — session.respond() mutates the request's tool part output in
     // place (p.output.grading = grading), and the shared blockOutputHistory object above is
@@ -229,13 +206,13 @@ describe('grading round-trip (Bug 2)', () => {
   }, 30_000);
 
   it('continues the SAME assistant message id when the request is a resubmit (no duplicate sibling message)', async () => {
-    // Regression test: without `originalMessages` wired into createUIMessageStream, the server
+    // Regression test: without `originalMessages` wired into createUiStream, the server
     // always minted a fresh random message id, while ai@7's useChat (on the client, for a
     // sendAutomaticallyWhen-triggered resubmit) seeds its streaming state from a SNAPSHOT of the
     // incoming history's last assistant message and only replaces it in place when ids match —
     // otherwise it pushes the snapshot-plus-new-content as an extra sibling message, duplicating
     // turn-1 content in the rendered thread. Confirmed by manual browser E2E debugging.
-    const model = textOnly();
+    const { model } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
     const freshHistory = [
       { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
@@ -255,7 +232,7 @@ describe('grading round-trip (Bug 2)', () => {
   }, 30_000);
 
   it('mints a fresh message id on the first turn (no assistant message to continue)', async () => {
-    const model = textOnly();
+    const { model } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
     const body = await (await session.respond(
       [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn',
