@@ -15,6 +15,21 @@ export function isTransportError(e: unknown): boolean {
   return TRANSPORT_ERROR.test(msg);
 }
 
+// Engram tools whose handlers only READ (ctx.snapshot()/store.read*/listRaw — verified against
+// engram's graphTools.ts/teachTools.ts registrations), marked `parallel` so a step that fans out
+// several of them runs them concurrently (loop.ts). The invariant: read-only ⇒ no vault or
+// student-file mutation ⇒ safe to interleave over the stdio client's concurrent request map.
+// Everything that writes — write_page, link_pages, unlink_pages, create_path (writePathDoc),
+// record_evidence (mastery/evidence log) — stays OFF this list and keeps strict sequencing:
+// interleaved vault writes could corrupt each other. A new engram tool defaults to sequential
+// until someone reads its handler and adds it here.
+const READ_ONLY_ENGRAM_TOOLS = new Set([
+  'list_pages', 'search', 'read_page',            // graph queries: snapshot only
+  'compile_source',                               // reads a raw file + snapshot; the writes happen via write_page later
+  'list_paths', 'read_path',                      // path docs: listPathDocs/readPathDoc
+  'get_student_state', 'next_lessons', 'find_analogies', 'working_set', // student reads: readStudent + snapshot
+]);
+
 export class Engram {
   // A respawn in flight, shared by every caller that hits the dead client at once. null when none.
   private respawning: Promise<McpConnection> | null = null;
@@ -82,6 +97,7 @@ export class Engram {
       name,
       description,
       inputSchema,
+      ...(READ_ONLY_ENGRAM_TOOLS.has(name) ? { parallel: true } : {}),
       execute: (args: unknown) => this.execTool(name, args),
     }));
   }

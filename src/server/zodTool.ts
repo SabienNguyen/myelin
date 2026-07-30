@@ -12,13 +12,16 @@ export function zodTool<S extends z.ZodType>(
     description: string;
     input: S;
     execute?: (input: z.infer<S>) => Promise<unknown>;
+    /** loop.ts's concurrency opt-in — pass true ONLY for a tool that writes nothing. */
+    parallel?: boolean;
   },
 ): LoopTool {
-  const { description, input, execute } = opts;
+  const { description, input, execute, parallel } = opts;
   return {
     name,
     description,
     inputSchema: z.toJSONSchema(input) as Record<string, unknown>,
+    ...(parallel ? { parallel: true } : {}),
     ...(execute ? { execute: async (raw: unknown) => execute(input.parse(raw)) } : {}),
   };
 }
