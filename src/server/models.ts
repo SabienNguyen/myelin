@@ -2,6 +2,9 @@ import { createRequire } from 'node:module';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import type { SystemModelMessage } from 'ai';
+import {
+  anthropicModel, openaiCompatModel as compatChatModel, type ChatModel,
+} from './llm/index.js';
 import type { HarnessConfig, ModelRole } from './config.js';
 
 // No explicit apiKey: the provider resolves ANTHROPIC_API_KEY per request (its getHeaders is a
@@ -71,6 +74,55 @@ export function modelFor(role: ModelRole, cfg: HarnessConfig) {
     return openaiCompatModel(modelId.slice(OPENAI_PREFIX.length));
   }
   return anthropic(modelId);
+}
+
+// modelFor's first-party counterpart (own-harness phase B): the same three routes resolved onto
+// our ChatModel for the one-shot roles. modelFor stays beside it until phase C moves the tutor
+// loop and the compile agent off the AI SDK. Env vars are read per call here too — the adapters
+// take plain option values, so a cached instance would freeze what the env held at resolve time.
+const scriptedChatCache = new Map<string, ChatModel>();
+
+export function chatModelFor(role: ModelRole, cfg: HarnessConfig): ChatModel {
+  if (process.env.LW_MOCK_MODEL) {
+    const scriptPath = process.env.LW_MOCK_MODEL;
+    if (!scriptedChatCache.has(scriptPath)) {
+      const require = createRequire(import.meta.url);
+      const { createChatModel } = require('../../tests/e2e/scripted-model.cjs');
+      scriptedChatCache.set(scriptPath, createChatModel(scriptPath) as ChatModel);
+    }
+    // The .cjs module keys its turn counter by script path, so this model and modelFor's V3
+    // instance pop from the SAME sequence — the invariant scriptedCache's comment describes.
+    return scriptedChatCache.get(scriptPath)!;
+  }
+  const modelId = cfg.models[role].model;
+  if (modelId.startsWith(OLLAMA_PREFIX)) {
+    return compatChatModel({
+      modelId: modelId.slice(OLLAMA_PREFIX.length),
+      baseUrl: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1',
+      // Unset means no Authorization header — the common local case. Set it for a key-protected
+      // Ollama reverse proxy.
+      apiKey: process.env.OLLAMA_API_KEY,
+    });
+  }
+  if (modelId.startsWith(OPENAI_PREFIX)) {
+    const id = modelId.slice(OPENAI_PREFIX.length);
+    const baseUrl = process.env.OPENAI_COMPAT_BASE_URL;
+    // No localhost fallback here: unlike Ollama there is no conventional default port, and a
+    // guessed URL would surface as a confusing connection error mid-lesson instead of this
+    // message at call time. A missing OPENAI_COMPAT_API_KEY is fine (keyless proxies exist);
+    // a wrong one is the provider's 401 to report.
+    if (!baseUrl) {
+      throw new Error(
+        `model "openai:${id}" needs OPENAI_COMPAT_BASE_URL set to the provider's `
+        + `OpenAI-compatible endpoint, e.g. https://openrouter.ai/api/v1 `
+        + `(and OPENAI_COMPAT_API_KEY if the provider requires a key)`,
+      );
+    }
+    return compatChatModel({ modelId: id, baseUrl, apiKey: process.env.OPENAI_COMPAT_API_KEY });
+  }
+  // Per-request ANTHROPIC_API_KEY resolution lives inside the adapter, for the reason the
+  // createAnthropic({}) comment above records.
+  return anthropicModel({ modelId });
 }
 
 export function cachedSystem(text: string): SystemModelMessage {

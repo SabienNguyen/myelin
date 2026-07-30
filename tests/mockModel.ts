@@ -1,34 +1,59 @@
-// One fake model for tests of model-graded paths (grading, gap help, card gen). Replies with
+// One fake ChatModel for tests of model-graded paths (grading, gap help, card gen). Replies with
 // canned text — a function reply picks per prompt, which is how a test serves the rubric judge
 // and the annotation grader different JSON from a single grader model — and records every prompt
-// as plain text so tests can assert what the model was actually shown. A reply that throws makes
-// the model call reject, for exercising the failure paths.
-import { MockLanguageModelV3 } from 'ai/test';
+// (system included) as plain text so tests can assert what the model was actually shown. A reply
+// that throws makes the model call reject, for exercising the failure paths.
+//
+// Structured output: generateStructured forces its schema tool via toolChoice and reads the
+// verdict off the matching tool call. When the request forces a tool, a reply that parses as
+// JSON becomes that tool call's input — so one scripted JSON string serves the structured path.
+// A reply that does NOT parse stays plain text with no tool call, which generateStructured
+// rejects: exactly the "unparseable grade throws" behavior the grading tests pin.
+import {
+  zeroUsage, type ChatModel, type ChatRequest, type GenerateResult,
+} from '../src/server/llm/index.js';
 
-function promptText(options: { prompt: unknown }): string {
-  return ((options.prompt ?? []) as any[])
-    .map((m) => (Array.isArray(m.content)
-      ? m.content.filter((p: any) => p?.type === 'text').map((p: any) => p.text).join('\n')
-      : String(m.content ?? '')))
-    .join('\n');
+function promptText(req: ChatRequest): string {
+  const parts = req.messages.map((m) =>
+    m.content.filter((p) => p.type === 'text').map((p) => p.text).join('\n'));
+  if (req.system !== undefined) parts.unshift(req.system);
+  return parts.join('\n');
 }
 
 export function textModel(reply: string | ((prompt: string) => string)) {
   const prompts: string[] = [];
-  const model = new MockLanguageModelV3({
-    doGenerate: async (options) => {
-      const prompt = promptText(options);
-      prompts.push(prompt);
-      return {
-        content: [{ type: 'text', text: typeof reply === 'function' ? reply(prompt) : reply }],
-        finishReason: { unified: 'stop', raw: 'stop' },
-        usage: {
-          inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-          outputTokens: { total: 1, text: 1, reasoning: undefined },
-        },
-        warnings: [],
-      };
+  const respond = (req: ChatRequest): GenerateResult => {
+    const prompt = promptText(req);
+    prompts.push(prompt);
+    const text = typeof reply === 'function' ? reply(prompt) : reply;
+    if (req.toolChoice !== undefined && req.toolChoice !== 'auto') {
+      try {
+        const input = JSON.parse(text);
+        return {
+          text: '',
+          toolCalls: [{ type: 'tool-call', toolCallId: 'mock-call', toolName: req.toolChoice.name, input }],
+          usage: zeroUsage(), finishReason: 'tool-calls',
+        };
+      } catch { /* non-JSON reply to a forced tool: fall through as text, no tool call */ }
+    }
+    return { text, toolCalls: [], usage: zeroUsage(), finishReason: 'stop' };
+  };
+  const model: ChatModel = {
+    async generate(req) {
+      return respond(req);
     },
-  });
+    // No one-shot caller streams today; the events mirror generate() so the fake stays a full
+    // ChatModel rather than throwing on half its interface.
+    async *stream(req) {
+      const r = respond(req);
+      for (const call of r.toolCalls) yield call;
+      if (r.text) {
+        yield { type: 'text-start', id: '0' };
+        yield { type: 'text-delta', id: '0', text: r.text };
+        yield { type: 'text-end', id: '0' };
+      }
+      yield { type: 'finish', reason: r.finishReason, usage: r.usage };
+    },
+  };
   return { model, prompts };
 }

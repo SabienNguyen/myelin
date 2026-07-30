@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { generateText, Output } from 'ai';
 import { z } from 'zod';
 import type { HarnessConfig } from '../config.js';
+import { generateStructured } from '../llm/index.js';
 import type { Engram } from '../mcp.js';
-import { modelFor } from '../models.js';
+import { chatModelFor } from '../models.js';
 import type { AnkiClient } from './client.js';
 
 export type GenerateCards = (
@@ -68,12 +68,12 @@ async function llmGenerateCards(
     misconceptions.length ? `Known misconceptions: ${misconceptions.join('; ')}` : '',
     CARD_PROMPT,
   ].filter(Boolean);
-  const { output } = await generateText({
-    model: modelFor('card_gen', cfg),
+  const { object } = await generateStructured({
+    model: chatModelFor('card_gen', cfg),
     prompt: parts.join('\n\n'),
-    output: Output.object({ schema: cardsSchema }),
+    schema: cardsSchema, schemaName: 'cards',
   });
-  return output.cards;
+  return object.cards;
 }
 
 /**

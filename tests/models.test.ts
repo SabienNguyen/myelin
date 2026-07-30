@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { modelFor, cachedSystem } from '../src/server/models.js';
+import { modelFor, chatModelFor, cachedSystem } from '../src/server/models.js';
 
 const cfg = { models: { tutor: { model: 'claude-sonnet-5' }, grader: { model: 'claude-haiku-4-5' } } } as any;
 
@@ -28,6 +28,48 @@ describe('model router', () => {
         expect(String(e?.message)).toMatch(/scripted-model/);
         expect(e?.code ?? '').toMatch(/MODULE_NOT_FOUND/);
       }
+    });
+  });
+
+  // chatModelFor returns an opaque {generate, stream} — no modelId to read — so these pin the
+  // behaviors observable from outside: the resolve-time failure, its per-call env read, and the
+  // LW_MOCK_MODEL hook resolving a first-party model. Wire-level routing is the adapters' tests.
+  describe('chatModelFor (first-party one-shot routes)', () => {
+    const openaiCfg = { models: { grader: { model: 'openai:foo/bar' } } } as any;
+    const prevBase = process.env.OPENAI_COMPAT_BASE_URL;
+    const prevMock = process.env.LW_MOCK_MODEL;
+    afterEach(() => {
+      if (prevBase === undefined) delete process.env.OPENAI_COMPAT_BASE_URL;
+      else process.env.OPENAI_COMPAT_BASE_URL = prevBase;
+      if (prevMock === undefined) delete process.env.LW_MOCK_MODEL;
+      else process.env.LW_MOCK_MODEL = prevMock;
+    });
+
+    it('resolves each route to a ChatModel', () => {
+      process.env.OPENAI_COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
+      for (const c of [cfg, { models: { tutor: { model: 'ollama:qwen2.5-coder:14B' } } } as any]) {
+        const m = chatModelFor('tutor', c);
+        expect(typeof m.generate).toBe('function');
+        expect(typeof m.stream).toBe('function');
+      }
+      expect(typeof chatModelFor('grader', openaiCfg).generate).toBe('function');
+    });
+
+    it('openai: with no base URL fails loudly, read per call — same contract as modelFor', () => {
+      delete process.env.OPENAI_COMPAT_BASE_URL;
+      expect(() => chatModelFor('grader', openaiCfg)).toThrow(/OPENAI_COMPAT_BASE_URL/);
+      expect(() => chatModelFor('grader', openaiCfg)).toThrow(/openai:foo\/bar/);
+      process.env.OPENAI_COMPAT_BASE_URL = 'https://openrouter.ai/api/v1';
+      expect(typeof chatModelFor('grader', openaiCfg).generate).toBe('function');
+    });
+
+    it('LW_MOCK_MODEL resolves the scripted chat model via createRequire (no bare require)', () => {
+      // The script file is read lazily (first pop, never at factory time), so the path need not
+      // exist here — same contract the modelFor hook test above leans on.
+      process.env.LW_MOCK_MODEL = 'scripted';
+      const m = chatModelFor('grader', cfg);
+      expect(typeof m.generate).toBe('function');
+      expect(typeof m.stream).toBe('function');
     });
   });
 

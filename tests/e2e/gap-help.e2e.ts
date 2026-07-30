@@ -5,15 +5,13 @@ import { test, expect } from '@playwright/test';
 // comment and playwright.config.ts's webServer doc for why this pair is separate from the
 // prod-shaped :4820/:4173 pair (never touched here).
 //
-// The scripted model (tests/e2e/scripted-model.cjs) only implements doStream() — its doGenerate()
-// throws by design ("the harness only ever calls doStream", per that file's doc comment). Chat
-// turns go through streamText (doStream), so the existing script drives them fine, but
-// gapHelp.ts's ai-sdk/ollama: dispatch path calls `generateText`, which calls doGenerate — the
-// scripted model genuinely cannot drive tutor-model help generation. Per the spec's own fallback
-// instruction, this test stubs POST /api/gap/help at the network layer (page.route) instead of
-// relying on the scripted model for that one call. Everything else (loading the real ladder from
-// the-gap sidecar on :4930, opening focus mode via a real scripted chat turn, the Help tab UI, the
-// markdown render, the transcript) is exercised for real.
+// The scripted model (tests/e2e/scripted-model.cjs) pops every call — chat turns and one-shot
+// generates alike — off ONE turn counter per script file. A real help call would consume a turn
+// from the same gap-script.json sequence gap-exercise.e2e.ts's chat turns are counted against,
+// so this test stubs POST /api/gap/help at the network layer (page.route) instead of scripting
+// a hint turn. Everything else (loading the real ladder from the-gap sidecar on :4930, opening
+// focus mode via a real scripted chat turn, the Help tab UI, the markdown render, the
+// transcript) is exercised for real.
 test.use({ baseURL: 'http://localhost:4174' });
 
 test('Help tab: composer submits, a hint exchange renders in the transcript inside focus mode', async ({ page }) => {

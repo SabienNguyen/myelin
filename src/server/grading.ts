@@ -1,17 +1,17 @@
 import { convertLatexToAsciiMath } from 'mathlive';
 import { create, all } from 'mathjs';
-import { generateText, Output, type LanguageModel } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
 import { TONE_SYSTEMS, type ToneSystem } from '../shared/toneContour.js';
 import { mmss } from '../shared/videoUrl.js';
 import type { EvidenceKind } from '../shared/engram.js';
-import { modelFor } from './models.js';
+import { generateStructured, generateText, type ChatModel } from './llm/index.js';
+import { chatModelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
 
 /** Injectable grader-model seam for tests (mirrors gapHelp.ts's GapHelpDeps.model). Real callers
  * omit it; the configured grader role's model is used. */
 export interface GradingDeps {
-  model?: LanguageModel;
+  model?: ChatModel;
 }
 
 // predictable: true makes functions like log()/sqrt() return NaN (not a Complex) outside
@@ -876,11 +876,11 @@ export async function gradeBlockOutput(
       const rubricPrompt = `Judge this draft against each rubric criterion. Prompt: "${input.prompt}"\n`
         + `Draft:\n${result.draft}\n\nCriteria:\n${criteria.map((r: string, i: number) => `${i + 1}. ${r}`).join('\n')}\n`
         + 'For each criterion, decide pass or fail and give a one-line note quoting the draft where possible.';
-      const { output } = await generateText({
-        model: deps.model ?? modelFor('grader', cfg), prompt: rubricPrompt,
-        output: Output.object({ schema: rubricSchema }),
+      const { object } = await generateStructured({
+        model: deps.model ?? chatModelFor('grader', cfg), prompt: rubricPrompt,
+        schema: rubricSchema, schemaName: 'rubric_judgment',
       });
-      return output as { criteria: { criterion: string; pass: boolean; note: string }[] };
+      return object;
     };
     // The rubric judge and the annotation grader are independent reads of the same draft — run
     // them CONCURRENTLY. In series they doubled every essay's grading latency (two model
@@ -972,12 +972,12 @@ async function annotateDraft(
 ): Promise<WritingAnnotations> {
   const draftPrompt = `Grade this student draft. Prompt: "${prompt}"\nDraft:\n${draft}\n`
     + `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`;
-  const { output } = await generateText({
-    model: deps.model ?? modelFor('grader', cfg),
+  const { object } = await generateStructured({
+    model: deps.model ?? chatModelFor('grader', cfg),
     prompt: draftPrompt,
-    output: Output.object({ schema: annotationSchema }),
+    schema: annotationSchema, schemaName: 'draft_annotations',
   });
-  return output as WritingAnnotations;
+  return object;
 }
 
 /** Suffix a quick_check confidence marker onto a grade's evidence notes. gradeOpenAnswer is shared
@@ -1005,7 +1005,7 @@ async function gradeOpenAnswer(
   // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
   // model, never copied into the evidence note.
   const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
-  const { text } = await generateText({ model: deps.model ?? modelFor('grader', cfg), prompt });
+  const { text } = await generateText({ model: deps.model ?? chatModelFor('grader', cfg), prompt });
   const ok = /^CORRECT/i.test(text.trim());
   return {
     verdict: ok ? 'correct' : 'incorrect', source: 'model', detail: text.trim(),
