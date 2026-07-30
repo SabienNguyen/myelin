@@ -86,6 +86,43 @@ describe('evidence guardrail', () => {
     await (await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn')).text();
     expect(JSON.stringify(calls[0].messages)).toMatch(/SESSION CONTEXT/);
   }, 30_000);
+
+  // Context placement is a caching decision: the transcript's prefix is what the cache
+  // breakpoints reuse, so per-turn HARNESS notes go at the TAIL (after the history) and only the
+  // first turn's bootstrap leads. A prepended note would shift every byte of the history and
+  // force a full input re-read on that turn and the next.
+  it('puts per-turn harness notes at the tail of the transcript, bootstrap at the head', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
+      { model, now: () => new Date('2026-07-12') });
+    // A pristine history, not a clone of the shared fixture: earlier tests merge `grading` into
+    // the fixture's output IN PLACE, and an already-graded output is (correctly) not re-graded —
+    // which would make this a no-grades turn with no note to place.
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [{
+          type: 'tool-quick_check', toolCallId: 'tc-placement', state: 'output-available',
+          input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+          output: { answer: '4' },
+        }],
+      },
+    ] as any[];
+    await (await session.respond(history, 'learn', 'placement-thread')).text();
+
+    const msgs = calls[0].messages;
+    const text = (m: any) => JSON.stringify(m.content);
+    // The grades note is the LAST message — after the history it points back into, which is what
+    // makes its "attached above" wording literally true.
+    expect(text(msgs[msgs.length - 1])).toMatch(/graded block results attached above/);
+    expect(msgs.slice(0, -1).map(text).join('')).not.toMatch(/graded block results/);
+
+    // Turn 1: bootstrap is the head of a brand-new transcript, ahead of the user's first words.
+    const first = textOnly();
+    const s2 = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model: first.model });
+    await (await s2.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn')).text();
+    expect(text(first.calls[0].messages[0])).toMatch(/SESSION CONTEXT/);
+  }, 30_000);
 });
 
 describe('cold-start research unlock', () => {
