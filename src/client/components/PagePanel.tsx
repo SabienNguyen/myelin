@@ -40,6 +40,11 @@ const GROUPS: { dir: Dir; type: LinkType; heading: string; blurb: string }[] = [
  * evidence, not a verdict on the learner — and in a subject with no applied exercise available it is
  * not even something they could act on, which is why the copy says what is missing rather than what
  * they should have done.
+ *
+ * The two non-applied branches also state the ceiling: engram caps explanation and rubric evidence
+ * at 'practicing' — only machine-checked work reaches 'mastered' (engram src/student/model.ts). That
+ * model comment asks for exactly this: the honest fix for subjects with no applied exercise is to
+ * say so in the UI, and this line is where the learner reads their standing.
  */
 function standingLine(st: { applied: number; explained: number; rubric?: number; struggled: number }): string {
   const rubric = st.rubric ?? 0;
@@ -56,11 +61,11 @@ function standingLine(st: { applied: number; explained: number; rubric?: number;
     // page up on a shorter decay window, and the learner deserves to know which kind is doing the
     // holding.
     return `Held up by ${rubric} rubric pass${rubric === 1 ? '' : 'es'}${st.explained > 0 ? ` and ${st.explained} explanation${st.explained === 1 ? '' : 's'}` : ''} — `
-      + 'work judged against stated criteria, re-checked sooner than machine-verified work.';
+      + 'work judged against stated criteria, re-checked sooner than machine-verified work. Mastered needs a machine-checked exercise.';
   }
   if (st.explained > 0) {
     return `Earned by ${st.explained} explanation${st.explained === 1 ? '' : 's'}, judged by the tutor. `
-      + 'No exercise has confirmed it.';
+      + 'No exercise has confirmed it — mastered stays out of reach until one does.';
   }
   if (st.struggled > 0) return 'You have attempted this and not landed it yet.';
   return 'Seen, but nothing recorded yet.';
@@ -217,6 +222,22 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
         <strong>{page.routes[0].ask}</strong> — {page.routes[0].why}.
       </p>
     ) : null;
+  const title = meta.title ?? page.page.slug;
+  // The claim probe: on a page nothing has proven yet (no standing, or effective still unseen/
+  // exposed), the learner may already know the material — so offer the shortcut the tutor prompt
+  // supports: one applied check, evidence recorded. Never on practicing/mastered, where the claim
+  // is already on the record.
+  const effective: string = standing?.effective ?? 'unseen';
+  const claimBtn = effective === 'unseen' || effective === 'exposed'
+    ? (
+      <button
+        type="button"
+        className="page-claim"
+        onClick={() => panelBus.askTutor(`I already know "${title}" — give me one quick applied check to prove it, and record the evidence.`)}
+      >
+        claim you know this
+      </button>
+    ) : null;
   const groups = GROUPS
     .map((g) => ({ g, edges: (edges[g.dir] ?? []).filter((e: any) => e.type === g.type) }))
     .filter(({ edges: es }) => es.length > 0);
@@ -255,6 +276,7 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
               could — "you have not done the exercise" and "no exercise exists" must stop sharing
               one ambiguous sentence. Routes are derived server-side from what exists. */}
           {routeHint}
+          {claimBtn}
           {decayIn != null ? (
             <p className="page-standing-decay">
               Holds for {decayIn} more day{decayIn === 1 ? '' : 's'} without practice.
@@ -288,14 +310,15 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
           )}
         </section>
       )}
-      {/* A page with NO standing at all still gets the route hint, in its own small section — a
-          learner who has never attempted a page is the one who most needs to know how it could be
-          confirmed. */}
-      {!standing && routeHint && (
+      {/* A page with NO standing at all still gets the route hint and the claim probe, in its own
+          small section — a learner who has never attempted a page is the one who most needs to
+          know how it could be confirmed, and the one most likely to already know it. */}
+      {!standing && (routeHint || claimBtn) && (
         <section className="page-standing">
           <h3>Your standing</h3>
           <p className="page-standing-why">Nothing recorded yet.</p>
           {routeHint}
+          {claimBtn}
         </section>
       )}
 

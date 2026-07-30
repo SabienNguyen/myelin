@@ -569,6 +569,40 @@ describe('quick_check phrasing tolerance (audit: correct answer graded wrong on 
   });
 });
 
+// Confidence-before-reveal (QuickCheck.tsx): the optional pre-answer rating rides the block
+// result into the evidence NOTE, where /api/progress's calibration count reads it back out.
+describe('quick_check confidence in the evidence note', () => {
+  const fakeSdk = (text: string) => ({
+    sdkGenerate: async (): Promise<ClaudeSdkResult> => ({ text, toolCallNames: [] }),
+  });
+  const cfg = { models: { grader: { model: 'claude-sdk:sonnet' } } } as any;
+  const input = { question: 'q?', mode: 'text', expected: 'buffer', pageSlug: 'p' };
+
+  it('appends " · felt sure" on the mechanical exact-match path', async () => {
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'buffer', confidence: 'sure' }, cfg);
+    expect(g.evidence[0].note).toBe('quick_check: q? · felt sure');
+  });
+
+  it('appends " · felt unsure" on the model-graded fallback path', async () => {
+    const { sdkGenerate } = fakeSdk('INCORRECT — no');
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'wrong', confidence: 'unsure' }, cfg, { sdkGenerate });
+    expect(g.evidence[0].note).toBe('open answer: q? · felt unsure');
+    expect(g.evidence[0].kind).toBe('struggled');
+  });
+
+  it('no confidence in the result → no suffix', async () => {
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'buffer' }, cfg);
+    expect(g.evidence[0].note).toBe('quick_check: q?');
+  });
+
+  it('an unrecognized confidence value is dropped, not recorded', async () => {
+    // Block outputs are not schema-validated; a garbage rating must not pollute the ledger the
+    // calibration count is built from.
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'buffer', confidence: 'kinda' }, cfg);
+    expect(g.evidence[0].note).toBe('quick_check: q?');
+  });
+});
+
 describe('math_scratchpad step-chain break detection', () => {
   const cfg = {} as any; // fully mechanical branch — no grader model involved
   const input = { problemLatex: 'simplify', expectedLatex: '2x', variable: 'x', stepMode: true, pageSlug: 'p' };

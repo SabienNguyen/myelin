@@ -602,6 +602,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         existing.effective = n.effective;
         existing.daysLeft = n.daysLeft;
         existing.ringFraction = n.ringFraction;
+        existing.slipped = n.slipped;
         existing.misconceptions = n.misconceptions;
         existing.degree = n.degree;
         nextMap.set(n.slug, existing);
@@ -793,7 +794,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                     // The <title> below is the tooltip; aria-label is what a screen reader reads,
                     // and it has to carry the mastery and decay a sighted user gets from the node's
                     // colour and ring — those are the only place that information exists.
-                    aria-label={`${n.title}, ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft} ${n.daysLeft === 1 ? 'day' : 'days'} until decay` : ''}${n.misconceptions.length > 0 ? ', has a recorded misconception' : ''}`}
+                    aria-label={`${n.title}, ${n.effective}${n.daysLeft != null ? `, ${n.daysLeft} ${n.daysLeft === 1 ? 'day' : 'days'} until decay` : ''}${n.slipped ? ', slipping — due for review' : ''}${n.misconceptions.length > 0 ? ', has a recorded misconception' : ''}`}
                     // Roving tabindex: the selected node if there is one, else the first, so the
                     // group is a single Tab stop that resumes where the learner left off.
                     tabIndex={(selected != null ? selected === n.slug : nodeIndex === 0) ? 0 : -1}
@@ -821,6 +822,16 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
                       <circle r={r + 4 / zoomClamp} fill="none" stroke={n.color} strokeWidth={2 / zoomClamp}
                         pathLength={100} strokeDasharray={`${n.ringFraction * 100} 100`}
                         transform="rotate(-90)" />
+                    )}
+                    {n.slipped && (
+                      // A slipped standing has no countdown (days_left is null once the rung drops
+                      // — readStanding's contract), so this ring and the decay arc above never
+                      // co-occur at the same radius. Dashed + --warn: shape and colour together,
+                      // never colour alone; static, per motion-cut. The aria-label above carries
+                      // the same fact in words.
+                      <circle className="graph-slip-ring" r={r + 4 / zoomClamp} fill="none"
+                        stroke="var(--warn)" strokeWidth={2 / zoomClamp}
+                        strokeDasharray={`${4 / zoomClamp} ${3 / zoomClamp}`} />
                     )}
                     {n.misconceptions.length > 0 && (
                       <g>
@@ -893,6 +904,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         <span><i className="dot" style={{ background: 'var(--mastery-practicing)' }} /> practicing</span>
         <span><i className="dot" style={{ background: 'var(--mastery-mastered)' }} /> mastered</span>
         <span><i className="ring" /> time till decay</span>
+        <span><i className="ring slipping" /> slipping</span>
         <span>⚠ misconception</span>
       </div>
       )}

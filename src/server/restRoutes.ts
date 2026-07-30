@@ -471,6 +471,14 @@ export function buildRestRoutes(
     }
   });
 
+  // Title with slug fallback — the one resolution path for every list that names pages (/api/due,
+  // /api/horizon, /api/progress's nextSlip): a page that fails to resolve keeps its slug rather
+  // than dropping off the list.
+  const pageTitle = (slug: string): Promise<string> =>
+    lw.call('read_page', { slug })
+      .then((p: any) => (p.page?.meta?.title as string) ?? slug)
+      .catch(() => slug);
+
   app.get('/api/due', async (c) => {
     const DUE_SOON_DAYS = 5;
     const CAP = 12;
@@ -490,15 +498,39 @@ export function buildRestRoutes(
     // badge reading 12 when 15 have slipped — is a silent lie the load test caught.
     const total = entries.length;
     const capped = entries.slice(0, CAP);
-    // Titles resolved per due page — bounded by the cap, and a page that fails to resolve keeps
-    // its slug rather than dropping off the review list.
-    const due = await Promise.all(capped.map(async (e) => ({
-      ...e,
-      title: await lw.call('read_page', { slug: e.slug })
-        .then((p: any) => p.page?.meta?.title ?? e.slug)
-        .catch(() => e.slug),
-    })));
+    // Titles resolved per due page — bounded by the cap.
+    const due = await Promise.all(capped.map(async (e) => ({ ...e, title: await pageTitle(e.slug) })));
     return c.json({ due, total });
+  });
+  /**
+   * The whole decay landscape — every page with a standing, not just the slice that needs review
+   * now. /api/due answers "what is urgent" and caps the list; this answers "where does everything
+   * stand", healthy pages included, so a landscape view can show the long-safe alongside the
+   * slipping. Levels are EFFECTIVE (decay-adjusted, as get_student_state reports them); a page
+   * whose effective level is unseen has no standing to show.
+   */
+  app.get('/api/horizon', async (c) => {
+    const state = await lw.call('get_student_state', { student: cfg.student }) as Record<string, any>;
+    const entries = Object.entries(state)
+      .filter(([, m]) => m && typeof m === 'object')
+      .map(([slug, m]) => ({
+        slug,
+        level: m.effective as string,
+        daysLeft: (m.days_left ?? null) as number | null,
+        slipped: m.slipped === true,
+      }))
+      .filter((e) => e.level && e.level !== 'unseen')
+      // Slipped leads (the /api/due promise), then the tightest countdown. A null daysLeft on an
+      // UNSLIPPED page means no clock at all — exposed, nothing to lose — which is the least
+      // urgent thing here, so nulls sort last rather than borrowing 0's urgency.
+      .sort((a, b) => {
+        if (a.slipped !== b.slipped) return a.slipped ? -1 : 1;
+        if (a.daysLeft === null) return b.daysLeft === null ? 0 : 1;
+        if (b.daysLeft === null) return -1;
+        return a.daysLeft - b.daysLeft;
+      });
+    const pages = await Promise.all(entries.map(async (e) => ({ ...e, title: await pageTitle(e.slug) })));
+    return c.json({ pages });
   });
   // An HONEST progress read — no points, no streaks, just what's true and what it implies. Three
   // numbers a learner can act on: what they actually know now (by decayed level), what they earned
@@ -510,13 +542,23 @@ export function buildRestRoutes(
     const state = await lw.call('get_student_state', { student: cfg.student }) as Record<string, any>;
     const byLevel = { mastered: 0, practicing: 0, exposed: 0 };
     let slipping = 0;
-    for (const m of Object.values(state)) {
+    // The not-yet-slipped page whose decay window closes soonest — the one CONCRETE page to review
+    // next, where `slipping` only says how many already fell. Slipped pages are excluded (their
+    // countdown is over; they are the `slipping` number), as are pages with no clock at all.
+    let nextSlipEntry: { slug: string; daysLeft: number } | null = null;
+    for (const [slug, m] of Object.entries(state)) {
       if (!m || typeof m !== 'object') continue;
       const eff = (m as any).effective as string;
       if (eff === 'mastered') byLevel.mastered += 1;
       else if (eff === 'practicing') byLevel.practicing += 1;
       else if (eff === 'exposed') byLevel.exposed += 1;
       if ((m as any).slipped === true) slipping += 1;
+      else {
+        const daysLeft = (m as any).days_left;
+        if (typeof daysLeft === 'number' && (nextSlipEntry === null || daysLeft < nextSlipEntry.daysLeft)) {
+          nextSlipEntry = { slug, daysLeft };
+        }
+      }
     }
     // "Earned this week" needs per-evidence DATES, which the bulk get_student_state omits (it sends
     // evidenceCount, not the array — that's only in the per-slug detail). Read the student ledger
@@ -525,18 +567,47 @@ export function buildRestRoutes(
     // learning shown, not time spent. Format drift or no ledger yet → 0, and the card still shows
     // the level/slipping it got from the state call.
     let earnedThisWeek = 0;
+    // TODAY's evidence by outcome, from the same per-evidence dates. `repaired` counts entries
+    // carrying a `resolved` field — engram's applyEvidence stamps the cleared misconception's text
+    // there, and that entry's own kind is ALSO counted, so a repair that came through an applied
+    // check shows in both. The date is rendered the way engram stamps every evidence date
+    // (toISOString, off the same clock earnedThisWeek's cutoff reads), so string equality is exact.
+    const today = { applied: 0, explained: 0, rubric: 0, struggled: 0, repaired: 0 };
+    // Calibration, from the same ledger walk: quick_check's confidence toggle stamps " · felt
+    // sure"/" · felt unsure" onto the evidence note (grading.ts), so "of the answers you called
+    // sure, how many were right" is countable with no new storage. All-time, not windowed —
+    // calibration is a trait being measured, not this week's activity. `includes('felt sure')`
+    // cannot match "felt unsure" (the space before 's' breaks it). Null until any sure-rating
+    // exists, so the card can tell "no data" from "0 for 0".
+    let sureRight = 0;
+    let sureTotal = 0;
     try {
       const ledgerPath = resolve(cfg.vault, 'students', `${cfg.student}.json`);
       const ledger = JSON.parse(readFileSync(ledgerPath, 'utf8')) as Record<string, any>;
       const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const todayStr = new Date().toISOString().slice(0, 10);
       const POSITIVE = new Set(['applied-correctly', 'explained-correctly', 'rubric-passed']);
       for (const m of Object.values(ledger)) {
         for (const e of ((m as any)?.evidence ?? []) as any[]) {
           if (POSITIVE.has(e?.kind) && e?.date && new Date(`${e.date}T00:00:00Z`) >= cutoff) earnedThisWeek += 1;
+          if (typeof e?.note === 'string' && e.note.includes('felt sure')) {
+            sureTotal += 1;
+            if (POSITIVE.has(e?.kind)) sureRight += 1;
+          }
+          if (e?.date !== todayStr) continue;
+          if (e.kind === 'applied-correctly') today.applied += 1;
+          else if (e.kind === 'explained-correctly') today.explained += 1;
+          else if (e.kind === 'rubric-passed') today.rubric += 1;
+          else if (e.kind === 'struggled') today.struggled += 1;
+          if (e.resolved) today.repaired += 1;
         }
       }
-    } catch { /* no ledger yet, or a format change — 0 earned, the rest of the card still stands */ }
-    return c.json({ byLevel, slipping, earnedThisWeek });
+    } catch { /* no ledger yet, or a format change — 0 earned/today, the rest of the card still stands */ }
+    const nextSlip = nextSlipEntry === null
+      ? null
+      : { ...nextSlipEntry, title: await pageTitle(nextSlipEntry.slug) };
+    const calibration = sureTotal > 0 ? { sureRight, sureTotal } : null;
+    return c.json({ byLevel, slipping, earnedThisWeek, today, nextSlip, calibration });
   });
   app.get('/api/status', async (c) => {
     // Read the tutor model AND the student from cfg HERE, not from the snapshot passed in at boot.

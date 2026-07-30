@@ -417,6 +417,17 @@ button.badge:hover { color: var(--text); }
 .quick-check form input { flex: 1; }
 .quick-check > button, .quiz-item button { margin-top: 0.35rem; }
 
+/* Confidence-before-reveal chips. Quiet by design — an optional self-rating beside the answer
+   controls, in the harper-apply pill register, never competing with the choices themselves. */
+.confidence { display: flex; gap: 0.3rem; align-items: center; margin: 0.35rem 0 0.1rem; }
+.confidence-chip {
+  border: 1px solid var(--border); background: transparent; color: var(--text-muted);
+  border-radius: 999px; padding: 0.1rem 0.55rem; font-size: 0.78rem;
+}
+.confidence-chip:hover { background: var(--accent-soft); border-color: var(--accent); }
+.confidence-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.confidence-echo { color: var(--text-muted); }
+
 .quiz-item { margin-bottom: 0.8rem; }
 .quiz-item p { margin: 0 0 0.35rem; }
 /* Direct children only — the step rows carry their own small edit/remove buttons, and an
@@ -466,6 +477,65 @@ math-field:focus-within { outline: 2px solid var(--accent); outline-offset: -1px
 .progress-sub { color: var(--text-muted); font-size: 0.86rem; }
 .progress-earned { margin: 0.2rem 0; font-size: 0.9rem; color: var(--good); }
 .progress-slipping { margin: 0.3rem 0 0; font-size: 0.86rem; color: var(--text-muted); }
+.progress-today { margin: 0.2rem 0; font-size: 0.86rem; color: var(--text-muted); }
+.progress-calibration { margin: 0.2rem 0; font-size: 0.86rem; color: var(--text-muted); }
+.progress-next-slip { margin: 0.3rem 0 0; font-size: 0.86rem; color: var(--text-muted); }
+
+/* ── Decay horizon: every clocked page as a tick on the now→45d axis ── */
+.decay-horizon { margin: 0 0 1rem; }
+.horizon-rail {
+  position: relative;
+  height: 1.3rem;
+  /* The L of the axis: bottom is the timeline, left is the "now" line slipped ticks sit past. */
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+}
+/* The button is a wider hit target than the bar it draws (::after) — a 4px control would be
+   unclickable. Crowded ticks overlap; hover/focus raises one above its neighbours by stacking,
+   never by motion. */
+.horizon-tick {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 0.8rem;
+  height: 1.3rem;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.horizon-tick:hover { background: var(--accent-soft); }
+.horizon-tick:hover, .horizon-tick:focus-visible { z-index: 2; }
+.horizon-tick::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 0.85rem;
+  border-radius: 2px;
+  background: var(--tick, var(--mastery-unseen));
+}
+/* Slipped = past the "now" line, not on the axis: hollow and a step taller, straddling the edge —
+   shape as well as position, so "already fell" never rests on colour alone. */
+.horizon-tick--slipped::after {
+  width: 6px;
+  height: 1.05rem;
+  background: var(--bg);
+  border: 1px solid var(--tick, var(--mastery-unseen));
+}
+.horizon-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
 
 .writing-draft textarea { width: 100%; min-height: 7rem; resize: vertical; margin: 0.4rem 0; }
 
@@ -839,6 +909,9 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   width: 10px; height: 10px; border-radius: 50%; display: inline-block;
   border: 2px solid var(--accent); border-bottom-color: transparent;
 }
+/* Slipping: dashed + --warn, matching the node's own .graph-slip-ring — shape and colour
+   together, never colour alone. */
+.graph-legend .ring.slipping { border: 2px dashed var(--warn); }
 
 /* The one filled, accent-colored button style — the screen's main action. Was scoped to
    .library-actions, so the session plan's "Start today's session" silently rendered as a plain
@@ -2045,6 +2118,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* The named applied route (backlog item 3): what to ask for to confirm this page. */
 .page-standing-route { margin: 0.3rem 0 0; font-size: 0.88rem; color: var(--text-muted); }
 .page-standing-route strong { color: var(--text); }
+/* The claim probe — a real action, so it keeps the house button chrome; sized down to sit inside
+   the standing section without outshouting the level line. */
+.page-claim { margin: 0.4rem 0 0.1rem; font-size: 0.85rem; padding: 0.25rem 0.7rem; }
 
 /* ── Predict gate (PredictGate.tsx): comprehension before production ───────── */
 .predict-gate { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.4rem 0; }

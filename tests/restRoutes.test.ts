@@ -90,12 +90,106 @@ describe('GET /api/progress — honest progress aggregation', () => {
     expect(body.earnedThisWeek).toBe(2); // two positive-this-week; the old one and the struggle excluded
   });
 
-  it('no ledger file yet → earnedThisWeek 0, the rest still computed', async () => {
+  it('no ledger file yet → earnedThisWeek 0 and empty today, the rest still computed', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-progress-empty-'));
     const lw = { call: async () => ({ a: { effective: 'practicing', slipped: false } }) } as any;
     const app = buildRestRoutes(lw, { student: 'kid', vault } as HarnessConfig);
     const body = await (await app.request('/api/progress')).json();
-    expect(body).toEqual({ byLevel: { mastered: 0, practicing: 1, exposed: 0 }, slipping: 0, earnedThisWeek: 0 });
+    expect(body).toEqual({
+      byLevel: { mastered: 0, practicing: 1, exposed: 0 },
+      slipping: 0,
+      earnedThisWeek: 0,
+      today: { applied: 0, explained: 0, rubric: 0, struggled: 0, repaired: 0 },
+      nextSlip: null, // no page carries a countdown, so there is no next slip to name
+      calibration: null, // no sure-ratings recorded — "no data", not "0 for 0"
+    });
+  });
+
+  // quick_check's confidence toggle stamps " · felt sure"/" · felt unsure" onto the evidence note
+  // (grading.ts); calibration counts sure-ratings from the same ledger the today loop walks.
+  it('counts calibration from "felt sure" notes: positive kinds as right, and never matches "felt unsure"', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-progress-calib-'));
+    mkdirSync(join(vault, 'students'), { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    writeFileSync(join(vault, 'students', 'kid.json'), JSON.stringify({
+      a: { level: 'practicing', evidence: [
+        // sure + positive → sureRight. Dated a month back on purpose: calibration is all-time,
+        // not windowed like earnedThisWeek.
+        { date: old, kind: 'applied-correctly', note: 'quick_check: q1 · felt sure' },
+        { date: today, kind: 'explained-correctly', note: 'open answer: q2 · felt sure' },
+        // sure + struggled → counts in sureTotal only.
+        { date: today, kind: 'struggled', note: 'open answer: q3 · felt sure' },
+        // unsure — must NOT count toward either number.
+        { date: today, kind: 'applied-correctly', note: 'quick_check: q4 · felt unsure' },
+        // no confidence at all.
+        { date: today, kind: 'applied-correctly', note: 'quick_check: q5' },
+      ] },
+    }));
+    const lw = { call: async () => ({ a: { effective: 'practicing', slipped: false } }) } as any;
+    const app = buildRestRoutes(lw, { student: 'kid', vault } as HarnessConfig);
+    const body = await (await app.request('/api/progress')).json();
+    expect(body.calibration).toEqual({ sureRight: 2, sureTotal: 3 });
+  });
+
+  it('calibration is null while the ledger holds no sure-ratings', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-progress-calib-none-'));
+    mkdirSync(join(vault, 'students'), { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    writeFileSync(join(vault, 'students', 'kid.json'), JSON.stringify({
+      a: { level: 'practicing', evidence: [
+        { date: today, kind: 'applied-correctly', note: 'quick_check: q · felt unsure' },
+        { date: today, kind: 'applied-correctly', note: 'quick_check: q2' },
+      ] },
+    }));
+    const lw = { call: async () => ({ a: { effective: 'practicing', slipped: false } }) } as any;
+    const app = buildRestRoutes(lw, { student: 'kid', vault } as HarnessConfig);
+    const body = await (await app.request('/api/progress')).json();
+    expect(body.calibration).toBeNull();
+  });
+
+  it('counts today\'s evidence by outcome, repaired included, and names the next page to slip', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-progress-today-'));
+    mkdirSync(join(vault, 'students'), { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // One of each outcome today; the applied entry also carries `resolved` (engram's applyEvidence
+    // records a repaired misconception on the evidence entry that proved it), so it counts in BOTH
+    // applied and repaired. The old resolved entry and the bare 'exposed' encounter count in neither.
+    writeFileSync(join(vault, 'students', 'kid.json'), JSON.stringify({
+      a: { level: 'practicing', evidence: [
+        { date: today, kind: 'applied-correctly', resolved: 'mixed up X with Y' },
+        { date: old, kind: 'explained-correctly', resolved: 'an old repair' },
+      ] },
+      b: { level: 'practicing', evidence: [
+        { date: today, kind: 'explained-correctly' },
+        { date: today, kind: 'rubric-passed' },
+        { date: today, kind: 'struggled' },
+        { date: today, kind: 'exposed' },
+      ] },
+    }));
+    const lw = {
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') {
+          return {
+            // slipped: its countdown is over — must NOT be the next slip despite days_left null
+            a: { effective: 'exposed', slipped: true, days_left: null },
+            // the two live countdowns: b's is tighter and must win
+            b: { effective: 'practicing', slipped: false, days_left: 3 },
+            c: { effective: 'mastered', slipped: false, days_left: 12 },
+          };
+        }
+        if (name === 'read_page') return { page: { meta: { title: `T:${args.slug}` } } };
+        throw new Error(`unexpected ${name}`);
+      },
+    } as any;
+    const app = buildRestRoutes(lw, { student: 'kid', vault } as HarnessConfig);
+    const body = await (await app.request('/api/progress')).json();
+    expect(body.today).toEqual({ applied: 1, explained: 1, rubric: 1, struggled: 1, repaired: 1 });
+    expect(body.nextSlip).toEqual({ slug: 'b', title: 'T:b', daysLeft: 3 });
   });
 });
 
@@ -563,6 +657,51 @@ describe('GET /api/due and /api/session-plan', () => {
       const { plan } = await (await buildRestRoutes(spacedLw(), bcfg).request('/api/session-plan')).json();
       expect(plan.filter((p: any) => p.kind === 'course').map((p: any) => p.slug)).toEqual(['midterm-2#2']);
     });
+  });
+});
+
+describe('GET /api/horizon — the whole decay landscape', () => {
+  function horizonLw(state: Record<string, any>, unreadable: string[] = []) {
+    return {
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') return state;
+        if (name === 'read_page') {
+          if (unreadable.includes(args.slug)) throw new Error(`page not found: ${args.slug}`);
+          return { page: { meta: { title: `T:${args.slug}` } } };
+        }
+        throw new Error(`unexpected ${name}`);
+      },
+    } as any;
+  }
+
+  it('every standing page, slipped first then tightest countdown with nulls last, unseen excluded', async () => {
+    const lw = horizonLw({
+      // No cap and no due-soon filter: `later` (40d out) and clockless `seen` are exactly the
+      // pages /api/due drops and this route exists to show.
+      later: { level: 'mastered', effective: 'mastered', days_left: 40, slipped: false },
+      seen: { level: 'exposed', effective: 'exposed', days_left: null, slipped: false },
+      slid: { level: 'practicing', effective: 'exposed', days_left: null, slipped: true },
+      soon: { level: 'practicing', effective: 'practicing', days_left: 2, slipped: false },
+      ghost: { level: 'unseen', effective: 'unseen', days_left: null, slipped: false },
+    });
+    const { pages } = await (await buildRestRoutes(lw, cfg).request('/api/horizon')).json();
+    expect(pages).toEqual([
+      // `slid` leads despite its null daysLeft — slipped outranks every countdown, and a slipped
+      // page's null means "already fell", not "nothing to lose".
+      { slug: 'slid', title: 'T:slid', level: 'exposed', daysLeft: null, slipped: true },
+      { slug: 'soon', title: 'T:soon', level: 'practicing', daysLeft: 2, slipped: false },
+      { slug: 'later', title: 'T:later', level: 'mastered', daysLeft: 40, slipped: false },
+      // clockless but standing: sorted after every live countdown, never dropped
+      { slug: 'seen', title: 'T:seen', level: 'exposed', daysLeft: null, slipped: false },
+    ]);
+  });
+
+  it('a page whose title cannot be read keeps its slug', async () => {
+    const lw = horizonLw({
+      soon: { level: 'practicing', effective: 'practicing', days_left: 2, slipped: false },
+    }, ['soon']);
+    const { pages } = await (await buildRestRoutes(lw, cfg).request('/api/horizon')).json();
+    expect(pages).toEqual([{ slug: 'soon', title: 'soon', level: 'practicing', daysLeft: 2, slipped: false }]);
   });
 });
 

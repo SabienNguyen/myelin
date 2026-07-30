@@ -3,46 +3,46 @@ import { parseHash, serializeHash, type UrlState } from '../../src/client/lib/ur
 
 describe('parseHash', () => {
   it('defaults on an empty hash', () => {
-    expect(parseHash('')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null });
+    expect(parseHash('')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: false });
   });
 
   it('defaults on a bare "#"', () => {
-    expect(parseHash('#')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null });
+    expect(parseHash('#')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: false });
   });
 
   it('defaults on unrelated junk', () => {
-    expect(parseHash('#garbage')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null });
+    expect(parseHash('#garbage')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: false });
   });
 
   it('defaults when the threadId segment is missing', () => {
-    expect(parseHash('#/t/')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null });
+    expect(parseHash('#/t/')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: false });
   });
 
   it('parses just a threadId', () => {
-    expect(parseHash('#/t/t-abc123')).toEqual({ threadId: 't-abc123', tab: 'stage', pageSlug: null });
+    expect(parseHash('#/t/t-abc123')).toEqual({ threadId: 't-abc123', tab: 'stage', pageSlug: null, tabExplicit: false });
   });
 
   it('parses threadId + tab', () => {
-    expect(parseHash('#/t/t-abc123/graph')).toEqual({ threadId: 't-abc123', tab: 'graph', pageSlug: null });
-    expect(parseHash('#/t/t-abc123/library')).toEqual({ threadId: 't-abc123', tab: 'library', pageSlug: null });
+    expect(parseHash('#/t/t-abc123/graph')).toEqual({ threadId: 't-abc123', tab: 'graph', pageSlug: null, tabExplicit: true });
+    expect(parseHash('#/t/t-abc123/library')).toEqual({ threadId: 't-abc123', tab: 'library', pageSlug: null, tabExplicit: true });
   });
 
   it('parses threadId + page + slug', () => {
     expect(parseHash('#/t/t-abc123/page/derivatives')).toEqual({
-      threadId: 't-abc123', tab: 'page', pageSlug: 'derivatives',
+      threadId: 't-abc123', tab: 'page', pageSlug: 'derivatives', tabExplicit: true,
     });
   });
 
   it('tolerates a page segment with no slug (falls back to null slug)', () => {
-    expect(parseHash('#/t/default/page')).toEqual({ threadId: 'default', tab: 'page', pageSlug: null });
+    expect(parseHash('#/t/default/page')).toEqual({ threadId: 'default', tab: 'page', pageSlug: null, tabExplicit: true });
   });
 
   it('decodes a percent-encoded slug', () => {
-    expect(parseHash('#/t/default/page/a%20b')).toEqual({ threadId: 'default', tab: 'page', pageSlug: 'a b' });
+    expect(parseHash('#/t/default/page/a%20b')).toEqual({ threadId: 'default', tab: 'page', pageSlug: 'a b', tabExplicit: true });
   });
 
   it('falls back to default threadId for an invalid threadId but keeps parsing the tab', () => {
-    expect(parseHash('#/t/inva!id/graph')).toEqual({ threadId: 'default', tab: 'graph', pageSlug: null });
+    expect(parseHash('#/t/inva!id/graph')).toEqual({ threadId: 'default', tab: 'graph', pageSlug: null, tabExplicit: true });
   });
 
   it('accepts a 64-char threadId and rejects a 65-char one', () => {
@@ -53,11 +53,17 @@ describe('parseHash', () => {
   });
 
   it('ignores an unrecognized tab segment, defaulting to stage', () => {
-    expect(parseHash('#/t/default/bogus-tab')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null });
+    expect(parseHash('#/t/default/bogus-tab')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: false });
   });
 
   it('never throws on malformed percent-encoding', () => {
-    expect(parseHash('#/t/default/page/%')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null });
+    expect(parseHash('#/t/default/page/%')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: false });
+  });
+
+  // tabExplicit is the map-as-home signal (SidePanel): a hash that NAMED a tab must never be
+  // re-homed, and a hash that merely fell back to the stage default may be.
+  it('marks a hash that names the stage tab explicitly as explicit', () => {
+    expect(parseHash('#/t/default/stage')).toEqual({ threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: true });
   });
 });
 
@@ -93,12 +99,14 @@ describe('serializeHash', () => {
 });
 
 describe('parseHash/serializeHash round-trip', () => {
+  // The stage default serializes to a bare `#/t/<id>` (no tab segment), so it parses back as
+  // NOT explicit; every other tab is named in the hash and parses back explicit.
   const cases: UrlState[] = [
-    { threadId: 'default', tab: 'stage', pageSlug: null },
-    { threadId: 't-abc123', tab: 'graph', pageSlug: null },
-    { threadId: 't-abc123', tab: 'library', pageSlug: null },
-    { threadId: 't-abc123', tab: 'page', pageSlug: 'derivatives' },
-    { threadId: 'default', tab: 'page', pageSlug: 'a b/c' },
+    { threadId: 'default', tab: 'stage', pageSlug: null, tabExplicit: false },
+    { threadId: 't-abc123', tab: 'graph', pageSlug: null, tabExplicit: true },
+    { threadId: 't-abc123', tab: 'library', pageSlug: null, tabExplicit: true },
+    { threadId: 't-abc123', tab: 'page', pageSlug: 'derivatives', tabExplicit: true },
+    { threadId: 'default', tab: 'page', pageSlug: 'a b/c', tabExplicit: true },
   ];
 
   it.each(cases)('round-trips %j', (state) => {

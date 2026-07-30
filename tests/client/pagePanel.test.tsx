@@ -1,15 +1,20 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { panelBus, type PanelEvent } from '../../src/client/lib/panelBus.js';
 
 const { PagePanel } = await import('../../src/client/components/PagePanel.js');
 
-const payload = (misconceptions: string[], decay: { daysLeft?: number | null; slipped?: boolean } = {}) => ({
+const payload = (
+  misconceptions: string[],
+  decay: { daysLeft?: number | null; slipped?: boolean } = {},
+  counts: Partial<{ applied: number; explained: number; rubric: number; struggled: number }> = {},
+) => ({
   page: { slug: 'stream-consumer', meta: { title: 'Stream consumer', status: 'solid' }, body: 'body text' },
   edges: {}, neighbors: {}, routes: [], noLadder: false,
   standing: {
     level: 'practicing', effective: 'practicing', lastReinforced: '2026-07-27',
-    applied: 1, explained: 0, rubric: 0, struggled: 0, misconceptions,
+    applied: 1, explained: 0, rubric: 0, struggled: 0, ...counts, misconceptions,
     // The panel reads the countdown straight from these server fields (get_student_state's own
     // decayDaysLeft), never re-deriving DECAY windows client-side.
     daysLeft: decay.daysLeft ?? null, slipped: decay.slipped ?? false,
@@ -93,6 +98,25 @@ describe('PagePanel standing misconceptions', () => {
     }
   });
 
+  // The mastered ceiling (engram model.ts: explanation and rubric evidence stop at 'practicing';
+  // only machine-checked work reaches 'mastered') must be stated where the learner reads their
+  // standing — otherwise "why is this not mastered" has no answer for subjects with no exercise.
+  it('explained-only standing says mastered stays out of reach until an exercise confirms it', async () => {
+    stubPage(payload([], {}, { applied: 0, explained: 2 }));
+    render(<PagePanel slug="stream-consumer" />);
+    expect(await screen.findByText(
+      'Earned by 2 explanations, judged by the tutor. No exercise has confirmed it — mastered stays out of reach until one does.',
+    )).toBeTruthy();
+  });
+
+  it('rubric-held standing says mastered needs a machine-checked exercise', async () => {
+    stubPage(payload([], {}, { applied: 0, rubric: 1 }));
+    render(<PagePanel slug="stream-consumer" />);
+    expect(await screen.findByText(
+      'Held up by 1 rubric pass — work judged against stated criteria, re-checked sooner than machine-verified work. Mastered needs a machine-checked exercise.',
+    )).toBeTruthy();
+  });
+
   it('does not poll while hidden', async () => {
     const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => payload([]) } as any));
     vi.stubGlobal('fetch', fetchSpy);
@@ -104,5 +128,56 @@ describe('PagePanel standing misconceptions', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// The claim probe: a page nothing has proven yet offers "claim you know this", which hands the
+// tutor a ready-made applied-check request over panelBus (Thread.tsx sends it as a real message).
+describe('PagePanel claim probe', () => {
+  const captureBus = () => {
+    const events: PanelEvent[] = [];
+    const unsub = panelBus.subscribe((e) => events.push(e));
+    return { events, unsub };
+  };
+
+  it('renders on an exposed page and emits askTutor with the page title', async () => {
+    stubPage({
+      ...payload([]),
+      standing: { ...payload([]).standing, level: 'exposed', effective: 'exposed', applied: 0 },
+    });
+    render(<PagePanel slug="stream-consumer" />);
+    const btn = await screen.findByRole('button', { name: 'claim you know this' });
+    const { events, unsub } = captureBus();
+    try {
+      fireEvent.click(btn);
+    } finally {
+      unsub();
+    }
+    expect(events).toEqual([{
+      type: 'askTutor',
+      text: 'I already know "Stream consumer" — give me one quick applied check to prove it, and record the evidence.',
+    }]);
+  });
+
+  it('renders on a page with no standing at all (effectively unseen)', async () => {
+    stubPage({ ...payload([]), standing: null });
+    render(<PagePanel slug="stream-consumer" />);
+    expect(await screen.findByRole('button', { name: 'claim you know this' })).toBeTruthy();
+    expect(screen.getByText('Nothing recorded yet.')).toBeTruthy();
+  });
+
+  it('is absent on practicing and mastered pages — the claim is already on the record', async () => {
+    stubPage(payload([])); // payload defaults to effective: practicing
+    render(<PagePanel slug="stream-consumer" />);
+    await screen.findByText('Stream consumer');
+    expect(screen.queryByRole('button', { name: 'claim you know this' })).toBeNull();
+    cleanup();
+    stubPage({
+      ...payload([]),
+      standing: { ...payload([]).standing, level: 'mastered', effective: 'mastered' },
+    });
+    render(<PagePanel slug="stream-consumer" />);
+    await screen.findByText('Stream consumer');
+    expect(screen.queryByRole('button', { name: 'claim you know this' })).toBeNull();
   });
 });

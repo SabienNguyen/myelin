@@ -574,6 +574,12 @@ export async function gradeBlockOutput(
     // turn's execute() — failing the whole turn. A missing answer becomes '', which already grades
     // as a miss on the path below; existing empty-submission behavior is unchanged.
     const answer = String(result.answer ?? '');
+    // Confidence-before-reveal (QuickCheck.tsx): the optional self-rating rides into the evidence
+    // NOTE, where /api/progress's calibration count reads it back out ("felt sure" is the marker).
+    // Unrecognized values are dropped, not recorded — the note is the ledger of what the learner
+    // deliberately said, and the block result is not schema-validated.
+    const conf = result.confidence === 'sure' || result.confidence === 'unsure'
+      ? ` · felt ${result.confidence}` : '';
     if (input.expected != null) {
       const ok = answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
       if (ok) {
@@ -581,7 +587,7 @@ export async function gradeBlockOutput(
           verdict: 'correct',
           source: 'mechanical',
           detail: 'exact match',
-          evidence: [ev(input.pageSlug, 'applied-correctly', `quick_check: ${input.question}`, 'mechanical')],
+          evidence: [ev(input.pageSlug, 'applied-correctly', `quick_check: ${input.question}${conf}`, 'mechanical')],
         };
       }
       // A miss on the EXACT string is not yet a wrong answer — the audit caught "a buffer carried
@@ -590,9 +596,9 @@ export async function gradeBlockOutput(
       // kind (capApplied keeps it from minting applied-correctly — a model judged it, honestly so),
       // and a genuinely wrong one still records struggled. Free-text punishing phrasing teaches
       // learners to guess the grader's wording, which is the opposite of knowing the thing.
-      return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected);
+      return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected), conf);
     }
-    return gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps);
+    return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps), conf);
   }
 
   if (tool === 'math_scratchpad') {
@@ -986,6 +992,14 @@ async function annotateDraft(
     output: Output.object({ schema: annotationSchema }),
   });
   return output as WritingAnnotations;
+}
+
+/** Suffix a quick_check confidence marker onto a grade's evidence notes. gradeOpenAnswer is shared
+ * with quiz items (which carry no confidence), so the suffix is applied by the one caller that has
+ * it rather than threaded through as a parameter every other caller would pass as ''. */
+function withConfidenceNote(grade: Grade, conf: string): Grade {
+  if (!conf) return grade;
+  return { ...grade, evidence: grade.evidence.map((e) => ({ ...e, note: `${e.note}${conf}` })) };
 }
 
 function latexParses(latex: string): boolean {

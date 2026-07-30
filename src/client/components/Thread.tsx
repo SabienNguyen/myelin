@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useThread } from '@assistant-ui/react';
+import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useThread, useThreadRuntime } from '@assistant-ui/react';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
+import { panelBus } from '../lib/panelBus.js';
 
 // P1 FIX (docs/superpowers/plans/2026-07-20-gap-integration.md — post-review): these two must be
 // stable module-scope function references, NOT inline arrow functions inside Thread()'s render
@@ -76,6 +77,26 @@ function ExampleAsks() {
   );
 }
 
+/**
+ * panelBus.askTutor → a real user chat message, through the SAME path the composer and the
+ * example asks use (setText + send), so the message renders in the transcript and starts a turn
+ * exactly as if typed. Renders nothing; it exists to hold the composer/thread runtime hooks,
+ * which need the runtime context Thread sits inside. While a send is streaming the event is
+ * dropped, mirroring the composer's own rule (its Send control is disabled mid-run) — queueing a
+ * second send behind a running turn is not something any send path here does.
+ */
+function AskTutorBridge() {
+  const composer = useComposerRuntime();
+  const thread = useThreadRuntime();
+  useEffect(() => panelBus.subscribe((e) => {
+    if (e.type !== 'askTutor') return;
+    if (thread.getState().isRunning) return;
+    composer.setText(e.text);
+    composer.send();
+  }), [composer, thread]);
+  return null;
+}
+
 interface PlanItem { kind: string; slug: string; title: string; why: string; transfer?: string }
 
 /**
@@ -135,6 +156,7 @@ export function Thread() {
   const empty = useThread((s) => s.messages.length === 0);
   return (
     <ThreadPrimitive.Root className="thread">
+      <AskTutorBridge />
       {/* tabIndex + a name so the transcript can be SCROLLED by keyboard. It is its own scroll
           region (the side panel scrolls independently), and most turns are plain prose with no
           focusable element inside — so without a tab stop of its own, a keyboard-only user has no

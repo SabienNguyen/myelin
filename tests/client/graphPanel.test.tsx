@@ -17,7 +17,7 @@ const {
 
 function node(slug: string, overrides: Partial<GraphNodeMeta> = {}): GraphNodeMeta {
   return {
-    slug, title: slug, color: '#000', ringFraction: null, daysLeft: null,
+    slug, title: slug, color: '#000', ringFraction: null, daysLeft: null, slipped: false,
     misconceptions: [], effective: 'unseen', degree: 0, ...overrides,
   };
 }

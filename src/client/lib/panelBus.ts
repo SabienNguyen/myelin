@@ -9,7 +9,12 @@ export type PanelEvent =
   // both "learner finishes/stops" (parent unmounts the block) and reload safety). App.tsx is the
   // only subscriber that matters today — it flips `.app.focus-mode` — but this stays a bus event
   // rather than e.g. a prop so nothing has to thread focus state through Thread/SidePanel's props.
-  | { type: 'focusMode'; on: boolean };
+  | { type: 'focusMode'; on: boolean }
+  // A panel handing the tutor a ready-made request as a REAL user message (Thread.tsx is the
+  // subscriber, reusing the composer's own send path). PagePanel's "claim you know this" is the
+  // emitter today; a bus event for the same reason as focusMode — nothing threads composer access
+  // through SidePanel's props.
+  | { type: 'askTutor'; text: string };
 
 type Fn = (e: PanelEvent) => void;
 const subs = new Set<Fn>();
@@ -20,6 +25,7 @@ export const panelBus = {
   openSource(path: string, title: string) { this.emit({ type: 'openSource', path, title }); },
   setTab(tab: PanelTab) { this.emit({ type: 'setTab', tab }); },
   setFocusMode(on: boolean) { this.emit({ type: 'focusMode', on }); },
+  askTutor(text: string) { this.emit({ type: 'askTutor', text }); },
 };
 
 /** Segments a markdown string so a blanket text transform skips what must stay verbatim: fenced
