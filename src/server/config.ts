@@ -7,6 +7,12 @@ import { z } from 'zod';
 
 const roleSchema = z.object({ model: z.string(), effort: z.enum(['low', 'medium', 'high']).optional() });
 
+// Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the teaching
+// loop and the tutor model only generates — for small local models that cannot hold the full
+// agentic loop. Applies to learn/review/quiz; freeform always runs agentic. Default off, and off
+// means zero behavior change.
+const tutorRoleSchema = roleSchema.extend({ rails: z.boolean().optional() });
+
 // `~` for the home dir, and `${VAR}` for an environment variable — the latter so a config that
 // must be portable across checkouts (the e2e fixtures, chiefly) can point at a path computed at
 // launch rather than baking one machine's absolute layout into the file. An unset `${VAR}` expands
@@ -115,7 +121,7 @@ const configSchema = z.object({
     // Sonnet for the roles that write prose the learner reads, Haiku for the mechanical ones.
     // Deliberately not Opus by default: the tutor role runs on every single turn, and choosing to
     // spend that is the user's call, not a default. Override any role in harness.config.json.
-    tutor: roleSchema.default({ model: 'claude-sonnet-5' }),
+    tutor: tutorRoleSchema.default({ model: 'claude-sonnet-5' }),
     grader: roleSchema.default({ model: 'claude-haiku-4-5' }),
     quiz_gen: roleSchema.default({ model: 'claude-sonnet-5' }),
     card_gen: roleSchema.default({ model: 'claude-haiku-4-5' }),

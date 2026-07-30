@@ -15,6 +15,7 @@ import { searchVideos } from './videoSearch.js';
 import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
 import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
+import { createRailsSession, pendingBlockOutputs } from './rails.js';
 import { dietUiMessages } from './historyDiet.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Engram } from './mcp.js';
@@ -501,23 +502,6 @@ export function buildFrontierTools(
   ];
 }
 
-/** Find block-tool outputs in the tail of the incoming history (since the last user text turn). */
-function pendingBlockOutputs(messages: UIMessage[]) {
-  const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
-  const last = messages[messages.length - 1];
-  for (const msg of [last]) {
-    if (msg?.role !== 'assistant') continue;
-    for (const part of msg.parts as any[]) {
-      const name = String(part.type).replace(/^tool-/, '') as BlockToolName;
-      if (part.type?.startsWith('tool-') && BLOCK_TOOL_NAMES.includes(name)
-        && part.state === 'output-available' && !part.output?.grading) {
-        out.push({ tool: name, toolCallId: part.toolCallId, input: part.input, output: part.output });
-      }
-    }
-  }
-  return out;
-}
-
 export function createTutorSession(
   lw: Engram, cfg: HarnessConfig,
   opts: { model?: ChatModel; now?: () => Date } = {},
@@ -593,7 +577,17 @@ export function createTutorSession(
   // failure.
   const lastModeByThread = new Map<string, Mode>();
 
+  // The rails branch shares this session's model so injected fakes (tests) and the scripted e2e
+  // model drive rails turns exactly as they drive agentic ones.
+  const rails = createRailsSession(lw, cfg, { model });
+
   async function respond(messages: UIMessage[], mode: Mode, threadId = 'default'): Promise<Response> {
+    // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): teaching modes hand the loop
+    // to the harness when the flag is set — read per turn so the models-dialog toggle is live.
+    // Freeform always runs the full agentic loop (writing pages needs real tool use), which also
+    // keeps chatRoute's one-shot writeUp promotion agentic.
+    if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId);
+
     const pending = pendingBlockOutputs(messages);
     const userTurn = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
 

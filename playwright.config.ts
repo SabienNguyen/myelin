@@ -152,5 +152,24 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
+    // rails.e2e.ts gets its own pair for the same turn-counter reason as the specs above.
+    // rails.config.json flips models.tutor.rails on, so this backend's teaching modes run the
+    // harness-driven loop against the scripted generation turns in rails-script.json.
+    {
+      command:
+        'LW_MOCK_MODEL=tests/e2e/rails-script.json HARNESS_CONFIG=tests/e2e/rails.config.json npx tsx src/server/index.ts',
+      port: 4824,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      env: backendEnv,
+    },
+    {
+      command:
+        'HARNESS_API=http://localhost:4824 sh -c "npx vite build --outDir dist-rails '
+        + '&& npx vite preview --outDir dist-rails --port 4178 --strictPort"',
+      port: 4178,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
   ],
 });

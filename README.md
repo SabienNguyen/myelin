@@ -200,6 +200,18 @@ Recommended split for mixing: keep `tutor` and `compile` on Claude (they need th
 reasoning and tool use); route `grader`, `quiz_gen`, `card_gen` to a cheap OpenAI-compatible or
 local model — higher-volume, lower-stakes calls a good small model handles fine.
 
+### Rails mode (small local models)
+
+The agentic tutor loop asks a lot of a model — pick the next topic across the vault, drive a dozen
+tools, remember to record evidence — and an 8-14B `ollama:` model reliably can't hold it. Rails
+mode inverts control: the harness plans the next item (due reviews first, then suggested lessons),
+assembles the page context, stages the `quick_check`, grades the answer, and records the evidence
+itself; the model only writes the question and the feedback line, one structured call each. Turn
+it on with the **rails** checkbox beside the tutor id in the models dialog, or
+`"tutor": { "model": "ollama:…", "rails": true }` in the config. Phase-1 scope is quick_check
+drills in learn/review/quiz; freeform always runs the full agentic loop (writing pages needs real
+tool use). Off by default — off means the loop is byte-for-byte what it was.
+
 <details>
 <summary><b>Ollama caveats: context length and leaked chat-template tokens</b></summary>
 

@@ -2425,6 +2425,9 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .models-row input { font-size: 0.85rem; min-width: 0; }
 .models-row input:disabled { color: var(--text-muted); background: var(--bg-inset); }
 .models-shadow-note { grid-column: 2; font-size: 0.72rem; color: var(--text-muted); }
+/* The rails checkbox rides the tutor row's grid; the checkbox must not stretch to the column. */
+.models-rails { display: flex; align-items: center; gap: 0.4rem; }
+.models-rails input { width: auto; accent-color: var(--accent); }
 .models-group { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; }
 .models-hint { font-size: 0.72rem; color: var(--text-muted); }
 .models-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3rem; }
