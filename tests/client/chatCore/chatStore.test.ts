@@ -2,7 +2,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ChatStore, type ChatStoreOptions } from '../../../src/client/chatCore/chatStore.js';
 import type { ToolUIPart, UIMessage } from '../../../src/shared/uiMessages.js';
-import { continuationChunks, fakeFetch, scriptedTurnChunks } from './sse.js';
+import {
+  continuationChunks, fakeFetch, scriptedTurnChunks, sseResponse, sseText, type RecordedCall,
+} from './sse.js';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -120,6 +122,66 @@ describe('ChatStore', () => {
     });
     expect(parts.find((p) => (p as ToolUIPart).toolCallId === 'r1')).toMatchObject({ state: 'output-available' });
     expect(calls.filter((c) => c.url === '/api/thread/t1')).toHaveLength(1);
+  });
+
+  it('a block answered while its stream is STILL RUNNING keeps the answer and resubmits once the stream settles', async () => {
+    // The paced-stream race a fast mock never hits: every stream snapshot comes from the
+    // assembler, which knows nothing of client-added outputs — a click landing mid-stream must
+    // not be undone by the next chunk, and the finish-time predicate must still see it.
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const gatedBody = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+    const feed = (chunks: unknown[]) => {
+      for (const c of chunks) controller.enqueue(encoder.encode(`data: ${JSON.stringify(c)}\n\n`));
+    };
+    const turn1 = scriptedTurnChunks();
+
+    // Hand-rolled fetch: /api/chat #1 streams the GATED body so the test can interleave the
+    // answer between chunks; #2 serves the recorded continuation; everything else 200s.
+    const calls: RecordedCall[] = [];
+    const chatCalls = () => calls.filter((c) => c.url === '/api/chat');
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init: init!, body: init?.body ? JSON.parse(init.body as string) : undefined });
+      if (url !== '/api/chat') return { ok: true, status: 200, json: async () => ({ ok: true }) } as Response;
+      if (chatCalls().length === 1) return { ok: true, status: 200, body: gatedBody } as unknown as Response;
+      return sseResponse(sseText(continuationChunks('A1B2C3D4E5F6G7H8', 'tc9')));
+    }) as typeof fetch;
+    const store = new ChatStore({
+      threadId: 't1', initialMessages: [],
+      requestContext: () => ({ mode: 'learn', writeUp: false }),
+      fetchImpl,
+    });
+
+    store.sendMessage('quiz me');
+    feed(turn1.slice(0, -2)); // up to tool-input-available: block present, stream still open
+    await vi.waitFor(() => {
+      expect(store.getState().messages[1]?.parts.some(
+        (p) => (p as ToolUIPart).toolCallId === 'tc9' && (p as ToolUIPart).state === 'input-available',
+      )).toBe(true);
+    });
+    expect(store.getState().isRunning).toBe(true);
+    store.addToolOutput({ toolCallId: 'tc9', output: { answer: '6' } });
+
+    feed(turn1.slice(-2)); // finish-step + finish arrive AFTER the answer
+    await vi.waitFor(() => {
+      // The later snapshots did not undo the answer.
+      expect(store.getState().messages[1]!.parts.find(
+        (p) => (p as ToolUIPart).toolCallId === 'tc9',
+      )).toMatchObject({ state: 'output-available' });
+    });
+    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+    controller.close();
+    await settled(store);
+    await flush();
+
+    // Exactly one resubmit, carrying the mid-stream answer; the continuation graded it.
+    expect(chatCalls()).toHaveLength(2);
+    const sent = (chatCalls()[1]!.body as { messages: UIMessage[] }).messages;
+    expect(sent[1]!.parts.find((p) => (p as ToolUIPart).toolCallId === 'tc9'))
+      .toMatchObject({ state: 'output-available', output: { answer: '6' } });
+    expect(store.getState().messages[1]!.parts.find((p) => (p as ToolUIPart).toolCallId === 'tc9'))
+      .toMatchObject({ output: { grading: { verdict: 'correct', detail: 'mechanical' } } });
   });
 
   it('does NOT resubmit for a non-block tool output', async () => {

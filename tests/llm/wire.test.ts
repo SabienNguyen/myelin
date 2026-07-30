@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 import {
   createUiStream, generateMessageId, uiMessagesToChatMessages,
   type UiChunk, type UiStreamWriter,
@@ -9,25 +7,52 @@ import {
 import type { LoopEvent } from '../../src/server/llm/index.js';
 import type { UIMessage } from '../../src/shared/uiMessages.js';
 
-// THE wire judge: the client does not parse with the top-level ai@7 — @assistant-ui/react-ai-sdk
-// bundles its own ai@6 whose uiMessageChunkSchema is a STRICT zod union (unknown chunk types AND
-// unknown fields rejected). Every chunk the wire layer emits is validated against that exact
-// schema here, loaded from the nested path the client really resolves.
-const NESTED_AI_ENTRY = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../node_modules/@assistant-ui/react-ai-sdk/node_modules/ai/dist/index.js',
-);
-const nestedAi = createRequire(import.meta.url)(NESTED_AI_ENTRY);
-// Resolved FROM the nested ai package so the validating provider-utils is the one it bundles with.
-const nestedProviderUtils = createRequire(NESTED_AI_ENTRY)('@ai-sdk/provider-utils');
+// THE wire judge: a STRICT union (unknown chunk types AND unknown fields rejected) pinning the
+// chunk vocabulary the wire emits — the `UiChunk` subset of the ai@6 UI-message-stream schema,
+// transcribed field-for-field from the schema the old client enforced (uiMessageChunkSchema in
+// @assistant-ui/react-ai-sdk's bundled ai@6, src/ui-message-stream/ui-message-chunks.ts) before
+// that dependency was removed. Both ends are first-party now, but this vocabulary stays the live
+// contract until protocol v2 changes both sides in lockstep — so a chunk this union rejects is a
+// wire regression, not a schema nit.
+const wireChunkSchema = z.union([
+  z.strictObject({ type: z.literal('start'), messageId: z.string().optional() }),
+  z.strictObject({ type: z.literal('start-step') }),
+  z.strictObject({ type: z.literal('finish-step') }),
+  z.strictObject({
+    type: z.literal('finish'),
+    finishReason: z.enum(['stop', 'length', 'content-filter', 'tool-calls', 'error', 'other']).optional(),
+  }),
+  z.strictObject({ type: z.literal('text-start'), id: z.string() }),
+  z.strictObject({ type: z.literal('text-delta'), id: z.string(), delta: z.string() }),
+  z.strictObject({ type: z.literal('text-end'), id: z.string() }),
+  z.strictObject({
+    type: z.literal('tool-input-start'), toolCallId: z.string(), toolName: z.string(),
+    providerExecuted: z.boolean().optional(),
+  }),
+  z.strictObject({ type: z.literal('tool-input-delta'), toolCallId: z.string(), inputTextDelta: z.string() }),
+  z.strictObject({
+    type: z.literal('tool-input-available'), toolCallId: z.string(), toolName: z.string(),
+    input: z.unknown(), providerExecuted: z.boolean().optional(),
+  }),
+  z.strictObject({
+    type: z.literal('tool-output-available'), toolCallId: z.string(), output: z.unknown(),
+    providerExecuted: z.boolean().optional(), preliminary: z.boolean().optional(),
+  }),
+  z.strictObject({
+    type: z.literal('tool-output-error'), toolCallId: z.string(), errorText: z.string(),
+    providerExecuted: z.boolean().optional(),
+  }),
+  z.strictObject({ type: z.literal('error'), errorText: z.string() }),
+  z.strictObject({
+    type: z.custom<`data-${string}`>((v) => typeof v === 'string' && v.startsWith('data-')),
+    id: z.string().optional(), data: z.unknown(), transient: z.boolean().optional(),
+  }),
+]);
 
-async function expectValidChunks(chunks: unknown[]) {
+function expectValidChunks(chunks: unknown[]) {
   for (const chunk of chunks) {
-    const res = await nestedProviderUtils.safeValidateTypes({
-      value: chunk,
-      schema: nestedAi.uiMessageChunkSchema,
-    });
-    expect(res.success, `client schema rejected chunk: ${JSON.stringify(chunk)}`).toBe(true);
+    const res = wireChunkSchema.safeParse(chunk);
+    expect(res.success, `wire schema rejected chunk: ${JSON.stringify(chunk)}`).toBe(true);
   }
 }
 
@@ -112,7 +137,7 @@ describe('createUiStream wire shape', () => {
     });
     // The loop's per-step finish reason surfaces once, on the stream-level finish chunk.
     expect(chunks[chunks.length - 1]).toEqual({ type: 'finish', finishReason: 'tool-calls' });
-    await expectValidChunks(chunks);
+    expectValidChunks(chunks);
   });
 
   it('mints a fresh id in the app\'s format when the last incoming message is not assistant', async () => {
@@ -163,7 +188,7 @@ describe('createUiStream wire shape', () => {
     expect(types.filter((t) => t === 'finish-step')).toHaveLength(2);
     // The second run's finish reason wins on the single finish chunk.
     expect(chunks[chunks.length - 1].finishReason).toBe('stop');
-    await expectValidChunks(chunks);
+    expectValidChunks(chunks);
 
     // Both steps assembled into ONE assistant message; the second step's text-id '0' did not
     // append onto the first step's part (finish-step resets text correlation, like the client).
@@ -186,7 +211,7 @@ describe('createUiStream wire shape', () => {
     const { chunks } = await collect(res);
     const chunk = chunks.find((c) => c.type === 'tool-output-available');
     expect(chunk).toEqual({ type: 'tool-output-available', toolCallId: 'tc1', output: graded });
-    await expectValidChunks(chunks);
+    expectValidChunks(chunks);
 
     // Continuation: merged into a1, not appended as a sibling.
     expect(finalMessages).toHaveLength(2);
@@ -212,7 +237,7 @@ describe('createUiStream wire shape', () => {
       onEnd: ({ messages }) => { finalMessages = messages; },
     });
     const { chunks } = await collect(res);
-    await expectValidChunks(chunks);
+    expectValidChunks(chunks);
     const parts = finalMessages[finalMessages.length - 1].parts;
     expect(parts.filter((p) => p.type === 'data-guardrail')).toHaveLength(0);
     expect(parts.filter((p) => p.type === 'data-note')).toEqual([{ type: 'data-note', id: 'n1', data: { x: 2 } }]);
@@ -236,7 +261,7 @@ describe('createUiStream wire shape', () => {
     });
     expect(chunks[chunks.length - 1].type).toBe('finish');
     expect(ended).toBe(true);
-    await expectValidChunks(chunks);
+    expectValidChunks(chunks);
   });
 
   it('assembles onEnd messages the way the client\'s processor does', async () => {
@@ -286,7 +311,7 @@ describe('createUiStream wire shape', () => {
     expect(chunks.find((c) => c.type === 'tool-output-available')).toEqual({
       type: 'tool-output-available', toolCallId: 'ws1', output: [{ url: 'https://x' }], providerExecuted: true,
     });
-    await expectValidChunks(chunks);
+    expectValidChunks(chunks);
     const part = finalMessages[1].parts.find((p) => (p as any).toolCallId === 'ws1') as any;
     expect(part).toMatchObject({ state: 'output-available', providerExecuted: true });
   });
@@ -312,7 +337,7 @@ describe('createUiStream wire shape', () => {
     expect(chunks.find((c) => c.type === 'tool-output-error')).toEqual({
       type: 'tool-output-error', toolCallId: 'bad1', errorText: 'backend down',
     });
-    await expectValidChunks(chunks);
+    expectValidChunks(chunks);
     const parts = finalMessages[1].parts as any[];
     expect(parts.find((p) => p.toolCallId === 'ok1')).toMatchObject({ state: 'output-available' });
     expect(parts.find((p) => p.toolCallId === 'bad1')).toMatchObject({ state: 'output-error', errorText: 'backend down' });

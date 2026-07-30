@@ -5,7 +5,7 @@
 // tool parts must arrive as 'tool-call' parts whose args/result/isError feed
 // render({ args, result, addResult, isError }) exactly as the react-ai-sdk converter fed them.
 import { describe, it, expect } from 'vitest';
-import { uiMessageToThreadMessage } from '../../../src/client/chatCore/runtimeAdapter.js';
+import { uiMessageToThreadMessage, withErrorPlaceholder } from '../../../src/client/chatCore/runtimeAdapter.js';
 import type { UIMessage } from '../../../src/shared/uiMessages.js';
 
 describe('uiMessageToThreadMessage', () => {
@@ -96,5 +96,26 @@ describe('uiMessageToThreadMessage', () => {
     // Never on a user message, whatever the store's error state.
     const user: UIMessage = { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] };
     expect(uiMessageToThreadMessage(user, 'model exploded').status).toBeUndefined();
+  });
+});
+
+describe('withErrorPlaceholder', () => {
+  const userTurn: UIMessage[] = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }];
+
+  it('appends a synthetic assistant message when a turn errors with no assistant message last', () => {
+    // The dead-backend-on-a-fresh-send case: without the placeholder there is no message for
+    // the error status to ride, and the error bubble never renders (the react-ai-sdk stack
+    // appended one via createErrorAssistantMessage).
+    const out = withErrorPlaceholder(userTurn, 'HTTP 502');
+    expect(out).toHaveLength(2);
+    expect(out[1]).toMatchObject({ role: 'assistant', parts: [] });
+    expect(uiMessageToThreadMessage(out[1]!, 'HTTP 502').status)
+      .toEqual({ type: 'incomplete', reason: 'error', error: 'HTTP 502' });
+  });
+
+  it('passes through untouched when there is no error, or the last message is already assistant', () => {
+    expect(withErrorPlaceholder(userTurn, undefined)).toBe(userTurn);
+    const withAssistant: UIMessage[] = [...userTurn, { id: 'a1', role: 'assistant', parts: [] }];
+    expect(withErrorPlaceholder(withAssistant, 'mid-turn error')).toBe(withAssistant);
   });
 });
