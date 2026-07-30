@@ -176,7 +176,7 @@ async function run(exec: ExecLike, args: string[]): Promise<{ stdout: string }> 
  */
 export async function fetchVideoTranscript(
   url: string, deps: VideoIngestDeps = {},
-): Promise<{ title: string; markdown: string }> {
+): Promise<{ title: string; channel: string; markdown: string }> {
   const exec = deps.exec
     ?? (async (cmd: string, args: string[]) => execFileAsync(cmd, args, { timeout: 120_000 }));
 
@@ -216,7 +216,10 @@ export async function fetchVideoTranscript(
     if (cues.length === 0) {
       throw new Error(`"${title}" — the caption file came back empty; nothing to ingest.`);
     }
-    return { title, markdown: transcriptMarkdown({ title, channel, duration, url }, cues) };
+    // The channel is returned, not just rendered into the transcript header: for THIS url YouTube
+    // is the index of record for who published it, so ingestRoutes files it as the source's
+    // `reported` attribution — the side a model's claim can never outrank (provenance.ts).
+    return { title, channel, markdown: transcriptMarkdown({ title, channel, duration, url }, cues) };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

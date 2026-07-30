@@ -9,6 +9,7 @@ import { compileNext, readQueue, renameBook, startConversion } from './ingest.js
 import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
 import { deleteLinkDirectory, readLinkDirectories } from './linkList.js';
+import { readSources } from './provenance.js';
 import { fetchVideoTranscript, isVideoUrl, type VideoIngestDeps } from './videoIngest.js';
 import type { ChatModel } from './llm/index.js';
 import type { Engram } from './mcp.js';
@@ -28,7 +29,13 @@ export function buildIngestRoutes(
     const contentType = c.req.header('content-type') ?? '';
 
     if (contentType.includes('application/json')) {
-      const body = await c.req.json().catch(() => null) as { url?: string; path?: string; mode?: 'book' | 'paper' } | null;
+      // `authors` is the CLAIM channel: who the caller (in practice, a model that found this link)
+      // says made the material. It is recorded as `claimed` and never outranks what the artifact's
+      // own platform reports — see provenance.ts's reconcileAttribution.
+      const body = await c.req.json().catch(() => null) as {
+        url?: string; path?: string; mode?: 'book' | 'paper'; authors?: string[];
+      } | null;
+      const claimed = Array.isArray(body?.authors) ? body.authors.filter((a) => typeof a === 'string') : undefined;
 
       // A LOCAL file by path — the audit typed a notes file's path into Add material and it fell
       // through to the repo route, which choked deriving a repo name from "sgd-notes.md" and then
@@ -42,6 +49,9 @@ export function buildIngestRoutes(
         }
         return c.json(startConversion(lw, cfg, p, {
           converter: deps.converter, mode: body.mode, model: deps.model,
+          // A file on disk reports no byline of its own; whatever the caller claimed stands
+          // as unverified rather than being upgraded by having reached the server.
+          provenance: { origin: { kind: 'file' }, claimed },
         }));
       }
       if (!body?.url) return c.json({ error: 'JSON body requires a "url" or "path" field' }, 400);
@@ -51,13 +61,21 @@ export function buildIngestRoutes(
       // ordinary markdown from here on — paper mode, source reader, select-to-ask, all of it.
       if (isVideoUrl(body.url)) {
         try {
-          const { title, markdown } = await fetchVideoTranscript(body.url, deps.videoDeps);
+          const { title, channel, markdown } = await fetchVideoTranscript(body.url, deps.videoDeps);
           const tmpDirV = mkdtempSync(join(tmpdir(), 'lwh-video-'));
           const mdPath = join(tmpDirV, 'transcript.md');
           writeFileSync(mdPath, markdown);
           return c.json(startConversion(lw, cfg, mdPath, {
             converter: deps.converter, mode: 'paper', title, model: deps.model, sourceUrl: body.url,
             cleanupInputDir: tmpDirV,
+            // yt-dlp read the channel off THIS url's own page — that is the platform's report of
+            // who published it, so it wins over any `authors` the caller claimed, and a
+            // disagreement is written into the record and shown in the Library.
+            provenance: {
+              origin: { kind: 'video', url: body.url, platform: 'YouTube' },
+              reported: channel ? [channel] : undefined,
+              claimed,
+            },
           }));
         } catch (e: any) {
           return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
@@ -76,6 +94,10 @@ export function buildIngestRoutes(
       const result = startConversion(lw, cfg, downloaded.path, {
         converter: deps.converter, mode: body.mode ?? 'paper', model: deps.model, sourceUrl: body.url,
         cleanupInputDir: dirname(downloaded.path),
+        // A downloaded PDF carries no machine-readable byline this pipeline reads (the converted
+        // text does, but only a model would be reading it — which is the claim side, not the
+        // reported side), so nothing here is `reported`.
+        provenance: { origin: { kind: 'url', url: body.url }, claimed },
       });
       return c.json(result);
     }
@@ -97,11 +119,16 @@ export function buildIngestRoutes(
     writeFileSync(tmpPath, Buffer.from(await file.arrayBuffer()));
     const result = startConversion(lw, cfg, tmpPath, {
       converter: deps.converter, model: deps.model, cleanupInputDir: tmpDir,
+      provenance: { origin: { kind: 'file' } },
     });
     return c.json(result);
   });
 
   app.get('/api/ingest/queue', (c) => c.json(readQueue(cfg.vault)));
+
+  /** Who each ingested source is by, and whether that byline was verified against the artifact or
+   * merely claimed by a model — the Library shows the difference rather than flattening it. */
+  app.get('/api/sources', (c) => c.json(readSources(cfg.vault)));
 
   /**
    * Dismiss one finished ledger row. Terminal rows only — a failed repo ingest from weeks ago is

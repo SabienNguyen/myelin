@@ -28,8 +28,14 @@ export function buildIngestTools(
       input: z.object({
         url: z.string().url(),
         title: z.string().optional().describe('Paper title, if known — overrides title detection from the PDF.'),
+        authors: z.array(z.string()).optional().describe(
+          'Who YOU believe wrote this, if you know — verbatim names. Recorded as a CLAIM and shown '
+          + 'to the student as unverified. It never overrides a byline the source itself or its '
+          + 'platform reports; if the two disagree, the source wins and your claim is recorded as '
+          + 'wrong. Omit it rather than guessing.',
+        ),
       }),
-      execute: async ({ url, title }) => {
+      execute: async ({ url, title, authors }) => {
         try {
           const downloaded = await download(url);
           // Conversion AND compile both run in the background — neither may stall the chat turn.
@@ -40,6 +46,7 @@ export function buildIngestTools(
           const result = startConversion(lw, cfg, downloaded.path, {
             converter: deps.converter, mode: 'paper', title, sourceUrl: url,
             cleanupInputDir: dirname(downloaded.path),
+            provenance: { origin: { kind: 'url', url }, claimed: authors },
           });
           return { queued: result.book, converting: true, compiling: 'starts after conversion' };
         } catch (e: any) {
