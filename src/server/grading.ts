@@ -6,6 +6,7 @@ import { mmss } from '../shared/videoUrl.js';
 import type { EvidenceKind } from '../shared/engram.js';
 import { generateStructured, generateText, type ChatModel } from './llm/index.js';
 import { chatModelFor } from './models.js';
+import { recordUsage } from './usageLedger.js';
 import type { HarnessConfig } from './config.js';
 
 /** Injectable grader-model seam for tests (mirrors gapHelp.ts's GapHelpDeps.model). Real callers
@@ -876,10 +877,11 @@ export async function gradeBlockOutput(
       const rubricPrompt = `Judge this draft against each rubric criterion. Prompt: "${input.prompt}"\n`
         + `Draft:\n${result.draft}\n\nCriteria:\n${criteria.map((r: string, i: number) => `${i + 1}. ${r}`).join('\n')}\n`
         + 'For each criterion, decide pass or fail and give a one-line note quoting the draft where possible.';
-      const { object } = await generateStructured({
+      const { object, usage } = await generateStructured({
         model: deps.model ?? chatModelFor('grader', cfg), prompt: rubricPrompt,
         schema: rubricSchema, schemaName: 'rubric_judgment',
       });
+      recordUsage(cfg.vault, { role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage });
       return object;
     };
     // The rubric judge and the annotation grader are independent reads of the same draft — run
@@ -972,11 +974,12 @@ async function annotateDraft(
 ): Promise<WritingAnnotations> {
   const draftPrompt = `Grade this student draft. Prompt: "${prompt}"\nDraft:\n${draft}\n`
     + `Return annotations whose "span" values are EXACT substrings of the draft, and per-skill grades for: claim, concision, specificity.`;
-  const { object } = await generateStructured({
+  const { object, usage } = await generateStructured({
     model: deps.model ?? chatModelFor('grader', cfg),
     prompt: draftPrompt,
     schema: annotationSchema, schemaName: 'draft_annotations',
   });
+  recordUsage(cfg.vault, { role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage });
   return object;
 }
 
@@ -1005,7 +1008,8 @@ async function gradeOpenAnswer(
   // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
   // model, never copied into the evidence note.
   const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
-  const { text } = await generateText({ model: deps.model ?? chatModelFor('grader', cfg), prompt });
+  const { text, usage } = await generateText({ model: deps.model ?? chatModelFor('grader', cfg), prompt });
+  recordUsage(cfg.vault, { role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage });
   const ok = /^CORRECT/i.test(text.trim());
   return {
     verdict: ok ? 'correct' : 'incorrect', source: 'model', detail: text.trim(),

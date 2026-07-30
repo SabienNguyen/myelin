@@ -21,6 +21,7 @@ import { chatModelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { logGuardrail, saveThread } from './sessionStore.js';
+import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated } from './gap/generated.js';
 import { builtinPatterns } from './gap/service.js';
@@ -784,6 +785,11 @@ export function createTutorSession(
             model, system, messages: msgs, tools, serverTools: webTools.serverTools,
             maxSteps: 24, cache: true,
             onEvent: (e) => writer.forward(e),
+          });
+          // Charged to the CONFIGURED tutor id even when opts.model/LW_MOCK_MODEL injected the
+          // model — the role is what the ledger tracks, and the injected cases report zeros anyway.
+          recordUsage(cfg.vault, {
+            role: 'tutor', model: cfg.models?.tutor?.model ?? 'unknown', usage: result.usage,
           });
           return result.steps.flatMap((s) => s.toolCalls)
             .filter((tc) => tc.toolName === 'record_evidence')

@@ -11,6 +11,7 @@ import { readGoal, writeGoal, pathProgress } from './goalStore.js';
 import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
 import { readBank } from './courseBank.js';
 import { BUILTIN_PATTERN_SLUGS } from './seedPatternPages.js';
+import { readUsage } from './usageLedger.js';
 
 async function fetchGraph(lw: Engram, cfg: HarnessConfig): Promise<GraphPayload> {
   // Two calls for the whole vault, however large. The old shape — read_page plus a per-slug
@@ -616,6 +617,10 @@ export function buildRestRoutes(
     const calibration = sureTotal > 0 ? { sureRight, sureTotal } : null;
     return c.json({ byLevel, slipping, earnedThisWeek, today, nextSlip, calibration });
   });
+  // Token spend per role, from the usage ledger every model call appends to (usageLedger.ts):
+  // today's and the trailing week's per-role totals, plus the window's cache-hit share of input.
+  app.get('/api/usage', (c) => c.json(readUsage(cfg.vault)));
+
   app.get('/api/status', async (c) => {
     // Read the tutor model AND the student from cfg HERE, not from the snapshot passed in at boot.
     // Switching learners rewrites cfg.student while the app runs (PUT /api/student). A captured

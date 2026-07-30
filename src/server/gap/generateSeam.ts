@@ -5,7 +5,12 @@
 import { generateText } from '../llm/index.js';
 import type { HarnessConfig } from '../config.js';
 import { chatModelFor } from '../models.js';
+import { recordUsage } from '../usageLedger.js';
 
 export function compileGenerate(cfg: HarnessConfig): (prompt: string) => Promise<string> {
-  return async (prompt) => (await generateText({ model: chatModelFor('compile', cfg), prompt })).text;
+  return async (prompt) => {
+    const { text, usage } = await generateText({ model: chatModelFor('compile', cfg), prompt });
+    recordUsage(cfg.vault, { role: 'compile', model: cfg.models?.compile?.model ?? 'unknown', usage });
+    return text;
+  };
 }

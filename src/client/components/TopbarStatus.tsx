@@ -182,6 +182,29 @@ type ModelsState = {
   env: Record<EnvKey, { value?: string; set?: boolean; shadowed: boolean }>;
 };
 
+type UsageTotals = { in: number; out: number; cacheRead: number; cacheWrite: number; calls: number };
+type UsageSummary = { today: Record<string, UsageTotals> };
+// 'help' is a ledger role (gap help borrows the tutor model) but not a configurable one, so it
+// joins the display order here rather than ROLE_ORDER.
+const USAGE_ORDER = [...ROLE_ORDER, 'help'] as const;
+
+/** 41321 -> "41k", 2130 -> "2.1k", 950 -> "950" — dense, badge-scale numbers. */
+export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return String(n);
+}
+
+/** One dialog line per role with any spend today. Cache share is per role — cacheRead over all
+ * input (fresh + cached), the same split /api/usage reports overall. */
+export function usageLine(role: string, t: UsageTotals): string {
+  const cached = t.cacheRead > 0
+    ? ` · ${Math.round((t.cacheRead / (t.in + t.cacheRead)) * 100)}% cached`
+    : '';
+  return `${role} ${fmtTokens(t.in)} in / ${fmtTokens(t.out)} out${cached}`;
+}
+
 /**
  * The tutor badge, grown into the model configuration surface: every role's id and the provider
  * endpoints models.ts reads, editable in place. Saves land in settings.json (GET/PUT
@@ -199,6 +222,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
     OLLAMA_BASE_URL: '', OLLAMA_API_KEY: '', OPENAI_COMPAT_BASE_URL: '', OPENAI_COMPAT_API_KEY: '',
   });
   const [note, setNote] = useState<{ text: string; err: boolean } | null>(null);
+  const [usage, setUsage] = useState<UsageSummary | null>(null);
   const rootRef = useRef<HTMLSpanElement>(null);
   const badgeRef = useRef<HTMLButtonElement>(null);
   const firstRef = useRef<HTMLInputElement>(null);
@@ -219,6 +243,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
     if (!open) return;
     setNote(null);
     fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(() => {});
+    fetch('/api/usage').then((r) => r.json()).then(setUsage).catch(() => {});
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -272,6 +297,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   };
 
   const { name, how } = modelLabel(tutor);
+  const usageRows = USAGE_ORDER.filter((r) => usage?.today?.[r]);
   return (
     <span className="models-menu" ref={rootRef}>
       <button
@@ -333,6 +359,16 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
               </span>
             );
           })}
+          {/* Read-only spend from the usage ledger — a line per role with any tokens today.
+              An empty ledger renders nothing: no data is not worth a heading. */}
+          {usageRows.length > 0 && (
+            <>
+              <span className="models-group">usage today</span>
+              {usageRows.map((r) => (
+                <span className="models-hint" key={r}>{usageLine(r, usage!.today[r])}</span>
+              ))}
+            </>
+          )}
           <span className="models-foot">
             <button type="submit" disabled={busy}>{busy ? 'saving…' : 'save'}</button>
             {note && (
