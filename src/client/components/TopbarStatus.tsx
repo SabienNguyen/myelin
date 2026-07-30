@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { BrainIcon as Brain, UserCircleIcon as UserCircle } from '@phosphor-icons/react';
+import { LocalModelGetter } from './LocalModelGetter.js';
 
 type Status = { anki?: 'up' | 'down' | 'backlog'; student?: string; tutor?: string };
 
@@ -365,10 +366,21 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const localModels = available.ollama ?? [];
   // A stale pick (model uninstalled between opens) falls back to the first discovered model.
   const presetValue = presetPick && localModels.includes(presetPick) ? presetPick : localModels[0];
-  const applyPreset = () => {
-    const id = `ollama:${presetValue}`;
+  const pointPresetAt = (ollamaTag: string) => {
+    const id = `ollama:${ollamaTag}`;
     setRoles((s) => ({ ...s, ...Object.fromEntries(PRESET_ROLES.map((r) => [r, id])) }));
     setRails(true);
+  };
+  const applyPreset = () => pointPresetAt(presetValue);
+  // Pull-then-configure: after the getter installs (or on "use it" for an already-installed one),
+  // re-read discovery so the model joins the installed list, THEN point the teaching roles at it.
+  // Order matters: takeState resets the working role/rails state from the server (which has not
+  // been saved yet), so the preset must be applied AFTER the refresh or it would be clobbered
+  // straight back to the current saved models.
+  const configureLocal = async (ollamaTag: string) => {
+    await fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(() => {});
+    pointPresetAt(ollamaTag);
+    setNote({ text: `${ollamaTag} ready — press save to use it`, err: false });
   };
   return (
     <span className="models-menu" ref={rootRef}>
@@ -423,6 +435,12 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             ))}
             {discoveredModelIds(available).map((id) => <option key={id} value={id} />)}
           </datalist>
+          <span className="models-group">get a local model</span>
+          <LocalModelGetter installed={localModels} onConfigured={configureLocal} busy={busy} />
+          <span className="models-hint">
+            downloads through Ollama and points the teaching roles at it. needs Ollama installed and
+            running (ollama.com).
+          </span>
           {localModels.length > 0 && (
             <>
               <span className="models-chips">

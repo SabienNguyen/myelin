@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BookOpenTextIcon as BookOpenText, KeyIcon as Key, CpuIcon as Cpu } from '@phosphor-icons/react';
+import { LocalModelGetter } from './LocalModelGetter.js';
 
 interface SetupState {
   apiKey: { rolesNeeding: string[]; present: boolean; source: string | null; savedAt: string };
@@ -63,20 +64,17 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
    * can split the roles later. Saved through the same endpoint the dialog uses, then /api/setup
    * is re-read: with no role on the Anthropic route, `blocked` comes back false and the gate
    * lifts itself. */
-  async function saveLocal() {
-    const id = localId.trim();
+  async function saveAllRolesTo(id: string, opts: { env?: Record<string, string>; rails?: boolean } = {}) {
     setBusy(true);
     setError(null);
     try {
-      const env: Record<string, string> = {};
-      if (baseUrl.trim()) env.OPENAI_COMPAT_BASE_URL = baseUrl.trim();
-      if (compatKey.trim()) env.OPENAI_COMPAT_API_KEY = compatKey.trim();
       const res = await fetch('/api/setup/models', {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           models: { tutor: id, grader: id, quiz_gen: id, card_gen: id, compile: id },
-          ...(Object.keys(env).length ? { env } : {}),
+          ...(opts.env && Object.keys(opts.env).length ? { env: opts.env } : {}),
+          ...(opts.rails ? { tutorRails: true } : {}),
         }),
       });
       if (!res.ok) {
@@ -90,6 +88,13 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  function saveLocal() {
+    const env: Record<string, string> = {};
+    if (baseUrl.trim()) env.OPENAI_COMPAT_BASE_URL = baseUrl.trim();
+    if (compatKey.trim()) env.OPENAI_COMPAT_API_KEY = compatKey.trim();
+    return saveAllRolesTo(localId.trim(), { env });
   }
 
   if (!state?.blocked) return <>{children}</>;
@@ -192,6 +197,15 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             reaches OpenRouter, LiteLLM, or any compatible endpoint. Split the roles later from the
             model badge in the top bar.
           </p>
+          {/* The zero-typing on-ramp: pick a recommended local model and we pull + configure it.
+              A pulled model points every role at it with rails on (it's a small local model), then
+              re-reads /api/setup — with nothing on the Anthropic route the gate lifts itself. */}
+          <p className="firstrun-getter-lede">Don’t have a model yet? Pick one and we’ll install it:</p>
+          <LocalModelGetter
+            installed={[]}
+            busy={busy}
+            onConfigured={(id) => saveAllRolesTo(`ollama:${id}`, { rails: true })}
+          />
         </form>
 
         {error && <p className="firstrun-error" role="alert">{error}</p>}

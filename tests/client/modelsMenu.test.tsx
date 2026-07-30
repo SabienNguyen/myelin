@@ -230,4 +230,45 @@ describe('ModelsMenu — live discovery', () => {
     await waitFor(() => expect(field.disabled).toBe(true));
     expect(screen.getByText(/overridden by ANTHROPIC_API_KEY in the environment/)).toBeTruthy();
   });
+
+  // Regression: after a pull completes, the teaching roles must be repointed at the model and
+  // rails checked. A first cut refreshed discovery AFTER applying the preset, and the refresh
+  // (takeState) reset the roles straight back to the saved claude defaults — the preset silently
+  // vanished. The refresh must run BEFORE the preset is applied.
+  it('the local getter pulls a model, then repoints the teaching roles at it with rails on', async () => {
+    // Discovery flips from "nothing installed" to "qwen3:8b installed" once the pull streams done.
+    let pulled = false;
+    const pullStream = () => new ReadableStream<Uint8Array>({
+      start(c) {
+        const e = new TextEncoder();
+        c.enqueue(e.encode('{"status":"downloading","total":10,"completed":10}\n'));
+        c.enqueue(e.encode('{"status":"success"}\n'));
+        c.close();
+      },
+    });
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith('/api/setup/models/pull')) { pulled = true; return { ok: true, status: 200, body: pullStream() }; }
+      if (u.endsWith('/api/status')) return { ok: true, json: async () => ({ student: 'e2e', tutor: 'claude-sonnet-5' }) };
+      if (u.endsWith('/api/setup/models')) {
+        return { ok: true, json: async () => modelsState({}, {}, pulled ? { ollama: ['qwen3:8b'] } : {}) };
+      }
+      if (u.endsWith('/api/usage')) return { ok: true, json: async () => emptyUsage };
+      if (u.endsWith('/api/setup')) return { ok: true, json: async () => ({ apiKey: { present: false, source: null } }) };
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await openPopover();
+    await screen.findByText('get a local model');
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Get' })[0]); // qwen3:8b, the first recommended
+    await screen.findByText(/qwen3:8b ready/);
+    // THE assertion the clobber bug failed: the roles are the pulled model, rails on — not the
+    // claude defaults the /api/setup/models refresh returns.
+    for (const r of ['tutor', 'grader', 'quiz_gen', 'card_gen']) {
+      expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:qwen3:8b');
+    }
+    expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5'); // preset leaves compile
+    expect((screen.getByLabelText('rails') as HTMLInputElement).checked).toBe(true);
+  });
 });

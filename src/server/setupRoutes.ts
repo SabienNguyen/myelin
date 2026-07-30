@@ -153,6 +153,10 @@ export function buildSetupRoutes(
    *  open and must open instantly offline), a failed probe leaves its field absent, and nothing is
    *  cached across requests — a model pulled a minute ago should appear on the next open. */
   const DISCOVERY_TIMEOUT_MS = 1500;
+  // Ollama's native API (tags, pull) lives at the server ROOT, not under the /v1 compat prefix the
+  // chat routes use — strip a trailing /v1 so one env var configures both.
+  const ollamaRoot = () => (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1')
+    .replace(/\/$/, '').replace(/\/v1$/, '');
   const discoverModels = async (): Promise<{ ollama?: string[]; openaiCompat?: string[] }> => {
     const f = deps.probeFetch ?? fetch;
     const probe = async (url: string, headers?: Record<string, string>): Promise<unknown> => {
@@ -160,13 +164,10 @@ export function buildSetupRoutes(
       if (!res.ok) throw new Error(`discovery probe: HTTP ${res.status} from ${url}`);
       return res.json();
     };
-    // Ollama's native tag list lives at the server root, not under the /v1 compat prefix.
-    const ollamaRoot = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1')
-      .replace(/\/$/, '').replace(/\/v1$/, '');
     const compatBase = process.env.OPENAI_COMPAT_BASE_URL?.replace(/\/$/, '');
     const compatKey = process.env.OPENAI_COMPAT_API_KEY;
     const [tags, ids] = await Promise.allSettled([
-      probe(`${ollamaRoot}/api/tags`),
+      probe(`${ollamaRoot()}/api/tags`),
       // No base URL means no endpoint to ask — not a failed probe worth 1500ms.
       compatBase
         ? probe(`${compatBase}/models`, compatKey ? { authorization: `Bearer ${compatKey}` } : undefined)
@@ -189,6 +190,43 @@ export function buildSetupRoutes(
   };
 
   app.get('/api/setup/models', async (c) => c.json({ ...modelsState(), available: await discoverModels() }));
+
+  /** Pull an Ollama model on the learner's behalf: the "choose a model, we install it" path. Proxies
+   *  Ollama's streaming POST /api/pull and relays its newline-delimited JSON progress straight
+   *  through — the client renders a progress bar from each line's {status,total,completed} and
+   *  configures the roles once the stream ends clean. No timeout here (a model is gigabytes and the
+   *  download runs for minutes); the request's own signal aborts the upstream pull if the learner
+   *  navigates away. Ollama unreachable is the ONE thing we can't do for them — surfaced as a 502
+   *  naming ollama.com, since a pull needs Ollama installed and running locally. */
+  app.post('/api/setup/models/pull', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const model = String((body as { model?: unknown })?.model ?? '').trim();
+    if (!model) return c.json({ error: 'pull requires a "model" name, e.g. "qwen3:8b"' }, 400);
+    const f = deps.probeFetch ?? fetch;
+    const root = ollamaRoot();
+    let upstream: Response;
+    try {
+      upstream = await f(`${root}/api/pull`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: model, stream: true }),
+        signal: c.req.raw.signal,
+      });
+    } catch {
+      return c.json({
+        error: `couldn't reach Ollama at ${root} to pull "${model}" — install it from ollama.com `
+          + `and make sure it's running, then try again`,
+      }, 502);
+    }
+    if (!upstream.ok || !upstream.body) {
+      return c.json({ error: `Ollama refused the pull of "${model}" (HTTP ${upstream.status})` }, 502);
+    }
+    // Same NDJSON Ollama emits, passed through verbatim — the client parses {status,total,completed}
+    // and a terminal {error} line the same way it would talking to Ollama directly.
+    return new Response(upstream.body, {
+      headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' },
+    });
+  });
 
   app.put('/api/setup/models', async (c) => {
     const body = await c.req.json().catch(() => ({}));
