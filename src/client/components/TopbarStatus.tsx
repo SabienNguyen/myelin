@@ -167,6 +167,8 @@ const ROLE_ORDER = ['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile'] as con
 type RoleName = typeof ROLE_ORDER[number];
 const URL_FIELDS = [
   { key: 'OLLAMA_BASE_URL', label: 'ollama base url', placeholder: 'http://localhost:11434/v1' },
+  // Serves OpenRouter, Nous, and a local LiteLLM proxy (http://localhost:4000/v1) alike — the
+  // openai: route is one wire format, whoever answers it.
   { key: 'OPENAI_COMPAT_BASE_URL', label: 'openai-compatible base url', placeholder: 'https://openrouter.ai/api/v1' },
 ] as const;
 const KEY_FIELDS = [
@@ -302,6 +304,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             <option value="claude-opus-5" />
             <option value="ollama:qwen2.5-coder:14b" />
             <option value="openai:deepseek/deepseek-chat" />
+            <option value="openai:gemini/gemini-2.5-flash" label="via a LiteLLM proxy on the openai: route" />
           </datalist>
           <span className="models-hint">
             tutor and compile want the strongest model; grader, quiz_gen, card_gen run fine on a
