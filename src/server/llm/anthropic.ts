@@ -16,9 +16,15 @@ export interface AnthropicModelOptions {
   baseUrl?: string;
   /** Request-initiation retry knobs (retry.ts). Tests shrink the delays; callers rarely should. */
   retry?: RetryOptions;
+  /** Milliseconds allowed for the provider to return response HEADERS, per attempt. Deliberately
+   * not a whole-request deadline: a long stream reads for minutes, but a healthy endpoint answers
+   * with headers fast — hanging there means a dead connection. Expiry surfaces as a retryable
+   * 408, so withRetries gets its shot. Default 120s. */
+  timeoutMs?: number;
 }
 
 const PROVIDER = 'anthropic';
+const DEFAULT_TIMEOUT_MS = 120_000;
 const CACHE = { type: 'ephemeral' } as const;
 
 type Json = Record<string, unknown>;
@@ -99,21 +105,42 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   return body;
 }
 
-function post(opts: AnthropicModelOptions, body: Json): Promise<Response> {
+function post(opts: AnthropicModelOptions, body: Json, signal?: AbortSignal): Promise<Response> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return withRetries(async () => {
-    const base = (opts.baseUrl ?? 'https://api.anthropic.com').replace(/\/$/, '');
-    const res = await fetch(`${base}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'x-api-key': opts.apiKey ?? process.env.ANTHROPIC_API_KEY ?? '',
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw await errorFromResponse(PROVIDER, res);
-    return res;
-  }, opts.retry);
+    // Per-attempt controller so the header timeout can be cleared once headers arrive — a plain
+    // AbortSignal.timeout on the fetch would kill a healthy long stream mid-body. The caller's
+    // signal stays wired for the response's whole life: an abort after headers cancels body reads.
+    const ctrl = new AbortController();
+    const forwardAbort = () => ctrl.abort(signal!.reason);
+    signal?.throwIfAborted();
+    signal?.addEventListener('abort', forwardAbort, { once: true });
+    const timer = setTimeout(
+      () => ctrl.abort(new LlmHttpError(PROVIDER, 408, `no response headers within ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    try {
+      const base = (opts.baseUrl ?? 'https://api.anthropic.com').replace(/\/$/, '');
+      const res = await fetch(`${base}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'x-api-key': opts.apiKey ?? process.env.ANTHROPIC_API_KEY ?? '',
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw await errorFromResponse(PROVIDER, res);
+      return res;
+    } catch (e) {
+      signal?.removeEventListener('abort', forwardAbort);
+      // fetch wraps its signal's reason; unwrap so the timeout's retryable 408 reaches withRetries.
+      throw ctrl.signal.aborted ? ctrl.signal.reason : e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }, { ...opts.retry, signal });
 }
 
 function usageOf(u?: WireUsage): Usage {
@@ -137,7 +164,7 @@ function mapStop(reason: string | null | undefined): FinishReason {
 export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
   return {
     async generate(req: ChatRequest): Promise<GenerateResult> {
-      const res = await post(opts, buildBody(opts.modelId, req, false));
+      const res = await post(opts, buildBody(opts.modelId, req, false), req.signal);
       const msg = await res.json() as {
         content?: WireBlock[];
         stop_reason?: string | null;
@@ -157,7 +184,7 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
     },
 
     async *stream(req: ChatRequest): AsyncIterable<StreamEvent> {
-      const res = await post(opts, buildBody(opts.modelId, req, true));
+      const res = await post(opts, buildBody(opts.modelId, req, true), req.signal);
       if (!res.body) throw new LlmHttpError(PROVIDER, res.status, 'response had no body');
       const usage = zeroUsage();
       let stopReason: string | null | undefined;

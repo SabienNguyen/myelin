@@ -15,9 +15,14 @@ export interface OpenAICompatModelOptions {
   apiKey?: string;
   /** Request-initiation retry knobs (retry.ts). Tests shrink the delays; callers rarely should. */
   retry?: RetryOptions;
+  /** Milliseconds allowed for the endpoint to return response HEADERS, per attempt. Not a
+   * whole-request deadline — a local model streams for minutes, but even a busy Ollama answers
+   * with headers long before this. Expiry surfaces as a retryable 408. Default 120s. */
+  timeoutMs?: number;
 }
 
 const PROVIDER = 'openai-compat';
+const DEFAULT_TIMEOUT_MS = 120_000;
 
 type Json = Record<string, unknown>;
 
@@ -150,18 +155,39 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   return body;
 }
 
-function post(opts: OpenAICompatModelOptions, body: Json): Promise<Response> {
+function post(opts: OpenAICompatModelOptions, body: Json, signal?: AbortSignal): Promise<Response> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return withRetries(async () => {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (opts.apiKey) headers.authorization = `Bearer ${opts.apiKey}`;
-    const res = await fetch(`${opts.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw await errorFromResponse(PROVIDER, res);
-    return res;
-  }, opts.retry);
+    // Per-attempt controller so the header timeout can be cleared once headers arrive — a plain
+    // AbortSignal.timeout on the fetch would kill a healthy long stream mid-body. The caller's
+    // signal stays wired for the response's whole life: an abort after headers cancels body reads.
+    const ctrl = new AbortController();
+    const forwardAbort = () => ctrl.abort(signal!.reason);
+    signal?.throwIfAborted();
+    signal?.addEventListener('abort', forwardAbort, { once: true });
+    const timer = setTimeout(
+      () => ctrl.abort(new LlmHttpError(PROVIDER, 408, `no response headers within ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    try {
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (opts.apiKey) headers.authorization = `Bearer ${opts.apiKey}`;
+      const res = await fetch(`${opts.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw await errorFromResponse(PROVIDER, res);
+      return res;
+    } catch (e) {
+      signal?.removeEventListener('abort', forwardAbort);
+      // fetch wraps its signal's reason; unwrap so the timeout's retryable 408 reaches withRetries.
+      throw ctrl.signal.aborted ? ctrl.signal.reason : e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }, { ...opts.retry, signal });
 }
 
 function usageOf(u?: WireUsage | null): Usage {
@@ -190,7 +216,7 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
   const baseKey = opts.baseUrl.replace(/\/$/, '');
 
   async function generateOnce(req: ChatRequest): Promise<GenerateResult> {
-    const res = await post(opts, buildBody(opts.modelId, req, false));
+    const res = await post(opts, buildBody(opts.modelId, req, false), req.signal);
     const data = await res.json() as {
       choices?: { message?: { content?: string | null; tool_calls?: WireToolCall[] }; finish_reason?: string | null }[];
       usage?: WireUsage;
@@ -229,7 +255,7 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
     },
 
     async *stream(req: ChatRequest): AsyncIterable<StreamEvent> {
-      const res = await post(opts, buildBody(opts.modelId, req, true));
+      const res = await post(opts, buildBody(opts.modelId, req, true), req.signal);
       if (!res.body) throw new LlmHttpError(PROVIDER, res.status, 'response had no body');
       const TEXT_ID = '0';
       let textOpen = false;

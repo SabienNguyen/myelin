@@ -30,6 +30,10 @@ export interface RunLoopOptions {
   serverTools?: ServerTool[];
   maxSteps: number;
   cache?: boolean;
+  /** Caller abort (client disconnect, supersession): forwarded into every model request — an
+   * abort cancels the in-flight provider call — and checked between steps and before tool
+   * execution, so an abandoned run stops burning tokens and tool side effects. */
+  signal?: AbortSignal;
   onEvent?: (e: LoopEvent) => void;
 }
 
@@ -59,6 +63,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
   let stopReason: LoopResult['stopReason'] = 'max-steps';
 
   for (let step = 0; step < opts.maxSteps; step++) {
+    opts.signal?.throwIfAborted();
     opts.onEvent?.({ type: 'step-start' });
     let text = '';
     const toolCalls: ToolCallPart[] = [];
@@ -67,6 +72,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       messages,
       tools: decls.length ? decls : undefined,
       cache: opts.cache,
+      signal: opts.signal,
     })) {
       opts.onEvent?.(ev);
       if (ev.type === 'text-delta') {
@@ -107,6 +113,9 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       break;
     }
 
+    // Checked once more here: the abort may have landed while the stream above drained. Tool
+    // execution has side effects (vault writes via MCP) — an abandoned run must not commit them.
+    opts.signal?.throwIfAborted();
     const results: ContentPart[] = [];
     for (const call of toolCalls) {
       const tool = byName.get(call.toolName);

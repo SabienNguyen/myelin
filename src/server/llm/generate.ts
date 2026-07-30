@@ -8,6 +8,7 @@ export interface GenerateTextOptions {
   prompt: string;
   maxTokens?: number;
   cache?: boolean;
+  signal?: AbortSignal;
 }
 
 export async function generateText(opts: GenerateTextOptions): Promise<{ text: string; usage: Usage }> {
@@ -16,6 +17,7 @@ export async function generateText(opts: GenerateTextOptions): Promise<{ text: s
     messages: [{ role: 'user', content: [{ type: 'text', text: opts.prompt }] }],
     maxTokens: opts.maxTokens,
     cache: opts.cache,
+    signal: opts.signal,
   });
   return { text, usage };
 }
@@ -27,6 +29,7 @@ export interface GenerateStructuredOptions<T> {
   schema: z.ZodType<T>;
   schemaName?: string;
   maxTokens?: number;
+  signal?: AbortSignal;
 }
 
 /** JSON.parse with an error a rejection prompt can carry: names the schema and quotes the head of
@@ -59,6 +62,7 @@ export async function generateStructured<T>(
     system: opts.system,
     messages: [{ role: 'user' as const, content: [{ type: 'text' as const, text: opts.prompt }] }],
     maxTokens: opts.maxTokens,
+    signal: opts.signal,
   };
   if (opts.model.supportsResponseFormat) {
     const result = await opts.model.generate({ ...base, responseSchema: { name, schema: jsonSchema } });

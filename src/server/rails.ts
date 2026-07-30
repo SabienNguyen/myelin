@@ -177,6 +177,9 @@ export function fallbackQuickCheck(title: string, body: string): RailsQuickCheck
 export interface RailsGenDeps {
   model: ChatModel;
   cfg: HarnessConfig;
+  /** Caller abort. Threaded into the structured generations, and rethrown PAST the never-dies
+   * fallbacks — a disconnect must not be answered with a template question. */
+  signal?: AbortSignal;
 }
 
 /** Exported for scripts/eval-local-model.ts: the eval must measure a candidate model against the
@@ -242,6 +245,7 @@ export async function generateRailsQuickCheck(
         : prompt,
       schema: railsCheckSchema,
       schemaName: 'rails_quick_check',
+      signal: deps.signal,
     });
     recordUsage(deps.cfg.vault, {
       role: 'tutor', model: deps.cfg.models?.tutor?.model ?? 'unknown', usage,
@@ -254,9 +258,11 @@ export async function generateRailsQuickCheck(
   try {
     return await once();
   } catch (first) {
+    deps.signal?.throwIfAborted();
     try {
       return await once(first instanceof Error ? first.message : String(first));
     } catch (second) {
+      deps.signal?.throwIfAborted();
       console.error('[rails] generation fell back to the template question:',
         second instanceof Error ? second.message : second);
       return fallbackQuickCheck(page.title, page.body);
@@ -304,12 +310,14 @@ export async function generateRailsFeedback(
   try {
     const { object, usage } = await generateStructured({
       model: deps.model, prompt, schema: railsFeedbackSchema, schemaName: 'rails_feedback',
+      signal: deps.signal,
     });
     recordUsage(deps.cfg.vault, {
       role: 'tutor', model: deps.cfg.models?.tutor?.model ?? 'unknown', usage,
     });
     return object;
   } catch (e) {
+    deps.signal?.throwIfAborted();
     console.error('[rails] feedback fell back to the machine grade:',
       e instanceof Error ? e.message : e);
     const g = graded[0];
@@ -379,7 +387,9 @@ export function createRailsSession(
     return { page: { title: page.meta?.title ?? item.slug, body: page.body ?? '' }, analogies };
   }
 
-  async function respond(messages: UIMessage[], _mode: Mode, threadId = 'default'): Promise<Response> {
+  async function respond(
+    messages: UIMessage[], _mode: Mode, threadId = 'default', signal?: AbortSignal,
+  ): Promise<Response> {
     const pending = pendingBlockOutputs(messages);
     const staged = stagedByThread.get(threadId) ?? new Set<string>();
     stagedByThread.set(threadId, staged);
@@ -403,7 +413,8 @@ export function createRailsSession(
         console.error('[rails-turn-error]', msg);
         return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}`;
       },
-      execute: async (writer) => {
+      signal,
+      execute: async (writer, runSignal) => {
         const say = (text: string) => {
           const id = `rails-say-${textSeq++}`;
           writer.write({ type: 'text-start', id });
@@ -417,7 +428,7 @@ export function createRailsSession(
           staged.add(item.slug);
           const { page, analogies } = await assemble(item);
           const gen = await generateRailsQuickCheck(
-            { model, cfg }, item, page, analogies, railsHistoryLines(messages),
+            { model, cfg, signal: runSignal }, item, page, analogies, railsHistoryLines(messages),
           );
           const input = {
             question: gen.question, mode: 'choice' as const,
@@ -460,7 +471,7 @@ export function createRailsSession(
         }
 
         writer.write({ type: 'start-step' });
-        const fb = await generateRailsFeedback({ model, cfg }, graded);
+        const fb = await generateRailsFeedback({ model, cfg, signal: runSignal }, graded);
         say(fb.feedback);
         if (fb.next === 'continue') await stageNext(writer);
         else say(STOP_OFFER);
