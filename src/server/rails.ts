@@ -15,7 +15,9 @@ import { gradeBlockOutput, type Grade } from './grading.js';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import type { Mode } from './prompt.js';
+import type { Stance } from '../shared/commands.js';
 import { saveThread } from './sessionStore.js';
+import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 
 /** How much page body rides into a generation prompt. Rails prompts must stay bounded and
@@ -189,6 +191,9 @@ export function buildCheckPrompt(
   page: { title: string; body: string },
   analogies: { slug: string; title: string }[],
   history: string[],
+  // Optional so scripts/eval-local-model.ts's existing calls stand; the thread's persisted
+  // stance (stanceStore.ts) rides in from respond() when one is set.
+  stance?: Stance,
 ): string {
   // Rule 3 (tutor-system-prompt.md): first contact is a calibration, not a test, and must read
   // that way. 'unseen'/'exposed' means nothing has probed this page yet.
@@ -212,6 +217,10 @@ export function buildCheckPrompt(
         + 'You may lean on one for the framing.']
       : []),
     ...(history.length ? ['Recent conversation:', ...history] : []),
+    ...(stance
+      ? [`The student's stance is ${stance}: ${STANCE_INSTRUCTIONS[stance]}. Pitch the question `
+        + 'and its framing at that level.']
+      : []),
     '',
     'Fields:',
     '- question: one question about the page, answered by picking an option. It is choice mode, so '
@@ -235,8 +244,9 @@ export async function generateRailsQuickCheck(
   page: { title: string; body: string },
   analogies: { slug: string; title: string }[],
   history: string[],
+  stance?: Stance,
 ): Promise<RailsQuickCheck> {
-  const prompt = buildCheckPrompt(item, page, analogies, history);
+  const prompt = buildCheckPrompt(item, page, analogies, history, stance);
   const once = async (rejection?: string): Promise<RailsQuickCheck> => {
     const { object, usage } = await generateStructured({
       model: deps.model,
@@ -281,12 +291,14 @@ export type RailsFeedback = z.infer<typeof railsFeedbackSchema>;
  * buildCheckPrompt. */
 export function buildFeedbackPrompt(
   graded: { question: string; answer: string; grade: Grade }[],
+  stance?: Stance,
 ): string {
   const lines = graded.map((g) =>
     `Question: ${g.question}\nStudent's answer: "${g.answer}"\nMachine grade: ${g.grade.verdict} — ${g.grade.detail}`);
   return [
     "Write the tutor's feedback after a machine-graded quick check.",
     ...lines,
+    ...(stance ? [`The student's stance is ${stance} — pitch the feedback at that level.`] : []),
     '',
     'Fields:',
     '- feedback: at most 2 sentences. Describe only what the student actually did — quote their '
@@ -305,8 +317,9 @@ export function buildFeedbackPrompt(
 export async function generateRailsFeedback(
   deps: RailsGenDeps,
   graded: { question: string; answer: string; grade: Grade }[],
+  stance?: Stance,
 ): Promise<RailsFeedback> {
-  const prompt = buildFeedbackPrompt(graded);
+  const prompt = buildFeedbackPrompt(graded, stance);
   try {
     const { object, usage } = await generateStructured({
       model: deps.model, prompt, schema: railsFeedbackSchema, schemaName: 'rails_feedback',
@@ -391,6 +404,9 @@ export function createRailsSession(
     messages: UIMessage[], _mode: Mode, threadId = 'default', signal?: AbortSignal,
   ): Promise<Response> {
     const pending = pendingBlockOutputs(messages);
+    // The thread's stance rides every generation prompt this turn stages — the rails analogue of
+    // session.ts's tail HARNESS note. Read per turn, so a stance set mid-thread applies at once.
+    const stance = readStance(cfg.vault, threadId) ?? undefined;
     const staged = stagedByThread.get(threadId) ?? new Set<string>();
     stagedByThread.set(threadId, staged);
     seedStaged(messages, staged);
@@ -428,7 +444,7 @@ export function createRailsSession(
           staged.add(item.slug);
           const { page, analogies } = await assemble(item);
           const gen = await generateRailsQuickCheck(
-            { model, cfg, signal: runSignal }, item, page, analogies, railsHistoryLines(messages),
+            { model, cfg, signal: runSignal }, item, page, analogies, railsHistoryLines(messages), stance,
           );
           const input = {
             question: gen.question, mode: 'choice' as const,
@@ -471,7 +487,7 @@ export function createRailsSession(
         }
 
         writer.write({ type: 'start-step' });
-        const fb = await generateRailsFeedback({ model, cfg, signal: runSignal }, graded);
+        const fb = await generateRailsFeedback({ model, cfg, signal: runSignal }, graded, stance);
         say(fb.feedback);
         if (fb.next === 'continue') await stageNext(writer);
         else say(STOP_OFFER);

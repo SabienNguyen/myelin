@@ -123,6 +123,57 @@ describe('ChatStore', () => {
     expect(chatCalls().map((c) => (c.body as { writeUp: boolean }).writeUp)).toEqual([false, true]);
   });
 
+  it('a slash command rides the POST body and leads the user message as a data-command part', async () => {
+    const { store, chatCalls } = makeStore([scriptedTurnChunks()], []);
+    const img: FileUIPart = { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,aW1n', filename: 'shot.png' };
+    store.sendMessage('explain limits', [img], { command: 'beginner' });
+    await settled(store);
+
+    const body = chatCalls()[0]!.body as { messages: UIMessage[]; command?: string };
+    expect(body.command).toBe('beginner');
+    // Order pinned: data part first (the transcript chip), then files, then text.
+    expect(body.messages[0]!.parts).toEqual([
+      { type: 'data-command', data: { command: 'beginner' } },
+      img,
+      { type: 'text', text: 'explain limits' },
+    ]);
+  });
+
+  it('a bare stance command sends with NO text part — no empty text block can reach the wire', async () => {
+    const { store, chatCalls } = makeStore([scriptedTurnChunks()], []);
+    store.sendMessage('', [], { command: 'beginner' });
+    await settled(store);
+    expect((chatCalls()[0]!.body as { messages: UIMessage[] }).messages[0]!.parts)
+      .toEqual([{ type: 'data-command', data: { command: 'beginner' } }]);
+  });
+
+  it('a command is one-shot: the block-answer resubmit does not replay it', async () => {
+    const { store, chatCalls } = makeStore(
+      [scriptedTurnChunks(), continuationChunks('A1B2C3D4E5F6G7H8', 'tc9')], [],
+    );
+    store.sendMessage('quiz me', [], { command: 'quiz' });
+    await settled(store);
+    store.addToolOutput({ toolCallId: 'tc9', output: { answer: '6' } });
+    await settled(store);
+    await flush();
+
+    expect(chatCalls()).toHaveLength(2);
+    expect((chatCalls()[0]!.body as { command?: string }).command).toBe('quiz');
+    expect('command' in (chatCalls()[1]!.body as object)).toBe(false);
+  });
+
+  it('a mode command flips the selector via onModeCommand; a stance command does not', async () => {
+    const seen: string[] = [];
+    const { store } = makeStore([scriptedTurnChunks(), scriptedTurnChunks()], [], {
+      onModeCommand: (m) => seen.push(m),
+    });
+    store.sendMessage('drill me', [], { command: 'review' });
+    await settled(store);
+    store.sendMessage('from zero please', [], { command: 'beginner' });
+    await settled(store);
+    expect(seen).toEqual(['review']);
+  });
+
   it('addToolOutput on a block part patches it and fires EXACTLY one resubmit', async () => {
     const { store, calls, chatCalls } = makeStore([continuationChunks('a1', 'tc1')], pausedBlockHistory());
 

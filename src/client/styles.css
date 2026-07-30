@@ -389,6 +389,94 @@ button.badge:hover { color: var(--text); }
 /* Oversize rejection — same quiet-failure idiom as .syntax-error-note. */
 .attachment-note { color: var(--bad); font-size: 0.8rem; }
 
+/* Slash-command editor (CommandEditor.tsx) — the Tiptap contenteditable styled as the old
+   composer input, plus the anchor for the command menu. */
+.composer-editor { position: relative; flex: 1; min-width: 0; }
+.composer-editor .tiptap {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.55rem 1.1rem;
+  max-height: 8.5rem;
+  overflow-y: auto;
+}
+/* Editable elements always match :focus-visible when focused — same ring as the old textarea. */
+.composer-editor .tiptap:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.composer-editor .tiptap p { margin: 0; }
+.composer-editor .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+/* The atomic command chip, in the editor and (as .msg-command-chip) in the transcript. */
+.command-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.35rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.85em;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.composer-editor .tiptap .command-chip.ProseMirror-selectednode { outline: 2px solid var(--accent); }
+
+/* The command menu — anchored above the composer (the trigger only exists at document start, so
+   no caret tracking); same dropdown surface as .history-panel / .models-panel. */
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 10;
+  width: min(24rem, 90vw);
+  display: flex;
+  flex-direction: column;
+  padding: 0.35rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+/* .composer prefix throughout: the menu lives inside the composer form, whose own
+   `.composer button` filled-accent rule would otherwise win on specificity. */
+.composer .slash-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: 0.88rem;
+  font-weight: 400;
+}
+.composer .slash-option:hover { background: var(--bg-inset); border-color: transparent; filter: none; }
+.composer .slash-option.active { background: var(--accent-soft); color: var(--accent); }
+.slash-name { font-weight: 600; white-space: nowrap; }
+.slash-hint { color: var(--text-muted); font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* --text-muted on accent-soft fails AA (same finding as .history-row.active .history-time). */
+.composer .slash-option.active .slash-hint { color: inherit; }
+
+/* Sent command (transcript user bubble) — the record of the chip, muted, ahead of the text. */
+.msg-command-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.4rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 /* Sent attachments (transcript user bubble). */
 .msg.user .msg-attachment-img {
   display: block;

@@ -3,6 +3,7 @@
 // chat state machine inside the bundled ai@6 (AbstractChat) — every behavior here ports a rule
 // that machine enforced, called out inline.
 import { generateMessageId } from '../../shared/uiMessageReducer.js';
+import { MODE_COMMANDS, type Command } from '../../shared/commands.js';
 import { isToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage, type UIPart } from '../../shared/uiMessages.js';
 import { blockOutputsComplete } from './blockOutputsComplete.js';
 import { consumeChatStream } from './streamConsumer.js';
@@ -20,6 +21,10 @@ export interface ChatStoreOptions {
    * (which changes without remounting the store), and `writeUp` is a one-shot flag armed just
    * before a single send — only that request should carry it. */
   requestContext: () => { mode: string; writeUp: boolean };
+  /** A mode slash command (/learn, /review, /quiz, /freeform) must flip the topbar selector too —
+   * the server only overrides the ONE turn the command rides, and it is this callback that makes
+   * the following turns keep the new mode (requestContext reads the selector per request). */
+  onModeCommand?: (mode: string) => void;
   /** Test seam; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -34,6 +39,9 @@ export class ChatStore {
   // the race: its addToolResult wrote into the stream's own working state). Cleared at run
   // start: by then any patch is already part of the history being POSTed.
   private midRunOutputs = new Map<string, { output: unknown; isError: boolean }>();
+  // The slash command riding the NEXT run only — armed by sendMessage, consumed by run(), so a
+  // block-answer resubmit (which reuses run()) never replays the command that staged the block.
+  private pendingCommand: Command | undefined;
   private readonly fetchImpl: typeof fetch;
 
   constructor(private readonly opts: ChatStoreOptions) {
@@ -60,16 +68,27 @@ export class ChatStore {
     this.setState({ messages });
   }
 
-  sendMessage(text: string, files: FileUIPart[] = []): void {
+  sendMessage(text: string, files: FileUIPart[] = [], opts: { command?: Command } = {}): void {
     const messages = closePendingToolCalls(this.state.messages);
-    // Attachments LEAD, text follows — the media-then-question order both provider wires read
-    // best, and the order uiMessagesToChatMessages preserves verbatim. A files-only send carries
-    // no text part at all; with neither text nor files the legacy single-empty-text-part message
-    // is kept (every UI caller gates on having something to send, so this is unreachable from
-    // the composer — but a byte-identical no-files path beats a new special case).
-    const parts: UIPart[] = [...files];
-    if (text !== '' || files.length === 0) parts.push({ type: 'text', text });
+    // The data-command part LEADS (runtimeAdapter maps data parts; the transcript chip renders
+    // from it), then attachments, then text — the media-then-question order both provider wires
+    // read best, and the order uiMessagesToChatMessages preserves verbatim (it skips data-*
+    // parts, so the model transcript never sees slash syntax). A files-only send carries no text
+    // part; so does a bare command ("/beginner" alone) — an empty text part beside a command
+    // would reach the wire as an empty text block. With none of the three, the legacy
+    // single-empty-text-part message is kept (every UI caller gates on having something to send,
+    // so this is unreachable from the composer — but a byte-identical no-files path beats a new
+    // special case).
+    const parts: UIPart[] = [
+      ...(opts.command !== undefined ? [{ type: 'data-command', data: { command: opts.command } } as UIPart] : []),
+      ...files,
+    ];
+    if (text !== '' || (files.length === 0 && opts.command === undefined)) parts.push({ type: 'text', text });
     const user: UIMessage = { id: generateMessageId(), role: 'user', parts };
+    this.pendingCommand = opts.command;
+    if (opts.command !== undefined && (MODE_COMMANDS as readonly string[]).includes(opts.command)) {
+      this.opts.onModeCommand?.(opts.command);
+    }
     this.setState({ messages: [...messages, user] });
     void this.run();
   }
@@ -121,6 +140,8 @@ export class ChatStore {
     const controller = new AbortController();
     this.inflight = controller;
     this.midRunOutputs.clear();
+    const command = this.pendingCommand;
+    this.pendingCommand = undefined; // one-shot, same lifetime rule as writeUp
     const { mode, writeUp } = this.opts.requestContext();
     // Clearing a previous turn's error re-clones the last message: assistant-ui's converter
     // caches per message reference and an explicit error status is sticky in that cache, so
@@ -130,7 +151,10 @@ export class ChatStore {
 
     let finished: UIMessage[] | null = null;
     const result = await consumeChatStream({
-      body: { messages: this.state.messages, mode, threadId: this.opts.threadId, writeUp },
+      body: {
+        messages: this.state.messages, mode, threadId: this.opts.threadId, writeUp,
+        ...(command !== undefined ? { command } : {}),
+      },
       signal: controller.signal,
       fetchImpl: this.fetchImpl,
       onUpdate: (inProgress) => { this.setState({ messages: this.withMidRunOutputs(inProgress) }); },

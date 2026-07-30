@@ -125,6 +125,58 @@ describe('evidence guardrail', () => {
   }, 30_000);
 });
 
+describe('stance injection', () => {
+  // Same cache rule as the notes above: the stance is per-turn context, so it must ride the
+  // TRANSCRIPT TAIL — never prepended, where it would shift the cached prefix every turn.
+  it('appends the stance HARNESS note at the tail when the thread has one, pinning the text', async () => {
+    const { setStance } = await import('../src/server/stanceStore.js');
+    setStance(vault, 'stance-thread', 'beginner');
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello there' }] }] as any,
+      'learn', 'stance-thread',
+    )).text();
+
+    const msgs = calls[0].messages;
+    const text = (m: any) => JSON.stringify(m.content);
+    const tail = text(msgs[msgs.length - 1]);
+    expect(tail).toMatch(/HARNESS STANCE \(persists for this thread\): teach at beginner level — /);
+    expect(tail).toMatch(/explain from zero/); // the per-stance instruction from STANCE_INSTRUCTIONS
+    expect(tail).toMatch(/Research accordingly\./);
+    // Tail, not head: turn 1's bootstrap still leads, and no earlier message carries the note.
+    expect(text(msgs[0])).toMatch(/SESSION CONTEXT/);
+    expect(msgs.slice(0, -1).map(text).join('')).not.toMatch(/HARNESS STANCE/);
+  }, 30_000);
+
+  it('a bare command turn (no model-visible user parts) still ends the transcript on a user turn', async () => {
+    // "/learn" alone: the user message carries only the data-command part, which the wire drops —
+    // without the closing note the transcript would end on the assistant's own last message, and
+    // the provider would treat it as a prefill to continue rather than a turn to answer.
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi there friend' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Hello!' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'data-command', data: { command: 'learn' } }] },
+    ] as any[];
+    await (await session.respond(history, 'learn', 'bare-command-thread')).text();
+    const msgs = calls[0].messages;
+    expect(msgs[msgs.length - 1].role).toBe('user');
+    expect(JSON.stringify(msgs[msgs.length - 1].content)).toMatch(/sent a command with no message text/);
+  }, 30_000);
+
+  it('injects nothing for a thread with no stance', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello again' }] }] as any,
+      'learn', 'stanceless-thread',
+    )).text();
+    expect(JSON.stringify(calls[0].messages)).not.toMatch(/HARNESS STANCE/);
+  }, 30_000);
+});
+
 describe('cold-start research unlock', () => {
   // researchGate.test.ts covers the DECISION against a stubbed scorer. This covers the WIRING:
   // that a teaching-mode turn actually hands the tutor the tools, and tells it they are there.

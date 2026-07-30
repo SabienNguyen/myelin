@@ -12,7 +12,7 @@ import { test, expect } from '@playwright/test';
 test('recording a level tone grades ngang and mints applied-correctly evidence', async ({ page }) => {
   const first = page.waitForResponse((r) => r.url().endsWith('/api/chat'));
   await page.goto('http://localhost:4177/');
-  await page.getByPlaceholder('Ask your tutor…').fill('teach me the level tone');
+  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('teach me the level tone');
   await page.keyboard.press('Enter');
   await first;
 

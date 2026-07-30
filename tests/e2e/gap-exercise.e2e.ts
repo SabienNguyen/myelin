@@ -36,7 +36,7 @@ test('code_exercise: the built-in sandbox renders the full_body editor, the refe
 
   const firstChat = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.goto('/');
-  await page.getByPlaceholder('Ask your tutor…').fill('Practice stream-consumer with a code exercise');
+  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('Practice stream-consumer with a code exercise');
   await page.keyboard.press('Enter');
   await firstChat;
 

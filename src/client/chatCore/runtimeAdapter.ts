@@ -82,6 +82,10 @@ export interface ChatCoreRuntimeOptions {
   mode: string;
   threadId: string;
   initialMessages: UIMessage[];
+  /** How a mode slash command reaches the topbar selector (App's setMode) — see
+   * ChatStoreOptions.onModeCommand. Rides a ref like `mode`, so the store keeps calling the
+   * CURRENT setter without remounting. */
+  onModeCommand?: (mode: string) => void;
 }
 
 /** The live ChatStore, for the ONE consumer that must reach past assistant-ui's composer: the
@@ -102,13 +106,16 @@ export function useChatStore(): ChatStore {
  * plus the backing store (for ChatStoreContext — see above). The caller remounts per threadId
  * (App's key), so the store is created once per thread; `mode` rides a ref so each request reads
  * the CURRENT topbar selection. */
-export function useChatCoreRuntime({ mode, threadId, initialMessages }: ChatCoreRuntimeOptions): { runtime: AssistantRuntime; store: ChatStore } {
+export function useChatCoreRuntime({ mode, threadId, initialMessages, onModeCommand }: ChatCoreRuntimeOptions): { runtime: AssistantRuntime; store: ChatStore } {
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const onModeCommandRef = useRef(onModeCommand);
+  onModeCommandRef.current = onModeCommand;
   const [store] = useState(() => new ChatStore({
     threadId,
     initialMessages,
     requestContext: () => ({ mode: modeRef.current, writeUp: consumeWriteIntent() }),
+    onModeCommand: (m) => onModeCommandRef.current?.(m),
   }));
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const messages = useMemo(

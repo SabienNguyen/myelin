@@ -23,6 +23,7 @@ import { chatModelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { logGuardrail, saveThread } from './sessionStore.js';
+import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated } from './gap/generated.js';
@@ -749,6 +750,15 @@ export function createTutorSession(
           + '(mastery and due reviews may have changed since the conversation started).\n\n'
           + await bootstrap(mode, slugs),
         ));
+        // The thread's stance (/beginner|/intermediate|/advanced — stanceStore.ts) rides EVERY
+        // turn while set, as a tail note under the same Tier-2 cache-prefix rule as the notes
+        // below: after the history, so the cached prefix stays byte-stable. It leads the other
+        // tail notes because it frames HOW the work they direct (research, grading) should read.
+        const stance = readStance(cfg.vault, threadId);
+        if (stance) trailing.push(userTurn(
+          `HARNESS STANCE (persists for this thread): teach at ${stance} level — `
+          + `${STANCE_INSTRUCTIONS[stance]}. Research accordingly.`,
+        ));
         // The unlock is decided per turn, so it can happen mid-conversation — after the bootstrap
         // has already been sent. Say it here or the tutor holds a tool it was told it does not have.
         // The REASON goes in too: "there is no page" and "the page is unsourced guesswork" call for
@@ -773,6 +783,15 @@ export function createTutorSession(
         const keepIds = new Set(pending.map((p) => p.toolCallId));
         const dieted = dietUiMessages(messages, keepIds);
         const model_messages = [...leading, ...uiMessagesToChatMessages(dieted), ...trailing];
+        // The transcript must END on a user turn. A bare slash-command send (a user message whose
+        // only part is data-command, which uiMessagesToChatMessages rightly drops) can otherwise
+        // leave the assistant's own last message final — and the Anthropic wire reads a trailing
+        // assistant message as a prefill to CONTINUE, not a turn to answer.
+        if (model_messages[model_messages.length - 1]?.role === 'assistant') {
+          model_messages.push(userTurn(
+            'HARNESS: the student sent a command with no message text. Acknowledge the change briefly and continue.',
+          ));
+        }
 
         // Bug 2 fix: the grading above only mutated the REQUEST's copy of the tool output
         // (p.output.grading, kept so the model sees student work + machine grade together in the
