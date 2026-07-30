@@ -58,7 +58,9 @@ async function collect(iter: AsyncIterable<StreamEvent>): Promise<StreamEvent[]>
   return events;
 }
 
-const model = () => anthropicModel({ modelId: 'claude-x', apiKey: 'k', baseUrl: base });
+// Zero-delay retries: the taxonomy tests below assert errors that now surface only after the
+// adapter's retry budget (retry.ts) is spent, and the real 2s/4s backoff would time tests out.
+const model = () => anthropicModel({ modelId: 'claude-x', apiKey: 'k', baseUrl: base, retry: { delayMs: () => 0 } });
 const USER_Q = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'q' }] }];
 
 describe('anthropic request shaping', () => {

@@ -6,12 +6,15 @@ import {
   type StreamEvent, type ToolCallPart, type Usage,
 } from './types.js';
 import { sseFrames } from './sse.js';
+import { withRetries, type RetryOptions } from './retry.js';
 
 export interface OpenAICompatModelOptions {
   modelId: string;
   baseUrl: string;
   /** Absent means no Authorization header — the common local (Ollama) case. */
   apiKey?: string;
+  /** Request-initiation retry knobs (retry.ts). Tests shrink the delays; callers rarely should. */
+  retry?: RetryOptions;
 }
 
 const PROVIDER = 'openai-compat';
@@ -104,16 +107,18 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   return body;
 }
 
-async function post(opts: OpenAICompatModelOptions, body: Json): Promise<Response> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (opts.apiKey) headers.authorization = `Bearer ${opts.apiKey}`;
-  const res = await fetch(`${opts.baseUrl.replace(/\/$/, '')}/chat/completions`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw await errorFromResponse(PROVIDER, res);
-  return res;
+function post(opts: OpenAICompatModelOptions, body: Json): Promise<Response> {
+  return withRetries(async () => {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (opts.apiKey) headers.authorization = `Bearer ${opts.apiKey}`;
+    const res = await fetch(`${opts.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await errorFromResponse(PROVIDER, res);
+    return res;
+  }, opts.retry);
 }
 
 function usageOf(u?: WireUsage | null): Usage {

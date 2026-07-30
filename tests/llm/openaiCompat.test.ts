@@ -53,7 +53,8 @@ async function collect(iter: AsyncIterable<StreamEvent>): Promise<StreamEvent[]>
   return events;
 }
 
-const model = (apiKey?: string) => openaiCompatModel({ modelId: 'llama3', baseUrl: `${base}/v1`, apiKey });
+// Zero-delay retries — see anthropic.test.ts's model() note.
+const model = (apiKey?: string) => openaiCompatModel({ modelId: 'llama3', baseUrl: `${base}/v1`, apiKey, retry: { delayMs: () => 0 } });
 const USER_Q = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'q' }] }];
 
 describe('openai-compat request shaping', () => {

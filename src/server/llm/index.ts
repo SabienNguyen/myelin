@@ -18,3 +18,4 @@ export {
   spawnMcpServer,
   type McpConnection, type McpToolDecl, type McpToolResult, type SpawnMcpServerOptions,
 } from './mcpClient.js';
+export { withRetries, type RetryOptions } from './retry.js';
