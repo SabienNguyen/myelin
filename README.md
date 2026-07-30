@@ -149,6 +149,53 @@ in `OPENAI_COMPAT_API_KEY`, and use their model ids: `"grader": { "model":
 base URL from its docs. An `openai:` role with no `OPENAI_COMPAT_BASE_URL` fails at call time with
 a message naming the variable — there is no localhost fallback to guess wrong.
 
+**LiteLLM (100+ providers through one endpoint).** The `openai:` route is also how a
+[LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) plugs in — no dedicated prefix needed,
+because the proxy speaks exactly the wire this route already speaks. Run it, point the base URL
+at it, and every provider LiteLLM knows (Gemini, GPT, Groq, Bedrock, Mistral, …) becomes a model
+id here:
+
+```bash
+pip install 'litellm[proxy]'
+export GEMINI_API_KEY=...            # whatever providers your config names
+litellm --model gemini/gemini-2.5-flash --port 4000
+# then, for myelin:
+export OPENAI_COMPAT_BASE_URL=http://localhost:4000/v1
+```
+
+with roles like `"grader": { "model": "openai:gemini/gemini-2.5-flash" }`. A
+[config.yaml](https://docs.litellm.ai/docs/proxy/configs) serves several models from the one
+port, so different roles can ride different upstream providers through the same base URL. If the
+proxy sets a master key, put it in `OPENAI_COMPAT_API_KEY`. LiteLLM stays an external process you
+run — it is not a dependency of this app.
+
+<details>
+<summary><b>Keeping a LiteLLM proxy running (docker compose)</b></summary>
+
+```yaml
+# litellm/compose.yaml
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    ports: ["4000:4000"]
+    volumes: ["./config.yaml:/app/config.yaml"]
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    restart: unless-stopped
+```
+
+```yaml
+# litellm/config.yaml — one entry per model id you want to expose
+model_list:
+  - model_name: gemini/gemini-2.5-flash
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+```
+
+`docker compose up -d`, then `OPENAI_COMPAT_BASE_URL=http://localhost:4000/v1`.
+</details>
+
 Recommended split for mixing: keep `tutor` and `compile` on Claude (they need the strongest
 reasoning and tool use); route `grader`, `quiz_gen`, `card_gen` to a cheap OpenAI-compatible or
 local model — higher-volume, lower-stakes calls a good small model handles fine.
