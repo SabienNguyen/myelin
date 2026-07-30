@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readQueue, updateQueue, type QueueEntry } from '../src/server/queueStore.js';
+import { enqueueChapters, readQueue, updateQueue, type QueueEntry } from '../src/server/queueStore.js';
 
 function seedLedger(entries: QueueEntry[]): string {
   const vault = mkdtempSync(join(tmpdir(), 'lwh-queuestore-'));
@@ -144,5 +144,37 @@ describe('updateQueue — the lost-update regression', () => {
     ]);
     expect(readQueue(vaultA)).toHaveLength(1);
     expect(readQueue(vaultB)).toHaveLength(1);
+  });
+});
+
+describe('enqueueChapters — upsert by chapter path (the stranded-duplicate fix)', () => {
+  const ch = (chapter: string, status: QueueEntry['status'] = 'pending'): QueueEntry =>
+    ({ book: 'B', chapter, title: chapter, status });
+
+  it('re-adding a chapter already in the ledger replaces it, never appends a duplicate', () => {
+    // The exact shape that caused the runaway: a chapter present as 'done' (compiled last time),
+    // re-ingested. Without the upsert the new 'pending' row would be stranded — every status
+    // mutator finds the FIRST match (the old 'done' one), so the duplicate never terminates and
+    // ensureCompileDrain recompiles it forever.
+    const entries = [ch('raw/a/ch-01.md', 'done'), ch('raw/a/ch-02.md', 'done')];
+    enqueueChapters(entries, [ch('raw/a/ch-01.md'), ch('raw/a/ch-02.md')]);
+    expect(entries).toHaveLength(2);
+    expect(entries.map((e) => e.chapter)).toEqual(['raw/a/ch-01.md', 'raw/a/ch-02.md']);
+    expect(entries.every((e) => e.status === 'pending')).toBe(true); // the fresh rows, not the stale done ones
+  });
+
+  it('a duplicate chapter ALREADY stuck in the ledger is collapsed to one on the next enqueue', () => {
+    // Belt-and-suspenders: even a ledger that a pre-fix build left with two rows for one chapter
+    // is healed the next time that chapter is enqueued — both stale rows go, one fresh row lands.
+    const entries = [ch('raw/a/ch-01.md', 'done'), ch('raw/a/ch-01.md', 'pending'), ch('raw/b/ch-01.md', 'done')];
+    enqueueChapters(entries, [ch('raw/a/ch-01.md')]);
+    expect(entries.filter((e) => e.chapter === 'raw/a/ch-01.md')).toHaveLength(1);
+    expect(entries).toHaveLength(2);
+  });
+
+  it('leaves unrelated chapters and synthetic placeholder keys untouched', () => {
+    const entries = [ch('__ingesting_repo__/abc', 'done'), ch('raw/a/ch-01.md', 'done')];
+    enqueueChapters(entries, [ch('raw/a/ch-02.md')]);
+    expect(entries.map((e) => e.chapter)).toEqual(['__ingesting_repo__/abc', 'raw/a/ch-01.md', 'raw/a/ch-02.md']);
   });
 });
