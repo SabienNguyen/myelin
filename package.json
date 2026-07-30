@@ -1,6 +1,6 @@
 {
   "name": "myelin",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A localhost tutor with a teaching memory: it researches a subject, writes an Obsidian-compatible vault of pages, and grades your work against them.",
   "repository": {
     "type": "git",
