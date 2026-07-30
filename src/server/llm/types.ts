@@ -71,9 +71,13 @@ export interface ChatRequest {
   toolChoice?: ToolChoice;
   maxTokens?: number;
   temperature?: number;
-  /** Lets the anthropic adapter place cache_control breakpoints (system tail + last message).
-   * The openai-compat adapter ignores it — that wire has no explicit cache placement. */
+  /** Lets the anthropic adapter place cache_control breakpoints (tools tail, system, penultimate
+   * message, last message — the wire's four-breakpoint budget). The openai-compat adapter ignores
+   * it — that wire has no explicit cache placement. */
   cache?: boolean;
+  /** Cache-entry lifetime for those breakpoints. '1h' survives a learner's long pause between
+   * turns at a higher write cost; absent means the wire's 5m default. Meaningless without cache. */
+  cacheTtl?: '5m' | '1h';
   /** Raw JSON Schema the DECODER is held to (constrained decoding). The openai-compat adapter
    * sends it as `response_format: {type: 'json_schema', …}` when no tools ride the request, so a
    * small model cannot emit invalid JSON; an endpoint that rejects it falls back to the forced-tool

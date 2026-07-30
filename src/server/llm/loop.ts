@@ -35,6 +35,8 @@ export interface RunLoopOptions {
   serverTools?: ServerTool[];
   maxSteps: number;
   cache?: boolean;
+  /** Passed through to every model request; see ChatRequest.cacheTtl. */
+  cacheTtl?: '5m' | '1h';
   /** Caller abort (client disconnect, supersession): forwarded into every model request — an
    * abort cancels the in-flight provider call — and checked between steps and before tool
    * execution, so an abandoned run stops burning tokens and tool side effects. */
@@ -78,6 +80,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       messages,
       tools: decls.length ? decls : undefined,
       cache: opts.cache,
+      cacheTtl: opts.cacheTtl,
       signal: opts.signal,
     })) {
       opts.onEvent?.(ev);

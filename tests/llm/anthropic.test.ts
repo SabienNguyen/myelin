@@ -105,28 +105,67 @@ describe('anthropic request shaping', () => {
     expect(captured[0].headers['x-api-key']).toBe('late-key');
   });
 
-  it('cache: true places both breakpoints — system tail and the last block of the last message', async () => {
+  it('cache: true places the four breakpoints — tools tail, system, penultimate and last message tails', async () => {
     respond = okText;
     await model().generate({
       system: 'sys',
       cache: true,
+      tools: [
+        { name: 'first', description: 'd', inputSchema: { type: 'object' } },
+        { name: 'last', description: 'd', inputSchema: { type: 'object' } },
+      ],
       messages: [
         { role: 'user', content: [{ type: 'text', text: 'a' }] },
-        { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
+        // Penultimate breakpoint: the block-resubmit shape patches grading INTO the last
+        // assistant message between requests, so the last-message entry misses — this one,
+        // written by the previous request, still saves the whole prefix.
+        { role: 'assistant', content: [{ type: 'text', text: 'b1' }, { type: 'text', text: 'b2' }] },
         { role: 'user', content: [{ type: 'text', text: 'c1' }, { type: 'text', text: 'c2' }] },
       ],
     });
     const body = captured[0].body;
     expect(body.system).toEqual([{ type: 'text', text: 'sys', cache_control: { type: 'ephemeral' } }]);
+    expect(body.tools[0].cache_control).toBeUndefined();
+    expect(body.tools[1].cache_control).toEqual({ type: 'ephemeral' });
     const marked = body.messages
       .flatMap((m: any) => m.content)
-      .filter((b: any) => b.cache_control);
-    expect(marked).toEqual([{ type: 'text', text: 'c2', cache_control: { type: 'ephemeral' } }]);
+      .filter((b: any) => b.cache_control)
+      .map((b: any) => b.text);
+    expect(marked).toEqual(['b2', 'c2']); // tail block of the penultimate and last messages only
+  });
+
+  it('a single-message history takes one history breakpoint, not a phantom penultimate', async () => {
+    respond = okText;
+    await model().generate({ system: 'sys', cache: true, messages: USER_Q });
+    const marked = captured[0].body.messages.flatMap((m: any) => m.content).filter((b: any) => b.cache_control);
+    expect(marked).toHaveLength(1);
+  });
+
+  it("cacheTtl: '1h' rides every breakpoint; absent means the bare 5m default object", async () => {
+    respond = okText;
+    await model().generate({
+      system: 'sys', cache: true, cacheTtl: '1h',
+      tools: [{ name: 't', description: 'd', inputSchema: { type: 'object' } }],
+      messages: USER_Q,
+    });
+    const body = captured[0].body;
+    expect(body.system[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    expect(body.tools[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    const marked = body.messages.flatMap((m: any) => m.content).filter((b: any) => b.cache_control);
+    expect(marked[0].cache_control).toEqual({ type: 'ephemeral', ttl: '1h' });
+    // ttl is opt-in: no cacheTtl → no ttl key anywhere (the wire's 5m default).
+    respond = okText;
+    await model().generate({ system: 'sys', cache: true, messages: USER_Q });
+    expect(JSON.stringify(captured[1].body)).not.toContain('ttl');
   });
 
   it('places no cache_control anywhere without cache: true', async () => {
     respond = okText;
-    await model().generate({ system: 'sys', messages: USER_Q });
+    await model().generate({
+      system: 'sys',
+      tools: [{ name: 't', description: 'd', inputSchema: { type: 'object' } }],
+      messages: USER_Q,
+    });
     expect(JSON.stringify(captured[0].body)).not.toContain('cache_control');
   });
 

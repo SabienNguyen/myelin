@@ -93,13 +93,23 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   // req.sampler is ignored too: current Claude models reject top_p/top_k alongside adaptive
   // thinking, and the harness's Claude routes need no sampler tuning — that block exists for
   // local/compat models, so it stops here rather than 400 every request that carries it.
+  // The wire's default entry lifetime is 5m; '1h' is only serialized when asked for, so the body
+  // stays byte-identical for callers that never set cacheTtl.
+  const cacheCtl = req.cacheTtl === '1h' ? { ...CACHE, ttl: '1h' } : CACHE;
   const messages = req.messages.map((m) => ({ role: m.role, content: m.content.map(contentBlock) }));
   if (req.cache) {
-    // Second breakpoint: the final block of the last message, so the growing history is reused
-    // turn to turn. (The first breakpoint — the stable prefix — is the system block below.)
-    const last = messages[messages.length - 1]?.content;
-    const block = last?.[last.length - 1];
-    if (block) block.cache_control = CACHE;
+    // Two history breakpoints of the wire's four-breakpoint budget (tools and system below take
+    // the other two). The LAST message's tail makes the growing history reusable turn to turn.
+    // The PENULTIMATE message's tail exists for the block-resubmit shape: grading is patched INTO
+    // the last assistant message between requests, so the tail entry misses — the penultimate
+    // breakpoint, written by the previous request, still matches and saves the whole prefix.
+    const mark = (index: number) => {
+      const content = messages[index]?.content;
+      const block = content?.[content.length - 1];
+      if (block) block.cache_control = cacheCtl;
+    };
+    mark(messages.length - 1);
+    if (messages.length >= 2) mark(messages.length - 2);
   }
   const body: Json = {
     model: modelId,
@@ -109,7 +119,7 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
     stream,
   };
   if (req.system !== undefined) {
-    body.system = [{ type: 'text', text: req.system, ...(req.cache ? { cache_control: CACHE } : {}) }];
+    body.system = [{ type: 'text', text: req.system, ...(req.cache ? { cache_control: cacheCtl } : {}) }];
   }
   if (req.temperature !== undefined) body.temperature = req.temperature;
   // Effort is the ONLY thinking control sent: current Claude models run adaptive thinking by
@@ -117,9 +127,14 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   // so neither is ever serialized here.
   if (req.effort !== undefined) body.output_config = { effort: req.effort };
   if (req.tools?.length) {
-    body.tools = req.tools.map((t) => isServerTool(t)
-      ? t // provider-executed: the provider-shaped object goes to the wire verbatim
-      : { name: t.name, description: t.description, input_schema: t.inputSchema });
+    const tools = req.tools.map((t) => isServerTool(t)
+      ? { ...t } // provider-executed: the provider-shaped object goes to the wire verbatim (copied so a breakpoint never mutates the caller's tool)
+      : { name: t.name, description: t.description, input_schema: t.inputSchema } as Json);
+    // Third breakpoint: the tools tail. Tools serialize AHEAD of system on this wire, and the
+    // tool set is stable across modes while the system prompt is not — so a mode switch keeps a
+    // tools-prefix hit instead of missing from byte zero.
+    if (req.cache) tools[tools.length - 1]!.cache_control = cacheCtl;
+    body.tools = tools;
   }
   if (req.toolChoice) {
     body.tool_choice = req.toolChoice === 'auto'
