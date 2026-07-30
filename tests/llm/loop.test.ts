@@ -195,7 +195,47 @@ describe('runLoop', () => {
     });
     expect(seen).toEqual([
       'step-start', 'text-start', 'text-delta', 'text-end', 'tool-call', 'finish', 'step-finish',
+      'tool-result',
       'step-start', 'text-delta', 'finish', 'step-finish',
+    ]);
+  });
+
+  it('emits a tool-result event per executed tool, carrying the output and isError', async () => {
+    const results: LoopEvent[] = [];
+    const { model } = scriptedModel([
+      [call('t1', 'lookup', {}), call('t2', 'broken', {}), finish('tool-calls')],
+      [finish('stop')],
+    ]);
+    await runLoop({
+      model,
+      messages: START,
+      tools: [
+        { name: 'lookup', description: 'd', inputSchema: {}, execute: async () => ({ ok: 1 }) },
+        { name: 'broken', description: 'd', inputSchema: {}, execute: async () => { throw new Error('nope'); } },
+      ],
+      maxSteps: 5,
+      onEvent: (e) => { if (e.type === 'tool-result') results.push(e); },
+    });
+    expect(results).toEqual([
+      { type: 'tool-result', toolCallId: 't1', toolName: 'lookup', output: { ok: 1 } },
+      { type: 'tool-result', toolCallId: 't2', toolName: 'broken', output: 'nope', isError: true },
+    ]);
+  });
+
+  it('passes server tools to the model verbatim without ever executing or halting on them', async () => {
+    const { model, requests } = scriptedModel([[finish('stop')]]);
+    const serverTool = { type: 'web_search_20260209', name: 'web_search', max_uses: 8 };
+    const out = await runLoop({
+      model,
+      messages: START,
+      tools: [{ name: 'lookup', description: 'd', inputSchema: {}, execute: async () => 'r' }],
+      serverTools: [serverTool],
+      maxSteps: 5,
+    });
+    expect(out.stopReason).toBe('end');
+    expect(requests[0].tools).toEqual([
+      { name: 'lookup', description: 'd', inputSchema: {} },
+      serverTool,
     ]);
   });
 });

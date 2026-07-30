@@ -3,7 +3,7 @@
 // hooks, and context assembly plug in later.
 import {
   zeroUsage,
-  type ChatMessage, type ChatModel, type ContentPart, type StreamEvent,
+  type ChatMessage, type ChatModel, type ContentPart, type ServerTool, type StreamEvent,
   type ToolCallPart, type ToolDecl, type Usage,
 } from './types.js';
 
@@ -13,13 +13,21 @@ export type LoopTool = ToolDecl & {
   execute?: (input: unknown) => Promise<unknown>;
 };
 
-export type LoopEvent = StreamEvent | { type: 'step-start' | 'step-finish' };
+export type LoopEvent =
+  | StreamEvent
+  | { type: 'step-start' | 'step-finish' }
+  // Emitted as each loop-executed tool settles, so the wire layer can round-trip the output to
+  // the client's already-rendered tool part (the provider stream itself never carries results).
+  | { type: 'tool-result'; toolCallId: string; toolName: string; output: unknown; isError?: boolean };
 
 export interface RunLoopOptions {
   model: ChatModel;
   system?: string;
   messages: ChatMessage[];
   tools: LoopTool[];
+  /** Provider-executed tools (e.g. Anthropic web search), forwarded to the model verbatim.
+   * They run inside the provider's own turn — never executed or halted on here. */
+  serverTools?: ServerTool[];
   maxSteps: number;
   cache?: boolean;
   onEvent?: (e: LoopEvent) => void;
@@ -43,9 +51,10 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
   const steps: LoopStep[] = [];
   const usage = zeroUsage();
   // The wire sees plain declarations; execute stays loop-side.
-  const decls: ToolDecl[] = opts.tools.map((t) => ({
-    name: t.name, description: t.description, inputSchema: t.inputSchema,
-  }));
+  const decls: (ToolDecl | ServerTool)[] = [
+    ...opts.tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+    ...(opts.serverTools ?? []),
+  ];
   const byName = new Map(opts.tools.map((t) => [t.name, t]));
   let stopReason: LoopResult['stopReason'] = 'max-steps';
 
@@ -121,6 +130,11 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
         toolCallId: call.toolCallId,
         toolName: call.toolName,
         output,
+        ...(isError ? { isError: true } : {}),
+      });
+      opts.onEvent?.({
+        type: 'tool-result',
+        toolCallId: call.toolCallId, toolName: call.toolName, output,
         ...(isError ? { isError: true } : {}),
       });
     }
