@@ -16,7 +16,7 @@ import { z } from 'zod';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import {
-  readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
+  enqueueChapters, readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
 import { sanitizeToolArgs, SLUG_LIST_CAP } from './session.js';
 import { recordUsage } from './usageLedger.js';
@@ -79,13 +79,13 @@ export async function ingestBook(
     mkdirSync(uploadsDir, { recursive: true });
     writeFileSync(join(uploadsDir, 'paper.md'), `<!-- source: "${title}" -->\n\n${markdown}\n`);
     await updateQueue(cfg.vault, (entries) => {
-      entries.push({
+      enqueueChapters(entries, [{
         book: title,
         chapter: `raw/uploads/${slug}/paper.md`,
         title,
         status: 'pending',
         ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
-      });
+      }]);
     });
     return { book: title, chapters: 1 };
   }
@@ -109,7 +109,7 @@ export async function ingestBook(
       status: 'pending' as const,
     };
   });
-  await updateQueue(cfg.vault, (entries) => { entries.push(...newEntries); });
+  await updateQueue(cfg.vault, (entries) => { enqueueChapters(entries, newEntries); });
 
   return { book: bookTitle, chapters: chapters.length };
 }
@@ -292,7 +292,7 @@ export function startConversion(
           queuedChapters.push(...newEntries.map((e) => e.chapter));
 
           await updateQueue(cfg.vault, (entries) => {
-            entries.push(...newEntries);
+            enqueueChapters(entries, newEntries);
             const ph = entries.find((e) => e.chapter === placeholderKey);
             if (ph) ph.progress = { pagesDone: u.pagesDone, pagesTotal: u.pagesTotal };
           });
@@ -835,12 +835,45 @@ export function ensureCompileDrain(lw: Engram, cfg: HarnessConfig, opts: { model
   void (async () => {
     try {
       const concurrency = compileConcurrencyFor(compileModelId);
-      while (readQueue(cfg.vault).some((e) => e.status === 'pending')) {
+      const pendingCount = () => readQueue(cfg.vault).filter((e) => e.status === 'pending').length;
+      while (pendingCount() > 0) {
         if (!canCompileNow(compileModelId, activeConversions)) {
           await new Promise((r) => { setTimeout(r, DRAIN_GPU_CONTENTION_BACKOFF_MS); });
           continue;
         }
+        // No-progress breaker: a compileNext pass that leaves the pending count no lower than it
+        // started did not drain anything it claimed — an entry the mutators cannot move to a
+        // terminal status (the stranded-duplicate bug enqueueChapters now prevents). Bail instead
+        // of spinning the loop forever, which recompiled a stuck entry thousands of times and
+        // filled a fresh vault with junk pages. A GPU-contention backoff `continue`s above without
+        // reaching here, so a legitimately-waiting drain is never tripped by this.
+        const before = pendingCount();
         await compileNext(lw, cfg, concurrency, { ...opts, concurrency });
+        if (pendingCount() >= before) {
+          // A pass that moved nothing means the pending entries can't be marked terminal. The one
+          // way that happens is a stranded duplicate: a chapter present twice, so compileOne's
+          // find(chapter) status write lands on the OTHER row (enqueueChapters prevents this at
+          // enqueue time, but two concurrent conversions of the same source can still interleave
+          // one in). Prune any pending/compiling entry whose chapter ALSO has a terminal twin —
+          // provably redundant, since the content compiled under the twin.
+          const sizeBefore = readQueue(cfg.vault).length;
+          const after = await updateQueue(cfg.vault, (entries) => {
+            const terminal = new Set(
+              entries.filter((e) => e.status === 'done' || e.status === 'error').map((e) => e.chapter),
+            );
+            return entries.filter((e) =>
+              !((e.status === 'pending' || e.status === 'compiling') && terminal.has(e.chapter)));
+          });
+          if (after.length < sizeBefore) continue; // pruned a stranded duplicate — keep draining
+          // Nothing to prune and nothing moved: a genuine stall. Bail rather than recompile
+          // forever (the runaway that filled a fresh vault with thousands of pages).
+          console.error(
+            `[ensureCompileDrain] no progress and no stranded duplicates to prune: ${pendingCount()} `
+            + `entries stuck pending — stopping to avoid a runaway. Chapters: `
+            + after.filter((e) => e.status === 'pending').map((e) => e.chapter).join(', '),
+          );
+          break;
+        }
       }
     } catch (e) {
       console.error('[ensureCompileDrain]', e);

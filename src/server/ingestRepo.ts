@@ -33,7 +33,7 @@ import { mineRepoBuiltin, type RepoMineReport } from './gap/mineRepo.js';
 import { ensureCompileDrain, slugify } from './ingest.js';
 import { analyzeLinkList, saveLinkDirectory, type DirectorySection } from './linkList.js';
 import type { Engram } from './mcp.js';
-import { readQueue, updateQueue, writeQueue, type QueueEntry } from './queueStore.js';
+import { enqueueChapters, readQueue, updateQueue, writeQueue, type QueueEntry } from './queueStore.js';
 
 // ── name/source derivation ──────────────────────────────────────────────────────────────────
 
@@ -485,7 +485,7 @@ export function ingestRepo(
         // read-once-hold-across-the-loop pattern that ate tonight's rows elsewhere — see
         // queueStore.ts's module doc comment. This is exactly the write that lost 15 rows in
         // production: a repo ingest's placeholder + these per-doc-file chapter pushes.
-        await updateQueue(cfg.vault, (entries) => { entries.push(...newEntries); });
+        await updateQueue(cfg.vault, (entries) => { enqueueChapters(entries, newEntries); });
         queuedChapters += chapters.length;
       }
       if (linkListFiles.length > 0) {

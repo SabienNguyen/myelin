@@ -116,6 +116,25 @@ const chains = new Map<string, Promise<unknown>>();
  * A throwing mutator rejects only its own caller's promise; the chain still advances (via the
  * trailing `.catch`) so one bad mutation never wedges every later caller against this vault.
  */
+/**
+ * Append chapter entries, UPSERTING by chapter path: any existing row with the same `chapter` is
+ * removed first, so re-ingesting a source (or two ingests racing to the same path) leaves exactly
+ * one entry per chapter. This is load-bearing, not tidiness — `chapter` is the ledger's identity
+ * key (see QueueEntry), and every status mutator finds its target with
+ * `entries.find(e => e.chapter === …)`. A duplicate chapter row therefore can NEVER be marked
+ * done: the find always resolves to the first match, so the later duplicate is stranded 'pending'
+ * forever and ensureCompileDrain's `while (some pending)` loop recompiles it without end — a fresh
+ * vault filled with thousands of pages before this was caught. Placeholders (synthetic unique
+ * chapters) never collide, so this is a no-op for them.
+ */
+export function enqueueChapters(entries: QueueEntry[], additions: QueueEntry[]): void {
+  const incoming = new Set(additions.map((e) => e.chapter));
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (incoming.has(entries[i].chapter)) entries.splice(i, 1);
+  }
+  entries.push(...additions);
+}
+
 export function updateQueue(
   vault: string,
   mutator: (entries: QueueEntry[]) => QueueEntry[] | void,

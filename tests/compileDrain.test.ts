@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Engram } from '../src/server/mcp.js';
 import { sawToolResult, streamModel, turnsModel } from './mockModel.js';
+import { writeQueue } from '../src/server/queueStore.js';
 import {
   canCompileNow, compileConcurrencyFor, ensureCompileDrain, readQueue, startConversion,
 } from '../src/server/ingest.js';
@@ -104,6 +105,40 @@ describe('ensureCompileDrain — autoCompile end to end', () => {
     // calling it again doesn't throw or double-run.
     expect(() => ensureCompileDrain(lw, cfg)).not.toThrow();
   });
+
+  it('the breaker prunes a stranded duplicate instead of recompiling it forever', async () => {
+    // Reproduces the runaway's mechanism directly: a 'pending' entry whose chapter DUPLICATES a
+    // 'done' one. compileOne finishes and writes status via find(chapter) — which resolves to the
+    // 'done' row, so the pending duplicate never terminates. Pre-fix, ensureCompileDrain's
+    // `while (some pending)` recompiled it without end (thousands of calls). The breaker must both
+    // STOP the runaway (a handful of calls, not thousands) AND prune the provably-redundant
+    // duplicate (its chapter already compiled under the done twin), leaving a clean ledger.
+    let calls = 0;
+    const model = streamModel((req) => {
+      calls++;
+      return sawToolResult(req)
+        ? { text: 'done' }
+        : { toolCalls: [{ toolName: 'write_page', input: {
+          slug: 'dup', title: 'Dup', body: 'A concept. Part of Dup Book.',
+          sources: ['Dup Book'], difficulty: 1, status: 'draft',
+        } }] };
+    });
+    writeQueue(vault, [
+      { book: 'Dup Book', chapter: 'raw/uploads/dup/ch-01.md', title: 'Dup', status: 'done' },
+      { book: 'Dup Book', chapter: 'raw/uploads/dup/ch-01.md', title: 'Dup', status: 'pending' },
+    ]);
+
+    ensureCompileDrain(lw, cfg, { model });
+    await until(() => !readQueue(vault).some((e) => e.status === 'pending' || e.status === 'compiling'), 8_000);
+    const ledger = readQueue(vault);
+    // The invariants that matter and are deterministic: the duplicate is collapsed to one row, it
+    // is terminal (not stuck pending/compiling), and the runaway is gone. The exact terminal value
+    // is nondeterministic — the status write lands on whichever twin find() hits first — which is
+    // the whole reason a duplicate chapter is a bug, and the whole reason we prune it.
+    expect(ledger.filter((e) => e.chapter === 'raw/uploads/dup/ch-01.md')).toHaveLength(1);
+    expect(['done', 'error']).toContain(ledger[0].status);
+    expect(calls).toBeLessThan(6); // the runaway is gone — a couple of passes, not thousands
+  }, 30_000);
 
   it('a non-ollama (cloud) compile model drains a progressively-queued chapter WHILE its own conversion is still active', async () => {
     // A model whose responses don't depend on call order/interleaving — it looks at whether a
