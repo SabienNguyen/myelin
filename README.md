@@ -224,6 +224,14 @@ To vet a model before pointing rails at it: `npm run eval:model -- ollama:qwen3:
 [--feedback]` runs the real rails generation prompts against it and reports first-try validity,
 retries, fallbacks, and latency.
 
+No local model handy? `npm run weak:model` starts a deliberately weak fake on the same wire —
+deterministic fenced-JSON, truncation, expected∉choices, and prose-refusal cycles (plus a
+`WEAK_MODE=reject-rf` variant that refuses `response_format`, exercising the forced-tool
+fallback). Point the eval at it with `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:4901/v1 npm run
+eval:model -- openai:weak-7b --n 6`. The same cycles run in CI as
+`tests/llm/weakModel.integration.test.ts`, pinning the invariant that a small model's worst
+output degrades to a retry or the deterministic fallback — never an error at the learner.
+
 <details>
 <summary><b>Ollama caveats: context length and leaked chat-template tokens</b></summary>
 
