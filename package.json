@@ -19,6 +19,7 @@
     "build:all": "npm run build && npm run build:server",
     "bundle:engram": "node scripts/bundle-engram.mjs",
     "eval:model": "tsx scripts/eval-local-model.ts",
+    "weak:model": "node scripts/weak-model-server.mjs",
     "desktop": "npm run build:all && electron electron/main.mjs",
     "dist": "npm run build:all && npm run bundle:engram && electron-builder"
   },
