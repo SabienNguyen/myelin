@@ -66,6 +66,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     opts.signal?.throwIfAborted();
     opts.onEvent?.({ type: 'step-start' });
     let text = '';
+    const thinking: ContentPart[] = [];
     const toolCalls: ToolCallPart[] = [];
     for await (const ev of opts.model.stream({
       system: opts.system,
@@ -77,6 +78,15 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       opts.onEvent?.(ev);
       if (ev.type === 'text-delta') {
         text += ev.text;
+      } else if (ev.type === 'thinking-end') {
+        // thinking-end carries the assembled block (text+signature, or the redacted payload), so
+        // no delta re-accumulation here. Collected even when empty: a signature with no visible
+        // text (display-omitted thinking) must still round-trip.
+        thinking.push({
+          type: 'thinking', text: ev.text,
+          ...(ev.signature !== undefined ? { signature: ev.signature } : {}),
+          ...(ev.redacted !== undefined ? { redacted: ev.redacted } : {}),
+        });
       } else if (ev.type === 'tool-call') {
         toolCalls.push({ type: 'tool-call', toolCallId: ev.toolCallId, toolName: ev.toolName, input: ev.input });
       } else if (ev.type === 'finish') {
@@ -89,7 +99,11 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
     opts.onEvent?.({ type: 'step-finish' });
     steps.push({ toolCalls, text });
 
+    // Thinking first, mirroring wire order (it streams ahead of text and tool calls): the
+    // Anthropic API rejects the next request when thinking is active and the thinking block that
+    // preceded a tool_use is missing from the echoed assistant turn — this line is the fix.
     const content: ContentPart[] = [
+      ...thinking,
       ...(text ? [{ type: 'text', text } satisfies ContentPart] : []),
       ...toolCalls,
     ];

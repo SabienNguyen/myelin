@@ -52,6 +52,30 @@ describe('shared MessageAssembler (direct drive)', () => {
     expect(history[1]!.parts).toHaveLength(1);
   });
 
+  it('assembles a reasoning part streaming -> done, storing providerMetadata from reasoning-end', () => {
+    const assembler = new MessageAssembler(USER_TURN, 'm1');
+    assembler.apply({ type: 'start', messageId: 'm1' });
+    assembler.apply({ type: 'start-step' });
+    assembler.apply({ type: 'reasoning-start', id: '0' });
+    assembler.apply({ type: 'reasoning-delta', id: '0', delta: 'Let me ' });
+    expect(assembler.message.parts[1]).toEqual({ type: 'reasoning', state: 'streaming', text: 'Let me ' });
+    assembler.apply({ type: 'reasoning-delta', id: '0', delta: 'reason.' });
+    assembler.apply({ type: 'reasoning-end', id: '0', providerMetadata: { signature: 'sig_1' } });
+    expect(assembler.message.parts[1]).toEqual({
+      type: 'reasoning', state: 'done', text: 'Let me reason.', providerMetadata: { signature: 'sig_1' },
+    });
+  });
+
+  it('resets reasoning correlation at finish-step, like text', () => {
+    const assembler = new MessageAssembler(USER_TURN, 'm1');
+    assembler.apply({ type: 'start-step' });
+    assembler.apply({ type: 'reasoning-start', id: '0' });
+    assembler.apply({ type: 'reasoning-end', id: '0' });
+    assembler.apply({ type: 'finish-step' });
+    // The anthropic adapter reuses block-index ids across steps; a stale id must not resolve.
+    expect(() => assembler.apply({ type: 'reasoning-delta', id: '0', delta: 'x' })).toThrow(/unknown reasoning id/);
+  });
+
   it('generateMessageId keeps the SDK-familiar 16-char format', () => {
     expect(generateMessageId()).toMatch(/^[0-9A-Za-z]{16}$/);
   });

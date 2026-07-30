@@ -30,6 +30,10 @@ export function uiMessageToThreadMessage(message: UIMessage, error?: string): Th
     if (part.type === 'step-start') continue;
     if (part.type === 'text') {
       content.push({ type: 'text', text: part.text });
+    } else if (part.type === 'reasoning') {
+      // providerMetadata (the thinking signature) stays behind: it is resubmit plumbing the
+      // renderer must never see. Thread.tsx's Reasoning component decides how much to show.
+      content.push({ type: 'reasoning', text: part.text });
     } else if (isToolUIPart(part)) {
       const args = part.input !== null && typeof part.input === 'object' && !Array.isArray(part.input)
         ? part.input : {};

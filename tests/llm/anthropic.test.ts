@@ -151,6 +151,45 @@ describe('anthropic request shaping', () => {
     expect(body.temperature).toBe(0.3);
     expect(body.max_tokens).toBe(100);
   });
+
+  it('serializes thinking parts back in position — signature intact, redacted as its wire block', async () => {
+    respond = okText;
+    await model().generate({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'q' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 'reasoning...', signature: 'sig_1' },
+            { type: 'thinking', text: '', redacted: { data: 'opaque==' } },
+            { type: 'tool-call', toolCallId: 'tu_1', toolName: 'lookup', input: {} },
+          ],
+        },
+        { role: 'user', content: [{ type: 'tool-result', toolCallId: 'tu_1', toolName: 'lookup', output: 'ok' }] },
+      ],
+    });
+    // Thinking leads the assistant turn, exactly as it arrived: with thinking active the API
+    // rejects a tool_use whose preceding thinking block is missing from the echo.
+    expect(captured[0].body.messages[1].content).toEqual([
+      { type: 'thinking', thinking: 'reasoning...', signature: 'sig_1' },
+      { type: 'redacted_thinking', data: 'opaque==' },
+      { type: 'tool_use', id: 'tu_1', name: 'lookup', input: {} },
+    ]);
+  });
+
+  it('sends output_config.effort when effort is set — and never a thinking or budget_tokens field', async () => {
+    respond = okText;
+    await model().generate({ messages: USER_Q, effort: 'high' });
+    expect(captured[0].body.output_config).toEqual({ effort: 'high' });
+    // Adaptive thinking is the default the request must not disturb; budget_tokens is rejected
+    // outright on current models.
+    expect(captured[0].body.thinking).toBeUndefined();
+    expect(JSON.stringify(captured[0].body)).not.toContain('budget_tokens');
+
+    respond = okText;
+    await model().generate({ messages: USER_Q });
+    expect(captured[1].body.output_config).toBeUndefined();
+  });
 });
 
 describe('anthropic generate', () => {
@@ -170,6 +209,27 @@ describe('anthropic generate', () => {
     ]);
     expect(out.usage).toEqual({ inputTokens: 100, outputTokens: 25, cacheReadTokens: 40, cacheWriteTokens: 10 });
     expect(out.finishReason).toBe('tool-calls');
+  });
+
+  it('parses thinking blocks into result.thinking, never into text', async () => {
+    respond = json(200, {
+      content: [
+        { type: 'thinking', thinking: 'quietly reasoning', signature: 'sig_1' },
+        { type: 'redacted_thinking', data: 'opaque==' },
+        { type: 'text', text: 'Answer.' },
+      ],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 3, output_tokens: 2 },
+    });
+    const out = await model().generate({ messages: USER_Q });
+    expect(out.text).toBe('Answer.');
+    expect(out.thinking).toEqual([
+      { type: 'thinking', text: 'quietly reasoning', signature: 'sig_1' },
+      { type: 'thinking', text: '', redacted: { data: 'opaque==' } },
+    ]);
+    // Absent entirely when the model did not think — one-shot callers see no shape change.
+    respond = okText;
+    expect((await model().generate({ messages: USER_Q })).thinking).toBeUndefined();
   });
 
   it('maps max_tokens to length and an unknown stop_reason to other', async () => {
@@ -239,6 +299,54 @@ describe('anthropic streaming', () => {
         type: 'finish', reason: 'stop',
         usage: { inputTokens: 5, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
       },
+    ]);
+  });
+
+  it('streams a thinking block: deltas out, signature silent, assembled block on thinking-end', async () => {
+    respond = sse([[
+      frame('message_start', { type: 'message_start', message: { usage: { input_tokens: 7 } } }),
+      frame('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'First, ' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'check.' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'sig_' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'signature_delta', signature: 'abc' } }),
+      frame('content_block_stop', { type: 'content_block_stop', index: 0 }),
+      frame('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'Done.' } }),
+      frame('content_block_stop', { type: 'content_block_stop', index: 1 }),
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 4 } }),
+      frame('message_stop', { type: 'message_stop' }),
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events).toEqual([
+      { type: 'thinking-start', id: '0' },
+      { type: 'thinking-delta', id: '0', text: 'First, ' },
+      { type: 'thinking-delta', id: '0', text: 'check.' },
+      // signature_delta fragments never surface as deltas; the end event carries the whole
+      // assembled block so the loop echoes without re-accumulating.
+      { type: 'thinking-end', id: '0', text: 'First, check.', signature: 'sig_abc' },
+      { type: 'text-start', id: '1' },
+      { type: 'text-delta', id: '1', text: 'Done.' },
+      { type: 'text-end', id: '1' },
+      {
+        type: 'finish', reason: 'stop',
+        usage: { inputTokens: 7, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    ]);
+  });
+
+  it('brackets a redacted_thinking block (whole on arrival) as start plus end with the payload', async () => {
+    respond = sse([[
+      frame('message_start', { type: 'message_start', message: { usage: {} } }),
+      frame('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'redacted_thinking', data: 'opaque==' } }),
+      frame('content_block_stop', { type: 'content_block_stop', index: 0 }),
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } }),
+      frame('message_stop', { type: 'message_stop' }),
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events.slice(0, 2)).toEqual([
+      { type: 'thinking-start', id: '0' },
+      { type: 'thinking-end', id: '0', text: '', redacted: { data: 'opaque==' } },
     ]);
   });
 

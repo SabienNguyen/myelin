@@ -82,6 +82,51 @@ describe('runLoop', () => {
     expect(requests[1].messages[2].content[0]).toMatchObject({ type: 'tool-result', toolCallId: 't1' });
   });
 
+  it('echoes the step\'s thinking (with signature) ahead of the tool call in the next request', async () => {
+    // This is the tool-loop 400 fix: with thinking active, the Anthropic wire rejects the next
+    // request unless the thinking block that preceded the tool_use is echoed back in position.
+    const { model, requests } = scriptedModel([
+      [
+        { type: 'thinking-start', id: '0' },
+        { type: 'thinking-delta', id: '0', text: 'Look it up.' },
+        { type: 'thinking-end', id: '0', text: 'Look it up.', signature: 'sig_1' },
+        { type: 'text-delta', id: '1', text: 'Checking' },
+        call('t1', 'lookup', { q: 'x' }),
+        finish('tool-calls'),
+      ],
+      [
+        { type: 'thinking-start', id: '0' },
+        { type: 'thinking-end', id: '0', text: '', redacted: { data: 'opaque==' } },
+        { type: 'text-delta', id: '1', text: 'Answer' },
+        finish('stop'),
+      ],
+    ]);
+    const out = await runLoop({
+      model,
+      messages: START,
+      tools: [{ name: 'lookup', description: 'd', inputSchema: {}, execute: async () => ({ found: true }) }],
+      maxSteps: 5,
+    });
+    expect(out.stopReason).toBe('end');
+    // The second request saw the first step's assistant turn thinking-first.
+    expect(requests[1].messages[1]).toEqual({
+      role: 'assistant',
+      content: [
+        { type: 'thinking', text: 'Look it up.', signature: 'sig_1' },
+        { type: 'text', text: 'Checking' },
+        { type: 'tool-call', toolCallId: 't1', toolName: 'lookup', input: { q: 'x' } },
+      ],
+    });
+    // A redacted block round-trips onto the transcript the same way.
+    expect(out.messages.at(-1)).toEqual({
+      role: 'assistant',
+      content: [
+        { type: 'thinking', text: '', redacted: { data: 'opaque==' } },
+        { type: 'text', text: 'Answer' },
+      ],
+    });
+  });
+
   it('halts as external-tool on a declared tool with no execute, running nothing', async () => {
     let ran = false;
     const { model, requests } = scriptedModel([

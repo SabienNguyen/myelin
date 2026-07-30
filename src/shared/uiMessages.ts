@@ -12,6 +12,18 @@ export interface TextUIPart {
   text: string;
 }
 
+/** Model reasoning streamed ahead of the answer — ai@6's ReasoningUIPart shape. providerMetadata
+ * carries what the provider wire must get back on a block-pause resubmit: the Anthropic thinking
+ * `signature`, or a redacted block's `redactedData`. Flat keys, not ai@6's per-provider nesting —
+ * both ends are first-party and uiMessagesToChatMessages is the only reader. */
+export interface ReasoningUIPart {
+  type: 'reasoning';
+  /** 'streaming' from reasoning-start until reasoning-end, then 'done' — same protocol as text. */
+  state?: 'streaming' | 'done';
+  text: string;
+  providerMetadata?: Record<string, unknown>;
+}
+
 /** Marks a step boundary inside an assistant message; uiMessagesToChatMessages groups on it. */
 export interface StepStartUIPart { type: 'step-start' }
 
@@ -41,7 +53,7 @@ export interface DataUIPart {
   data: unknown;
 }
 
-export type UIPart = TextUIPart | StepStartUIPart | ToolUIPart | DataUIPart;
+export type UIPart = TextUIPart | ReasoningUIPart | StepStartUIPart | ToolUIPart | DataUIPart;
 
 export interface UIMessage {
   id: string;

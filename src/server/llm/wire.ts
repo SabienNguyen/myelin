@@ -103,6 +103,20 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
             case 'text-start': return emit({ type: 'text-start', id: event.id });
             case 'text-delta': return emit({ type: 'text-delta', id: event.id, delta: event.text });
             case 'text-end': return emit({ type: 'text-end', id: event.id });
+            case 'thinking-start': return emit({ type: 'reasoning-start', id: event.id });
+            case 'thinking-delta': return emit({ type: 'reasoning-delta', id: event.id, delta: event.text });
+            case 'thinking-end': {
+              // The assembled text is dropped (the reducer accumulated the deltas); what must
+              // survive the round trip is the echo plumbing — signature / redacted payload —
+              // which rides providerMetadata for uiMessagesToChatMessages to read back.
+              const meta: Record<string, unknown> = {};
+              if (event.signature !== undefined) meta.signature = event.signature;
+              if (event.redacted !== undefined) meta.redactedData = event.redacted.data;
+              return emit({
+                type: 'reasoning-end', id: event.id,
+                ...(Object.keys(meta).length ? { providerMetadata: meta } : {}),
+              });
+            }
             case 'tool-input-start':
               return emit({ type: 'tool-input-start', toolCallId: event.toolCallId, toolName: event.toolName });
             case 'tool-input-delta':
@@ -166,8 +180,9 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
 }
 
 /** First-party replacement for the SDK's convertToModelMessages, matched to how session.ts
- * uses it: text parts become text, tool parts with results become assistant tool-call plus
- * user tool-result pairs, and step-start parts split an assistant message so each step's calls
+ * uses it: text parts become text, reasoning parts become thinking parts (signature restored
+ * from providerMetadata), tool parts with results become assistant tool-call plus user
+ * tool-result pairs, and step-start parts split an assistant message so each step's calls
  * are grouped with THEIR results (the transcript shape both provider wires demand).
  *
  * Deliberate narrowings against the SDK version:
@@ -200,6 +215,17 @@ export function uiMessagesToChatMessages(messages: UIMessage[]): ChatMessage[] {
           for (const part of block) {
             if (part.type === 'text') {
               calls.push({ type: 'text', text: part.text });
+            } else if (part.type === 'reasoning') {
+              // Back to a ThinkingPart, in position: reasoning sits before its step's tool call
+              // in parts order, and the Anthropic wire rejects a resubmitted tool_use whose
+              // preceding thinking block is missing while thinking is active. Mapped even with
+              // empty text — a display-omitted block still carries a signature to echo.
+              const meta = part.providerMetadata ?? {};
+              calls.push({
+                type: 'thinking', text: part.text,
+                ...(typeof meta.signature === 'string' ? { signature: meta.signature } : {}),
+                ...(typeof meta.redactedData === 'string' ? { redacted: { data: meta.redactedData } } : {}),
+              });
             } else if (isToolUIPart(part)) {
               if (part.providerExecuted === true || part.state === 'input-streaming') continue;
               const toolName = getToolName(part);

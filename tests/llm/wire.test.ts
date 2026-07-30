@@ -25,6 +25,22 @@ const wireChunkSchema = z.union([
   z.strictObject({ type: z.literal('text-start'), id: z.string() }),
   z.strictObject({ type: z.literal('text-delta'), id: z.string(), delta: z.string() }),
   z.strictObject({ type: z.literal('text-end'), id: z.string() }),
+  // The ai@6 reasoning chunks, added deliberately when first-party thinking support landed —
+  // same field-for-field transcription as the rest, with one documented extension both
+  // first-party ends own: the wire puts FLAT keys under reasoning-end's providerMetadata
+  // ({ signature }, { redactedData }) instead of ai@6's per-provider nesting.
+  z.strictObject({
+    type: z.literal('reasoning-start'), id: z.string(),
+    providerMetadata: z.record(z.string(), z.unknown()).optional(),
+  }),
+  z.strictObject({
+    type: z.literal('reasoning-delta'), id: z.string(), delta: z.string(),
+    providerMetadata: z.record(z.string(), z.unknown()).optional(),
+  }),
+  z.strictObject({
+    type: z.literal('reasoning-end'), id: z.string(),
+    providerMetadata: z.record(z.string(), z.unknown()).optional(),
+  }),
   z.strictObject({
     type: z.literal('tool-input-start'), toolCallId: z.string(), toolName: z.string(),
     providerExecuted: z.boolean().optional(),
@@ -343,6 +359,62 @@ describe('createUiStream wire shape', () => {
     expect(parts.find((p) => p.toolCallId === 'bad1')).toMatchObject({ state: 'output-error', errorText: 'backend down' });
   });
 
+  it('maps thinking events to schema-valid reasoning chunks and assembles the part', async () => {
+    let finalMessages: UIMessage[] = [];
+    const res = createUiStream({
+      originalMessages: USER_TURN,
+      execute: async (writer) => {
+        writer.forward({ type: 'step-start' });
+        writer.forward({ type: 'thinking-start', id: '0' });
+        writer.forward({ type: 'thinking-delta', id: '0', text: 'Let me ' });
+        writer.forward({ type: 'thinking-delta', id: '0', text: 'reason.' });
+        writer.forward({ type: 'thinking-end', id: '0', text: 'Let me reason.', signature: 'sig_1' });
+        writer.forward({ type: 'text-start', id: '1' });
+        writer.forward({ type: 'text-delta', id: '1', text: 'Answer.' });
+        writer.forward({ type: 'text-end', id: '1' });
+        writer.forward({ type: 'step-finish' });
+      },
+      onEnd: ({ messages }) => { finalMessages = messages; },
+    });
+    const { chunks } = await collect(res);
+    expect(chunks.filter((c) => c.type.startsWith('reasoning'))).toEqual([
+      { type: 'reasoning-start', id: '0' },
+      { type: 'reasoning-delta', id: '0', delta: 'Let me ' },
+      { type: 'reasoning-delta', id: '0', delta: 'reason.' },
+      // The assembled text stays off the wire (the reducer accumulated the deltas); only the
+      // echo plumbing rides providerMetadata.
+      { type: 'reasoning-end', id: '0', providerMetadata: { signature: 'sig_1' } },
+    ]);
+    expectValidChunks(chunks);
+    const parts = finalMessages[1].parts;
+    expect(parts[1]).toEqual({
+      type: 'reasoning', state: 'done', text: 'Let me reason.', providerMetadata: { signature: 'sig_1' },
+    });
+    expect(parts[2]).toEqual({ type: 'text', state: 'done', text: 'Answer.' });
+  });
+
+  it('carries a redacted block as an empty-text reasoning part with redactedData metadata', async () => {
+    let finalMessages: UIMessage[] = [];
+    const res = createUiStream({
+      originalMessages: USER_TURN,
+      execute: async (writer) => {
+        writer.forward({ type: 'step-start' });
+        writer.forward({ type: 'thinking-start', id: '0' });
+        writer.forward({ type: 'thinking-end', id: '0', text: '', redacted: { data: 'opaque==' } });
+        writer.forward({ type: 'step-finish' });
+      },
+      onEnd: ({ messages }) => { finalMessages = messages; },
+    });
+    const { chunks } = await collect(res);
+    expect(chunks.find((c) => c.type === 'reasoning-end')).toEqual({
+      type: 'reasoning-end', id: '0', providerMetadata: { redactedData: 'opaque==' },
+    });
+    expectValidChunks(chunks);
+    expect(finalMessages[1].parts[1]).toEqual({
+      type: 'reasoning', state: 'done', text: '', providerMetadata: { redactedData: 'opaque==' },
+    });
+  });
+
   it('generateMessageId matches the SDK default format', () => {
     for (let i = 0; i < 20; i++) expect(generateMessageId()).toMatch(/^[0-9A-Za-z]{16}$/);
   });
@@ -482,6 +554,54 @@ describe('uiMessagesToChatMessages', () => {
     ]);
   });
 
+  it('round-trips a reasoning part into a ThinkingPart inside its own step block', () => {
+    // The block-pause resubmit shape when thinking is active: the paused assistant message holds
+    // thinking, text, and the tool call. The thinking part must come back FIRST in the same
+    // assistant ChatMessage as the call — the Anthropic wire rejects the echoed tool_use without
+    // its preceding thinking block.
+    const messages: UIMessage[] = [
+      {
+        id: 'a1', role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          {
+            type: 'reasoning', state: 'done', text: 'Warm-up first.',
+            providerMetadata: { signature: 'sig_1' },
+          },
+          { type: 'text', state: 'done', text: 'Try this.' },
+          {
+            type: 'tool-quick_check', toolCallId: 'tc1', state: 'output-available',
+            input: { question: '2+2?' }, output: { answer: '4' },
+          },
+          { type: 'step-start' },
+          { type: 'reasoning', state: 'done', text: '', providerMetadata: { redactedData: 'opaque==' } },
+          { type: 'text', state: 'done', text: 'Done.' },
+        ],
+      },
+    ];
+    expect(uiMessagesToChatMessages(messages)).toEqual([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', text: 'Warm-up first.', signature: 'sig_1' },
+          { type: 'text', text: 'Try this.' },
+          { type: 'tool-call', toolCallId: 'tc1', toolName: 'quick_check', input: { question: '2+2?' } },
+        ],
+      },
+      {
+        role: 'user',
+        content: [{ type: 'tool-result', toolCallId: 'tc1', toolName: 'quick_check', output: { answer: '4' } }],
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', text: '', redacted: { data: 'opaque==' } },
+          { type: 'text', text: 'Done.' },
+        ],
+      },
+    ]);
+  });
+
   it('throws on a system message — the system prompt rides ChatRequest.system', () => {
     expect(() => uiMessagesToChatMessages([
       { id: 's1', role: 'system', parts: [{ type: 'text', text: 'be terse' }] },
@@ -503,6 +623,47 @@ describe('uiMessagesToChatMessages', () => {
       {
         role: 'assistant',
         content: [
+          { type: 'text', text: 'Try this.' },
+          { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' } },
+        ],
+      },
+    ]);
+  });
+});
+
+describe('thinking round trip: stream -> onEnd messages -> ChatMessage transcript', () => {
+  it('echoes the signature-bearing thinking part ahead of the paused tool call', async () => {
+    const run: LoopEvent[] = [
+      { type: 'step-start' },
+      { type: 'thinking-start', id: '0' },
+      { type: 'thinking-delta', id: '0', text: 'Quiz them.' },
+      { type: 'thinking-end', id: '0', text: 'Quiz them.', signature: 'sig_9' },
+      { type: 'text-start', id: '1' },
+      { type: 'text-delta', id: '1', text: 'Try this.' },
+      { type: 'text-end', id: '1' },
+      { type: 'tool-input-start', toolCallId: 'tc9', toolName: 'quick_check' },
+      { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' } },
+      {
+        type: 'finish', reason: 'tool-calls',
+        usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+      { type: 'step-finish' },
+    ];
+    let finalMessages: UIMessage[] = [];
+    const res = createUiStream({
+      originalMessages: USER_TURN,
+      execute: async (writer) => forwardAll(writer, run),
+      onEnd: ({ messages }) => { finalMessages = messages; },
+    });
+    await collect(res);
+    // The next request after the client answers the block is built from exactly these messages;
+    // the thinking block riding first is what keeps the Anthropic wire from 400ing the resubmit.
+    expect(uiMessagesToChatMessages(finalMessages)).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'quiz me' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', text: 'Quiz them.', signature: 'sig_9' },
           { type: 'text', text: 'Try this.' },
           { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' } },
         ],
