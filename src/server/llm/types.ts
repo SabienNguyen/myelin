@@ -59,6 +59,12 @@ export interface ChatRequest {
   /** Lets the anthropic adapter place cache_control breakpoints (system tail + last message).
    * The openai-compat adapter ignores it — that wire has no explicit cache placement. */
   cache?: boolean;
+  /** Raw JSON Schema the DECODER is held to (constrained decoding). The openai-compat adapter
+   * sends it as `response_format: {type: 'json_schema', …}` when no tools ride the request, so a
+   * small model cannot emit invalid JSON; an endpoint that rejects it falls back to the forced-tool
+   * request inside the adapter. The anthropic adapter ignores it — its forced-tool path already
+   * yields schema-shaped tool input. Only generateStructured sets this. */
+  responseSchema?: { name: string; schema: Record<string, unknown> };
 }
 
 /** Zeros where the wire does not report a figure. */
@@ -97,6 +103,11 @@ export interface GenerateResult {
 export interface ChatModel {
   generate(req: ChatRequest): Promise<GenerateResult>;
   stream(req: ChatRequest): AsyncIterable<StreamEvent>;
+  /** True on adapters that honor ChatRequest.responseSchema (openai-compat). generateStructured
+   * checks it to pick constrained decoding over the forced-tool mechanism; absent means forced
+   * tool. A flag rather than a capability probe on purpose: attempt-and-remember is the design —
+   * the adapter itself falls back and remembers endpoints that reject response_format. */
+  readonly supportsResponseFormat?: boolean;
 }
 
 export class LlmHttpError extends Error {

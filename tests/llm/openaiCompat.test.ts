@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from 'node:http';
 import { openaiCompatModel, LlmHttpError, type StreamEvent } from '../../src/server/llm/index.js';
+import { resetResponseFormatMemory } from '../../src/server/llm/openaiCompat.js';
 
 let server: Server;
 let base: string;
@@ -21,7 +22,7 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${addr.port}`;
 });
 afterAll(() => new Promise<void>((r) => server.close(() => r())));
-beforeEach(() => { captured = []; });
+beforeEach(() => { captured = []; resetResponseFormatMemory(); });
 
 const json = (status: number, obj: unknown) => (res: ServerResponse) => {
   res.statusCode = status;
@@ -162,6 +163,80 @@ describe('openai-compat generate', () => {
     expect(err.status).toBe(500);
     expect(err.retryable).toBe(true);
     expect(err.message).toBe('model not loaded');
+  });
+});
+
+describe('openai-compat constrained decoding (responseSchema)', () => {
+  const RF_REQ = {
+    messages: USER_Q,
+    responseSchema: { name: 'grade', schema: { type: 'object' } },
+  };
+  const toolOk = json(200, {
+    choices: [{
+      message: {
+        content: null,
+        tool_calls: [{ id: 'c1', type: 'function', function: { name: 'grade', arguments: '{"a":1}' } }],
+      },
+      finish_reason: 'tool_calls',
+    }],
+  });
+
+  it('sends response_format json_schema strict, no tools, and returns the text as-is', async () => {
+    respond = json(200, { choices: [{ message: { content: '{"a":1}' }, finish_reason: 'stop' }] });
+    const out = await model().generate(RF_REQ);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: { name: 'grade', schema: { type: 'object' }, strict: true },
+    });
+    expect(captured[0].body.tools).toBeUndefined();
+    expect(captured[0].body.tool_choice).toBeUndefined();
+    expect(out.text).toBe('{"a":1}');
+    expect(out.toolCalls).toEqual([]);
+  });
+
+  it('a rejected response_format falls back to the forced tool once, remembered per endpoint', async () => {
+    respond = (res) => (captured.length === 1
+      ? json(400, { error: { message: 'response_format is not supported' } })
+      : toolOk)(res);
+    const out = await model().generate(RF_REQ);
+    // Fallback round-trip: the second request is the forced-tool form of the same call.
+    expect(captured).toHaveLength(2);
+    expect(captured[1].body.response_format).toBeUndefined();
+    expect(captured[1].body.tools).toEqual([{
+      type: 'function',
+      function: { name: 'grade', description: 'Report the result in the required structure.', parameters: { type: 'object' } },
+    }]);
+    expect(captured[1].body.tool_choice).toEqual({ type: 'function', function: { name: 'grade' } });
+    expect(out.toolCalls).toEqual([
+      { type: 'tool-call', toolCallId: 'c1', toolName: 'grade', input: { a: 1 } },
+    ]);
+
+    // Remembered: the next call on the same endpoint goes straight to the tool path — ONE request.
+    await model().generate(RF_REQ);
+    expect(captured).toHaveLength(3);
+    expect(captured[2].body.response_format).toBeUndefined();
+    expect(captured[2].body.tool_choice).toEqual({ type: 'function', function: { name: 'grade' } });
+  });
+
+  it('a non-rejection failure (401) throws through and does not poison the memory', async () => {
+    respond = json(401, { error: { message: 'bad key' } });
+    await expect(model('sk-x').generate(RF_REQ)).rejects.toThrow('bad key');
+    expect(captured).toHaveLength(1);
+    // The endpoint was NOT remembered as rejecting: the next call still tries response_format.
+    respond = json(200, { choices: [{ message: { content: '{}' }, finish_reason: 'stop' }] });
+    await model().generate(RF_REQ);
+    expect(captured[1].body.response_format).toBeDefined();
+  });
+
+  it('responseSchema never rides alongside real tools', async () => {
+    respond = okText;
+    await model().generate({
+      ...RF_REQ,
+      tools: [{ name: 'lookup', description: 'd', inputSchema: { type: 'object' } }],
+    });
+    expect(captured[0].body.response_format).toBeUndefined();
+    expect(captured[0].body.tools).toHaveLength(1);
   });
 });
 

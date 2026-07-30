@@ -177,11 +177,36 @@ const KEY_FIELDS = [
 ] as const;
 type EnvKey = (typeof URL_FIELDS | typeof KEY_FIELDS)[number]['key'];
 
+/** What the endpoints report as installed/served, discovered fresh on every dialog open (GET only —
+ * the PUT response carries no `available`, so a save keeps the last discovery). */
+type Available = { ollama?: string[]; openaiCompat?: string[] };
+
 type ModelsState = {
   roles: Record<string, { effective: string; saved: string | null }>;
   tutorRails?: boolean;
   env: Record<EnvKey, { value?: string; set?: boolean; shadowed: boolean }>;
+  available?: Available;
 };
+
+/** The datalist's evergreen suggestions; discovered ids join them, minus duplicates. */
+const STATIC_MODEL_IDS = [
+  'claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-5',
+  'ollama:qwen2.5-coder:14b', 'openai:deepseek/deepseek-chat', 'openai:gemini/gemini-2.5-flash',
+];
+
+/** Discovered models as routable ids: `ollama:<name>` / `openai:<id>`, deduped against the static
+ * suggestions (an installed model that IS a static entry must not appear twice). */
+export function discoveredModelIds(available: Available): string[] {
+  const ids = [
+    ...(available.ollama ?? []).map((m) => `ollama:${m}`),
+    ...(available.openaiCompat ?? []).map((m) => `openai:${m}`),
+  ];
+  return ids.filter((v, i) => ids.indexOf(v) === i && !STATIC_MODEL_IDS.includes(v));
+}
+
+/** The roles the local preset repoints. compile stays put: it writes the vault, so it keeps the
+ * strongest model configured. */
+const PRESET_ROLES = ['tutor', 'grader', 'quiz_gen', 'card_gen'] as const;
 
 type UsageTotals = { in: number; out: number; cacheRead: number; cacheWrite: number; calls: number };
 type UsageSummary = { today: Record<string, UsageTotals> };
@@ -225,14 +250,22 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   });
   const [note, setNote] = useState<{ text: string; err: boolean } | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [available, setAvailable] = useState<Available>({});
+  // Which local model the preset row would apply — '' until the user picks, so the first
+  // discovered model is the default without an effect syncing state to fetches.
+  const [presetPick, setPresetPick] = useState('');
   const rootRef = useRef<HTMLSpanElement>(null);
   const badgeRef = useRef<HTMLButtonElement>(null);
   const firstRef = useRef<HTMLInputElement>(null);
+  // Where a chip click lands: the role input focused most recently. A ref, not state — chips read
+  // it on click and nothing renders from it.
+  const lastRole = useRef<RoleName>('tutor');
 
   const takeState = (d: ModelsState) => {
     setLoaded(d);
     setRoles(Object.fromEntries(ROLE_ORDER.map((r) => [r, d.roles[r]?.effective ?? ''])) as Record<RoleName, string>);
     setRails(Boolean(d.tutorRails));
+    if (d.available) setAvailable(d.available);
     // Key inputs stay empty — the value never leaves the server; base URLs are not secrets.
     setEnv((e) => ({
       ...e,
@@ -304,6 +337,14 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
 
   const { name, how } = modelLabel(tutor);
   const usageRows = USAGE_ORDER.filter((r) => usage?.today?.[r]);
+  const localModels = available.ollama ?? [];
+  // A stale pick (model uninstalled between opens) falls back to the first discovered model.
+  const presetValue = presetPick && localModels.includes(presetPick) ? presetPick : localModels[0];
+  const applyPreset = () => {
+    const id = `ollama:${presetValue}`;
+    setRoles((s) => ({ ...s, ...Object.fromEntries(PRESET_ROLES.map((r) => [r, id])) }));
+    setRails(true);
+  };
   return (
     <span className="models-menu" ref={rootRef}>
       <button
@@ -327,6 +368,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                   id={`models-role-${r}`} ref={i === 0 ? firstRef : undefined}
                   list="model-id-list" autoComplete="off" spellCheck={false}
                   value={roles[r]}
+                  onFocus={() => { lastRole.current = r; }}
                   onChange={(e) => setRoles((s) => ({ ...s, [r]: e.target.value }))}
                 />
               </span>
@@ -348,13 +390,48 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             </Fragment>
           ))}
           <datalist id="model-id-list">
-            <option value="claude-sonnet-5" />
-            <option value="claude-haiku-4-5" />
-            <option value="claude-opus-5" />
-            <option value="ollama:qwen2.5-coder:14b" />
-            <option value="openai:deepseek/deepseek-chat" />
-            <option value="openai:gemini/gemini-2.5-flash" label="via a LiteLLM proxy on the openai: route" />
+            {STATIC_MODEL_IDS.map((id) => (
+              <option
+                key={id} value={id}
+                label={id === 'openai:gemini/gemini-2.5-flash' ? 'via a LiteLLM proxy on the openai: route' : undefined}
+              />
+            ))}
+            {discoveredModelIds(available).map((id) => <option key={id} value={id} />)}
           </datalist>
+          {localModels.length > 0 && (
+            <>
+              <span className="models-chips">
+                <span className="models-hint">installed locally:</span>
+                {localModels.map((m) => (
+                  <button
+                    key={m} type="button" className="models-chip"
+                    title="fills the last-focused role input"
+                    onClick={() => setRoles((s) => ({ ...s, [lastRole.current]: `ollama:${m}` }))}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </span>
+              <span className="models-row">
+                <label htmlFor="models-local-preset">local preset</label>
+                <span className="models-preset">
+                  <select
+                    id="models-local-preset" value={presetValue}
+                    onChange={(e) => setPresetPick(e.target.value)}
+                  >
+                    {localModels.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                  {/* Terse on purpose: a longer label starved the select of the width the model
+                      name needs, and the hint line below already says exactly what apply does. */}
+                  <button type="button" onClick={applyPreset}>apply</button>
+                </span>
+              </span>
+              <span className="models-hint">
+                sets tutor, grader, quiz_gen, card_gen to it and turns rails on. compile stays put —
+                compile writes the vault, keep it on the strongest model you have. save still applies.
+              </span>
+            </>
+          )}
           <span className="models-hint">
             tutor and compile want the strongest model; grader, quiz_gen, card_gen run fine on a
             cheap or local one

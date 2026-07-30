@@ -132,8 +132,9 @@ export function railsHistoryLines(messages: UIMessage[], exchanges = RAILS_HISTO
 }
 
 // What the generation call must return. expected∈choices is checked after parse (see
-// generateRailsQuickCheck) so the retry can name the violation to the model.
-const railsCheckSchema = z.object({
+// generateRailsQuickCheck) so the retry can name the violation to the model. Exported for
+// scripts/eval-local-model.ts, which drives the same schema against a candidate local model.
+export const railsCheckSchema = z.object({
   question: z.string().min(1),
   mode: z.literal('choice'),
   choices: z.array(z.string().min(1)).min(3).max(5),
@@ -178,7 +179,9 @@ export interface RailsGenDeps {
   cfg: HarnessConfig;
 }
 
-function buildCheckPrompt(
+/** Exported for scripts/eval-local-model.ts: the eval must measure a candidate model against the
+ * REAL rails prompt, not a paraphrase of it. */
+export function buildCheckPrompt(
   item: RailsItem,
   page: { title: string; body: string },
   analogies: { slug: string; title: string }[],
@@ -261,24 +264,21 @@ export async function generateRailsQuickCheck(
   }
 }
 
-const railsFeedbackSchema = z.object({
+// Exported for scripts/eval-local-model.ts, same as railsCheckSchema.
+export const railsFeedbackSchema = z.object({
   feedback: z.string().min(1),
   next: z.enum(['continue', 'stop-offer']),
 });
 export type RailsFeedback = z.infer<typeof railsFeedbackSchema>;
 
-/**
- * One feedback call, honesty-bound per rule 3a: describe only what the student actually did.
- * A failed call falls back to reading the machine grade out loud with a stop-offer — deterministic
- * and honest by construction, same never-dies rule as the question generation.
- */
-export async function generateRailsFeedback(
-  deps: RailsGenDeps,
+/** Exported for scripts/eval-local-model.ts — the real feedback prompt, same rule as
+ * buildCheckPrompt. */
+export function buildFeedbackPrompt(
   graded: { question: string; answer: string; grade: Grade }[],
-): Promise<RailsFeedback> {
+): string {
   const lines = graded.map((g) =>
     `Question: ${g.question}\nStudent's answer: "${g.answer}"\nMachine grade: ${g.grade.verdict} — ${g.grade.detail}`);
-  const prompt = [
+  return [
     "Write the tutor's feedback after a machine-graded quick check.",
     ...lines,
     '',
@@ -289,6 +289,18 @@ export async function generateRailsFeedback(
     "- next: 'continue' stages the next drill immediately; 'stop-offer' pauses and asks whether "
     + 'to stop or go on.',
   ].join('\n');
+}
+
+/**
+ * One feedback call, honesty-bound per rule 3a: describe only what the student actually did.
+ * A failed call falls back to reading the machine grade out loud with a stop-offer — deterministic
+ * and honest by construction, same never-dies rule as the question generation.
+ */
+export async function generateRailsFeedback(
+  deps: RailsGenDeps,
+  graded: { question: string; answer: string; grade: Grade }[],
+): Promise<RailsFeedback> {
+  const prompt = buildFeedbackPrompt(graded);
   try {
     const { object, usage } = await generateStructured({
       model: deps.model, prompt, schema: railsFeedbackSchema, schemaName: 'rails_feedback',

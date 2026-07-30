@@ -8,7 +8,8 @@ import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/re
 import { TopbarStatus } from '../../src/client/components/TopbarStatus.js';
 
 type EnvOverrides = Partial<Record<string, object>>;
-function modelsState(env: EnvOverrides = {}, roles: Record<string, string> = {}) {
+type Available = { ollama?: string[]; openaiCompat?: string[] };
+function modelsState(env: EnvOverrides = {}, roles: Record<string, string> = {}, available: Available = {}) {
   const effective = {
     tutor: 'claude-sonnet-5', grader: 'claude-haiku-4-5', quiz_gen: 'claude-sonnet-5',
     card_gen: 'claude-haiku-4-5', compile: 'claude-sonnet-5', ...roles,
@@ -22,6 +23,7 @@ function modelsState(env: EnvOverrides = {}, roles: Record<string, string> = {})
       OPENAI_COMPAT_API_KEY: { set: false, shadowed: false },
       ...env,
     },
+    available,
     savedAt: '~/.config/myelin/settings.json',
   };
 }
@@ -129,5 +131,55 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'models' })).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: /configure models/i }));
+  });
+});
+
+describe('ModelsMenu — live discovery', () => {
+  const discovered = () => modelsState({}, {}, {
+    ollama: ['qwen3:8b', 'llama3.1:8b'],
+    openaiCompat: ['mistralai/mistral-7b'],
+  });
+
+  it('discovered models join the shared datalist as routable ids', async () => {
+    stubFetch(discovered());
+    await openPopover();
+    await screen.findByText('installed locally:');
+    const options = [...document.querySelectorAll('#model-id-list option')]
+      .map((o) => (o as HTMLOptionElement).value);
+    expect(options).toContain('ollama:qwen3:8b');
+    expect(options).toContain('ollama:llama3.1:8b');
+    expect(options).toContain('openai:mistralai/mistral-7b');
+    expect(options).toContain('claude-sonnet-5'); // the static entries stay
+  });
+
+  it('an installed-locally chip fills the last-focused role input, nothing else', async () => {
+    stubFetch(discovered());
+    await openPopover();
+    await screen.findByText('installed locally:');
+    fireEvent.focus(screen.getByLabelText('grader'));
+    fireEvent.click(screen.getByRole('button', { name: 'qwen3:8b' }));
+    expect((screen.getByLabelText('grader') as HTMLInputElement).value).toBe('ollama:qwen3:8b');
+    expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('claude-sonnet-5');
+  });
+
+  it('the local preset sets the four teaching roles, checks rails, and leaves compile alone', async () => {
+    stubFetch(discovered());
+    await openPopover();
+    await screen.findByText('installed locally:');
+    fireEvent.change(screen.getByLabelText('local preset'), { target: { value: 'llama3.1:8b' } });
+    fireEvent.click(screen.getByRole('button', { name: 'apply' }));
+    for (const r of ['tutor', 'grader', 'quiz_gen', 'card_gen']) {
+      expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:llama3.1:8b');
+    }
+    expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5');
+    expect((screen.getByLabelText('rails') as HTMLInputElement).checked).toBe(true);
+  });
+
+  it('nothing discovered means no chips and no preset row — a clean offline dialog', async () => {
+    stubFetch();
+    await openPopover();
+    await screen.findByText('provider endpoints');
+    expect(screen.queryByText('installed locally:')).toBeNull();
+    expect(screen.queryByLabelText('local preset')).toBeNull();
   });
 });

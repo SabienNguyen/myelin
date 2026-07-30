@@ -44,8 +44,8 @@ export function needsApiKey(cfg: HarnessConfig): string[] {
  */
 export function buildSetupRoutes(
   cfg: HarnessConfig,
-  // Injectable seam for tests: the real probe hits api.anthropic.com, which does not belong in a
-  // unit test of ROUTE behavior.
+  // Injectable seam for tests: the real probes hit api.anthropic.com and the provider endpoints,
+  // none of which belongs in a unit test of ROUTE behavior.
   deps: { probeFetch?: typeof fetch } = {},
 ) {
   const app = new Hono();
@@ -146,7 +146,47 @@ export function buildSetupRoutes(
     };
   };
 
-  app.get('/api/setup/models', (c) => c.json(modelsState()));
+  /** What the endpoints report as installed/served right now, so the dialog can offer real ids
+   *  instead of asking anyone to type one from memory. Each probe is short (the dialog fetches on
+   *  open and must open instantly offline), a failed probe leaves its field absent, and nothing is
+   *  cached across requests — a model pulled a minute ago should appear on the next open. */
+  const DISCOVERY_TIMEOUT_MS = 1500;
+  const discoverModels = async (): Promise<{ ollama?: string[]; openaiCompat?: string[] }> => {
+    const f = deps.probeFetch ?? fetch;
+    const probe = async (url: string, headers?: Record<string, string>): Promise<unknown> => {
+      const res = await f(url, { headers, signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS) });
+      if (!res.ok) throw new Error(`discovery probe: HTTP ${res.status} from ${url}`);
+      return res.json();
+    };
+    // Ollama's native tag list lives at the server root, not under the /v1 compat prefix.
+    const ollamaRoot = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1')
+      .replace(/\/$/, '').replace(/\/v1$/, '');
+    const compatBase = process.env.OPENAI_COMPAT_BASE_URL?.replace(/\/$/, '');
+    const compatKey = process.env.OPENAI_COMPAT_API_KEY;
+    const [tags, ids] = await Promise.allSettled([
+      probe(`${ollamaRoot}/api/tags`),
+      // No base URL means no endpoint to ask — not a failed probe worth 1500ms.
+      compatBase
+        ? probe(`${compatBase}/models`, compatKey ? { authorization: `Bearer ${compatKey}` } : undefined)
+        : Promise.reject(new Error('OPENAI_COMPAT_BASE_URL unset')),
+    ]);
+    const strings = (values: unknown[]): string[] =>
+      values.filter((v): v is string => typeof v === 'string' && v.length > 0);
+    const available: { ollama?: string[]; openaiCompat?: string[] } = {};
+    if (tags.status === 'fulfilled') {
+      const models = (tags.value as { models?: { name?: unknown }[] })?.models;
+      const names = strings((Array.isArray(models) ? models : []).map((m) => m?.name));
+      if (names.length) available.ollama = names;
+    }
+    if (ids.status === 'fulfilled') {
+      const data = (ids.value as { data?: { id?: unknown }[] })?.data;
+      const names = strings((Array.isArray(data) ? data : []).map((m) => m?.id));
+      if (names.length) available.openaiCompat = names;
+    }
+    return available;
+  };
+
+  app.get('/api/setup/models', async (c) => c.json({ ...modelsState(), available: await discoverModels() }));
 
   app.put('/api/setup/models', async (c) => {
     const body = await c.req.json().catch(() => ({}));
