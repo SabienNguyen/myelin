@@ -6,6 +6,7 @@ import {
   type GenerateResult, type StreamEvent, type ToolCallPart, type Usage,
 } from './types.js';
 import { sseFrames } from './sse.js';
+import { withRetries, type RetryOptions } from './retry.js';
 
 export interface AnthropicModelOptions {
   modelId: string;
@@ -13,6 +14,8 @@ export interface AnthropicModelOptions {
    * the next call must see it without a restart (the constraint models.ts documents). */
   apiKey?: string;
   baseUrl?: string;
+  /** Request-initiation retry knobs (retry.ts). Tests shrink the delays; callers rarely should. */
+  retry?: RetryOptions;
 }
 
 const PROVIDER = 'anthropic';
@@ -93,19 +96,21 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   return body;
 }
 
-async function post(opts: AnthropicModelOptions, body: Json): Promise<Response> {
-  const base = (opts.baseUrl ?? 'https://api.anthropic.com').replace(/\/$/, '');
-  const res = await fetch(`${base}/v1/messages`, {
-    method: 'POST',
-    headers: {
-      'x-api-key': opts.apiKey ?? process.env.ANTHROPIC_API_KEY ?? '',
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw await errorFromResponse(PROVIDER, res);
-  return res;
+function post(opts: AnthropicModelOptions, body: Json): Promise<Response> {
+  return withRetries(async () => {
+    const base = (opts.baseUrl ?? 'https://api.anthropic.com').replace(/\/$/, '');
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': opts.apiKey ?? process.env.ANTHROPIC_API_KEY ?? '',
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await errorFromResponse(PROVIDER, res);
+    return res;
+  }, opts.retry);
 }
 
 function usageOf(u?: WireUsage): Usage {

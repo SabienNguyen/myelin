@@ -255,7 +255,7 @@ unverified.
 
 **Dev** (two processes, hot reload):
 ```bash
-npm run dev:server   # Hono + AI SDK agent loop + Engram MCP client, :4820
+npm run dev:server   # Hono + first-party model harness (src/server/llm) + Engram MCP client, :4820
 npm run dev:client   # Vite dev server, :5173
 ```
 
