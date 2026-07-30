@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ChatStore, type ChatStoreOptions } from '../../../src/client/chatCore/chatStore.js';
-import type { ToolUIPart, UIMessage } from '../../../src/shared/uiMessages.js';
+import type { FileUIPart, ToolUIPart, UIMessage } from '../../../src/shared/uiMessages.js';
 import {
   continuationChunks, fakeFetch, scriptedTurnChunks, sseResponse, sseText, type RecordedCall,
 } from './sse.js';
@@ -80,6 +80,29 @@ describe('ChatStore', () => {
     const put = calls.find((c) => c.url === '/api/thread/t1');
     expect(put?.init.method).toBe('PUT');
     expect(put?.body).toEqual(store.getState().messages);
+  });
+
+  it('sendMessage with files puts the file parts BEFORE the text part on the user message', async () => {
+    const { store, chatCalls } = makeStore([scriptedTurnChunks()], []);
+    const img: FileUIPart = { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,aW1n', filename: 'shot.png' };
+    const pdf: FileUIPart = { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,cGRm', filename: 'notes.pdf' };
+
+    store.sendMessage('what does this show?', [img, pdf]);
+    await settled(store);
+
+    const sent = (chatCalls()[0]!.body as { messages: UIMessage[] }).messages;
+    expect(sent[0]!.parts).toEqual([img, pdf, { type: 'text', text: 'what does this show?' }]);
+  });
+
+  it('a files-only send (empty text) is valid and carries no text part at all', async () => {
+    const { store, chatCalls } = makeStore([scriptedTurnChunks()], []);
+    const img: FileUIPart = { type: 'file', mediaType: 'image/jpeg', url: 'data:image/jpeg;base64,aW1n', filename: 'p.jpg' };
+
+    store.sendMessage('', [img]);
+    await settled(store);
+
+    const sent = (chatCalls()[0]!.body as { messages: UIMessage[] }).messages;
+    expect(sent[0]!.parts).toEqual([img]);
   });
 
   it('reads requestContext per request, so a mid-thread mode switch and one-shot writeUp reach the wire', async () => {

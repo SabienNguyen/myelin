@@ -29,4 +29,7 @@ declare module '@phosphor-icons/react' {
   export const XIcon: ComponentType<PhosphorIconProps>;
   export const ArrowLeftIcon: ComponentType<PhosphorIconProps>;
   export const ExamIcon: ComponentType<PhosphorIconProps>;
+  export const PaperclipIcon: ComponentType<PhosphorIconProps>;
+  export const FilePdfIcon: ComponentType<PhosphorIconProps>;
+  export const CpuIcon: ComponentType<PhosphorIconProps>;
 }

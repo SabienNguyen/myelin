@@ -10,7 +10,7 @@
 // transcript prefix stays stable for the prompt cache (one small shift when a block first ages
 // out of keepIds, then never again).
 import { BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
-import { isToolUIPart, getToolName, type UIMessage } from '../shared/uiMessages.js';
+import { isToolUIPart, getToolName, type UIMessage, type UIPart } from '../shared/uiMessages.js';
 
 const CAP = 160;
 
@@ -21,10 +21,26 @@ const firstString = (...candidates: unknown[]): string => {
 
 const trim = (s: string): string => (s.length > CAP ? `${s.slice(0, CAP)}…` : s);
 
-/** UIMessages for the model with old graded block payloads compacted to verdict lines.
+/** UIMessages for the model with old graded block payloads compacted to verdict lines, and old
+ * user attachments compacted to one-line stubs (see below).
  * Untouched parts are shared by reference; only compacted parts (and their ancestors) are new. */
 export function dietUiMessages(messages: UIMessage[], keepIds: Set<string>): UIMessage[] {
-  return messages.map((msg) => {
+  // Attachments are the other payload class that rides every request forever: one screenshot is
+  // hundreds of KB of base64. Only the LAST user message keeps its file parts — those are what
+  // the model is being asked about this turn; every earlier user message's files become text
+  // stubs. Deterministic like the block compaction: a message compacts identically on every
+  // later turn (one prefix shift when a newer user message arrives, then stable).
+  const lastUserIndex = messages.reduce((acc, m, i) => (m.role === 'user' ? i : acc), -1);
+  return messages.map((msg, index) => {
+    if (msg.role === 'user') {
+      if (index === lastUserIndex || !msg.parts.some((p) => p.type === 'file')) return msg;
+      const parts = msg.parts.map((part): UIPart => (part.type !== 'file' ? part : {
+        type: 'text',
+        text: `[${part.mediaType.startsWith('image/') ? 'image' : 'file'} attached earlier: `
+          + `${part.filename ?? part.mediaType}]`,
+      }));
+      return { ...msg, parts };
+    }
     if (msg.role !== 'assistant') return msg;
     let changed = false;
     const parts = msg.parts.map((part) => {

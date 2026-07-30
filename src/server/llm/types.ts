@@ -33,7 +33,21 @@ export interface ToolResultPart {
   isError?: boolean;
 }
 
-export type ContentPart = TextPart | ThinkingPart | ToolCallPart | ToolResultPart;
+/** A learner-attached file on a USER message — the request direction only. Responses never carry
+ * files, so StreamEvent and the wire chunk vocabulary know nothing of this part. One part type
+ * covers images and PDFs alike: the adapters branch on mediaType (application/pdf → Anthropic
+ * document block, image/* → image block / compat image_url; anything else degrades per adapter
+ * rather than throwing mid-request). */
+export interface FilePart {
+  type: 'file';
+  /** MIME type, e.g. 'image/png' or 'application/pdf'. */
+  mediaType: string;
+  /** Bare base64 payload — no data: URL prefix. Each adapter adds the framing its wire wants. */
+  data: string;
+  filename?: string;
+}
+
+export type ContentPart = TextPart | ThinkingPart | ToolCallPart | ToolResultPart | FilePart;
 
 export interface ChatMessage {
   role: 'user' | 'assistant';

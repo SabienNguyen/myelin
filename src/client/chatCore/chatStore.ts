@@ -3,7 +3,7 @@
 // chat state machine inside the bundled ai@6 (AbstractChat) — every behavior here ports a rule
 // that machine enforced, called out inline.
 import { generateMessageId } from '../../shared/uiMessageReducer.js';
-import { isToolUIPart, type ToolUIPart, type UIMessage } from '../../shared/uiMessages.js';
+import { isToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage, type UIPart } from '../../shared/uiMessages.js';
 import { blockOutputsComplete } from './blockOutputsComplete.js';
 import { consumeChatStream } from './streamConsumer.js';
 
@@ -60,9 +60,16 @@ export class ChatStore {
     this.setState({ messages });
   }
 
-  sendMessage(text: string): void {
+  sendMessage(text: string, files: FileUIPart[] = []): void {
     const messages = closePendingToolCalls(this.state.messages);
-    const user: UIMessage = { id: generateMessageId(), role: 'user', parts: [{ type: 'text', text }] };
+    // Attachments LEAD, text follows — the media-then-question order both provider wires read
+    // best, and the order uiMessagesToChatMessages preserves verbatim. A files-only send carries
+    // no text part at all; with neither text nor files the legacy single-empty-text-part message
+    // is kept (every UI caller gates on having something to send, so this is unreachable from
+    // the composer — but a byte-identical no-files path beats a new special case).
+    const parts: UIPart[] = [...files];
+    if (text !== '' || files.length === 0) parts.push({ type: 'text', text });
+    const user: UIMessage = { id: generateMessageId(), role: 'user', parts };
     this.setState({ messages: [...messages, user] });
     void this.run();
   }

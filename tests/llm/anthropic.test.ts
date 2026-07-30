@@ -216,6 +216,28 @@ describe('anthropic request shaping', () => {
     ]);
   });
 
+  it('serializes file parts by mediaType: image block, document block, unknown type → named text block', async () => {
+    respond = okText;
+    await model().generate({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'file', mediaType: 'image/png', data: 'aW1n', filename: 'shot.png' },
+          { type: 'file', mediaType: 'application/pdf', data: 'cGRm', filename: 'notes.pdf' },
+          { type: 'file', mediaType: 'text/csv', data: 'Y3N2', filename: 'data.csv' },
+          { type: 'text', text: 'what does this show?' },
+        ],
+      }],
+    });
+    expect(captured[0].body.messages[0].content).toEqual([
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aW1n' } },
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'cGRm' } },
+      // Unknown mediaType degrades to a text block naming the file — never a mid-request throw.
+      { type: 'text', text: '[attached file data.csv (type text/csv) — format not supported by this model]' },
+      { type: 'text', text: 'what does this show?' },
+    ]);
+  });
+
   it('sends output_config.effort when effort is set — and never a thinking or budget_tokens field', async () => {
     respond = okText;
     await model().generate({ messages: USER_Q, effort: 'high' });

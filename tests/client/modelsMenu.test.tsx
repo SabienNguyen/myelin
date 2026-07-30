@@ -30,13 +30,19 @@ function modelsState(env: EnvOverrides = {}, roles: Record<string, string> = {},
 
 const emptyUsage = { today: {}, week: {}, cacheHitShare: null };
 
-function stubFetch(state = modelsState(), putResponse = state, usage: object = emptyUsage) {
+function stubFetch(
+  state = modelsState(), putResponse = state, usage: object = emptyUsage,
+  setup: object = { apiKey: { present: false, source: null } },
+  apiKeyPut: { ok: boolean; body: object } = { ok: true, body: {} },
+) {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url);
+    if (u.endsWith('/api/setup/api-key')) return { ok: apiKeyPut.ok, json: async () => apiKeyPut.body };
     const body = u.endsWith('/api/status') ? { student: 'e2e', tutor: 'claude-sonnet-5' }
       : u.endsWith('/api/setup/models') ? (init?.method === 'PUT' ? putResponse : state)
         : u.endsWith('/api/usage') ? usage
-          : {};
+          : u.endsWith('/api/setup') ? setup
+            : {};
     return { ok: true, json: async () => body };
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -181,5 +187,47 @@ describe('ModelsMenu — live discovery', () => {
     await screen.findByText('provider endpoints');
     expect(screen.queryByText('installed locally:')).toBeNull();
     expect(screen.queryByLabelText('local preset')).toBeNull();
+  });
+
+  // The dialog is where the Anthropic key gets CHANGED after first run — the first-run card only
+  // ever sets it once. Same conventions as the other key fields: the value never round-trips,
+  // typing means replace, the environment variable shadows the saved one.
+  it('a typed Anthropic key rides save through the validating endpoint, then the field clears', async () => {
+    const fetchMock = stubFetch(
+      modelsState(), modelsState(), emptyUsage,
+      { apiKey: { present: true, source: 'saved' } },
+    );
+    await openPopover();
+    const field = await screen.findByLabelText('anthropic api key') as HTMLInputElement;
+    await waitFor(() => expect(field.placeholder).toBe('saved — type to replace'));
+    fireEvent.change(field, { target: { value: 'sk-ant-new-key' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect on the next call/);
+    const keyPut = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/api/setup/api-key'));
+    expect(JSON.parse(String(keyPut?.[1]?.body))).toEqual({ key: 'sk-ant-new-key' });
+    expect(field.value).toBe('');
+  });
+
+  it('a rejected key says so by name, after the models half already saved', async () => {
+    stubFetch(
+      modelsState(), modelsState(), emptyUsage,
+      { apiKey: { present: false, source: null } },
+      { ok: false, body: { error: 'that key was refused by Anthropic' } },
+    );
+    await openPopover();
+    fireEvent.change(await screen.findByLabelText('anthropic api key'), { target: { value: 'sk-ant-bad' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/models saved, but the Anthropic key was rejected: that key was refused/);
+  });
+
+  it('ANTHROPIC_API_KEY in the environment disables the field and says which variable wins', async () => {
+    stubFetch(
+      modelsState(), modelsState(), emptyUsage,
+      { apiKey: { present: true, source: 'environment' } },
+    );
+    await openPopover();
+    const field = await screen.findByLabelText('anthropic api key') as HTMLInputElement;
+    await waitFor(() => expect(field.disabled).toBe(true));
+    expect(screen.getByText(/overridden by ANTHROPIC_API_KEY in the environment/)).toBeTruthy();
   });
 });

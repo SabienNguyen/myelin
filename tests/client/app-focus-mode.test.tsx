@@ -23,8 +23,9 @@
 // assistant-ui's real message-rendering machinery is driving the remounts.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, waitFor, cleanup, act } from '@testing-library/react';
-import { useEffect, useRef, type PropsWithChildren } from 'react';
+import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import { AssistantRuntimeProvider, Tools, useAui, useLocalRuntime } from '@assistant-ui/react';
+import { ChatStore, ChatStoreContext } from '../../src/client/chatCore/index.js';
 import { toolkit } from '../../src/client/toolkit.js';
 
 // Swap out Runtime.tsx's real chat wiring (network fetch + AI SDK transport) for a minimal, real
@@ -60,7 +61,18 @@ function TestRuntime({ children }: PropsWithChildren<Record<string, unknown>>) {
       content: [{ type: 'text', text: 'Practice stream-consumer with a code exercise' }],
     });
   }, [runtime]);
-  return <AssistantRuntimeProvider runtime={runtime} aui={aui}>{children}</AssistantRuntimeProvider>;
+  // Runtime.tsx provides the ChatStoreContext the attach-aware composer reads; a stand-in that
+  // replaces Runtime must provide it too. Never sent through here — the local runtime above owns
+  // this test's sends.
+  const [store] = useState(() => new ChatStore({
+    threadId: 'test', initialMessages: [],
+    requestContext: () => ({ mode: 'learn', writeUp: false }),
+  }));
+  return (
+    <ChatStoreContext.Provider value={store}>
+      <AssistantRuntimeProvider runtime={runtime} aui={aui}>{children}</AssistantRuntimeProvider>
+    </ChatStoreContext.Provider>
+  );
 }
 
 vi.mock('../../src/client/runtime.js', () => ({ Runtime: TestRuntime }));

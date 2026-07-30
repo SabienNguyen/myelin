@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useThread, useThreadRuntime } from '@assistant-ui/react';
+import { FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, XIcon as X } from '@phosphor-icons/react';
+import type { FileUIPart } from '../../shared/uiMessages.js';
+import { useChatStore } from '../chatCore/index.js';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
@@ -19,10 +22,27 @@ import { panelBus } from '../lib/panelBus.js';
 // "Maximum update depth exceeded" and tears the tree down (the browser symptom: chip visible,
 // #stage-root empty, .focus-mode gone). Fix is this hoist alone — StagePortal's target
 // (#stage-root, SidePanel.tsx) is a permanently-mounted DOM node and was never actually churning.
+/** A user-attached image in the transcript: a small thumbnail (the data: URL renders directly),
+ * never the full-size bitmap — the bubble is a record of what was sent, not a viewer. */
+function UserImagePart({ image, filename }: { image: string; filename?: string }) {
+  return <img className="msg-attachment-img" src={image} alt={filename ?? 'attached image'} />;
+}
+
+/** A user-attached PDF (or other non-image file): a filename chip. The payload is a base64 data:
+ * URL with nothing useful to open in-app, so the chip is presentation only. */
+function UserFilePart({ filename, mimeType }: { filename?: string; mimeType: string }) {
+  return (
+    <span className="msg-attachment-file">
+      <FilePdf size={14} weight="duotone" />
+      {filename ?? mimeType}
+    </span>
+  );
+}
+
 function UserMessage() {
   return (
     <MessagePrimitive.Root className="msg user">
-      <MessagePrimitive.Parts />
+      <MessagePrimitive.Parts components={{ Image: UserImagePart, File: UserFilePart }} />
     </MessagePrimitive.Root>
   );
 }
@@ -190,6 +210,110 @@ function EmptyHero() {
   );
 }
 
+// What the attach button admits: the image types both provider wires accept, plus PDF (Anthropic
+// document blocks; dropped with a stub on the compat wire). Everything else stays unpickable.
+const ATTACH_ACCEPT = 'image/png,image/jpeg,image/webp,image/gif,application/pdf';
+// Per-file cap. Past ~5MB a single attachment dominates the request body and the provider's
+// per-image limits start rejecting anyway; oversize picks get an inline note, not a send failure.
+const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The composer, with attachments. Text still lives in assistant-ui's composer state (so the
+ * programmatic senders — example asks, Ask-Tutor bridge, session-plan CTA — keep working through
+ * composer.setText + send), but the FORM submit is taken over: the handler preventDefaults before
+ * the primitive's own submit runs and sends through the store directly, because assistant-ui's
+ * send() can only carry attachments via an AttachmentAdapter this app does not configure, and its
+ * canSend gate would veto a files-only send. Pending files are plain local state; they become
+ * FileUIParts on the user message ahead of the text part (chatStore.sendMessage).
+ */
+function Composer() {
+  const store = useChatStore();
+  const composer = useComposerRuntime();
+  // isEmpty tracks composer text (assistant-ui memoizes the state object, so the snapshot is
+  // stable between notifications); the send gate must ALSO open for a files-only message.
+  const isEmpty = useSyncExternalStore(composer.subscribe, () => composer.getState().isEmpty);
+  const [files, setFiles] = useState<FileUIPart[]>([]);
+  const [note, setNote] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const addFiles = (picked: FileList | null) => {
+    for (const file of Array.from(picked ?? [])) {
+      if (file.size > ATTACH_MAX_BYTES) {
+        setNote(`${file.name} is too large — attachments are capped at 5 MB`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        // readAsDataURL yields exactly FileUIPart.url's shape (data:<type>;base64,<payload>).
+        setFiles((prev) => [...prev, {
+          type: 'file', mediaType: file.type, url: reader.result as string, filename: file.name,
+        }]);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const submit = (e: FormEvent) => {
+    // preventDefault BEFORE assistant-ui's handler: ComposerPrimitive.Root composes this handler
+    // first and skips its own send once the event is defaultPrevented.
+    e.preventDefault();
+    const text = composer.getState().text;
+    if (!text.trim() && files.length === 0) return;
+    // Whitespace-only text beside files sends as files-only — no junk text part in the history.
+    store.sendMessage(text.trim() ? text : '', files);
+    composer.setText('');
+    setFiles([]);
+    setNote(null);
+  };
+
+  return (
+    <ComposerPrimitive.Root className="composer" onSubmit={submit}>
+      {(files.length > 0 || note !== null) && (
+        <div className="composer-attachments">
+          {files.map((f, i) => (
+            <span key={`${i}-${f.filename}`} className="attachment-chip">
+              {f.mediaType.startsWith('image/')
+                ? <img className="attachment-thumb" src={f.url} alt="" />
+                : <FilePdf size={15} weight="duotone" />}
+              <span className="attachment-chip-name">{f.filename}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${f.filename}`}
+                onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))}
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+          {note !== null && <span className="attachment-note" role="status">{note}</span>}
+        </div>
+      )}
+      <div className="composer-row">
+        <button
+          type="button"
+          className="composer-attach"
+          aria-label="Attach image or PDF"
+          onClick={() => fileInput.current?.click()}
+        >
+          <Paperclip size={18} weight="duotone" />
+        </button>
+        <input
+          ref={fileInput}
+          type="file"
+          accept={ATTACH_ACCEPT}
+          multiple
+          hidden
+          onChange={(e) => { addFiles(e.currentTarget.files); e.currentTarget.value = ''; }}
+        />
+        <ComposerPrimitive.Input placeholder="Ask your tutor…" autoFocus />
+        {/* Not ComposerPrimitive.Send: its disabled state reads assistant-ui's canSend, which
+            knows nothing of the local files and would stay disabled on a files-only message. */}
+        <button type="submit" disabled={isEmpty && files.length === 0}>Send</button>
+      </div>
+    </ComposerPrimitive.Root>
+  );
+}
+
 export function Thread() {
   // The viewport's autoScroll pins to the bottom on mount — correct for a conversation, wrong for
   // the empty state: in a short window the pitch overflows and a brand-new thread opened with
@@ -224,10 +348,7 @@ export function Thread() {
           </div>
         </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
-      <ComposerPrimitive.Root className="composer">
-        <ComposerPrimitive.Input placeholder="Ask your tutor…" autoFocus />
-        <ComposerPrimitive.Send>Send</ComposerPrimitive.Send>
-      </ComposerPrimitive.Root>
+      <Composer />
     </ThreadPrimitive.Root>
   );
 }

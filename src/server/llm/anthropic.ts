@@ -83,6 +83,21 @@ function contentBlock(part: ContentPart): Json {
         content: typeof part.output === 'string' ? part.output : JSON.stringify(part.output),
         ...(part.isError ? { is_error: true } : {}),
       };
+    case 'file':
+      // Branch on mediaType: PDFs are document blocks, images image blocks, both base64-source.
+      // Anything else serializes as a text block NAMING the file — the composer's accept list
+      // should make that unreachable, but a stray part from persisted history must degrade to a
+      // lost attachment the model can acknowledge, never a thrown mid-request 400.
+      if (part.mediaType === 'application/pdf') {
+        return { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: part.data } };
+      }
+      if (part.mediaType.startsWith('image/')) {
+        return { type: 'image', source: { type: 'base64', media_type: part.mediaType, data: part.data } };
+      }
+      return {
+        type: 'text',
+        text: `[attached file ${part.filename ?? 'unnamed'} (type ${part.mediaType}) — format not supported by this model]`,
+      };
   }
 }
 

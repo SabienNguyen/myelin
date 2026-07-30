@@ -88,6 +88,22 @@ describe('uiMessageToThreadMessage', () => {
     }]);
   });
 
+  it('maps user file parts to assistant-ui content: images as image parts, PDFs as file parts', () => {
+    const message: UIMessage = {
+      id: 'u1', role: 'user',
+      parts: [
+        { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,aW1n', filename: 'shot.png' },
+        { type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,cGRm', filename: 'notes.pdf' },
+        { type: 'text', text: 'see attached' },
+      ],
+    };
+    expect(uiMessageToThreadMessage(message).content).toEqual([
+      { type: 'image', image: 'data:image/png;base64,aW1n', filename: 'shot.png' },
+      { type: 'file', data: 'data:application/pdf;base64,cGRm', mimeType: 'application/pdf', filename: 'notes.pdf' },
+      { type: 'text', text: 'see attached' },
+    ]);
+  });
+
   it('keeps data-* parts as named data parts and passes user text through', () => {
     const message: UIMessage = {
       id: 'u1', role: 'user',

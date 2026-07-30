@@ -3,4 +3,7 @@
 export { blockOutputsComplete } from './blockOutputsComplete.js';
 export { ChatStore, type ChatState, type ChatStoreOptions } from './chatStore.js';
 export { consumeChatStream, type ChatRequestBody, type ConsumeChatStreamOptions } from './streamConsumer.js';
-export { uiMessageToThreadMessage, useChatCoreRuntime, type ChatCoreRuntimeOptions } from './runtimeAdapter.js';
+export {
+  ChatStoreContext, uiMessageToThreadMessage, useChatCoreRuntime, useChatStore,
+  type ChatCoreRuntimeOptions,
+} from './runtimeAdapter.js';
