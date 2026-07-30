@@ -165,6 +165,9 @@ describe('generate -> review -> serve', () => {
     setGeneratedStatus(vault, 'ndjson-parser', 'approved');
     body = await (await app.request('/api/gap/patterns')).json();
     expect(body.patterns.map((p: any) => p.pattern)).toEqual(['stream-consumer', 'ndjson-parser']);
+    // Only the factory demo carries the builtin flag — Practice hides an untouched builtin, and a
+    // generated pattern must never inherit that fate (it exists because the learner did something).
+    expect(body.patterns.map((p: any) => p.builtin === true)).toEqual([true, false]);
   });
 
   it('a model returning garbage is an error, not a stored exercise', async () => {

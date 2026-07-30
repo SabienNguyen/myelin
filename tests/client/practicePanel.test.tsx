@@ -10,7 +10,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
 
 const { PracticePanel } = await import('../../src/client/components/PracticePanel.js');
 
-function mockFetch(effective?: string, mined: any[] = []) {
+function mockFetch(effective?: string, mined: any[] = [], extraPatterns: any[] = []) {
   return vi.fn(async (url: string) => {
     if (url === '/api/gap/ladder') {
       return {
@@ -20,6 +20,13 @@ function mockFetch(effective?: string, mined: any[] = []) {
           rungs: [],
           mined,
         }),
+      } as any;
+    }
+    // The built-in sandbox marks its factory demo `builtin` — the panel hides it while untouched.
+    if (url === '/api/gap/patterns') {
+      return {
+        ok: true,
+        json: async () => ({ patterns: [{ pattern: 'stream-consumer', builtin: true }, ...extraPatterns] }),
       } as any;
     }
     if (url === '/api/student') {
@@ -46,7 +53,7 @@ describe('PracticePanel', () => {
     expect(append).toHaveBeenCalledExactlyOnceWith('Practice stream-consumer with a code exercise');
   });
 
-  it('maps practicing/mastered -> owned, exposed -> rented, unseen/no-record -> new', async () => {
+  it('maps practicing/mastered -> owned, exposed -> rented; a generated pattern shows new', async () => {
     vi.stubGlobal('fetch', mockFetch('practicing'));
     const { unmount } = render(<PracticePanel />);
     await waitFor(() => expect(screen.queryByText('owned')).not.toBeNull());
@@ -59,9 +66,29 @@ describe('PracticePanel', () => {
     r2.unmount();
     cleanup();
 
-    vi.stubGlobal('fetch', mockFetch(undefined));
+    // 'new' still renders — for a pattern that exists because the learner did something (a
+    // generated exercise carries no builtin flag). The factory demo's own new-state is the hidden
+    // case, covered below.
+    vi.stubGlobal('fetch', mockFetch(undefined, [], [{ pattern: 'ndjson-parser', title: 'NDJSON' }]));
     render(<PracticePanel />);
     await waitFor(() => expect(screen.queryByText('new')).not.toBeNull());
+    expect(screen.queryByText('ndjson-parser')).not.toBeNull();
+    expect(screen.queryByText('stream-consumer')).toBeNull();
+  });
+
+  it('hides the untouched factory demo — no Practice section at all for a learner who never engaged', async () => {
+    vi.stubGlobal('fetch', mockFetch(undefined));
+    const { container } = render(<PracticePanel />);
+    // The only pattern is the builtin demo with no mastery record; the whole section renders null
+    // rather than presenting infrastructure as the learner's curriculum.
+    await waitFor(() => expect(container.querySelector('.practice-panel')).toBeNull());
+  });
+
+  it('the factory demo appears once engagement puts a mastery record on it', async () => {
+    vi.stubGlobal('fetch', mockFetch('exposed'));
+    render(<PracticePanel />);
+    const row = await screen.findByRole('button', { name: /stream-consumer/i });
+    expect(row).not.toBeNull();
   });
 
   it('renders nothing when the gap feature is off (ladder fetch not ok)', async () => {
@@ -112,7 +139,9 @@ describe('PracticePanel — mined patterns (B2c)', () => {
   });
 
   it('shows no "From your repos" group when mined is empty', async () => {
-    vi.stubGlobal('fetch', mockFetch(undefined, []));
+    // 'exposed' so the demo row renders and the section exists to inspect — an untouched demo
+    // with no mined rows would render nothing at all (covered above).
+    vi.stubGlobal('fetch', mockFetch('exposed', []));
     const { container } = render(<PracticePanel />);
     await waitFor(() => expect(container.querySelector('.practice-panel')).not.toBeNull());
     expect(screen.queryByText('From your repos')).toBeNull();

@@ -227,7 +227,8 @@ systemctl --user enable --now myelin
 an exercise ladder plus a grader that runs submissions in a spawned child process with a hard
 wall-clock kill — an unbounded loop in learner code dies at 6s instead of hanging the tutor.
 Nothing to install; the starter pattern page is seeded at boot, and the Library's *Practice*
-section lists each pattern with an owned/rented/new badge derived from the student model.
+section lists each pattern you've touched with an owned/rented/new badge derived from the student
+model — the factory demo stays out of sight until the tutor assigns it or you ask for it.
 
 An external sidecar with more patterns can be pointed at via `gap.url` in `harness.config.json`;
 a configured url takes precedence over the built-in sandbox. Either way the tutor UI is the one

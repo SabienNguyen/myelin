@@ -54,13 +54,13 @@ const PATTERN_PAGES: PatternPageSeed[] = [
   },
 ];
 
-/** The factory-shipped demo patterns, by slug. The graph hides one of these while it is still an
- *  untouched stub (no mastery record, never filled in): a brand-new learner's knowledge graph
- *  opened with a lone "Consuming SSE token streams" node they never asked for — infrastructure
- *  presenting itself as their knowledge. The page still exists (Practice lists it, code_exercise
- *  targets it, the Page tab can open it); it joins the GRAPH when the learner actually engages.
- *  Deliberately only the hardcoded list: generated-exercise and course-bank seeds exist because
- *  the learner did something. */
+/** The factory-shipped demo patterns, by slug. The graph and the Library's Practice section both
+ *  hide one of these while it is untouched (no mastery record, never filled in): a brand-new
+ *  learner's workspace opened with a "Consuming SSE token streams" entry they never asked for —
+ *  infrastructure presenting itself as their knowledge. The page still exists (code_exercise
+ *  targets it, the Page tab can open it, the tutor can assign it); it joins the graph and the
+ *  Practice list when the learner actually engages. Deliberately only the hardcoded list:
+ *  generated-exercise and course-bank seeds exist because the learner did something. */
 export const BUILTIN_PATTERN_SLUGS: ReadonlySet<string> = new Set(PATTERN_PAGES.map((p) => p.slug));
 
 /** Idempotent boot seed: for each known ladder pattern, writes a 'stub' vault page IF (and only

@@ -199,7 +199,11 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
    *  ladder), so the client treats a 404 here as "single-pattern mode", not an error. */
   app.get('/api/gap/patterns', (c) => c.json({
     patterns: [
-      ...Object.keys(EXERCISES).map((p) => ({ pattern: p })),
+      // `builtin` marks the factory-shipped demo ladders. The Practice section hides an untouched
+      // builtin (same rule the graph applies to its seeded stub page): a demo the learner never
+      // asked for is infrastructure, not their curriculum. Generated patterns exist because the
+      // learner did something, so they carry no flag and always list.
+      ...Object.keys(EXERCISES).map((p) => ({ pattern: p, builtin: true })),
       ...(vault ? approvedGenerated(vault).map((g) => ({ pattern: g.pattern, title: g.title })) : []),
     ],
   }));
