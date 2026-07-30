@@ -80,13 +80,37 @@ function MathLiveInput({ value, onChange, label }: {
       // Seed the sink with the field's name; guarded, so once MathLive writes its own it wins.
       const sink = ref.current?.shadowRoot?.querySelector('[role="textbox"]');
       if (label && sink && !sink.hasAttribute('aria-label')) sink.setAttribute('aria-label', label);
+      // The learner may have clicked the field before this chunk resolved (or inside MathLive's
+      // own deferred-init window, below). If the host holds focus, re-focus it now that the
+      // element is fully wired, so the keyboard sink engages.
+      if (document.activeElement === ref.current) ref.current?.focus?.();
     }, (e) => console.error('mathlive failed to load:', e));
   }, [label]);
   useEffect(() => {
     if (ref.current && ref.current.value !== value)
       ref.current.setValue?.(value, { silenceNotifications: true });
   }, [value]);
-  return <math-field ref={ref} aria-label={label} onInput={(e: any) => onChange(e.target.value)} />;
+  return (
+    <math-field
+      ref={ref}
+      tabIndex={0}
+      aria-label={label}
+      // MathLive focuses itself ASYNCHRONOUSLY after a click — measured at up to ~1.5s on a cold
+      // instance: it preventDefaults pointerdown (killing the browser's default focus move) and
+      // its own focus() override no-ops until per-instance init completes. All that time the
+      // composer kept focus, so a learner who clicked the field and started typing was typing
+      // into CHAT — the persona drive caught "2" of "2x+1" landing in the message box, one Enter
+      // from being sent to the tutor. Move DOM focus synchronously with the raw HTMLElement
+      // primitive (bypassing the override): worst case a keystroke inside MathLive's remaining
+      // wiring gap is dropped on the focused host, never redirected into another input.
+      onPointerDown={(e: any) => {
+        if (document.activeElement !== e.currentTarget) {
+          HTMLElement.prototype.focus.call(e.currentTarget);
+        }
+      }}
+      onInput={(e: any) => onChange(e.target.value)}
+    />
+  );
 }
 
 export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput }: {

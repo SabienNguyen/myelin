@@ -49,8 +49,11 @@ const cfg = {
   models: { grader: { model: 'claude-sdk:sonnet' } },
 } as unknown as HarnessConfig;
 
-/** A best case for every block: the input and result that earn the highest evidence each can give. */
-const BEST_CASE: { tool: any; input: any; result: any; expect: GradeSource }[] = [
+/** A best case for every block: the input and result that earn the highest evidence each can give.
+ *  `ceiling` names that highest kind when it is NOT applied-correctly — watch_video's best case is
+ *  an ENCOUNTER by design, so its ceiling is 'exposed' and the rule below checks both directions:
+ *  the declared best is reachable, and nothing above it ever is. */
+const BEST_CASE: { tool: any; input: any; result: any; expect: GradeSource; ceiling?: string }[] = [
   {
     tool: 'quick_check',
     input: { question: 'q', expected: '2x', pageSlug: 'p' },
@@ -129,6 +132,15 @@ const BEST_CASE: { tool: any; input: any; result: any; expect: GradeSource }[] =
     expect: 'mechanical',
   },
   {
+    tool: 'watch_video',
+    // The best a viewing can ever earn is 'exposed' — watching is an encounter, and the follow-up
+    // graded check (a different block) is where it becomes stronger evidence.
+    input: { url: 'https://youtu.be/abcdefghijk', startSeconds: 30, why: 'w', pageSlug: 'p' },
+    result: { watched: true },
+    expect: 'mechanical',
+    ceiling: 'exposed',
+  },
+  {
     tool: 'writing_draft',
     input: { prompt: 'write', round: 1, pageSlug: 'p' },
     result: { draft: 'a strong, concise, specific paragraph.' },
@@ -170,7 +182,11 @@ describe('THE RULE: a model-graded verdict can never mint applied-correctly', ()
       } else {
         // The mechanical half of the property matters just as much: if the cap were applied
         // everywhere, this file would pass while quietly making real test suites worthless.
-        expect(kinds).toContain('applied-correctly');
+        // A block with a declared lower ceiling (watch_video: 'exposed') must reach exactly that
+        // ceiling and never applied-correctly — same property, honest about the block's best.
+        const best = c.ceiling ?? 'applied-correctly';
+        expect(kinds).toContain(best);
+        if (best !== 'applied-correctly') expect(kinds).not.toContain('applied-correctly');
       }
     });
   }

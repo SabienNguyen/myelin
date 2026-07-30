@@ -347,7 +347,8 @@ export function createClaudeSdkTutorSession(
       buildInstructions(),
       `The student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`,
       `Mode: ${mode.toUpperCase()}.`,
-      'Interactive learning blocks (quick_check, quiz, math_scratchpad, writing_draft, code_exercise) '
+      'Interactive learning blocks (quick_check, quiz, math_scratchpad, writing_draft, '
+        + 'code_exercise, watch_video) '
         + 'are presented via the blocks tools. After calling one, END YOUR TURN immediately — the '
         + "student's answer arrives as the next message. Never answer a block yourself.",
       // The base prompt's research rules name the ai-sdk route's tools, none of which exist here.
@@ -362,7 +363,8 @@ export function createClaudeSdkTutorSession(
       // research a subject the vault had never seen and compiled six pages of unsourced training
       // knowledge instead.
       'On this route the research tools named above (`find_recent_papers`, `find_canonical_sources`, '
-        + '`web_search`, `read_url`, `paper_references`, `ingest_url`) DO NOT EXIST. Your only '
+        + '`web_search`, `read_url`, `paper_references`, `ingest_url`, `find_video`, '
+        + '`video_transcript`) DO NOT EXIST. Your only '
         + 'research tools are WebSearch and WebFetch, '
         + (mode === 'freeform'
           ? 'available on every turn in this mode — freeform is where a subject gets researched and '
