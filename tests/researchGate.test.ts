@@ -15,7 +15,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { vaultGap, topicTokens } from '../src/server/session.js';
-import type { UIMessage } from 'ai';
+import type { UIMessage } from '../src/shared/uiMessages.js';
 
 const user = (text: string): UIMessage =>
   ({ id: 'u', role: 'user', parts: [{ type: 'text', text }] }) as UIMessage;

@@ -33,7 +33,7 @@ describe('Engram client', () => {
   });
   it('exposes tools for the agent loop', async () => {
     const tools = await lw.tools();
-    expect(Object.keys(tools)).toContain('record_evidence');
+    expect(tools.map((t) => t.name)).toContain('record_evidence');
   });
   it('throws a readable error on isError results', async () => {
     await expect(lw.call('read_page', { slug: 'nope' })).rejects.toThrow();
@@ -53,8 +53,8 @@ describe('Engram client', () => {
   it('recovers tools() after the transport dies', async () => {
     await (lw as any).client.close();
     const tools = await lw.tools();
-    expect(Object.keys(tools)).toContain('record_evidence');
-    const raw: any = await (tools.read_page as any).execute({ slug: 'derivatives' }, {} as any);
+    expect(tools.map((t) => t.name)).toContain('record_evidence');
+    const raw: any = await tools.find((t) => t.name === 'read_page')!.execute!({ slug: 'derivatives' });
     const parsed = JSON.parse(raw.content[0].text);
     expect(parsed.page.meta.title).toBe('Derivatives');
   });
@@ -62,7 +62,7 @@ describe('Engram client', () => {
   it("recovers a previously-fetched tool's execute after the transport dies underneath it", async () => {
     const tools = await lw.tools(); // fetched while the client is alive
     await (lw as any).client.close(); // kill the client the fetched tool's closure was bound to
-    const raw: any = await (tools.read_page as any).execute({ slug: 'derivatives' }, {} as any);
+    const raw: any = await tools.find((t) => t.name === 'read_page')!.execute!({ slug: 'derivatives' });
     const parsed = JSON.parse(raw.content[0].text);
     expect(parsed.page.meta.title).toBe('Derivatives');
   });

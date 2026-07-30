@@ -17,7 +17,7 @@ function bankedVault() {
   return vault;
 }
 
-const exec = (tools: any, name: string, args: any) => tools[name].execute(args, {} as any);
+const exec = (tools: any[], name: string, args: any) => tools.find((t) => t.name === name)!.execute!(args);
 
 describe('course_problems', () => {
   it('returns the banked problems verbatim, with ids the model can hand back', async () => {

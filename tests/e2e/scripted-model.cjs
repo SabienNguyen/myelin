@@ -3,37 +3,34 @@
 const fs = require('node:fs');
 
 /**
- * E2E hook (Task 12). CommonJS on purpose: src/server/models.ts is ESM and reaches this file
- * via `createRequire(import.meta.url)` so `require()` works from inside a "type": "module"
- * package.
+ * E2E hook. CommonJS on purpose: src/server/models.ts is ESM and reaches this file via
+ * `createRequire(import.meta.url)` so `require()` works from inside a "type": "module" package.
  *
- * Two factories, one script format:
+ * One factory, one script format:
  *   { turns: [ { toolCalls？: [{ toolName, input }], text？: string } ] }
  *
- * - createScriptedModel(scriptPath) — a LanguageModelV3-shaped object (ai@7 / @ai-sdk/provider
- *   v3 stream chunk shapes — usage nested {inputTokens:{...}, outputTokens:{...}}, finishReason
- *   {unified, raw}) for the tutor loop, which stays on the AI SDK until own-harness phase C.
- * - createChatModel(scriptPath) — the first-party ChatModel (src/server/llm/types.ts) that
- *   chatModelFor hands the one-shot roles (grading, gap help, card gen).
+ * createChatModel(scriptPath) — the first-party ChatModel (src/server/llm/types.ts) that
+ * chatModelFor resolves for EVERY role: the tutor loop and compile agent drive stream(), the
+ * one-shot roles (grading, gap help, card gen) drive generate().
  *
- * ALL factories for one scriptPath share one turn counter (module-level `states`): the tutor
- * session holds its V3 model while every grading call resolves a fresh ChatModel, and if each
- * kept its own counter the grader would replay the first tool-call turn forever instead of
- * reaching its scripted verdict.
+ * ALL models for one scriptPath share one turn counter (module-level `states`): the tutor session
+ * holds its model while every grading call resolves a fresh chatModelFor, and if each kept its
+ * own counter the grader would replay the first tool-call turn forever instead of reaching its
+ * scripted verdict.
  *
  * The script file is read LAZILY (only when a turn is popped, never at factory call time) —
  * tests/models.test.ts's ESM-require regression test sets LW_MOCK_MODEL to a path that doesn't
- * exist and only asserts modelFor() returns a defined model (or fails with a MODULE_NOT_FOUND
- * naming 'scripted-model'); it must not blow up with ENOENT for a bogus script path that is
- * never actually streamed from.
+ * exist and only asserts chatModelFor() returns a model; it must not blow up with ENOENT for a
+ * bogus script path that is never actually streamed from.
  *
- * Calls past the end of the script return an empty, tool-call-free 'stop' finish so the agent
- * loop terminates cleanly instead of erroring — this covers the extra step the SDK takes after
- * a step that both emits text AND calls a server-executed tool (e.g. record_evidence): it
- * re-invokes the model once more with the tool result appended, which our fixed 2-turn E2E
- * script does not itself account for. One-shot generate calls past the end default to
- * 'CORRECT — scripted.' so a scripted drive's model-graded answers pass without the script
- * enumerating every grading call.
+ * Past the end of the script the two methods diverge on purpose:
+ *   - stream() returns an EMPTY tool-call-free 'stop' turn so the loop terminates cleanly. This
+ *     covers the extra step the loop takes after a turn that both emits text AND calls a
+ *     loop-executed tool (e.g. record_evidence): it re-invokes the model once more with the tool
+ *     result appended, which a fixed 2-turn E2E script does not itself account for — and that
+ *     extra step must not smuggle default text into the rendered conversation.
+ *   - generate() defaults to 'CORRECT — scripted.' so a scripted drive's model-graded answers
+ *     pass without the script enumerating every grading call.
  */
 
 // scriptPath -> { turns, index }, shared by every model built for that path.
@@ -74,75 +71,6 @@ function popTurn(scriptPath, method) {
   return { turn, n: st.index };
 }
 
-function createScriptedModel(scriptPath) {
-  return {
-    specificationVersion: 'v3',
-    provider: 'scripted-e2e',
-    modelId: `scripted-model(${scriptPath})`,
-    supportedUrls: {},
-
-    async doGenerate() {
-      // The claim this used to throw with — "the harness only ever calls doStream" — stopped being
-      // true when quiz short answers went through gradeOpenAnswer's generateText. A doGenerate that
-      // pops a turn and returns its text lets scripted drives exercise MODEL-GRADED paths too.
-      const { turn } = popTurn(scriptPath, 'doGenerate');
-      return {
-        content: [{ type: 'text', text: (turn && turn.text) || 'CORRECT — scripted.' }],
-        finishReason: { unified: 'stop', raw: 'stop' },
-        usage: {
-          inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-          outputTokens: { total: 1, text: 1, reasoning: undefined },
-        },
-        warnings: [],
-      };
-    },
-
-    async doStream() {
-      const { turn, n } = popTurn(scriptPath, 'doStream');
-
-      const toolCalls = (turn && turn.toolCalls) || [];
-      const parts = [];
-
-      toolCalls.forEach((call, i) => {
-        parts.push({
-          type: 'tool-call',
-          toolCallId: `scripted-${n}-${i}-${call.toolName}`,
-          toolName: call.toolName,
-          input: JSON.stringify(call.input),
-        });
-      });
-
-      if (turn && turn.text) {
-        const id = `scripted-text-${n}`;
-        parts.push({ type: 'text-start', id });
-        parts.push({ type: 'text-delta', id, delta: turn.text });
-        parts.push({ type: 'text-end', id });
-      }
-
-      parts.push({
-        type: 'finish',
-        finishReason: {
-          unified: toolCalls.length ? 'tool-calls' : 'stop',
-          raw: toolCalls.length ? 'tool_use' : 'end_turn',
-        },
-        usage: {
-          inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-          outputTokens: { total: 10, text: 10, reasoning: 0 },
-        },
-      });
-
-      return {
-        stream: new ReadableStream({
-          start(controller) {
-            for (const part of parts) controller.enqueue(part);
-            controller.close();
-          },
-        }),
-      };
-    },
-  };
-}
-
 const SCRIPTED_USAGE = { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
 
 function chatTurn(scriptPath, method) {
@@ -151,21 +79,18 @@ function chatTurn(scriptPath, method) {
     type: 'tool-call',
     toolCallId: `scripted-${n}-${i}-${call.toolName}`,
     toolName: call.toolName,
-    // First-party tool-call input is the parsed value; only the V3 stream path stringifies.
+    // First-party tool-call input is the parsed value, never a JSON string.
     input: call.input,
   }));
-  return {
-    // The past-end default mirrors doGenerate's: a one-shot grade past the script's end passes.
-    text: (turn && turn.text) || (toolCalls.length ? '' : 'CORRECT — scripted.'),
-    toolCalls,
-    n,
-  };
+  return { turn, toolCalls, n };
 }
 
 function createChatModel(scriptPath) {
   return {
     async generate() {
-      const { text, toolCalls } = chatTurn(scriptPath, 'generate');
+      const { turn, toolCalls } = chatTurn(scriptPath, 'generate');
+      // The past-end default: a one-shot grade past the script's end passes.
+      const text = (turn && turn.text) || (toolCalls.length ? '' : 'CORRECT — scripted.');
       return {
         text,
         toolCalls,
@@ -175,7 +100,9 @@ function createChatModel(scriptPath) {
     },
 
     async *stream() {
-      const { text, toolCalls, n } = chatTurn(scriptPath, 'stream');
+      const { turn, toolCalls, n } = chatTurn(scriptPath, 'stream');
+      // Past-end streams are EMPTY (see the header comment) — the loop ends, no default text.
+      const text = (turn && turn.text) || '';
       for (const call of toolCalls) yield call;
       if (text) {
         const id = `scripted-text-${n}`;
@@ -192,4 +119,4 @@ function createChatModel(scriptPath) {
   };
 }
 
-module.exports = { createScriptedModel, createChatModel };
+module.exports = { createChatModel };

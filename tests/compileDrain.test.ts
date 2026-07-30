@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MockLanguageModelV3 } from 'ai/test';
 import { Engram } from '../src/server/mcp.js';
+import { sawToolResult, streamModel, turnsModel } from './mockModel.js';
 import {
   canCompileNow, compileConcurrencyFor, ensureCompileDrain, readQueue, startConversion,
 } from '../src/server/ingest.js';
@@ -70,40 +70,22 @@ describe('ensureCompileDrain — autoCompile end to end', () => {
   afterAll(async () => { await lw.close(); });
 
   it('drains pending entries automatically once a conversion completes, without /api/ingest/compile', async () => {
-    const model = new MockLanguageModelV3({
-      doGenerate: [
-        {
-          content: [{
-            type: 'tool-call',
-            toolCallId: 'call-1',
-            toolName: 'write_page',
-            input: JSON.stringify({
-              slug: 'auto-compile-concept',
-              title: 'Auto Compile Concept',
-              body: 'Content written by the auto-compile drain test. Part of Auto Compile Book.',
-              sources: ['Auto Compile Book', 'chapter 1'],
-              difficulty: 2,
-              status: 'draft',
-            }),
-          }],
-          finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
-          usage: {
-            inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 20, text: 0, reasoning: undefined },
+    const model = turnsModel([
+      {
+        toolCalls: [{
+          toolName: 'write_page',
+          input: {
+            slug: 'auto-compile-concept',
+            title: 'Auto Compile Concept',
+            body: 'Content written by the auto-compile drain test. Part of Auto Compile Book.',
+            sources: ['Auto Compile Book', 'chapter 1'],
+            difficulty: 2,
+            status: 'draft',
           },
-          warnings: [],
-        },
-        {
-          content: [{ type: 'text', text: 'Compiled 1 concept.' }],
-          finishReason: { unified: 'stop', raw: 'stop' },
-          usage: {
-            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 5, text: 5, reasoning: undefined },
-          },
-          warnings: [],
-        },
-      ],
-    });
+        }],
+      },
+      { text: 'Compiled 1 concept.' },
+    ]);
 
     const fakeConverter: Converter = async () => ({
       markdown: '# Auto Compile Concept\nContent written by the auto-compile drain test.',
@@ -125,46 +107,25 @@ describe('ensureCompileDrain — autoCompile end to end', () => {
 
   it('a non-ollama (cloud) compile model drains a progressively-queued chapter WHILE its own conversion is still active', async () => {
     // A model whose responses don't depend on call order/interleaving — it looks at whether a
-    // tool result is already in the prompt to decide "first step" (call write_page) vs "second
-    // step" (stop). Slugs are unique per call so concurrent/aggregate writes never collide.
+    // tool result is already in the transcript to decide "first step" (call write_page) vs
+    // "second step" (stop). Slugs are unique per call so concurrent/aggregate writes never collide.
     let nextSlug = 0;
-    const cloudModel = new MockLanguageModelV3({
-      doGenerate: async (options) => {
-        const alreadyCalledTool = options.prompt.some((m) => m.role === 'tool');
-        if (!alreadyCalledTool) {
-          const n = nextSlug++;
-          return {
-            content: [{
-              type: 'tool-call',
-              toolCallId: `call-cloud-during-${n}`,
-              toolName: 'write_page',
-              input: JSON.stringify({
-                slug: `cloud-during-conversion-${n}`,
-                title: `Cloud During Conversion Concept ${n}`,
-                body: `Content compiled while its own conversion (${n}) is technically still running.`,
-                sources: ['Cloud During Conversion Book', 'chapter 1'],
-                difficulty: 2,
-                status: 'draft',
-              }),
-            }],
-            finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
-            usage: {
-              inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
-              outputTokens: { total: 20, text: 0, reasoning: undefined },
-            },
-            warnings: [],
-          };
-        }
-        return {
-          content: [{ type: 'text', text: 'Compiled 1 concept.' }],
-          finishReason: { unified: 'stop', raw: 'stop' },
-          usage: {
-            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 5, text: 5, reasoning: undefined },
+    const cloudModel = streamModel((req) => {
+      if (sawToolResult(req)) return { text: 'Compiled 1 concept.' };
+      const n = nextSlug++;
+      return {
+        toolCalls: [{
+          toolName: 'write_page',
+          input: {
+            slug: `cloud-during-conversion-${n}`,
+            title: `Cloud During Conversion Concept ${n}`,
+            body: `Content compiled while its own conversion (${n}) is technically still running.`,
+            sources: ['Cloud During Conversion Book', 'chapter 1'],
+            difficulty: 2,
+            status: 'draft',
           },
-          warnings: [],
-        };
-      },
+        }],
+      };
     });
 
     let releaseGate: () => void;

@@ -13,6 +13,60 @@ import {
   zeroUsage, type ChatModel, type ChatRequest, type GenerateResult,
 } from '../src/server/llm/index.js';
 
+/** One scripted loop step: tool calls first, then text — the order the real adapters and the e2e
+ * scripted model both emit. */
+export interface FakeTurn {
+  text?: string;
+  toolCalls?: { toolName: string; input: unknown }[];
+}
+
+/** A ChatModel whose stream() plays whatever `turn` returns per call — the first-party stand-in
+ * for the SDK's MockLanguageModelV3 in loop-driving tests (compile agent, tutor session). The
+ * request and a 0-based call index go in, so a fake can script by position or react to the
+ * transcript (e.g. "a tool-result is present, so this is step two"). A `turn` that throws makes
+ * the model call reject, for exercising failure paths. */
+export function streamModel(
+  turn: (req: ChatRequest, call: number) => FakeTurn | Promise<FakeTurn>,
+): ChatModel {
+  let calls = 0;
+  return {
+    async generate() { throw new Error('streamModel drives stream(); use textModel for one-shot callers'); },
+    async *stream(req) {
+      const n = calls++;
+      const t = await turn(req, n);
+      const toolCalls = (t.toolCalls ?? []).map((c, i) => ({
+        type: 'tool-call' as const,
+        toolCallId: `fake-${n}-${i}-${c.toolName}`,
+        toolName: c.toolName,
+        input: c.input,
+      }));
+      for (const call of toolCalls) yield call;
+      if (t.text) {
+        yield { type: 'text-start', id: '0' };
+        yield { type: 'text-delta', id: '0', text: t.text };
+        yield { type: 'text-end', id: '0' };
+      }
+      yield { type: 'finish', reason: toolCalls.length ? 'tool-calls' : 'stop', usage: zeroUsage() };
+    },
+  };
+}
+
+/** streamModel scripted by position; throws past the end so an unexpected extra step fails the
+ * test instead of silently replaying the last turn. */
+export function turnsModel(turns: FakeTurn[]): ChatModel {
+  return streamModel((_req, call) => {
+    const t = turns[call];
+    if (!t) throw new Error(`scripted model exhausted after ${turns.length} turns`);
+    return t;
+  });
+}
+
+/** True once the transcript carries any tool-result — the request-shape probe order-independent
+ * fakes use to tell "first step" (call the tool) from "later step" (stop). */
+export function sawToolResult(req: ChatRequest): boolean {
+  return req.messages.some((m) => m.content.some((p) => p.type === 'tool-result'));
+}
+
 function promptText(req: ChatRequest): string {
   const parts = req.messages.map((m) =>
     m.content.filter((p) => p.type === 'text').map((p) => p.text).join('\n'));

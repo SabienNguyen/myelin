@@ -191,7 +191,7 @@ export function buildSetupRoutes(
     }
     writeSettings({ ...saved, models: nextModels, env: nextEnv });
 
-    // Live, no restart: cfg.models is the object every route and modelFor call reads, and
+    // Live, no restart: cfg.models is the object every route and chatModelFor call reads, and
     // models.ts resolves the provider env per call.
     for (const [role, id] of ids) cfg.models[role as ModelRole].model = id.trim();
     applyEnvValues(nextEnv as Partial<Record<ProviderEnvKey, string>>);

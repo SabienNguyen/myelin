@@ -3,8 +3,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MockLanguageModelV3 } from 'ai/test';
 import { buildIngestRoutes } from '../src/server/ingestRoutes.js';
+import { streamModel } from './mockModel.js';
 import { readQueue } from '../src/server/ingest.js';
 import { saveLinkDirectory } from '../src/server/linkList.js';
 import type { HarnessConfig } from '../src/server/config.js';
@@ -28,21 +28,11 @@ async function until<T>(fn: () => T, ms = 3000): Promise<T> {
 // compileNext only ever calls .listSlugs()/.tools() on the Engram client — a plain stub is
 // enough here; the real MCP round-trip is already covered by tests/ingest.test.ts.
 function fakeLw() {
-  return { listSlugs: async () => [] as string[], tools: async () => ({}) } as any;
+  return { listSlugs: async () => [] as string[], tools: async () => [] } as any;
 }
 
 function noToolModel() {
-  return new MockLanguageModelV3({
-    doGenerate: {
-      content: [{ type: 'text', text: 'nothing to do' }],
-      finishReason: { unified: 'stop', raw: 'stop' },
-      usage: {
-        inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-        outputTokens: { total: 1, text: 1, reasoning: undefined },
-      },
-      warnings: [],
-    },
-  });
+  return streamModel(() => ({ text: 'nothing to do' }));
 }
 
 function cfgFor(vault: string): HarnessConfig {

@@ -1,4 +1,3 @@
-import { ToolLoopAgent, isStepCount, type LanguageModel, type ToolSet } from 'ai';
 import {
   mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
 } from 'node:fs';
@@ -12,8 +11,9 @@ import {
 } from './convert.js';
 import { extractProblems, saveProblems } from './courseBank.js';
 import { analyzeLinkList, saveLinkDirectory } from './linkList.js';
+import { runLoop, type ChatModel, type LoopTool } from './llm/index.js';
 import type { Engram } from './mcp.js';
-import { modelFor } from './models.js';
+import { chatModelFor } from './models.js';
 import {
   readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
@@ -163,7 +163,7 @@ export function startConversion(
   lw: Engram, cfg: HarnessConfig, filePath: string,
   opts: {
     converter?: Converter; incrementalConverter?: IncrementalConverter;
-    mode?: 'book' | 'paper'; title?: string; sourceUrl?: string; model?: LanguageModel; onComplete?: () => void;
+    mode?: 'book' | 'paper'; title?: string; sourceUrl?: string; model?: ChatModel; onComplete?: () => void;
     // A temp dir holding the INPUT file this conversion consumes. The upload/video/download routes
     // each create one per ingest (lwh-upload-/lwh-video-/lwh-download-) and hand it off here, because
     // the conversion runs in the background — past the route's return — so only this function knows
@@ -423,13 +423,13 @@ export function renameBook(vault: string, from: string, to: string): number {
 /** Wrap MCP tools so every execute() sees sanitized args, mirroring session.ts's guardMcpTools —
  * duplicated locally (not imported) because it's the ingest pipeline's own small guard, and
  * session.ts doesn't export the wrapper itself, only the sanitizeToolArgs primitive it's built on. */
-function guardTools(tools: ToolSet, student: string, knownSlugs: string[]): ToolSet {
-  return Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, {
+function guardTools(tools: LoopTool[], student: string, knownSlugs: string[]): LoopTool[] {
+  return tools.map((t) => ({
     ...t,
     execute: t.execute
-      ? async (args: any, execOpts: any) => t.execute(sanitizeToolArgs(args, name, student, knownSlugs), execOpts)
-      : t.execute,
-  }])) as ToolSet;
+      ? async (args: unknown) => t.execute!(sanitizeToolArgs(args, t.name, student, knownSlugs))
+      : undefined,
+  }));
 }
 
 let cachedPrompt: string | null = null;
@@ -517,7 +517,7 @@ export function buildCompilePrompt(
  * queueStore.ts's module doc comment for the full incident writeup.
  */
 export async function compileOne(
-  lw: Engram, cfg: HarnessConfig, model: LanguageModel, entry: QueueEntry,
+  lw: Engram, cfg: HarnessConfig, model: ChatModel, entry: QueueEntry,
   chunkChars: number,
 ): Promise<'compiled' | 'failed'> {
   let status: QueueStatus = 'done';
@@ -537,17 +537,15 @@ export async function compileOne(
       ? `${entry.book} (${entry.sourceUrl})`
       : `${entry.book} — ${entry.title}`;
     const videoUrl = entry.sourceUrl && isVideoUrl(entry.sourceUrl) ? entry.sourceUrl : null;
-    const withCitation = (tools: ToolSet): ToolSet =>
-      Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, name !== 'write_page' ? t : {
+    const withCitation = (tools: LoopTool[]): LoopTool[] =>
+      tools.map((t) => (t.name !== 'write_page' || !t.execute ? t : {
         ...t,
-        execute: t.execute
-          ? (args: any, execOpts: any) => t.execute({
-            ...args,
-            ...(videoUrl && typeof args?.body === 'string' ? { body: linkifyTimestamps(args.body, videoUrl) } : {}),
-            sources: [...new Set([...(Array.isArray(args?.sources) ? args.sources : []), citation])],
-          }, execOpts)
-          : t.execute,
-      }])) as ToolSet;
+        execute: (args: any) => t.execute!({
+          ...args,
+          ...(videoUrl && typeof args?.body === 'string' ? { body: linkifyTimestamps(args.body, videoUrl) } : {}),
+          sources: [...new Set([...(Array.isArray(args?.sources) ? args.sources : []), citation])],
+        }),
+      }));
 
     let wroteAny = false;
     const partErrors: string[] = [];
@@ -558,16 +556,16 @@ export async function compileOne(
       const prompt = buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel);
 
       const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
-      const agent = new ToolLoopAgent({
-        model,
-        instructions: 'You are compiling one textbook chapter into Engram vault pages.',
-        tools,
-        stopWhen: isStepCount(16),
-      });
       try {
-        const result = await agent.generate({ prompt });
-        // "The agent finished" is not "the work happened" — small models sometimes narrate instead
-        // of calling tools. Gate on THIS agent's own steps (per-entry AND per-part accurate under
+        const result = await runLoop({
+          model,
+          system: 'You are compiling one textbook chapter into Engram vault pages.',
+          messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+          tools,
+          maxSteps: 16,
+        });
+        // "The loop finished" is not "the work happened" — small models sometimes narrate instead
+        // of calling tools. Gate on THIS run's own steps (per-entry AND per-part accurate under
         // concurrency; a global vault-slug diff would misattribute other workers' pages).
         const wrotePage = result.steps.some((step) => step.toolCalls.some((tc) => tc.toolName === 'write_page'));
         if (wrotePage) wroteAny = true;
@@ -616,9 +614,9 @@ export async function compileOne(
  */
 export async function compileNext(
   lw: Engram, cfg: HarnessConfig, n = 1,
-  opts: { model?: LanguageModel; concurrency?: number; chunkChars?: number } = {},
+  opts: { model?: ChatModel; concurrency?: number; chunkChars?: number } = {},
 ): Promise<{ compiled: number; failed: number }> {
-  const model = opts.model ?? modelFor('compile', cfg);
+  const model = opts.model ?? chatModelFor('compile', cfg);
   const concurrency = Math.max(1, opts.concurrency ?? 1);
   const snapshot = readQueue(cfg.vault);
   const batch = snapshot.filter((e) => e.status === 'pending').slice(0, n);
@@ -692,7 +690,7 @@ let drainRunning = false;
  * 'error' — the loop moves on and never retries a failed one (manual retry only, e.g. re-running
  * compile from the UI later).
  */
-export function ensureCompileDrain(lw: Engram, cfg: HarnessConfig, opts: { model?: LanguageModel } = {}): void {
+export function ensureCompileDrain(lw: Engram, cfg: HarnessConfig, opts: { model?: ChatModel } = {}): void {
   if (drainRunning) return;
   // Defensive: production config always has models.compile (zod-required), but some test
   // fixtures construct a bare-bones HarnessConfig without it — treat that as "nothing to drain"

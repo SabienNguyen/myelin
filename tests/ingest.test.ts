@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MockLanguageModelV3 } from 'ai/test';
 import { Engram } from '../src/server/mcp.js';
 import { ingestBook, compileNext, readQueue, startConversion } from '../src/server/ingest.js';
+import { sawToolResult, streamModel, turnsModel } from './mockModel.js';
 import type { Converter } from '../src/server/convert.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import { readLinkDirectories } from '../src/server/linkList.js';
@@ -269,40 +269,22 @@ describe('compileNext', () => {
     });
 
     // Step 1: model calls write_page once. Step 2: model replies with text and stops — no more tools.
-    const model = new MockLanguageModelV3({
-      doGenerate: [
-        {
-          content: [{
-            type: 'tool-call',
-            toolCallId: 'call-1',
-            toolName: 'write_page',
-            input: JSON.stringify({
-              slug: 'photosynthesis-basics',
-              title: 'Photosynthesis Basics',
-              body: 'Plants convert light into chemical energy using chlorophyll. Part of Test Biology Book.',
-              sources: ['Test Biology Book', 'chapter 1'],
-              difficulty: 2,
-              status: 'draft',
-            }),
-          }],
-          finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
-          usage: {
-            inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 20, text: 0, reasoning: undefined },
+    const model = turnsModel([
+      {
+        toolCalls: [{
+          toolName: 'write_page',
+          input: {
+            slug: 'photosynthesis-basics',
+            title: 'Photosynthesis Basics',
+            body: 'Plants convert light into chemical energy using chlorophyll. Part of Test Biology Book.',
+            sources: ['Test Biology Book', 'chapter 1'],
+            difficulty: 2,
+            status: 'draft',
           },
-          warnings: [],
-        },
-        {
-          content: [{ type: 'text', text: 'Compiled 1 concept from this chapter.' }],
-          finishReason: { unified: 'stop', raw: 'stop' },
-          usage: {
-            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 5, text: 5, reasoning: undefined },
-          },
-          warnings: [],
-        },
-      ],
-    });
+        }],
+      },
+      { text: 'Compiled 1 concept from this chapter.' },
+    ]);
 
     const summary = await compileNext(lw, cfg, 1, { model });
     expect(summary).toEqual({ compiled: 1, failed: 0 });
@@ -318,9 +300,7 @@ describe('compileNext', () => {
     await ingestBook(cfg, '/uploads/Broken Book.pdf', {
       converter: async () => ({ markdown: '# Some Concept\nSome content.' }),
     });
-    const model = new MockLanguageModelV3({
-      doGenerate: async () => { throw new Error('model unavailable'); },
-    });
+    const model = streamModel(() => { throw new Error('model unavailable'); });
     const summary = await compileNext(lw, cfg, 1, { model });
     expect(summary).toEqual({ compiled: 0, failed: 1 });
 
@@ -332,53 +312,32 @@ describe('compileNext', () => {
 
   describe('concurrency', () => {
     /** A model whose response doesn't depend on call order — it looks at whether a tool result is
-     * already in the prompt to tell "first step" (call write_page) from "second step" (stop), so
-     * it behaves correctly no matter how compileNext's worker pool interleaves calls across
+     * already in the transcript to tell "first step" (call write_page) from "second step" (stop),
+     * so it behaves correctly no matter how compileNext's worker pool interleaves calls across
      * chapters. Tracks how many of its "first step" calls are simultaneously in flight (via an
      * artificial delay) so tests can assert on actual overlap, not just wall-clock time. */
     function trackedModel(delayMs: number, inFlight: { current: number; max: number }) {
       let nextSlug = 0;
-      return new MockLanguageModelV3({
-        doGenerate: async (options) => {
-          const alreadyCalledTool = options.prompt.some((m) => m.role === 'tool');
-          if (!alreadyCalledTool) {
-            inFlight.current++;
-            inFlight.max = Math.max(inFlight.max, inFlight.current);
-            await new Promise((r) => { setTimeout(r, delayMs); });
-            inFlight.current--;
-            const n = nextSlug++;
-            return {
-              content: [{
-                type: 'tool-call',
-                toolCallId: `call-pool-${n}`,
-                toolName: 'write_page',
-                input: JSON.stringify({
-                  slug: `pool-concept-${n}`,
-                  title: `Pool Concept ${n}`,
-                  body: `Body for pool concept ${n}, written by the concurrency pool test.`,
-                  sources: ['Pool Test Book', 'chapter 1'],
-                  difficulty: 2,
-                  status: 'draft',
-                }),
-              }],
-              finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
-              usage: {
-                inputTokens: { total: 20, noCache: 20, cacheRead: undefined, cacheWrite: undefined },
-                outputTokens: { total: 20, text: 0, reasoning: undefined },
-              },
-              warnings: [],
-            };
-          }
-          return {
-            content: [{ type: 'text', text: 'done' }],
-            finishReason: { unified: 'stop', raw: 'stop' },
-            usage: {
-              inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
-              outputTokens: { total: 5, text: 5, reasoning: undefined },
+      return streamModel(async (req) => {
+        if (sawToolResult(req)) return { text: 'done' };
+        inFlight.current++;
+        inFlight.max = Math.max(inFlight.max, inFlight.current);
+        await new Promise((r) => { setTimeout(r, delayMs); });
+        inFlight.current--;
+        const n = nextSlug++;
+        return {
+          toolCalls: [{
+            toolName: 'write_page',
+            input: {
+              slug: `pool-concept-${n}`,
+              title: `Pool Concept ${n}`,
+              body: `Body for pool concept ${n}, written by the concurrency pool test.`,
+              sources: ['Pool Test Book', 'chapter 1'],
+              difficulty: 2,
+              status: 'draft',
             },
-            warnings: [],
-          };
-        },
+          }],
+        };
       });
     }
 
@@ -408,17 +367,7 @@ describe('compileNext', () => {
       const chapters = Array.from({ length: 3 }, (_, i) => `# Pool Chapter C${i + 1}\nContent ${i + 1}.`).join('\n');
       await ingestBook(cfg, '/uploads/Pool Test Book C.pdf', { converter: async () => ({ markdown: chapters }) });
 
-      const noToolModel = new MockLanguageModelV3({
-        doGenerate: async () => ({
-          content: [{ type: 'text', text: 'narrating instead of writing pages' }],
-          finishReason: { unified: 'stop', raw: 'stop' },
-          usage: {
-            inputTokens: { total: 5, noCache: 5, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 5, text: 5, reasoning: undefined },
-          },
-          warnings: [],
-        }),
-      });
+      const noToolModel = streamModel(() => ({ text: 'narrating instead of writing pages' }));
 
       const summary = await compileNext(lw, cfg, 3, { model: noToolModel, concurrency: 3 });
 
@@ -468,33 +417,27 @@ describe('chunkChapter (context-budget splitting)', async () => {
 
 describe('mechanical citation on write_page', async () => {
   const { compileNext } = await import('../src/server/ingest.js');
-  const { MockLanguageModelV3 } = await import('ai/test');
   const { mkdtempSync: mkTmp, mkdirSync: mkDir, writeFileSync: writeF } = await import('node:fs');
   const { tmpdir: tmpD } = await import('node:os');
   const { join: j } = await import('node:path');
-  const { z } = await import('zod');
-  const { tool } = await import('ai');
+
+  // A fake Engram whose write_page records what it was invoked with — the citation merge under
+  // test happens between the model's call and this execute.
+  function seeingLw(seen: any[]) {
+    return {
+      listSlugs: async () => [],
+      tools: async () => [{
+        name: 'write_page', description: 'w', inputSchema: { type: 'object' },
+        execute: async (args: any) => { seen.push(args); return { ok: true }; },
+      }],
+    } as any;
+  }
 
   function writePageModel() {
-    return new MockLanguageModelV3({
-      doGenerate: [
-        {
-          content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'write_page',
-            input: JSON.stringify({ slug: 'attention', title: 'Attention', body: 'x', sources: ['model-added'] }) }],
-          finishReason: { unified: 'tool-calls', raw: 'tool_use' },
-          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 1, text: 1, reasoning: undefined } },
-          warnings: [],
-        },
-        {
-          content: [{ type: 'text', text: 'done' }],
-          finishReason: { unified: 'stop', raw: 'end_turn' },
-          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 1, text: 1, reasoning: undefined } },
-          warnings: [],
-        },
-      ],
-    });
+    return turnsModel([
+      { toolCalls: [{ toolName: 'write_page', input: { slug: 'attention', title: 'Attention', body: 'x', sources: ['model-added'] } }] },
+      { text: 'done' },
+    ]);
   }
 
   it('merges the canonical citation into write_page sources (paper URL form)', async () => {
@@ -508,18 +451,8 @@ describe('mechanical citation on write_page', async () => {
     }]));
 
     const seen: any[] = [];
-    const fakeLw = {
-      listSlugs: async () => [],
-      tools: async () => ({
-        write_page: tool({
-          description: 'w', inputSchema: z.object({}).passthrough() as any,
-          execute: async (args: any) => { seen.push(args); return { ok: true }; },
-        }),
-      }),
-    } as any;
-
-    const res = await compileNext(fakeLw, { vault, student: 'kid', models: {} } as any, 1,
-      { model: writePageModel() as any });
+    const res = await compileNext(seeingLw(seen), { vault, student: 'kid', models: {} } as any, 1,
+      { model: writePageModel() });
     expect(res).toEqual({ compiled: 1, failed: 0 });
     expect(seen).toHaveLength(1);
     expect(seen[0].sources).toContain('model-added');
@@ -536,39 +469,14 @@ describe('mechanical citation on write_page', async () => {
       status: 'pending', sourceUrl: 'https://www.youtube.com/watch?v=WUvTyaaNkzM',
     }]));
 
-    const stampModel = new MockLanguageModelV3({
-      doGenerate: [
-        {
-          content: [{ type: 'tool-call', toolCallId: 'c1', toolName: 'write_page',
-            input: JSON.stringify({ slug: 'rings', title: 'Rings', body: 'slice the disk ([2:40])', sources: [] }) }],
-          finishReason: { unified: 'tool-calls', raw: 'tool_use' },
-          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 1, text: 1, reasoning: undefined } },
-          warnings: [],
-        },
-        {
-          content: [{ type: 'text', text: 'done' }],
-          finishReason: { unified: 'stop', raw: 'end_turn' },
-          usage: { inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
-            outputTokens: { total: 1, text: 1, reasoning: undefined } },
-          warnings: [],
-        },
-      ],
-    });
+    const stampModel = turnsModel([
+      { toolCalls: [{ toolName: 'write_page', input: { slug: 'rings', title: 'Rings', body: 'slice the disk ([2:40])', sources: [] } }] },
+      { text: 'done' },
+    ]);
 
     const seen: any[] = [];
-    const fakeLw = {
-      listSlugs: async () => [],
-      tools: async () => ({
-        write_page: tool({
-          description: 'w', inputSchema: z.object({}).passthrough() as any,
-          execute: async (args: any) => { seen.push(args); return { ok: true }; },
-        }),
-      }),
-    } as any;
-
-    const res = await compileNext(fakeLw, { vault, student: 'kid', models: {} } as any, 1,
-      { model: stampModel as any });
+    const res = await compileNext(seeingLw(seen), { vault, student: 'kid', models: {} } as any, 1,
+      { model: stampModel });
     expect(res).toEqual({ compiled: 1, failed: 0 });
     expect(seen[0].body).toBe('slice the disk ([\\[2:40\\]](https://www.youtube.com/watch?v=WUvTyaaNkzM&t=160s))');
   });

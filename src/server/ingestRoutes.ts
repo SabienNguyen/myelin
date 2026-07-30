@@ -1,4 +1,3 @@
-import type { LanguageModel } from 'ai';
 import { Hono } from 'hono';
 import { existsSync, mkdtempSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,12 +10,13 @@ import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
 import { deleteLinkDirectory, readLinkDirectories } from './linkList.js';
 import { fetchVideoTranscript, isVideoUrl, type VideoIngestDeps } from './videoIngest.js';
+import type { ChatModel } from './llm/index.js';
 import type { Engram } from './mcp.js';
 
 export function buildIngestRoutes(
   lw: Engram, cfg: HarnessConfig,
   deps: {
-    converter?: Converter; model?: LanguageModel; fetchImpl?: typeof fetch;
+    converter?: Converter; model?: ChatModel; fetchImpl?: typeof fetch;
     ingestRepoDeps?: IngestRepoDeps; videoDeps?: VideoIngestDeps;
   } = {},
 ) {

@@ -1,10 +1,11 @@
-import {
-  ToolLoopAgent, convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse,
-  generateId, isStepCount, toUIMessageStream, tool, type LanguageModel, type ModelMessage, type ToolSet, type UIMessage,
-} from 'ai';
 import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
 import { UI_TOOLS } from '../shared/uiTools.js';
+import type { UIMessage } from '../shared/uiMessages.js';
+import {
+  createUiStream, runLoop, uiMessagesToChatMessages,
+  type ChatMessage, type ChatModel, type LoopTool,
+} from './llm/index.js';
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
@@ -16,7 +17,7 @@ import { readQueue } from './queueStore.js';
 import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Engram } from './mcp.js';
-import { modelFor } from './models.js';
+import { chatModelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
 import { logGuardrail, saveThread } from './sessionStore.js';
@@ -24,6 +25,7 @@ import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated } from './gap/generated.js';
 import { builtinPatterns } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
+import { zodTool } from './zodTool.js';
 
 // Tools the tutor may use per mode; write/link/compile only in freeform (spec §5).
 const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidence',
@@ -100,9 +102,6 @@ export function sanitizeToolArgs(args: any, toolName: string, student: string, k
   return out;
 }
 
-/** Wrap MCP tools so every execute() sees sanitized args — the model cannot send a wrong
- * student id, a null optional field, or (where repairable) a hallucinated slug. Failed calls
- * are logged server-side so journalctl shows WHY a tool chip went ⚠. */
 /** The prompt's slug grounding, capped for scale.
  *
  * Small vaults inline every slug — the original behavior, and the right one: small models invent
@@ -123,21 +122,24 @@ export function slugListLine(slugs: string[], relevant: string[] = []): string {
     + 'a near-miss slug is auto-corrected to the nearest real page.';
 }
 
-function guardMcpTools(tools: ToolSet, student: string, knownSlugs: string[]): ToolSet {
-  return Object.fromEntries(Object.entries(tools).map(([name, t]: [string, any]) => [name, {
+/** Wrap MCP tools so every execute() sees sanitized args — the model cannot send a wrong
+ * student id, a null optional field, or (where repairable) a hallucinated slug. Failed calls
+ * are logged server-side so journalctl shows WHY a tool chip went ⚠. */
+function guardMcpTools(tools: LoopTool[], student: string, knownSlugs: string[]): LoopTool[] {
+  return tools.map((t) => ({
     ...t,
     execute: t.execute
-      ? async (args: any, opts: any) => {
-        const clean = sanitizeToolArgs(args, name, student, knownSlugs);
-        const result = await t.execute(clean, opts);
+      ? async (args: unknown) => {
+        const clean = sanitizeToolArgs(args, t.name, student, knownSlugs);
+        const result = await t.execute!(clean);
         if (result && typeof result === 'object' && (result as any).isError) {
           const text = ((result as any).content ?? []).map((c: any) => c?.text ?? '').join(' ');
-          console.error(`[tool-error] ${name} args=${JSON.stringify(clean)} -> ${text.slice(0, 300)}`);
+          console.error(`[tool-error] ${t.name} args=${JSON.stringify(clean)} -> ${text.slice(0, 300)}`);
         }
         return result;
       }
-      : t.execute,
-  }])) as ToolSet;
+      : undefined,
+  }));
 }
 
 /**
@@ -154,52 +156,48 @@ export function availableBlocks(): BlockToolName[] {
   return [...BLOCK_TOOL_NAMES];
 }
 
-/** Frontend tools: no execute — the loop pauses; the browser supplies output via addToolOutput.
- *  (`inputSchema` cast to z.ZodTypeAny — a plain `.map` over the BlockToolName union defeats
- *  tool()'s generic overload inference, which otherwise falls back to Tool<never, never, ...>.) */
 /** The turn's block toolset under structural rule 1a: a pure grading turn withholds every block
  *  except open_source (navigation is not staging work) — two live probes showed prompt wording
  *  alone does not stop the model staging a block over its own next-step offer. Exported for tests. */
-export function turnBlockTools(gradingOnly: boolean): ToolSet {
-  const tools = { ...blockTools() };
-  if (gradingOnly) {
-    const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
-    for (const name of Object.keys(tools)) if (!keep.has(name)) delete tools[name];
-  }
-  return tools;
+export function turnBlockTools(gradingOnly: boolean): LoopTool[] {
+  if (!gradingOnly) return blockTools();
+  const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
+  return blockTools().filter((t) => keep.has(t.name));
 }
 
-export function blockTools(): ToolSet {
-  const blocks = Object.fromEntries(availableBlocks().map((name) => [name, tool({
+/** Frontend tools: no execute — the loop pauses on them (runLoop's external-tool halt); the
+ *  browser supplies output via addToolOutput and the resubmit carries it back. */
+export function blockTools(): LoopTool[] {
+  const blocks = availableBlocks().map((name) => zodTool(name, {
     description: `Present a ${name} block to the student and wait for their work.`,
-    inputSchema: BLOCK_TOOLS[name].input as z.ZodTypeAny,
-  })]));
+    input: BLOCK_TOOLS[name].input as z.ZodTypeAny,
+  }));
   // UI tools ride the same frontend transport but are navigation, not graded work — the client
   // resolves and answers them itself (src/shared/uiTools.ts; grading never sees them because
   // pendingBlockOutputs filters on BLOCK_TOOL_NAMES).
-  blocks.open_source = tool({
+  blocks.push(zodTool('open_source', {
     description: 'Open an ingested source (book chapter, paper, notes) in the reading surface '
       + 'beside the conversation — BRING the student to the artifact instead of describing it. '
       + 'Pass the source title as the Library shows it. Then direct their reading and probe on it.',
-    inputSchema: UI_TOOLS.open_source.input as z.ZodTypeAny,
-  });
-  blocks.offer_write = tool({
+    input: UI_TOOLS.open_source.input as z.ZodTypeAny,
+  }));
+  blocks.push(zodTool('offer_write', {
     description: 'Offer the learner a one-click "write this up" button. Use ONLY in a teaching '
       + 'mode (learn/review/quiz) when you have taught something worth keeping but cannot write '
       + 'it yourself — instead of telling them to switch to freeform, call this so one click '
       + 'saves it. Pass `title` (the page name) and an optional `why`. Do not call it in freeform '
       + '(you can just write there) or for something already covered by a solid page.',
-    inputSchema: UI_TOOLS.offer_write.input as z.ZodTypeAny,
-  });
-  blocks.speak = tool({
+    input: UI_TOOLS.offer_write.input as z.ZodTypeAny,
+  }));
+  blocks.push(zodTool('speak', {
     description: 'Attach a "hear this" button to a word or short phrase, spoken aloud by the '
       + "browser's speech engine. Use for pronunciation in ANY language the learner is studying — "
       + 'essential for tone languages (Vietnamese, Mandarin, Thai) where the text alone cannot '
       + 'convey the sound. Pass `text`, a BCP-47 `lang` (e.g. "vi", "zh-CN"), and an optional '
       + '`gloss`. The client reports whether a voice was available; if not, teach from the tone '
       + 'map and point the learner to a native recording.',
-    inputSchema: UI_TOOLS.speak.input as z.ZodTypeAny,
-  });
+    input: UI_TOOLS.speak.input as z.ZodTypeAny,
+  }));
   return blocks;
 }
 
@@ -341,17 +339,17 @@ export async function vaultGap(
  * problems are drilled VERBATIM, so course_problems hands the tutor the exact text plus a stable
  * id, and mark_course_problem is how a correct answer reaches the bank's spacing.
  */
-export function buildCourseTools(vault: string): ToolSet {
-  return {
-    course_problems: tool({
+export function buildCourseTools(vault: string): LoopTool[] {
+  return [
+    zodTool('course_problems', {
       description: 'The next banked course problems (past exams, problem sets) worth drilling — '
         + 'never-answered first, then correct-longest-ago. Each comes with a stable id and its '
         + 'VERBATIM text: present that text word for word as the prompt of a quick_check or '
         + 'structured_check; never paraphrase it.',
-      inputSchema: z.object({
+      input: z.object({
         k: z.number().int().min(1).max(5).optional().describe('how many problems (default 5)'),
       }),
-      execute: async ({ k }: { k?: number }) => {
+      execute: async ({ k }) => {
         const problems = nextProblems(vault, k ?? 5);
         return problems.length
           ? {
@@ -364,18 +362,18 @@ export function buildCourseTools(vault: string): ToolSet {
           : { problems: [], note: 'the course bank is empty — no problem set or past exam has been added' };
       },
     }),
-    mark_course_problem: tool({
+    zodTool('mark_course_problem', {
       description: 'Record that the learner just answered a banked course problem correctly in a '
         + 'graded block — spacing uses it to stop re-asking. Call it alongside record_evidence, '
         + 'never for an answer that was not graded correct.',
-      inputSchema: z.object({
+      input: z.object({
         id: z.string().describe('the problem id from course_problems, e.g. "midterm-2#3"'),
       }),
-      execute: async ({ id }: { id: string }) => (markCorrect(vault, id)
+      execute: async ({ id }) => (markCorrect(vault, id)
         ? { marked: id }
         : { error: `no banked problem with id "${id}"` }),
     }),
-  };
+  ];
 }
 
 /**
@@ -388,18 +386,18 @@ export function buildFrontierTools(
   vault?: string, fetchImpl: typeof fetch = fetch,
   // yt-dlp seams, injected by tests so no suite ever needs the binary or a network.
   video: { search?: typeof searchVideos; transcript?: typeof fetchVideoTranscript } = {},
-): ToolSet {
-  return {
-    find_recent_papers: tool({
+): LoopTool[] {
+  return [
+    zodTool('find_recent_papers', {
       description: 'Search the live literature indices (arXiv preprints + Crossref published '
         + 'work) for the NEWEST papers on a topic, sorted by date. Use this whenever the student '
         + 'asks what is new, recent, state-of-the-art, or frontier in any field — your training '
         + 'knowledge has a cutoff and this tool does not. Present results with their dates and '
         + 'offer to ingest any of them (ingest_url with the pdfUrl) as course pages.',
-      inputSchema: z.object({
+      input: z.object({
         topic: z.string().describe('the research topic, e.g. "KV cache compression"'),
       }),
-      execute: async ({ topic }: { topic: string }) => {
+      execute: async ({ topic }) => {
         try {
           const { papers, sourceErrors } = await findRecentPapers(topic, fetchImpl);
           return {
@@ -411,16 +409,16 @@ export function buildFrontierTools(
         }
       },
     }),
-    paper_references: tool({
+    zodTool('paper_references', {
       description: 'The references of an INGESTED paper or book chapter, parsed from the source '
         + 'itself — citation chasing. Use when the student wants to go deeper than the current '
         + 'paper: present the actionable ones (those with a url) as next reads and offer '
         + 'ingest_url (pdfUrl when present, else url). Entries without an id are listed for '
         + 'manual searching — say so.',
-      inputSchema: z.object({
+      input: z.object({
         title: z.string().describe('the source title as the Library shows it'),
       }),
-      execute: async ({ title }: { title: string }) => {
+      execute: async ({ title }) => {
         if (!vault) return { error: 'no vault configured for reference lookup' };
         const want = title.trim().toLowerCase();
         const entry = readQueue(vault).find((e) => e.chapter?.startsWith('raw/')
@@ -438,15 +436,15 @@ export function buildFrontierTools(
         }
       },
     }),
-    find_canonical_sources: tool({
+    zodTool('find_canonical_sources', {
       description: 'The LOAD-BEARING literature of a field: Crossref sorted by citation count — '
         + 'who to read first, not what is newest. Use it when a student is STARTING a subject, so '
         + 'you can route them to the canonical human artifacts (and name the researchers behind '
         + 'them) rather than teaching from your own memory. Offer to ingest the best ones.',
-      inputSchema: z.object({
+      input: z.object({
         topic: z.string().describe('the field or topic, e.g. "spaced repetition learning"'),
       }),
-      execute: async ({ topic }: { topic: string }) => {
+      execute: async ({ topic }) => {
         try {
           return await findCanonicalPapers(topic);
         } catch (e: any) {
@@ -454,18 +452,18 @@ export function buildFrontierTools(
         }
       },
     }),
-    find_video: tool({
+    zodTool('find_video', {
       description: 'Search YouTube for teaching videos on a topic (yt-dlp, no API key). Returns '
         + 'title, url, channel, durationSeconds, views. Prefer a short well-viewed explainer over '
         + 'a long lecture unless the student asked for depth. Then call video_transcript on your '
         + 'pick to find the EXACT passage, and assign it with a watch_video block '
         + '(startSeconds/endSeconds) — never make the student scrub a 40-minute video for a '
         + '3-minute idea.',
-      inputSchema: z.object({
+      input: z.object({
         query: z.string().describe('what to search for, e.g. "quadratic formula derivation"'),
         limit: z.number().int().min(1).max(10).optional().describe('results to return (default 5)'),
       }),
-      execute: async ({ query, limit }: { query: string; limit?: number }) => {
+      execute: async ({ query, limit }) => {
         try {
           return { videos: await (video.search ?? searchVideos)(query, limit ?? 5) };
         } catch (e: any) {
@@ -473,16 +471,16 @@ export function buildFrontierTools(
         }
       },
     }),
-    video_transcript: tool({
+    zodTool('video_transcript', {
       description: "A YouTube video's own captions as a timestamped transcript ([M:SS] marks), no "
         + 'download. Use it BEFORE assigning watch_video: find where the topic is actually '
         + 'covered, convert the [M:SS] you picked to seconds, and pass startSeconds/endSeconds so '
         + 'the assignment is the snippet, not the whole video. Works for any YouTube URL, '
         + 'ingested or not.',
-      inputSchema: z.object({
+      input: z.object({
         url: z.string().describe('the YouTube URL from find_video or the student'),
       }),
-      execute: async ({ url }: { url: string }) => {
+      execute: async ({ url }) => {
         try {
           const { title, markdown } = await (video.transcript ?? fetchVideoTranscript)(url);
           // A long lecture's transcript can be book-sized; cap what enters the turn and say so —
@@ -498,7 +496,7 @@ export function buildFrontierTools(
         }
       },
     }),
-  };
+  ];
 }
 
 /** Find block-tool outputs in the tail of the incoming history (since the last user text turn). */
@@ -520,9 +518,9 @@ function pendingBlockOutputs(messages: UIMessage[]) {
 
 export function createTutorSession(
   lw: Engram, cfg: HarnessConfig,
-  opts: { model?: LanguageModel; now?: () => Date } = {},
+  opts: { model?: ChatModel; now?: () => Date } = {},
 ) {
-  const model = opts.model ?? modelFor('tutor', cfg);
+  const model = opts.model ?? chatModelFor('tutor', cfg);
   // Which model id the WEB TOOLS should assume — deliberately not the same question as `model`
   // above. A provider-executed search tool is a request-shape feature of Anthropic's API, so it
   // only means anything on a real Anthropic route; an injected model (tests) or the scripted e2e
@@ -595,25 +593,25 @@ export function createTutorSession(
 
   async function respond(messages: UIMessage[], mode: Mode, threadId = 'default'): Promise<Response> {
     const pending = pendingBlockOutputs(messages);
+    const userTurn = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
 
     // Everything slow (grading, bootstrap, model turns) runs INSIDE the stream's execute so the
     // HTTP response starts immediately — the client flips to "running" and can show a working
     // indicator during grading instead of a dead pause.
-    const stream = createUIMessageStream({
+    return createUiStream({
       // Continuation, not a new sibling message: when this response is a resubmit whose incoming
       // history already ends in an assistant message (the block output that triggered the
-      // resubmit), `createUIMessageStream` inspects `originalMessages` and injects THAT message's
-      // id into the outgoing 'start' chunk. The client (ai@7's AbstractChat.makeRequest) seeds its
-      // streaming state from a snapshot of that same last message and only REPLACES it in place
-      // when the ids match — without this, the ids mismatch (a fresh one vs the snapshot's), the
-      // client falls back to pushing the snapshot-plus-new-content as an extra sibling message, and
-      // the turn-1 content (e.g. "Let's warm up.") ends up rendered twice.
+      // resubmit), createUiStream puts THAT message's id on the outgoing 'start' chunk. The client
+      // (ai@7's AbstractChat.makeRequest) seeds its streaming state from a snapshot of that same
+      // last message and only REPLACES it in place when the ids match — without this, the ids
+      // mismatch (a fresh one vs the snapshot's), the client falls back to pushing the
+      // snapshot-plus-new-content as an extra sibling message, and the turn-1 content (e.g.
+      // "Let's warm up.") ends up rendered twice.
       originalMessages: messages,
       // Server-side turn persistence (the disconnect fix): the client's own PUT only happens when
       // ITS stream finishes, so a disconnect mid-answer lost the assistant turn the server had
-      // completed. generateId makes both sides name the response message identically, so this
+      // completed. createUiStream mints response ids in the same format the client does, so this
       // save and the client's PUT converge in saveThread's union-by-id.
-      generateId,
       onEnd: ({ messages: finalMessages }) => {
         try {
           saveThread(cfg.vault, threadId, finalMessages as unknown[]);
@@ -621,11 +619,10 @@ export function createTutorSession(
           console.error('[server-side thread save]', e);
         }
       },
-      // Surface failures to the learner ("degrade loudly") — and to journalctl. NOTE: model
-      // errors surface through the MERGED agent stream, so the same handler must also be passed
-      // to toUIMessageStream below — this outer one only catches execute()-level throws.
+      // Surface failures to the learner ("degrade loudly") — and to journalctl. A model throw
+      // mid-run propagates out of execute and lands here as an error chunk on the open stream.
       onError: turnError,
-      execute: async ({ writer }) => {
+      execute: async (writer) => {
         // 1. Grade fresh block outputs BEFORE the model sees them.
         const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
         for (const p of pending) {
@@ -636,8 +633,7 @@ export function createTutorSession(
 
         const slugs = await lw.listSlugs();
         const mcpTools = guardMcpTools(await lw.tools(), cfg.student, slugs);
-        const activeMcp = Object.fromEntries(Object.entries(mcpTools)
-          .filter(([n]) => mode === 'freeform' || TEACH_TOOLS.includes(n)));
+        const activeMcp = mcpTools.filter((t) => mode === 'freeform' || TEACH_TOOLS.includes(t.name));
 
         // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
         // wherever the vault has a GAP — no page, a stub, an unsourced page, a page too thin to
@@ -651,16 +647,17 @@ export function createTutorSession(
           search: (query) => lw.call('search', { query }) as Promise<any>,
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
-        const webTools = gap ? buildWebTools(cfg, searchModelId) : {};
+        const webTools = gap ? buildWebTools(cfg, searchModelId) : { tools: [], serverTools: [] };
+        const hasWebSearch = [...webTools.tools, ...webTools.serverTools].some((t) => t.name === 'web_search');
         // ingest_paper needs cfg (to queue) AND lw (to kick a background compile) — same
         // freeform-only gate as webTools: a subject gets researched, sourced, and compiled in
         // freeform; teaching modes stay grounded in the vault.
-        const ingestTools = mode === 'freeform' ? buildIngestTools(lw, cfg) : {};
+        const ingestTools = mode === 'freeform' ? buildIngestTools(lw, cfg) : [];
         // Freeform-only, like every other content-creating tool: the tutor can commission a NEW
         // coding exercise when a learner wants practice no ladder covers. The result is pending
         // review — the tutor must say so, not promise the exercise for this session.
-        const generateTool: ToolSet = mode !== 'freeform' ? {} : {
-          generate_exercise: tool({
+        const generateTool: LoopTool[] = mode !== 'freeform' ? [] : [
+          zodTool('generate_exercise', {
             description: 'Author a new coding exercise — for subjects where CODE IS THE SKILL: '
               + 'programming itself, or a domain the student chose to practice through code (data '
               + 'analysis, scripting, infra). Non-coding subjects take their own applied routes '
@@ -679,7 +676,7 @@ export function createTutorSession(
               + 'framing). The result is verified mechanically and stored PENDING REVIEW — tell the '
               + 'student it is waiting in the Library\'s Practice section for their approval, and do '
               + 'not promise it mid-conversation.',
-            inputSchema: z.object({
+            input: z.object({
               pattern: z.string().describe('kebab-case pattern id, e.g. dilution-calculator'),
               description: z.string().describe('what the exercise should teach, 1-3 sentences'),
               family: z.enum(['function', 'manifest', 'exec', 'stream']).optional()
@@ -689,7 +686,7 @@ export function createTutorSession(
               environment: z.enum(['redis', 'postgres']).optional()
                 .describe('exec family only: a real service composed up fresh for every suite run — the program gets its connection string via REDIS_URL / DATABASE_URL. Needs Docker with the compose plugin and the image pulled; generation fails loudly with the exact fix when it is missing. Use for exercises about caching, queues, SQL — anything worth practicing against the real thing.'),
             }),
-            execute: async ({ pattern, description, family, runtime, environment }: { pattern: string; description: string; family?: 'function' | 'manifest' | 'exec' | 'stream'; runtime?: 'python3' | 'bash' | 'ruby' | 'node' | 'typescript' | 'sqlite' | 'c' | 'rust' | 'cuda' | 'go' | 'java'; environment?: 'redis' | 'postgres' }) => {
+            execute: async ({ pattern, description, family, runtime, environment }) => {
               const slug = pattern.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
               if (builtinPatterns(cfg.vault).includes(slug) || listGenerated(cfg.vault).some((e) => e.pattern === slug)) {
                 return { error: `an exercise for "${slug}" already exists` };
@@ -710,7 +707,7 @@ export function createTutorSession(
               }
             },
           }),
-        };
+        ];
 
         // STRUCTURAL "let a win land" (rule 1a): in a pure grading turn — block outputs arriving,
         // no new words from the student — the block tools are WITHHELD, not just discouraged. Two
@@ -719,19 +716,14 @@ export function createTutorSession(
         // offer is the only possible ending, and the student's "yes" is a real user turn where
         // the tools return. open_source stays available: navigation is not staging work.
         const gradingOnly = pending.length > 0;
-        const turnBlocks = turnBlockTools(gradingOnly);
-        const agent = new ToolLoopAgent({
-          model,
-          instructions: `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
-            + (gradingOnly
-              ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
-              : ''),
-          tools: {
-            ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(cfg.vault), ...webTools, ...ingestTools,
-            ...generateTool, ...turnBlocks,
-          },
-          stopWhen: isStepCount(24),
-        });
+        const system = `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
+          + (gradingOnly
+            ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
+            : '');
+        const tools: LoopTool[] = [
+          ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(cfg.vault),
+          ...webTools.tools, ...ingestTools, ...generateTool, ...turnBlockTools(gradingOnly),
+        ];
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
         // A mode switch mid-thread re-arms the context injection (see lastModeByThread above).
@@ -740,36 +732,33 @@ export function createTutorSession(
         const prevMode = lastModeByThread.get(threadId);
         const modeSwitched = !isFirstTurn && !pending.length && prevMode !== undefined && prevMode !== mode;
         lastModeByThread.set(threadId, mode);
-        const context: ModelMessage[] = [];
-        if (isFirstTurn) context.push({ role: 'user', content: await bootstrap(mode, slugs) });
-        else if (modeSwitched) context.push({
-          role: 'user',
-          content: `HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
-            + 'Fresh session context follows — trust it over anything earlier in this conversation '
-            + '(mastery and due reviews may have changed since the conversation started).\n\n'
-            + await bootstrap(mode, slugs),
-        });
+        const context: ChatMessage[] = [];
+        if (isFirstTurn) context.push(userTurn(await bootstrap(mode, slugs)));
+        else if (modeSwitched) context.push(userTurn(
+          `HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
+          + 'Fresh session context follows — trust it over anything earlier in this conversation '
+          + '(mastery and due reviews may have changed since the conversation started).\n\n'
+          + await bootstrap(mode, slugs),
+        ));
         // The unlock is decided per turn, so it can happen mid-conversation — after the bootstrap
         // has already been sent. Say it here or the tutor holds a tool it was told it does not have.
         // The REASON goes in too: "there is no page" and "the page is unsourced guesswork" call for
         // visibly different work, and the second one should not be taught from as if it were fine.
-        if (gap && gap.reason !== 'freeform' && webTools.web_search) context.push({
-          role: 'user',
-          content: `HARNESS: your memory has a gap here — ${gap.detail}. `
-            + 'web_search and read_url are unlocked for this turn. Research it, cite what you read '
-            + 'in your answer, and teach from that rather than from '
-            + `${gap.slug ? 'the existing page' : 'memory'}. You still have NO page-writing tools `
-            + 'here, so nothing you find is being saved: once the student has their answer, offer to '
-            + `switch to freeform so ${gap.slug ? `“${gap.slug}” can be rewritten properly` : 'the subject can be researched and compiled'} `
-            + 'into pages that track their progress.',
-        });
-        if (grades.length) context.push({
-          role: 'user',
-          content: `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. ` +
-            `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
-        });
+        if (gap && gap.reason !== 'freeform' && hasWebSearch) context.push(userTurn(
+          `HARNESS: your memory has a gap here — ${gap.detail}. `
+          + 'web_search and read_url are unlocked for this turn. Research it, cite what you read '
+          + 'in your answer, and teach from that rather than from '
+          + `${gap.slug ? 'the existing page' : 'memory'}. You still have NO page-writing tools `
+          + 'here, so nothing you find is being saved: once the student has their answer, offer to '
+          + `switch to freeform so ${gap.slug ? `“${gap.slug}” can be rewritten properly` : 'the subject can be researched and compiled'} `
+          + 'into pages that track their progress.',
+        ));
+        if (grades.length) context.push(userTurn(
+          `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
+          + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
+        ));
 
-        const model_messages = [...context, ...(await convertToModelMessages(messages))];
+        const model_messages = [...context, ...uiMessagesToChatMessages(messages)];
 
         // Bug 2 fix: the grading above only mutated the REQUEST's copy of the tool output
         // (p.output.grading, kept so the model sees student work + machine grade together in the
@@ -788,29 +777,31 @@ export function createTutorSession(
         }
         // Returns the record_evidence tool inputs the model actually emitted this run — the count
         // gates the guardrail below, and the (slug, kind) inside each drives the recording-integrity
-        // check after (appliedGradeBypass).
-        const run = async (msgs: ModelMessage[]) => {
-          const result = await agent.stream({ messages: msgs });
-          writer.merge(toUIMessageStream({ stream: result.stream, onError: turnError }));
-          const steps = await result.steps;
-          return steps.flatMap((s: any) => s.toolCalls ?? [])
-            .filter((tc: any) => tc.toolName === 'record_evidence')
-            .map((tc: any) => (tc.input ?? tc.args ?? {}));
+        // check after (appliedGradeBypass). Prompt caching is live here: the anthropic adapter
+        // places the breakpoints (system tail + last message); scripted/compat models ignore it.
+        const run = async (msgs: ChatMessage[]) => {
+          const result = await runLoop({
+            model, system, messages: msgs, tools, serverTools: webTools.serverTools,
+            maxSteps: 24, cache: true,
+            onEvent: (e) => writer.forward(e),
+          });
+          return result.steps.flatMap((s) => s.toolCalls)
+            .filter((tc) => tc.toolName === 'record_evidence')
+            .map((tc) => (tc.input ?? {}) as any);
         };
         const recordedCalls: any[] = await run(model_messages);
         // Gate on evidence, not on grade COUNT: a grade can legitimately carry none (an unavailable
         // code_exercise — see grading.ts), and nagging the tutor to record evidence that does not
         // exist would train it to invent some.
         if (grades.some((g) => g.evidence.length > 0) && recordedCalls.length === 0) {
-          // Guardrail: one nudged retry
-          const nudged = await run([...model_messages, {
-            role: 'user',
-            content: 'HARNESS GUARDRAIL: you did not call record_evidence for the graded block result. Do it now, then continue.',
-          }]);
+          // Guardrail: one nudged retry, forwarded into the SAME stream (one start/finish pair).
+          const nudged = await run([...model_messages, userTurn(
+            'HARNESS GUARDRAIL: you did not call record_evidence for the graded block result. Do it now, then continue.',
+          )]);
           recordedCalls.push(...nudged);
           if (nudged.length === 0) {
             logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
-            writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true } as any);
+            writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true });
           }
         }
         // Recording-integrity detection (DETECTION ONLY): capApplied guarantees the machine grade,
@@ -828,7 +819,6 @@ export function createTutorSession(
         } catch { /* detection is telemetry; it must never affect the turn */ }
       },
     });
-    return createUIMessageStreamResponse({ stream });
   }
 
   return { respond };

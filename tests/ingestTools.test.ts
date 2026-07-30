@@ -18,8 +18,12 @@ function cfgFor(vault: string): HarnessConfig {
 }
 
 function fakeLw() {
-  return { listSlugs: async () => [] as string[], tools: async () => ({}) } as any;
+  return { listSlugs: async () => [] as string[], tools: async () => [] } as any;
 }
+
+/** buildIngestTools returns LoopTool[]; this resolves ingest_paper's execute for the drives below. */
+const ingestPaper = (tools: ReturnType<typeof buildIngestTools>) =>
+  tools.find((t) => t.name === 'ingest_paper')!.execute!;
 
 const fakeConverter: Converter = async () => ({ markdown: '# A Nice Paper\nAbstract text here.' });
 
@@ -40,7 +44,7 @@ describe('ingest_paper tool', () => {
     const fakeDownload = vi.fn(async (_url: string) => ({ path: '/fake/paper.pdf', contentType: 'application/pdf' }));
     const tools = buildIngestTools(fakeLw(), cfgFor(vault), { download: fakeDownload, converter: fakeConverter });
 
-    const out = await (tools.ingest_paper as any).execute({ url: 'https://arxiv.org/pdf/2401.12345' }, {});
+    const out = await ingestPaper(tools)({ url: 'https://arxiv.org/pdf/2401.12345' });
     expect(out).toEqual({ queued: 'paper', converting: true, compiling: 'starts after conversion' });
     expect(fakeDownload).toHaveBeenCalledWith('https://arxiv.org/pdf/2401.12345');
     // Placeholder is on disk instantly (reload-safe visibility)…
@@ -59,9 +63,7 @@ describe('ingest_paper tool', () => {
     const fakeDownload = async () => ({ path: '/fake/paper.pdf', contentType: 'application/pdf' });
     const tools = buildIngestTools(fakeLw(), cfgFor(vault), { download: fakeDownload, converter: fakeConverter });
 
-    const out = await (tools.ingest_paper as any).execute(
-      { url: 'https://example.com/paper.pdf', title: 'Custom Title' }, {},
-    );
+    const out = await ingestPaper(tools)({ url: 'https://example.com/paper.pdf', title: 'Custom Title' });
     expect(out).toEqual({ queued: 'Custom Title', converting: true, compiling: 'starts after conversion' });
     await until(() => readQueue(vault)[0]?.title === 'Custom Title' && readQueue(vault)[0].status !== 'converting');
   });
@@ -71,7 +73,7 @@ describe('ingest_paper tool', () => {
     const fakeDownload = async () => { throw new Error('unsupported content-type "text/html" for download'); };
     const tools = buildIngestTools(fakeLw(), cfgFor(vault), { download: fakeDownload, converter: fakeConverter });
 
-    const out = await (tools.ingest_paper as any).execute({ url: 'https://example.com/notapaper' }, {});
+    const out = await ingestPaper(tools)({ url: 'https://example.com/notapaper' });
     expect(out).toEqual({ error: expect.stringMatching(/unsupported content-type/) });
     expect(readQueue(vault)).toHaveLength(0);
   });
@@ -82,7 +84,7 @@ describe('ingest_paper tool', () => {
     const brokenConverter: Converter = async () => { throw new Error('conversion exploded'); };
     const tools = buildIngestTools(fakeLw(), cfgFor(vault), { download: fakeDownload, converter: brokenConverter });
 
-    const out = await (tools.ingest_paper as any).execute({ url: 'https://example.com/paper.pdf' }, {});
+    const out = await ingestPaper(tools)({ url: 'https://example.com/paper.pdf' });
     // Conversion failures now surface in the LEDGER (convert-error), not the tool result —
     // the tool returns before conversion runs.
     expect(out).toMatchObject({ converting: true });

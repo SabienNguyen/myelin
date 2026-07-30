@@ -1,6 +1,6 @@
 import { AssistantRuntimeProvider, Tools, useAui } from '@assistant-ui/react';
 import { AssistantChatTransport, useChatRuntime } from '@assistant-ui/react-ai-sdk';
-import type { UIMessage } from 'ai';
+import type { UIMessage } from '../shared/uiMessages.js';
 import { useEffect, useState, type PropsWithChildren } from 'react';
 import { BLOCK_TOOL_NAMES } from '../shared/blocks.js';
 import { dedupeById } from '../shared/messages.js';
@@ -76,7 +76,10 @@ function RuntimeInner(
     // Identical wire shape, incompatible type identities (the repo-wide rule: never let ai
     // types flow through react-ai-sdk's surface without a boundary cast).
     messages: initial.length ? (initial as never[]) : undefined,
-    sendAutomaticallyWhen: blockOutputsComplete,
+    // Same boundary cast as `messages` above: the predicate is typed against OUR first-party
+    // UIMessage (narrower parts union), while react-ai-sdk types the option against its bundled
+    // ai@6 message. Structurally the predicate only reads role/parts/type/state, all shared.
+    sendAutomaticallyWhen: blockOutputsComplete as never,
     onFinish: ({ messages }) => {
       void fetch(`/api/thread/${threadId}`, {
         method: 'PUT',

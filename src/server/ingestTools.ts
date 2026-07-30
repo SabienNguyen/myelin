@@ -1,10 +1,11 @@
-import { tool, type ToolSet } from 'ai';
 import { z } from 'zod';
 import type { HarnessConfig } from './config.js';
 import type { Converter } from './convert.js';
 import { downloadToTemp } from './download.js';
 import { startConversion } from './ingest.js';
+import type { LoopTool } from './llm/index.js';
 import type { Engram } from './mcp.js';
+import { zodTool } from './zodTool.js';
 import { dirname } from 'node:path';
 
 /** The tutor's own paper-fetching tool — freeform mode only (wired in session.ts alongside
@@ -14,17 +15,17 @@ import { dirname } from 'node:path';
 export function buildIngestTools(
   lw: Engram, cfg: HarnessConfig,
   deps: { download?: typeof downloadToTemp; converter?: Converter } = {},
-): ToolSet {
+): LoopTool[] {
   const download = deps.download ?? downloadToTemp;
 
-  return {
-    ingest_paper: tool({
+  return [
+    zodTool('ingest_paper', {
       description: 'Download a research paper by URL (arXiv PDF, journal PDF, etc.) and queue it '
         + "for compilation into vault pages. Use after a web_search with category 'science' turns "
         + 'up the best source — pages then compile from the actual paper text, not from memory. '
         + 'Compiling runs in the background and can take minutes; tell the student it is underway '
         + 'rather than waiting on it.',
-      inputSchema: z.object({
+      input: z.object({
         url: z.string().url(),
         title: z.string().optional().describe('Paper title, if known — overrides title detection from the PDF.'),
       }),
@@ -46,5 +47,5 @@ export function buildIngestTools(
         }
       },
     }),
-  };
+  ];
 }
