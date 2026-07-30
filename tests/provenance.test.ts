@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  readSources, recordSource, reconcileAttribution, sourceFor, type SourceRecord,
+  readSources, recordSource, recordSpineChapter, reconcileAttribution, sourceFor,
+  type SourceRecord,
 } from '../src/server/provenance.js';
 
 const rec = (over: Partial<SourceRecord> = {}): SourceRecord => ({
@@ -128,5 +129,72 @@ describe('the sources sidecar', () => {
     const log = readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8');
     expect(log).toContain('attribution mismatch for "The essence of calculus"');
     expect(log).toContain('but the source itself credits Branch Education');
+  });
+});
+
+describe('the spine — the source\'s own chapter order', () => {
+  const freshVault = () => mkdtempSync(join(tmpdir(), 'lwh-spine-'));
+  const slice = (n: number, pages: string[]) => ({
+    chapter: `raw/uploads/essence-of-calculus/ch-0${n}-c.md`,
+    chapterOrdinal: n,
+    title: `Chapter ${n}`,
+    pages,
+  });
+
+  it('files a chapter\'s pages against the source record', () => {
+    const vault = freshVault();
+    recordSource(vault, rec());
+    recordSpineChapter(vault, rec().book, slice(1, ['limits', 'derivatives']));
+    expect(sourceFor(vault, rec().book)?.spine).toEqual([slice(1, ['limits', 'derivatives'])]);
+    expect(sourceFor(vault, rec().book)?.authors).toEqual(['3Blue1Brown']); // byline untouched
+  });
+
+  it('keeps the spine sorted by chapter ordinal however the chapters arrive', () => {
+    // The drain compiles four chapters at a time, so chapter 3 routinely lands before chapter 1.
+    const vault = freshVault();
+    recordSource(vault, rec());
+    recordSpineChapter(vault, rec().book, slice(3, ['c']));
+    recordSpineChapter(vault, rec().book, slice(1, ['a']));
+    recordSpineChapter(vault, rec().book, slice(2, ['b']));
+    expect(sourceFor(vault, rec().book)?.spine?.map((s) => s.chapterOrdinal)).toEqual([1, 2, 3]);
+  });
+
+  it('recompiling a chapter REPLACES its slice rather than appending a second one', () => {
+    // Same identity rule as enqueueChapters: keyed by chapter path, or every recompile grows the
+    // book a duplicate set of stops.
+    const vault = freshVault();
+    recordSource(vault, rec());
+    recordSpineChapter(vault, rec().book, slice(1, ['old-page']));
+    recordSpineChapter(vault, rec().book, slice(2, ['ch2-page']));
+    recordSpineChapter(vault, rec().book, slice(1, ['new-page', 'another-new-page']));
+    const spine = sourceFor(vault, rec().book)?.spine;
+    expect(spine).toHaveLength(2);
+    expect(spine?.[0].pages).toEqual(['new-page', 'another-new-page']);
+    expect(spine?.[1].pages).toEqual(['ch2-page']);
+  });
+
+  it('a source nobody filed provenance for still keeps its ordering', () => {
+    // ingestBook and the older doors record no SourceRecord; an artifact must not lose its order
+    // because the door it came through did not know its byline.
+    const vault = freshVault();
+    recordSpineChapter(vault, 'An Unattributed Book', slice(1, ['page-a']));
+    const made = sourceFor(vault, 'An Unattributed Book');
+    expect(made?.attribution).toBe('unknown');
+    expect(made?.authors).toEqual([]);
+    expect(made?.spine?.[0].pages).toEqual(['page-a']);
+  });
+
+  it('leaves other books\' spines alone', () => {
+    const vault = freshVault();
+    recordSpineChapter(vault, 'A', slice(1, ['a1']));
+    recordSpineChapter(vault, 'B', slice(1, ['b1']));
+    recordSpineChapter(vault, 'A', slice(2, ['a2']));
+    expect(sourceFor(vault, 'A')?.spine).toHaveLength(2);
+    expect(sourceFor(vault, 'B')?.spine?.[0].pages).toEqual(['b1']);
+    expect(readSources(vault)).toHaveLength(2);
+  });
+
+  it('an empty vault path is a silent no-op here too', () => {
+    expect(() => recordSpineChapter('', 'A', slice(1, ['a']))).not.toThrow();
   });
 });

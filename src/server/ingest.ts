@@ -16,8 +16,9 @@ import { z } from 'zod';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import {
-  recordIngest, sourceFor, type SourceRecord,
+  recordIngest, recordSpineChapter, sourceFor, type SourceRecord,
 } from './provenance.js';
+import { ensureArtifactPaths } from './artifactPath.js';
 import {
   enqueueChapters, readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
@@ -652,6 +653,15 @@ export async function compileOne(
 ): Promise<'compiled' | 'failed'> {
   let status: QueueStatus = 'done';
   let error: string | undefined;
+  // Every slug this chapter writes, in the order write_page was called — the chapter's slice of the
+  // source's spine (provenance.ts), filed in the finally so a chapter that failed halfway still
+  // contributes the pages it did write. Declared out here for that reason alone.
+  const writtenSlugs: string[] = [];
+  // Book-mode uploads only: `ch-NN-` at the START of the filename is what carries an authored
+  // position. A paper (paper.md) is one unit and has no order to preserve, and a repo's doc files
+  // (<file>--ch-NN-…) each restart at 01 — several sequences, no single spine — so both correctly
+  // fail this match and record none.
+  const chapterOrdinal = Number(basename(entry.chapter).match(/^ch-(\d+)-/)?.[1] ?? 0);
   try {
     const chapterMarkdown = readFileSync(join(cfg.vault, entry.chapter), 'utf8');
     const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
@@ -674,15 +684,24 @@ export async function compileOne(
     // door we control. With no recorded authors the model's own field passes through untouched:
     // engram stores names verbatim, and inventing an empty byline is not an improvement.
     const recordedAuthors = sourceFor(cfg.vault, entry.book)?.authors ?? [];
+    // The spine rides this wrapper too, and for the same reason the citation does: it is the one
+    // place BOTH compile routes go through — the agentic loop's write_page and weakCompileFallback's
+    // harness-driven one — so neither can produce a page the chapter's order forgets. Call order is
+    // the page order; a slug written twice in one chapter (the model updating its own page) stays at
+    // its first position rather than becoming a second stop.
     const withCitation = (tools: LoopTool[]): LoopTool[] =>
       tools.map((t) => (t.name !== 'write_page' || !t.execute ? t : {
         ...t,
-        execute: (args: any) => t.execute!({
-          ...args,
-          ...(videoUrl && typeof args?.body === 'string' ? { body: linkifyTimestamps(args.body, videoUrl) } : {}),
-          ...(recordedAuthors.length > 0 ? { authors: recordedAuthors } : {}),
-          sources: [...new Set([...(Array.isArray(args?.sources) ? args.sources : []), citation])],
-        }),
+        execute: (args: any) => {
+          const slug = typeof args?.slug === 'string' ? slugify(args.slug) : '';
+          if (slug && !writtenSlugs.includes(slug)) writtenSlugs.push(slug);
+          return t.execute!({
+            ...args,
+            ...(videoUrl && typeof args?.body === 'string' ? { body: linkifyTimestamps(args.body, videoUrl) } : {}),
+            ...(recordedAuthors.length > 0 ? { authors: recordedAuthors } : {}),
+            sources: [...new Set([...(Array.isArray(args?.sources) ? args.sources : []), citation])],
+          });
+        },
       }));
 
     let wroteAny = false;
@@ -757,6 +776,11 @@ export async function compileOne(
     error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
     return 'failed';
   } finally {
+    if (chapterOrdinal > 0 && writtenSlugs.length > 0) {
+      recordSpineChapter(cfg.vault, entry.book, {
+        chapter: entry.chapter, chapterOrdinal, title: entry.title, pages: writtenSlugs,
+      });
+    }
     await updateQueue(cfg.vault, (entries) => {
       const live = entries.find((e) => e.chapter === entry.chapter);
       if (live) {
@@ -910,6 +934,14 @@ export function ensureCompileDrain(lw: Engram, cfg: HarnessConfig, opts: { model
           break;
         }
       }
+      // The drain has settled, so every chapter a source queued has reached a terminal status —
+      // which is exactly the condition an artifact-led path waits for (artifactPath.ts). Wrapped
+      // because a path is a bonus on top of compiled pages: a create_path that rejects must never
+      // turn a successful compile run into a logged failure, same stance as the rest of this loop.
+      await ensureArtifactPaths(lw, cfg).catch((e) => {
+        console.error('[ensureCompileDrain] artifact paths:', e);
+        return [];
+      });
     } catch (e) {
       console.error('[ensureCompileDrain]', e);
     } finally {

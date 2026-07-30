@@ -658,3 +658,125 @@ describe('buildCompilePrompt slug cap', async () => {
     expect(p).toMatch(/write_page proposes/);
   });
 });
+
+describe('the source spine — compile records the book\'s own order', async () => {
+  const { sourceFor } = await import('../src/server/provenance.js');
+  const { writeQueue } = await import('../src/server/queueStore.js');
+
+  const TWO_CHAPTERS = [
+    '# Photosynthesis Basics',
+    'Plants convert light into chemical energy using chlorophyll.',
+    '# Cellular Respiration',
+    'Cells break down glucose to release usable energy.',
+  ].join('\n');
+
+  /** A fake Engram whose write_page just succeeds — the spine is collected in the harness's
+   * wrapper, above whatever engram does with the page. */
+  const fakeLw = () => ({
+    listSlugs: async () => [],
+    tools: async () => [{
+      name: 'write_page', description: 'w', inputSchema: { type: 'object' },
+      execute: async () => ({ ok: true }),
+    }],
+  }) as any;
+
+  const promptOf = (req: any) => req.messages
+    .map((m: any) => m.content.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('\n'))
+    .join('\n');
+
+  async function twoChapterVault(name: string) {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-spine-compile-'));
+    const cfg = { vault, student: 'kid', models: {} } as unknown as HarnessConfig;
+    await ingestBook(cfg, `/uploads/${name}.pdf`, { converter: async () => ({ markdown: TWO_CHAPTERS }) });
+    return { vault, cfg };
+  }
+
+  it('captures each chapter\'s pages in write_page call order, under the right ordinal', async () => {
+    const { vault, cfg } = await twoChapterVault('Spine Book');
+    // Deliberately not alphabetical: the spine must be the order the pages were WRITTEN, which is
+    // the order the chapter presents them, not any order we could have sorted our way to.
+    const perChapter: Record<string, string[]> = {
+      'Photosynthesis Basics': ['light-reactions', 'calvin-cycle'],
+      'Cellular Respiration': ['glycolysis'],
+    };
+    const model = streamModel((req) => {
+      if (sawToolResult(req)) return { text: 'done' };
+      const prompt = promptOf(req);
+      const chapter = Object.keys(perChapter).find((t) => prompt.includes(t))!;
+      return {
+        toolCalls: perChapter[chapter].map((slug) => ({
+          toolName: 'write_page',
+          input: { slug, title: slug, body: `Body for ${slug}.`, sources: [] },
+        })),
+      };
+    });
+
+    expect(await compileNext(fakeLw(), cfg, 2, { model })).toEqual({ compiled: 2, failed: 0 });
+
+    expect(sourceFor(vault, 'Spine Book')?.spine).toEqual([
+      {
+        chapter: 'raw/uploads/spine-book/ch-01-photosynthesis-basics.md',
+        chapterOrdinal: 1,
+        title: 'Photosynthesis Basics',
+        pages: ['light-reactions', 'calvin-cycle'],
+      },
+      {
+        chapter: 'raw/uploads/spine-book/ch-02-cellular-respiration.md',
+        chapterOrdinal: 2,
+        title: 'Cellular Respiration',
+        pages: ['glycolysis'],
+      },
+    ]);
+  });
+
+  it('the weak-model fallback contributes its page too — both routes write through one wrapper', async () => {
+    const { vault, cfg } = await twoChapterVault('Weak Spine Book');
+    // Narrates instead of tool-calling (the agentic pass comes back empty), then answers the forced
+    // schema — the harness-driven distillation, whose write_page the model never sees.
+    const { model } = textModel(JSON.stringify({
+      title: 'Distilled Concept', body: 'A distilled explanation of this chapter part.',
+    }));
+
+    expect(await compileNext(fakeLw(), cfg, 2, { model })).toEqual({ compiled: 2, failed: 0 });
+
+    const spine = sourceFor(vault, 'Weak Spine Book')?.spine;
+    expect(spine).toHaveLength(2);
+    // The slug recorded is the one the FALLBACK chose (freshSlug off the distilled title), not
+    // anything the model handed to a tool — it never called one.
+    expect(spine?.map((s) => s.pages)).toEqual([['distilled-concept'], ['distilled-concept']]);
+    expect(spine?.map((s) => s.chapterOrdinal)).toEqual([1, 2]);
+  });
+
+  it('recompiling a chapter REPLACES its slice rather than appending a second one', async () => {
+    const { vault, cfg } = await twoChapterVault('Recompiled Book');
+    const writes = (slugs: string[]) => streamModel((req) => (sawToolResult(req) ? { text: 'done' } : {
+      toolCalls: slugs.map((slug) => ({
+        toolName: 'write_page', input: { slug, title: slug, body: `Body for ${slug}.`, sources: [] },
+      })),
+    }));
+
+    await compileNext(fakeLw(), cfg, 1, { model: writes(['first-pass-page']) });
+    // Re-queue chapter 1 exactly as a "compile again" would, and compile it with a better model.
+    writeQueue(vault, readQueue(vault).map((e) => (
+      e.chapter.includes('ch-01') ? { ...e, status: 'pending' as const } : e)));
+    await compileNext(fakeLw(), cfg, 1, { model: writes(['second-pass-page', 'and-another']) });
+
+    const spine = sourceFor(vault, 'Recompiled Book')?.spine;
+    expect(spine).toHaveLength(1); // chapter 2 was never compiled; chapter 1 has ONE slice
+    expect(spine?.[0].pages).toEqual(['second-pass-page', 'and-another']);
+  });
+
+  it('a paper records no spine — one unit of work has no order to preserve', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-spine-paper-'));
+    const cfg = { vault, student: 'kid', models: {} } as unknown as HarnessConfig;
+    await ingestBook(cfg, '/uploads/whatever.pdf', {
+      mode: 'paper', converter: async () => ({ markdown: '# Attention Is All You Need\nBody.' }),
+    });
+    const model = streamModel((req) => (sawToolResult(req) ? { text: 'done' } : {
+      toolCalls: [{ toolName: 'write_page', input: { slug: 'attention', title: 'Attention', body: 'x', sources: [] } }],
+    }));
+
+    expect(await compileNext(fakeLw(), cfg, 1, { model })).toEqual({ compiled: 1, failed: 0 });
+    expect(sourceFor(vault, 'Attention Is All You Need')?.spine).toBeUndefined();
+  });
+});
