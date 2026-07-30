@@ -26,6 +26,17 @@ describe('prompt assembly', () => {
     expect(instructions).toMatch(/never put "and why\?"/);
   });
 
+  // Third report from the same sitting: the tutor assumed "true beginner" without asking (the
+  // learner is a working SWE), and presented a 3-stop path as the whole of machine learning after
+  // three searches it called solid grounding. Intake before the spine; first-leg framing after.
+  it('instructions require a one-round intake for broad subjects and first-leg path framing', () => {
+    const instructions = buildInstructions();
+    expect(instructions).toMatch(/ONE compact intake message/);
+    expect(instructions).toMatch(/start me somewhere sensible/);
+    expect(instructions).toMatch(/first leg/);
+    expect(instructions).toMatch(/never call a handful of searches comprehensive/);
+  });
+
   // Goal + cold start. Both exist because the system could previously answer "what next across the
   // whole vault" but not "how far through THIS subject am I", and because learn/review/quiz expose no
   // page-writing tools — so an empty vault left the tutor silently unable to act.
