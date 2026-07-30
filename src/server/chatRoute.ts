@@ -22,7 +22,9 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     const effectiveMode: Mode = body.writeUp && mode !== 'freeform' ? 'freeform' : mode;
     const threadId = body.threadId ?? 'default';
     saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
-    return respond(body.messages, effectiveMode, threadId);
+    // The request's own signal: the runtime fires it when the client disconnects (tab closed,
+    // send superseded), and respond threads it down to the in-flight provider request.
+    return respond(body.messages, effectiveMode, threadId, c.req.raw.signal);
   });
   app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
   app.get('/api/thread/:id', (c) => c.json(loadThread(cfg.vault, c.req.param('id'))));

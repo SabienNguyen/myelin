@@ -50,8 +50,17 @@ export interface CreateUiStreamOptions {
   /** The turn body. May forward events from SEVERAL sequential loop runs (the guardrail retry
    * merges two runs into one HTTP stream); 'start' is emitted once before it begins and
    * 'finish' once after it settles, never per run. A throw becomes an 'error' chunk via
-   * onError — the response stays a 200 and the stream still terminates cleanly. */
-  execute: (writer: UiStreamWriter) => Promise<void>;
+   * onError — the response stays a 200 and the stream still terminates cleanly.
+   *
+   * The second argument aborts when the client is gone — the HTTP request's own signal fired or
+   * the response stream was cancelled. Thread it into runLoop/generate so the in-flight provider
+   * request is cancelled too, instead of streaming tokens nobody will see. An execute that throws
+   * BECAUSE of that abort produces no error chunk (there is no one to show it to); onEnd still
+   * fires so the partial turn persists. */
+  execute: (writer: UiStreamWriter, signal: AbortSignal) => Promise<void>;
+  /** Upstream abort — pass the HTTP request's `signal` here so a client disconnect detected by
+   * the server runtime propagates into execute's signal. */
+  signal?: AbortSignal;
   /** Fires after the stream closes with the full final history (originals plus the assembled
    * assistant message, merged into the continued message on a resubmit) — the server-side
    * saveThread hook. */
@@ -68,7 +77,18 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
   const encoder = new TextEncoder();
   let finishReason: UiFinishReason | undefined;
 
+  // The signal execute() receives: fired by the upstream request signal (server runtime noticed
+  // the disconnect) OR by the ReadableStream's cancel (the consumer let go of the body). Either
+  // way the client is gone, and the provider request downstream should stop.
+  const abort = new AbortController();
+  const linkUpstream = () => abort.abort(opts.signal!.reason);
+  if (opts.signal?.aborted) abort.abort(opts.signal.reason);
+  else opts.signal?.addEventListener('abort', linkUpstream, { once: true });
+
   const stream = new ReadableStream<Uint8Array>({
+    cancel(reason) {
+      abort.abort(reason);
+    },
     start(controller) {
       const emit = (chunk: UiChunk) => {
         assembler.apply(chunk);
@@ -121,17 +141,22 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
       emit({ type: 'start', messageId });
       void (async () => {
         try {
-          await opts.execute(writer);
+          await opts.execute(writer, abort.signal);
         } catch (e) {
-          try {
-            emit({ type: 'error', errorText: onError(e) });
-          } catch { /* the controller already failed; the finally below still runs onEnd */ }
+          // No error chunk on an aborted turn: the client is gone, and were it somehow still
+          // reading, "aborted" is not a turn failure worth an error bubble.
+          if (!abort.signal.aborted) {
+            try {
+              emit({ type: 'error', errorText: onError(e) });
+            } catch { /* the controller already failed; the finally below still runs onEnd */ }
+          }
         }
         try {
           emit({ type: 'finish', ...(finishReason !== undefined ? { finishReason } : {}) });
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
         } catch { /* client disconnected mid-stream — persistence below still happens */ }
+        opts.signal?.removeEventListener('abort', linkUpstream);
         opts.onEnd?.({ messages: assembler.finalMessages(), responseMessage: assembler.message });
       })();
     },

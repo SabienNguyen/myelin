@@ -581,12 +581,14 @@ export function createTutorSession(
   // model drive rails turns exactly as they drive agentic ones.
   const rails = createRailsSession(lw, cfg, { model });
 
-  async function respond(messages: UIMessage[], mode: Mode, threadId = 'default'): Promise<Response> {
+  async function respond(
+    messages: UIMessage[], mode: Mode, threadId = 'default', signal?: AbortSignal,
+  ): Promise<Response> {
     // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): teaching modes hand the loop
     // to the harness when the flag is set — read per turn so the models-dialog toggle is live.
     // Freeform always runs the full agentic loop (writing pages needs real tool use), which also
     // keeps chatRoute's one-shot writeUp promotion agentic.
-    if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId);
+    if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId, signal);
 
     const pending = pendingBlockOutputs(messages);
     const userTurn = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
@@ -617,8 +619,12 @@ export function createTutorSession(
       },
       // Surface failures to the learner ("degrade loudly") — and to journalctl. A model throw
       // mid-run propagates out of execute and lands here as an error chunk on the open stream.
+      // Client disconnect propagation (T1): the request's own signal feeds the stream, and the
+      // stream's combined signal (below) feeds the loop, so an abandoned turn stops the provider
+      // request instead of streaming tokens nobody will see.
+      signal,
       onError: turnError,
-      execute: async (writer) => {
+      execute: async (writer, runSignal) => {
         // 1. Grade fresh block outputs BEFORE the model sees them.
         const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
         for (const p of pending) {
@@ -790,7 +796,7 @@ export function createTutorSession(
         const run = async (msgs: ChatMessage[]) => {
           const result = await runLoop({
             model, system, messages: msgs, tools, serverTools: webTools.serverTools,
-            maxSteps: 24, cache: true,
+            maxSteps: 24, cache: true, signal: runSignal,
             onEvent: (e) => writer.forward(e),
           });
           // Charged to the CONFIGURED tutor id even when opts.model/LW_MOCK_MODEL injected the

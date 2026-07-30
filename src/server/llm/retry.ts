@@ -9,6 +9,9 @@ export interface RetryOptions {
   retries?: number;
   /** Delay before retry n (0-based). Default 2s, 4s. Injectable so tests run in milliseconds. */
   delayMs?: (attempt: number) => number;
+  /** Caller abort: no further attempts once it fires, and a fire mid-backoff rejects immediately
+   * with the signal's reason instead of sleeping out the delay. */
+  signal?: AbortSignal;
 }
 
 const defaultDelay = (attempt: number) => 2000 * 2 ** attempt;
@@ -19,15 +22,31 @@ function isRetryable(e: unknown): boolean {
   return e instanceof TypeError && /fetch failed/i.test(e.message);
 }
 
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal!.reason ?? new DOMException('This operation was aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export async function withRetries<T>(fn: () => Promise<T>, opts: RetryOptions = {}): Promise<T> {
   const retries = opts.retries ?? 2;
   const delayMs = opts.delayMs ?? defaultDelay;
   for (let attempt = 0; ; attempt++) {
+    opts.signal?.throwIfAborted();
     try {
       return await fn();
     } catch (e) {
-      if (attempt >= retries || !isRetryable(e)) throw e;
-      await new Promise((r) => setTimeout(r, delayMs(attempt)));
+      // An aborted attempt is not a transient failure, whatever error shape the abort surfaced as.
+      if (attempt >= retries || !isRetryable(e) || opts.signal?.aborted) throw e;
+      await abortableSleep(delayMs(attempt), opts.signal);
     }
   }
 }

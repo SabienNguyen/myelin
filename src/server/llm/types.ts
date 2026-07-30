@@ -65,6 +65,11 @@ export interface ChatRequest {
    * request inside the adapter. The anthropic adapter ignores it — its forced-tool path already
    * yields schema-shaped tool input. Only generateStructured sets this. */
   responseSchema?: { name: string; schema: Record<string, unknown> };
+  /** Caller-side abort (client disconnect, supersession). Both adapters wire it into fetch, so an
+   * abort cancels the in-flight provider request AND any open stream body; withRetries stops
+   * retrying and cuts its backoff sleep short. Distinct from the adapters' timeoutMs, which only
+   * bounds waiting for response headers. */
+  signal?: AbortSignal;
 }
 
 /** Zeros where the wire does not report a figure. */
