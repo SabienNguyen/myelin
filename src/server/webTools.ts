@@ -60,6 +60,9 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
         + 'promising search results, or on any URL the student names, before writing or updating '
         + 'vault pages.',
       input: z.object({ url: z.string().url() }),
+      // A pure fetch — nothing local is written — so a model that fans out several reads gets
+      // them concurrently (loop.ts's parallel runs) instead of paying the latency serially.
+      parallel: true,
       execute: async ({ url }) => {
         try {
           const res = await fetch(url, {
@@ -107,6 +110,9 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
         + 'cross-check at least two sources before writing pages, and cite result URLs in the '
         + 'page\'s sources frontmatter.',
       input: z.object({ query: z.string(), category: z.enum(['general', 'science', 'it', 'news']).optional() }),
+      // Read-only like read_url: SearXNG queries write nothing, so cross-checking several
+      // sources at once is safe to interleave.
+      parallel: true,
       execute: async ({ query, category }) => {
         try {
           const url = `${base}/search?format=json&q=${encodeURIComponent(query)}`

@@ -24,6 +24,14 @@ const call = (id: string, name: string, input: unknown): StreamEvent =>
 
 const START = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'go' }] }];
 
+// A promise the TEST settles, so the parallel-execution tests can hold tool executes open and
+// choose settlement order from outside.
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
 describe('runLoop', () => {
   it('executes a tool, feeds the result back, and ends on a step with no calls', async () => {
     const executed: unknown[] = [];
@@ -264,6 +272,138 @@ describe('runLoop', () => {
     expect(results).toEqual([
       { type: 'tool-result', toolCallId: 't1', toolName: 'lookup', output: { ok: 1 } },
       { type: 'tool-result', toolCallId: 't2', toolName: 'broken', output: 'nope', isError: true },
+    ]);
+  });
+
+  it('runs consecutive parallel-safe calls concurrently and keeps results call-ordered', async () => {
+    // Deferred executes: the test owns settlement. Sequential execution would deadlock here —
+    // `b` only starts because the loop did NOT wait for `a` to settle — so bothStarted resolving
+    // at all is the concurrency proof (a regression to strict sequencing times the test out).
+    const d1 = deferred<unknown>(); const d2 = deferred<unknown>();
+    const bothStarted = deferred<void>();
+    const started: string[] = [];
+    const { model } = scriptedModel([
+      [call('t1', 'a', {}), call('t2', 'b', {}), finish('tool-calls')],
+      [finish('stop')],
+    ]);
+    const loop = runLoop({
+      model,
+      messages: START,
+      tools: [
+        { name: 'a', description: 'd', inputSchema: {}, parallel: true, execute: () => { started.push('a'); return d1.promise; } },
+        { name: 'b', description: 'd', inputSchema: {}, parallel: true, execute: () => { started.push('b'); bothStarted.resolve(); return d2.promise; } },
+      ],
+      maxSteps: 5,
+    });
+    await bothStarted.promise;
+    expect(started).toEqual(['a', 'b']); // both in flight, neither resolved
+    d2.resolve('B'); // the SECOND call settles first…
+    await new Promise((r) => { setTimeout(r, 0); });
+    d1.resolve('A');
+    const out = await loop;
+    expect(out.stopReason).toBe('end');
+    // …and the results message still carries ORIGINAL call order.
+    expect(out.messages[2].content).toEqual([
+      { type: 'tool-result', toolCallId: 't1', toolName: 'a', output: 'A' },
+      { type: 'tool-result', toolCallId: 't2', toolName: 'b', output: 'B' },
+    ]);
+  });
+
+  it('fires tool-result events in settlement order while the transcript stays call-ordered', async () => {
+    const d1 = deferred<unknown>(); const d2 = deferred<unknown>();
+    const bothStarted = deferred<void>();
+    const settled: string[] = [];
+    const { model } = scriptedModel([
+      [call('t1', 'a', {}), call('t2', 'b', {}), finish('tool-calls')],
+      [finish('stop')],
+    ]);
+    const loop = runLoop({
+      model,
+      messages: START,
+      tools: [
+        { name: 'a', description: 'd', inputSchema: {}, parallel: true, execute: () => d1.promise },
+        { name: 'b', description: 'd', inputSchema: {}, parallel: true, execute: () => { bothStarted.resolve(); return d2.promise; } },
+      ],
+      maxSteps: 5,
+      onEvent: (e) => { if (e.type === 'tool-result') settled.push(e.toolCallId); },
+    });
+    await bothStarted.promise;
+    d2.resolve('B');
+    await new Promise((r) => { setTimeout(r, 0); });
+    d1.resolve('A');
+    const out = await loop;
+    // The client saw outputs as they arrived (t2 first)…
+    expect(settled).toEqual(['t2', 't1']);
+    // …but the transcript message is deterministic, in call order.
+    expect((out.messages[2].content as any[]).map((p) => p.toolCallId)).toEqual(['t1', 't2']);
+  });
+
+  it('keeps strict sequencing across partitions in a [parallel, sequential, parallel] step', async () => {
+    // Maximal-run partitioning makes this [p][s][p]: each singleton run is awaited, so a write
+    // between two reads still sees the first read finished and blocks the second.
+    const order: string[] = [];
+    const track = (name: string) => async () => {
+      order.push(`${name}-start`);
+      await new Promise((r) => { setTimeout(r, 0); });
+      order.push(`${name}-end`);
+      return name;
+    };
+    const { model } = scriptedModel([
+      [call('t1', 'p', {}), call('t2', 's', {}), call('t3', 'p', {}), finish('tool-calls')],
+      [finish('stop')],
+    ]);
+    const out = await runLoop({
+      model,
+      messages: START,
+      tools: [
+        { name: 'p', description: 'd', inputSchema: {}, parallel: true, execute: track('p') },
+        { name: 's', description: 'd', inputSchema: {}, execute: track('s') },
+      ],
+      maxSteps: 5,
+    });
+    expect(order).toEqual(['p-start', 'p-end', 's-start', 's-end', 'p-start', 'p-end']);
+    expect((out.messages[2].content as any[]).map((p) => p.toolCallId)).toEqual(['t1', 't2', 't3']);
+  });
+
+  it('turns a throwing parallel call into an isError result in position, sibling unaffected', async () => {
+    const { model } = scriptedModel([
+      [call('t1', 'boom', {}), call('t2', 'ok', {}), finish('tool-calls')],
+      [finish('stop')],
+    ]);
+    const out = await runLoop({
+      model,
+      messages: START,
+      tools: [
+        { name: 'boom', description: 'd', inputSchema: {}, parallel: true, execute: async () => { throw new Error('nope'); } },
+        { name: 'ok', description: 'd', inputSchema: {}, parallel: true, execute: async () => ({ fine: 1 }) },
+      ],
+      maxSteps: 5,
+    });
+    expect(out.stopReason).toBe('end');
+    // A rejection must not cancel the run (or the sibling) the way a bare Promise.all would.
+    expect(out.messages[2].content).toEqual([
+      { type: 'tool-result', toolCallId: 't1', toolName: 'boom', output: 'nope', isError: true },
+      { type: 'tool-result', toolCallId: 't2', toolName: 'ok', output: { fine: 1 } },
+    ]);
+  });
+
+  it('keeps an unknown tool name position-faithful inside a would-be parallel run', async () => {
+    // A hallucinated name has no LoopTool, so it counts as NOT parallel-safe: the run splits
+    // around it and its error result lands exactly where the call sat.
+    const { model } = scriptedModel([
+      [call('t1', 'p', { n: 1 }), call('t2', 'ghost', {}), call('t3', 'p', { n: 2 }), finish('tool-calls')],
+      [finish('stop')],
+    ]);
+    const out = await runLoop({
+      model,
+      messages: START,
+      tools: [{ name: 'p', description: 'd', inputSchema: {}, parallel: true, execute: async (input) => input }],
+      maxSteps: 5,
+    });
+    expect(out.messages[2].content).toEqual([
+      { type: 'tool-result', toolCallId: 't1', toolName: 'p', output: { n: 1 } },
+      { type: 'tool-result', toolCallId: 't2', toolName: 'ghost', output: 'unknown tool: ghost', isError: true },
+      { type: 'tool-result', toolCallId: 't3', toolName: 'p', output: { n: 2 } },
     ]);
   });
 

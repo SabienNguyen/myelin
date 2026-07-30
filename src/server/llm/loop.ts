@@ -11,6 +11,11 @@ export type LoopTool = ToolDecl & {
   /** Absent means external (block tools): the loop halts after the assistant's call so an outer
    * layer — the client, for block tools — supplies the result on resubmit. */
   execute?: (input: unknown) => Promise<unknown>;
+  /** Safe to run concurrently with other parallel-safe tools in the same step — set it ONLY on
+   * tools that never write the vault (or anything else): reads can interleave, writes cannot.
+   * Absent/false preserves strict sequencing, so a tool that mutates state costs nothing to leave
+   * unmarked. */
+  parallel?: boolean;
 };
 
 export type LoopEvent =
@@ -129,9 +134,14 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
 
     // Checked once more here: the abort may have landed while the stream above drained. Tool
     // execution has side effects (vault writes via MCP) — an abandoned run must not commit them.
+    // Deliberately NOT re-checked between the settlements below: once an execute has started (a
+    // write may already have landed), its result must still reach the transcript.
     opts.signal?.throwIfAborted();
-    const results: ContentPart[] = [];
-    for (const call of toolCalls) {
+    // Runs one call and emits its tool-result the moment it settles (the client sees outputs as
+    // they arrive); the caller owns result ORDERING. Never throws — a tool failure is an isError
+    // result the model can recover from, and under Promise.all a throw would also cancel nothing
+    // yet abandon the siblings' results.
+    const execCall = async (call: ToolCallPart): Promise<ContentPart> => {
       const tool = byName.get(call.toolName);
       let output: unknown;
       let isError = false;
@@ -148,18 +158,37 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
           isError = true;
         }
       }
-      results.push({
-        type: 'tool-result',
-        toolCallId: call.toolCallId,
-        toolName: call.toolName,
-        output,
-        ...(isError ? { isError: true } : {}),
-      });
       opts.onEvent?.({
         type: 'tool-result',
         toolCallId: call.toolCallId, toolName: call.toolName, output,
         ...(isError ? { isError: true } : {}),
       });
+      return {
+        type: 'tool-result',
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+        output,
+        ...(isError ? { isError: true } : {}),
+      };
+    };
+    // Parallel-safe (LoopTool.parallel) calls fan out; everything else keeps today's strict
+    // sequencing. Partitioned IN CALL ORDER into maximal runs of consecutive safe calls, so a
+    // write between two reads still sees the first read finished and blocks the second — and
+    // results land in the results message in ORIGINAL call order regardless of settlement order
+    // (both provider wires demand a result per call; order stability keeps transcripts
+    // deterministic). An unknown tool name is NOT safe: its error result stays position-faithful.
+    const isSafe = (c: ToolCallPart) => byName.get(c.toolName)?.parallel === true;
+    const results: ContentPart[] = [];
+    for (let i = 0; i < toolCalls.length;) {
+      let j = i;
+      while (j < toolCalls.length && isSafe(toolCalls[j])) j++;
+      if (j - i > 1) {
+        results.push(...await Promise.all(toolCalls.slice(i, j).map(execCall)));
+        i = j;
+      } else {
+        results.push(await execCall(toolCalls[i]));
+        i++;
+      }
     }
     messages.push({ role: 'user', content: results });
   }
