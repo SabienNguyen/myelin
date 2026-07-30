@@ -6,6 +6,16 @@ describe('prompt assembly', () => {
     expect(buildInstructions()).toMatch(/record_evidence/);
   });
 
+  // A live first sitting opened with an unframed quiz on never-taught material and a path the
+  // learner couldn't see — both experienced as "this assumes I already know it" and "no coherent
+  // journey". The two phrases below are the load-bearing fixes: first-contact probes announce
+  // themselves as calibration, and a new path is narrated as stops in the chat.
+  it('instructions frame first-contact probes and require narrating the path', () => {
+    const instructions = buildInstructions();
+    expect(instructions).toMatch(/calibration, not a test/);
+    expect(instructions).toMatch(/show the journey in the\s+chat/);
+  });
+
   // Goal + cold start. Both exist because the system could previously answer "what next across the
   // whole vault" but not "how far through THIS subject am I", and because learn/review/quiz expose no
   // page-writing tools — so an empty vault left the tutor silently unable to act.
