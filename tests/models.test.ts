@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { chatModelFor } from '../src/server/models.js';
+import { chatModelFor, withEffort } from '../src/server/models.js';
+import type { ChatModel, ChatRequest } from '../src/server/llm/index.js';
 
 const cfg = { models: { tutor: { model: 'claude-sonnet-5' }, grader: { model: 'claude-haiku-4-5' } } } as any;
 
@@ -53,6 +54,27 @@ describe('chatModelFor (the model router)', () => {
     } finally {
       if (prevKey !== undefined) process.env.OPENAI_COMPAT_API_KEY = prevKey;
     }
+  });
+
+  it('withEffort injects the role\'s effort into every request without touching the rest', async () => {
+    const seen: ChatRequest[] = [];
+    const stub: ChatModel = {
+      supportsResponseFormat: true,
+      async generate(req) {
+        seen.push(req);
+        return { text: '', toolCalls: [], usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, finishReason: 'stop' as const };
+      },
+      async *stream(req) { seen.push(req); },
+    };
+    const wrapped = withEffort(stub, 'low');
+    expect(wrapped.supportsResponseFormat).toBe(true);
+    await wrapped.generate({ messages: [], maxTokens: 9 });
+    for await (const _ of wrapped.stream({ messages: [] })) void _;
+    expect(seen[0]).toMatchObject({ effort: 'low', maxTokens: 9 });
+    expect(seen[1]).toMatchObject({ effort: 'low' });
+    // A request that already carries an effort wins over the role default.
+    await wrapped.generate({ messages: [], effort: 'high' });
+    expect(seen[2]).toMatchObject({ effort: 'high' });
   });
 
   it('LW_MOCK_MODEL resolves the scripted chat model via createRequire (no bare require in ESM)', () => {

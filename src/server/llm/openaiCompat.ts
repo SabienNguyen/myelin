@@ -3,7 +3,7 @@
 import {
   errorFromResponse, isServerTool, zeroUsage, LlmHttpError,
   type ChatModel, type ChatRequest, type FinishReason, type GenerateResult,
-  type StreamEvent, type ToolCallPart, type Usage,
+  type StreamEvent, type ThinkingPart, type ToolCallPart, type Usage,
 } from './types.js';
 import { sseFrames } from './sse.js';
 import { withRetries, type RetryOptions } from './retry.js';
@@ -41,6 +41,8 @@ interface WireChunk {
   choices?: {
     delta?: {
       content?: string | null;
+      /** DeepSeek/LiteLLM reasoning convention; absent on providers without thinking models. */
+      reasoning_content?: string | null;
       tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[];
     };
     finish_reason?: string | null;
@@ -91,6 +93,8 @@ function wireMessages(req: ChatRequest): Json[] {
       let text = '';
       const calls: Json[] = [];
       for (const part of msg.content) {
+        // Thinking parts are DROPPED here on purpose: this wire has no echo requirement (no
+        // reasoning field on assistant request messages), so replaying them has nothing to ride.
         if (part.type === 'text') text += part.text;
         else if (part.type === 'tool-call') {
           calls.push({
@@ -147,6 +151,8 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   }
   if (req.maxTokens !== undefined) body.max_tokens = req.maxTokens;
   if (req.temperature !== undefined) body.temperature = req.temperature;
+  // The LiteLLM/OpenRouter spelling; endpoints without reasoning models ignore it.
+  if (req.effort !== undefined) body.reasoning_effort = req.effort;
   if (stream) {
     body.stream = true;
     // Without this, most providers omit usage from the stream entirely.
@@ -218,7 +224,10 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
   async function generateOnce(req: ChatRequest): Promise<GenerateResult> {
     const res = await post(opts, buildBody(opts.modelId, req, false), req.signal);
     const data = await res.json() as {
-      choices?: { message?: { content?: string | null; tool_calls?: WireToolCall[] }; finish_reason?: string | null }[];
+      choices?: {
+        message?: { content?: string | null; reasoning_content?: string | null; tool_calls?: WireToolCall[] };
+        finish_reason?: string | null;
+      }[];
       usage?: WireUsage;
     };
     const choice = data.choices?.[0];
@@ -228,9 +237,12 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
       toolName: c.function.name,
       input: parseArgs(c.function.arguments),
     }));
+    const reasoning = choice?.message?.reasoning_content;
+    const thinking: ThinkingPart[] = reasoning ? [{ type: 'thinking', text: reasoning }] : [];
     return {
       text: choice?.message?.content ?? '',
       toolCalls,
+      ...(thinking.length ? { thinking } : {}),
       usage: usageOf(data.usage),
       finishReason: mapFinish(choice?.finish_reason),
     };
@@ -258,7 +270,13 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
       const res = await post(opts, buildBody(opts.modelId, req, true), req.signal);
       if (!res.body) throw new LlmHttpError(PROVIDER, res.status, 'response had no body');
       const TEXT_ID = '0';
+      const REASONING_ID = 'reasoning-0';
       let textOpen = false;
+      // reasoning_content precedes content on this wire, so the block closes on the first
+      // regular delta (or at stream end); the accumulated text rides thinking-end, matching the
+      // anthropic adapter's assembled-block promise.
+      let reasoningOpen = false;
+      let reasoningText = '';
       // Tool calls assemble BY INDEX: id and name arrive on the first fragment only; later
       // fragments carry just {index, function: {arguments}}.
       const calls = new Map<number, { id: string; name: string; args: string }>();
@@ -272,6 +290,18 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
         if (chunk.usage) usage = usageOf(chunk.usage);
         const choice = chunk.choices?.[0];
         if (!choice) continue;
+        if (choice.delta?.reasoning_content) {
+          if (!reasoningOpen) {
+            reasoningOpen = true;
+            yield { type: 'thinking-start', id: REASONING_ID };
+          }
+          reasoningText += choice.delta.reasoning_content;
+          yield { type: 'thinking-delta', id: REASONING_ID, text: choice.delta.reasoning_content };
+        }
+        if (reasoningOpen && (choice.delta?.content || choice.delta?.tool_calls?.length)) {
+          reasoningOpen = false;
+          yield { type: 'thinking-end', id: REASONING_ID, text: reasoningText };
+        }
         if (choice.delta?.content) {
           if (!textOpen) {
             textOpen = true;
@@ -295,6 +325,8 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
         if (choice.finish_reason) finishReason = choice.finish_reason;
       }
 
+      // A reasoning-only stream (model cut off mid-thought) still closes its block.
+      if (reasoningOpen) yield { type: 'thinking-end', id: REASONING_ID, text: reasoningText };
       if (textOpen) yield { type: 'text-end', id: TEXT_ID };
       for (const [, st] of [...calls.entries()].sort(([a], [b]) => a - b)) {
         yield { type: 'tool-call', toolCallId: st.id, toolName: st.name, input: parseArgs(st.args) };

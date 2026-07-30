@@ -113,6 +113,31 @@ describe('openai-compat request shaping', () => {
     expect(captured[0].body.tool_choice).toBe('auto');
   });
 
+  it('sends reasoning_effort when effort is set, and drops assistant thinking parts (no echo here)', async () => {
+    respond = okText;
+    await model().generate({
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'q' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'thinking', text: 'reasoning...', signature: 'sig_1' },
+            { type: 'text', text: 'a' },
+          ],
+        },
+        { role: 'user', content: [{ type: 'text', text: 'next' }] },
+      ],
+      effort: 'medium',
+    });
+    expect(captured[0].body.reasoning_effort).toBe('medium');
+    // This wire has no reasoning field on assistant request messages — the part vanishes.
+    expect(captured[0].body.messages[1]).toEqual({ role: 'assistant', content: 'a' });
+
+    respond = okText;
+    await model().generate({ messages: USER_Q });
+    expect(captured[1].body.reasoning_effort).toBeUndefined();
+  });
+
   it('streaming adds stream: true and stream_options.include_usage', async () => {
     respond = sse(['data: [DONE]\n\n']);
     await collect(model().stream({ messages: USER_Q }));
@@ -140,6 +165,21 @@ describe('openai-compat generate', () => {
     ]);
     expect(out.finishReason).toBe('tool-calls');
     expect(out.usage).toEqual({ inputTokens: 9, outputTokens: 4, cacheReadTokens: 3, cacheWriteTokens: 0 });
+  });
+
+  it('reads message.reasoning_content into result.thinking (DeepSeek/LiteLLM convention)', async () => {
+    respond = json(200, {
+      choices: [{
+        message: { content: 'Answer.', reasoning_content: 'quietly reasoning' },
+        finish_reason: 'stop',
+      }],
+    });
+    const out = await model().generate({ messages: USER_Q });
+    expect(out.text).toBe('Answer.');
+    expect(out.thinking).toEqual([{ type: 'thinking', text: 'quietly reasoning' }]);
+    // Absent when the endpoint has no reasoning to report.
+    respond = okText;
+    expect((await model().generate({ messages: USER_Q })).thinking).toBeUndefined();
   });
 
   it('maps length and unknown finish_reasons', async () => {
@@ -286,6 +326,51 @@ describe('openai-compat streaming', () => {
     ]);
     const finish = events.at(-1);
     expect(finish).toMatchObject({ type: 'finish', reason: 'tool-calls' });
+  });
+
+  it('parses reasoning_content deltas into thinking events, closing on the first content delta', async () => {
+    respond = sse([[
+      data({ choices: [{ index: 0, delta: { reasoning_content: 'Hmm, ' } }] }),
+      data({ choices: [{ index: 0, delta: { reasoning_content: 'maybe.' } }] }),
+      data({ choices: [{ index: 0, delta: { content: 'Answer' } }] }),
+      data({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+      data({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 2 } }),
+      'data: [DONE]\n\n',
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events).toEqual([
+      { type: 'thinking-start', id: 'reasoning-0' },
+      { type: 'thinking-delta', id: 'reasoning-0', text: 'Hmm, ' },
+      { type: 'thinking-delta', id: 'reasoning-0', text: 'maybe.' },
+      // Closed with the assembled text before any answer text opens — the loop mirrors this
+      // order onto the transcript. No signature on this wire.
+      { type: 'thinking-end', id: 'reasoning-0', text: 'Hmm, maybe.' },
+      { type: 'text-start', id: '0' },
+      { type: 'text-delta', id: '0', text: 'Answer' },
+      { type: 'text-end', id: '0' },
+      {
+        type: 'finish', reason: 'stop',
+        usage: { inputTokens: 3, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    ]);
+  });
+
+  it('closes a reasoning-only stream at the end rather than leaving the block open', async () => {
+    respond = sse([[
+      data({ choices: [{ index: 0, delta: { reasoning_content: 'cut off' } }] }),
+      data({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }] }),
+      'data: [DONE]\n\n',
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events).toEqual([
+      { type: 'thinking-start', id: 'reasoning-0' },
+      { type: 'thinking-delta', id: 'reasoning-0', text: 'cut off' },
+      { type: 'thinking-end', id: 'reasoning-0', text: 'cut off' },
+      {
+        type: 'finish', reason: 'length',
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    ]);
   });
 
   it('maps a plain text stream ending in stop, with [DONE] terminating cleanly', async () => {

@@ -631,6 +631,17 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
 
+/* ── model thinking: collapsed by default, quiet like the tool chips ── */
+.reasoning-part { margin: 0.15rem 0; font-size: 0.8rem; color: var(--text-muted); }
+.reasoning-part summary { cursor: pointer; width: fit-content; }
+.reasoning-part summary:hover { color: var(--text); }
+.reasoning-part p {
+  margin: 0.3rem 0 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--border);
+  white-space: pre-wrap;
+}
+
 /* pronounce — the spoken-language block (Pronounce.tsx): hear, record, and see your pitch contour
    drawn over the target so a tone miss is visible, not just told. */
 .pronounce-word { font-size: 1.8rem; font-weight: 600; margin: 0.3rem 0 0; }

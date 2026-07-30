@@ -3,6 +3,21 @@
 
 export interface TextPart { type: 'text'; text: string }
 
+/** Extended-thinking output. It round-trips because the Anthropic wire REQUIRES it back: when
+ * thinking is active, the thinking block that preceded a tool_use must be echoed with the tool
+ * results (tool loop and client block-pause resubmit alike) or the next request 400s. One part
+ * type covers both wire shapes — a redacted_thinking block (opaque, arrives whole) sets
+ * `redacted` and leaves text empty — so contentBlock() and the UI round-trip branch on a field
+ * instead of a second part kind. */
+export interface ThinkingPart {
+  type: 'thinking';
+  text: string;
+  /** Verification signature; echoed back verbatim alongside the text. */
+  signature?: string;
+  /** Opaque redacted_thinking payload; echoed back as { type: 'redacted_thinking', data }. */
+  redacted?: { data: string };
+}
+
 export interface ToolCallPart {
   type: 'tool-call';
   toolCallId: string;
@@ -18,7 +33,7 @@ export interface ToolResultPart {
   isError?: boolean;
 }
 
-export type ContentPart = TextPart | ToolCallPart | ToolResultPart;
+export type ContentPart = TextPart | ThinkingPart | ToolCallPart | ToolResultPart;
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -65,6 +80,11 @@ export interface ChatRequest {
    * request inside the adapter. The anthropic adapter ignores it — its forced-tool path already
    * yields schema-shaped tool input. Only generateStructured sets this. */
   responseSchema?: { name: string; schema: Record<string, unknown> };
+  /** Reasoning-depth hint from the role's config. The anthropic adapter sends it as
+   * output_config.effort and NOTHING else — never a `thinking` field (current Claude models run
+   * adaptive thinking by default, and budget_tokens is rejected outright). The openai-compat
+   * adapter sends reasoning_effort, the LiteLLM/OpenRouter convention. */
+  effort?: 'low' | 'medium' | 'high';
   /** Caller-side abort (client disconnect, supersession). Both adapters wire it into fetch, so an
    * abort cancels the in-flight provider request AND any open stream body; withRetries stops
    * retrying and cuts its backoff sleep short. Distinct from the adapters' timeoutMs, which only
@@ -90,6 +110,11 @@ export type StreamEvent =
   | { type: 'text-start'; id: string }
   | { type: 'text-delta'; id: string; text: string }
   | { type: 'text-end'; id: string }
+  | { type: 'thinking-start'; id: string }
+  | { type: 'thinking-delta'; id: string; text: string }
+  // End carries the ASSEMBLED block (text plus signature, or the redacted payload) so the loop
+  // can echo it without re-accumulating deltas. A redacted block emits start+end with no deltas.
+  | { type: 'thinking-end'; id: string; text: string; signature?: string; redacted?: { data: string } }
   | { type: 'tool-input-start'; toolCallId: string; toolName: string }
   | { type: 'tool-input-delta'; toolCallId: string; delta: string }
   // Assembled from input deltas; fires at block end.
@@ -101,6 +126,10 @@ export type StreamEvent =
 export interface GenerateResult {
   text: string;
   toolCalls: ToolCallPart[];
+  /** Thinking blocks from the response, kept out of `text` so one-shot callers that only read
+   * prose never see reasoning. Present only when the model actually thought — generate() callers
+   * are single-turn roles that never echo history, so parsing without dropping is all they need. */
+  thinking?: ThinkingPart[];
   usage: Usage;
   finishReason: FinishReason;
 }

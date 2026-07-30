@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { anthropicModel, openaiCompatModel, type ChatModel } from './llm/index.js';
+import { anthropicModel, openaiCompatModel, type ChatModel, type ChatRequest } from './llm/index.js';
 import type { HarnessConfig, ModelRole } from './config.js';
 
 // The three model routes resolved onto the first-party ChatModel. Env vars are read PER CALL, not
@@ -15,6 +15,18 @@ const OPENAI_PREFIX = 'openai:';
 // turn forever instead of reaching its scripted verdict.
 const scriptedChatCache = new Map<string, ChatModel>();
 
+/** The role's configured effort rides the resolved model, not the call sites: every ChatRequest
+ * built through runLoop or the generate* helpers picks it up with no signature changes anywhere
+ * between config and adapter. An effort already on the request wins (no caller sets one today). */
+export function withEffort(model: ChatModel, effort: NonNullable<ChatRequest['effort']>): ChatModel {
+  return {
+    ...(model.supportsResponseFormat !== undefined
+      ? { supportsResponseFormat: model.supportsResponseFormat } : {}),
+    generate: (req) => model.generate({ ...req, effort: req.effort ?? effort }),
+    stream: (req) => model.stream({ ...req, effort: req.effort ?? effort }),
+  };
+}
+
 export function chatModelFor(role: ModelRole, cfg: HarnessConfig): ChatModel {
   if (process.env.LW_MOCK_MODEL) {
     // E2E hook: tests/e2e/scripted-model.cjs provides createChatModel(); lazily imported to keep
@@ -26,17 +38,19 @@ export function chatModelFor(role: ModelRole, cfg: HarnessConfig): ChatModel {
       const { createChatModel } = require('../../tests/e2e/scripted-model.cjs');
       scriptedChatCache.set(scriptPath, createChatModel(scriptPath) as ChatModel);
     }
+    // Unwrapped on purpose: scripted models replay fixed turns and ignore effort by design.
     return scriptedChatCache.get(scriptPath)!;
   }
-  const modelId = cfg.models[role].model;
+  const { model: modelId, effort } = cfg.models[role];
+  const wrap = (m: ChatModel) => (effort !== undefined ? withEffort(m, effort) : m);
   if (modelId.startsWith(OLLAMA_PREFIX)) {
-    return openaiCompatModel({
+    return wrap(openaiCompatModel({
       modelId: modelId.slice(OLLAMA_PREFIX.length),
       baseUrl: process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434/v1',
       // Unset means no Authorization header — the common local case. Set it for a key-protected
       // Ollama reverse proxy.
       apiKey: process.env.OLLAMA_API_KEY,
-    });
+    }));
   }
   if (modelId.startsWith(OPENAI_PREFIX)) {
     const id = modelId.slice(OPENAI_PREFIX.length);
@@ -52,11 +66,11 @@ export function chatModelFor(role: ModelRole, cfg: HarnessConfig): ChatModel {
         + `(and OPENAI_COMPAT_API_KEY if the provider requires a key)`,
       );
     }
-    return openaiCompatModel({ modelId: id, baseUrl, apiKey: process.env.OPENAI_COMPAT_API_KEY });
+    return wrap(openaiCompatModel({ modelId: id, baseUrl, apiKey: process.env.OPENAI_COMPAT_API_KEY }));
   }
   // No apiKey passed: the adapter resolves ANTHROPIC_API_KEY per request, so a key saved through
   // the setup panel at runtime takes effect on the next turn with no restart. Passing
   // `process.env.ANTHROPIC_API_KEY ?? 'unset'` here — as a predecessor of this code did — froze
   // whatever was set at module load, which made the first-run flow impossible to fix without one.
-  return anthropicModel({ modelId });
+  return wrap(anthropicModel({ modelId }));
 }

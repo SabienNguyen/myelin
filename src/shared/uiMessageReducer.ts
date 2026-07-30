@@ -4,13 +4,16 @@
 // (src/client/chatCore) build byte-identical messages by construction, not by test coverage.
 // Portable code only: no node: imports, nothing beyond structuredClone and Map.
 import {
-  isDataUIPart, isToolUIPart, type TextUIPart, type ToolUIPart, type UIMessage,
+  isDataUIPart, isToolUIPart,
+  type ReasoningUIPart, type TextUIPart, type ToolUIPart, type UIMessage,
 } from './uiMessages.js';
 
 export type UiFinishReason = 'stop' | 'length' | 'content-filter' | 'tool-calls' | 'error' | 'other';
 
 /** The chunk vocabulary the wire layer can emit — a subset of the client schema's full union
- * (reasoning/source/file/approval chunks exist there but nothing in this app produces them). */
+ * (source/file/approval chunks exist there but nothing in this app produces them). The reasoning
+ * chunks are ai@6's shapes; providerMetadata on reasoning-end is where the wire smuggles the
+ * Anthropic thinking signature (or a redacted block's data) so the resubmit can echo it. */
 export type UiChunk =
   | { type: 'start'; messageId?: string }
   | { type: 'start-step' }
@@ -19,6 +22,9 @@ export type UiChunk =
   | { type: 'text-start'; id: string }
   | { type: 'text-delta'; id: string; delta: string }
   | { type: 'text-end'; id: string }
+  | { type: 'reasoning-start'; id: string }
+  | { type: 'reasoning-delta'; id: string; delta: string }
+  | { type: 'reasoning-end'; id: string; providerMetadata?: Record<string, unknown> }
   | { type: 'tool-input-start'; toolCallId: string; toolName: string; providerExecuted?: boolean }
   | { type: 'tool-input-delta'; toolCallId: string; inputTextDelta: string }
   | { type: 'tool-input-available'; toolCallId: string; toolName: string; input: unknown; providerExecuted?: boolean }
@@ -46,6 +52,9 @@ export class MessageAssembler {
   // finish-step) — the anthropic adapter reuses block-index ids like '0' across steps, so
   // without the reset a second step's text would append to the first step's part.
   private activeText = new Map<string, TextUIPart>();
+  // Reasoning tracked apart from text, mirroring ai@6's per-kind correlation: both id spaces
+  // come from block indexes / fixed strings and are only unique within their own kind.
+  private activeReasoning = new Map<string, ReasoningUIPart>();
 
   constructor(private readonly originalMessages: UIMessage[], messageId: string) {
     const last = originalMessages[originalMessages.length - 1];
@@ -73,6 +82,7 @@ export class MessageAssembler {
         return;
       case 'finish-step':
         this.activeText.clear();
+        this.activeReasoning.clear();
         return;
       case 'text-start': {
         const part: TextUIPart = { type: 'text', text: '', state: 'streaming' };
@@ -91,6 +101,26 @@ export class MessageAssembler {
         if (!part) throw new Error(`text-end for unknown text id "${chunk.id}"`);
         part.state = 'done';
         this.activeText.delete(chunk.id);
+        return;
+      }
+      case 'reasoning-start': {
+        const part: ReasoningUIPart = { type: 'reasoning', text: '', state: 'streaming' };
+        this.activeReasoning.set(chunk.id, part);
+        this.message.parts.push(part);
+        return;
+      }
+      case 'reasoning-delta': {
+        const part = this.activeReasoning.get(chunk.id);
+        if (!part) throw new Error(`reasoning-delta for unknown reasoning id "${chunk.id}"`);
+        part.text += chunk.delta;
+        return;
+      }
+      case 'reasoning-end': {
+        const part = this.activeReasoning.get(chunk.id);
+        if (!part) throw new Error(`reasoning-end for unknown reasoning id "${chunk.id}"`);
+        part.state = 'done';
+        if (chunk.providerMetadata !== undefined) part.providerMetadata = chunk.providerMetadata;
+        this.activeReasoning.delete(chunk.id);
         return;
       }
       case 'tool-input-start': {

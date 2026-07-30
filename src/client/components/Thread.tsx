@@ -26,12 +26,25 @@ function UserMessage() {
     </MessagePrimitive.Root>
   );
 }
+/** Thinking output, collapsed by default: available to the curious, never pushed at the learner.
+ * Providers that omit thinking content stream the block with empty text — render nothing then,
+ * rather than a summary line that expands to a blank. */
+function ReasoningPart({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <details className="reasoning-part">
+      <summary>thinking</summary>
+      <p>{text}</p>
+    </details>
+  );
+}
+
 function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="msg assistant">
       <MessagePrimitive.Parts components={{
         Text: MarkdownText,
-        Reasoning: () => null, // thinking models: never show raw reasoning to the learner
+        Reasoning: ReasoningPart,
         tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
       }} />
       <MessagePrimitive.Error>

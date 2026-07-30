@@ -34,6 +34,24 @@ describe('uiMessageToThreadMessage', () => {
     });
   });
 
+  it('maps reasoning parts to assistant-ui reasoning content, leaving providerMetadata behind', () => {
+    const message: UIMessage = {
+      id: 'a1', role: 'assistant',
+      parts: [
+        {
+          type: 'reasoning', state: 'done', text: 'Warm-up first.',
+          providerMetadata: { signature: 'sig_1' },
+        },
+        { type: 'text', state: 'done', text: 'Try this.' },
+      ],
+    };
+    expect(uiMessageToThreadMessage(message).content).toEqual([
+      // The signature is resubmit plumbing, not render input — it must not leak to the UI layer.
+      { type: 'reasoning', text: 'Warm-up first.' },
+      { type: 'text', text: 'Try this.' },
+    ]);
+  });
+
   it('a paused block (input-available, no output) keeps args and carries no result', () => {
     const message: UIMessage = {
       id: 'a1', role: 'assistant',
