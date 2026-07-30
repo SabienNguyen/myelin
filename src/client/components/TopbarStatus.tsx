@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { BrainIcon as Brain, UserCircleIcon as UserCircle } from '@phosphor-icons/react';
 
 type Status = { anki?: 'up' | 'down' | 'backlog'; student?: string; tutor?: string };
@@ -179,6 +179,7 @@ type EnvKey = (typeof URL_FIELDS | typeof KEY_FIELDS)[number]['key'];
 
 type ModelsState = {
   roles: Record<string, { effective: string; saved: string | null }>;
+  tutorRails?: boolean;
   env: Record<EnvKey, { value?: string; set?: boolean; shadowed: boolean }>;
 };
 
@@ -216,6 +217,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [roles, setRoles] = useState<Record<RoleName, string>>(Object.fromEntries(ROLE_ORDER.map((r) => [r, ''])) as Record<RoleName, string>);
+  const [rails, setRails] = useState(false);
   // What the server reported at load — a save only sends what changed against this.
   const [loaded, setLoaded] = useState<ModelsState | null>(null);
   const [env, setEnv] = useState<Record<EnvKey, string>>({
@@ -230,6 +232,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const takeState = (d: ModelsState) => {
     setLoaded(d);
     setRoles(Object.fromEntries(ROLE_ORDER.map((r) => [r, d.roles[r]?.effective ?? ''])) as Record<RoleName, string>);
+    setRails(Boolean(d.tutorRails));
     // Key inputs stay empty — the value never leaves the server; base URLs are not secrets.
     setEnv((e) => ({
       ...e,
@@ -282,7 +285,10 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
     try {
       const res = await fetch('/api/setup/models', {
         method: 'PUT', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ models, env: envOut }),
+        body: JSON.stringify({
+          models, env: envOut,
+          ...(rails !== Boolean(loaded?.tutorRails) ? { tutorRails: rails } : {}),
+        }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) { setNote({ text: d.error ?? 'save failed', err: true }); return; }
@@ -314,15 +320,32 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       {open && (
         <form className="models-panel" role="dialog" aria-label="models" onSubmit={save}>
           {ROLE_ORDER.map((r, i) => (
-            <span className="models-row" key={r}>
-              <label htmlFor={`models-role-${r}`}>{r}</label>
-              <input
-                id={`models-role-${r}`} ref={i === 0 ? firstRef : undefined}
-                list="model-id-list" autoComplete="off" spellCheck={false}
-                value={roles[r]}
-                onChange={(e) => setRoles((s) => ({ ...s, [r]: e.target.value }))}
-              />
-            </span>
+            <Fragment key={r}>
+              <span className="models-row">
+                <label htmlFor={`models-role-${r}`}>{r}</label>
+                <input
+                  id={`models-role-${r}`} ref={i === 0 ? firstRef : undefined}
+                  list="model-id-list" autoComplete="off" spellCheck={false}
+                  value={roles[r]}
+                  onChange={(e) => setRoles((s) => ({ ...s, [r]: e.target.value }))}
+                />
+              </span>
+              {r === 'tutor' && (
+                <span className="models-row">
+                  <label htmlFor="models-tutor-rails">rails</label>
+                  <span className="models-rails">
+                    <input
+                      id="models-tutor-rails" type="checkbox"
+                      checked={rails}
+                      onChange={(e) => setRails(e.target.checked)}
+                    />
+                    <span className="models-hint">
+                      harness drives, model generates — for small local models
+                    </span>
+                  </span>
+                </span>
+              )}
+            </Fragment>
           ))}
           <datalist id="model-id-list">
             <option value="claude-sonnet-5" />

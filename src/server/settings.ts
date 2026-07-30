@@ -11,6 +11,8 @@ import { removedRouteMessage } from './config.js';
  */
 export interface Settings {
   models?: Partial<Record<ModelRole, string>>;
+  /** The rails checkbox beside the tutor id — mirrors config's models.tutor.rails. */
+  tutorRails?: boolean;
   env?: Partial<Record<ProviderEnvKey, string>>;
 }
 
@@ -84,5 +86,6 @@ export function applySettings(cfg: HarnessConfig, path = settingsPath()): void {
     }
     cfg.models[role as ModelRole].model = id.trim();
   }
+  if (typeof saved.tutorRails === 'boolean') cfg.models.tutor.rails = saved.tutorRails;
   applyEnvValues(saved.env ?? {});
 }

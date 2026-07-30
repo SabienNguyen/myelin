@@ -25,3 +25,5 @@ release/
 dist-pronounce/
 tests/e2e/.tmp-vault-pronounce/
 tests/e2e/.tmp-fake-audio.wav
+dist-rails/
+tests/e2e/.tmp-vault-rails/

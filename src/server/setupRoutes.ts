@@ -129,6 +129,9 @@ export function buildSetupRoutes(
         effective: cfg.models[r].model,
         saved: saved.models?.[r] ?? null,
       }])),
+      // The live value, not the saved one — harness.config.json can set it too, and the checkbox
+      // should show what the next turn will actually do.
+      tutorRails: Boolean(cfg.models.tutor.rails),
       env: {
         OLLAMA_BASE_URL: { value: saved.env?.OLLAMA_BASE_URL ?? '', shadowed: shadow.OLLAMA_BASE_URL },
         OLLAMA_API_KEY: { set: Boolean(saved.env?.OLLAMA_API_KEY), shadowed: shadow.OLLAMA_API_KEY },
@@ -149,6 +152,10 @@ export function buildSetupRoutes(
     const body = await c.req.json().catch(() => ({}));
     const models = Object.entries((body?.models ?? {}) as Record<string, unknown>);
     const env = (body?.env ?? {}) as Record<string, unknown>;
+    const tutorRails = body?.tutorRails as unknown;
+    if (tutorRails !== undefined && typeof tutorRails !== 'boolean') {
+      return c.json({ error: 'tutorRails must be a boolean' }, 400);
+    }
 
     for (const [role, id] of models) {
       if (!roleNames().includes(role as ModelRole)) {
@@ -189,11 +196,15 @@ export function buildSetupRoutes(
       const v = env[k];
       if (typeof v === 'string' && v.trim()) nextEnv[k] = v.trim();
     }
-    writeSettings({ ...saved, models: nextModels, env: nextEnv });
+    writeSettings({
+      ...saved, models: nextModels, env: nextEnv,
+      ...(tutorRails !== undefined ? { tutorRails } : {}),
+    });
 
     // Live, no restart: cfg.models is the object every route and chatModelFor call reads, and
     // models.ts resolves the provider env per call.
     for (const [role, id] of ids) cfg.models[role as ModelRole].model = id.trim();
+    if (tutorRails !== undefined) cfg.models.tutor.rails = tutorRails;
     applyEnvValues(nextEnv as Partial<Record<ProviderEnvKey, string>>);
     return c.json(modelsState());
   });

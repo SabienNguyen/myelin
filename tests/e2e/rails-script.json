@@ -1,0 +1,29 @@
+{
+  "turns": [
+    {
+      "toolCalls": [
+        {
+          "toolName": "rails_quick_check",
+          "input": {
+            "question": "What does a derivative measure?",
+            "mode": "choice",
+            "choices": ["slope at a point", "area under a curve", "a running sum"],
+            "expected": "slope at a point",
+            "framing": "First contact — you are not expected to know this yet; a guess shows where to start."
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "toolName": "rails_feedback",
+          "input": {
+            "feedback": "You picked \"slope at a point\" — the machine grade agrees.",
+            "next": "stop-offer"
+          }
+        }
+      ]
+    }
+  ]
+}

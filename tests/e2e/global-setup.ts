@@ -26,6 +26,7 @@ const VAULT = join(E2E_DIR, '.tmp-vault');
 const GAP_VAULT = join(E2E_DIR, '.tmp-vault-gap');
 const LABEL_VAULT = join(E2E_DIR, '.tmp-vault-label');
 const PRONOUNCE_VAULT = join(E2E_DIR, '.tmp-vault-pronounce');
+const RAILS_VAULT = join(E2E_DIR, '.tmp-vault-rails');
 
 /** A mono 16-bit PCM WAV of a steady tone — the fake microphone input for the pronounce spec.
  *  A steady pitch reads as the level tone (ngang) no matter where Chromium's loop starts it, so the
@@ -74,6 +75,17 @@ export default async function globalSetup() {
     '---\ntitle: Vietnamese Tones\ndifficulty: 1\nstatus: solid\n---\nThe six tones: ngang, huyền, sắc, hỏi, ngã, nặng.',
   );
   writeSteadyToneWav(FAKE_AUDIO_WAV);
+
+  // rails.e2e.ts's vault: same fresh-sessions/fresh-students reset as the label vault, and the
+  // one page the rails planner will pick as the frontier lesson (its evidence target).
+  rmSync(join(RAILS_VAULT, 'students'), { recursive: true, force: true });
+  rmSync(join(RAILS_VAULT, '.harness', 'sessions'), { recursive: true, force: true });
+  mkdirSync(join(RAILS_VAULT, 'pages'), { recursive: true });
+  writeFileSync(
+    join(RAILS_VAULT, 'pages', 'derivatives.md'),
+    '---\ntitle: Derivatives\ndifficulty: 1\nstatus: solid\n---\n' +
+      'The derivative measures the instantaneous rate of change — the slope at a point.',
+  );
 
   rmSync(join(GAP_VAULT, 'students'), { recursive: true, force: true });
   // Also reset persisted chat threads: the SPA's default thread id is literally 'default'
