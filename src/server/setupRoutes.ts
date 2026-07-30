@@ -23,11 +23,13 @@ export function displayPath(path: string, home = homedir()): string {
   return path.startsWith(home) && (sep === '/' || sep === '\\') ? `~${path.slice(home.length)}` : path;
 }
 
-/** Model ids that need an Anthropic API key: a plain id routes through the Anthropic API, while
- *  `ollama:` is local. */
+/** Model ids that need an Anthropic API key: only a plain id routes through the Anthropic API.
+ *  `ollama:` is local and `openai:` rides OPENAI_COMPAT_BASE_URL with its own (optional) key —
+ *  a setup running every role on a compat endpoint must not be walled at first run demanding an
+ *  Anthropic key it will never use. (Found live: an all-openai: config booted into the key gate.) */
 export function needsApiKey(cfg: HarnessConfig): string[] {
   return Object.entries(cfg.models)
-    .filter(([, r]) => !r.model.startsWith('ollama:'))
+    .filter(([, r]) => !r.model.startsWith('ollama:') && !r.model.startsWith('openai:'))
     .map(([role]) => role);
 }
 

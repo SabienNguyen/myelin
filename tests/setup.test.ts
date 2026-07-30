@@ -154,6 +154,10 @@ describe('the API key, the one thing that cannot be defaulted', () => {
     expect(roles({ tutor: 'claude-sonnet-5', grader: 'ollama:qwen' })).toEqual(['tutor']);
     // A fully local setup needs no key at all, and must not be nagged.
     expect(roles({ tutor: 'ollama:qwen', grader: 'ollama:llama3' })).toEqual([]);
+    // openai: rides the compat endpoint with its own optional key — an all-compat setup (LiteLLM,
+    // OpenRouter, a local sim) must not be walled at first run for an Anthropic key it never uses.
+    expect(roles({ tutor: 'openai:weak-7b', grader: 'openai:deepseek/deepseek-chat' })).toEqual([]);
+    expect(roles({ tutor: 'claude-sonnet-5', grader: 'openai:weak-7b', card_gen: 'ollama:qwen' })).toEqual(['tutor']);
   });
 });
 
