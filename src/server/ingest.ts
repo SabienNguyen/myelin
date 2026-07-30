@@ -16,6 +16,9 @@ import { z } from 'zod';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import {
+  recordIngest, sourceFor, type SourceRecord,
+} from './provenance.js';
+import {
   enqueueChapters, readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
 import { sanitizeToolArgs, SLUG_LIST_CAP } from './session.js';
@@ -173,6 +176,16 @@ export function startConversion(
     // MUST stay unset for a learner's OWN local file path (ingestRoutes' `path` branch): its parent
     // is the user's directory, and deleting that would be catastrophic.
     cleanupInputDir?: string;
+    // Where this material came from and who it is credited to (provenance.ts). Recorded once the
+    // book's FINAL identity is known — paper mode only learns its title from the converted H1, and
+    // a record filed under the placeholder name is a record nothing can look up. `reported` is what
+    // the artifact or its platform said (yt-dlp's channel); `claimed` is what a model said, which
+    // reconcileAttribution never lets outrank `reported`.
+    provenance?: {
+      origin: SourceRecord['origin'];
+      reported?: string[];
+      claimed?: string[];
+    };
   } = {},
 ): { book: string; converting: true } {
   const book = opts.title || basename(filePath, extname(filePath));
@@ -196,6 +209,18 @@ export function startConversion(
   const bookTitle = basename(filePath, extname(filePath));
   const bookSlug = slugify(bookTitle) || 'book';
   const uploadsDir = join(cfg.vault, 'raw', 'uploads', bookSlug);
+
+  // Keyed on the same `book` value this conversion's CHAPTER rows carry — not the placeholder's —
+  // because that is what compileOne hands sourceFor() and what the Library groups by. Unlabelled
+  // doors (a direct startConversion, a learner's own file) still get a record: "a file, authors
+  // unknown" is provenance too, and an absent record is indistinguishable from an unrecorded one.
+  const recordProvenance = (bookKey: string) => recordIngest(cfg.vault, {
+    book: bookKey,
+    title: bookKey,
+    origin: opts.provenance?.origin ?? { kind: 'file' },
+    reported: opts.provenance?.reported,
+    claimed: opts.provenance?.claimed,
+  });
 
   async function updatePlaceholderProgress(pagesDone: number, pagesTotal: number | null): Promise<void> {
     await updateQueue(cfg.vault, (entries) => {
@@ -235,6 +260,7 @@ export function startConversion(
         bankProblems = extractProblems(lastMarkdown);
         linkCatalogue = analyzeLinkList(lastMarkdown);
         const title = opts.title || lastMarkdown.match(H1_LINE)?.[1]?.trim() || basename(filePath, extname(filePath));
+        recordProvenance(title);
         const slug = slugify(title) || 'paper';
         const dir = join(cfg.vault, 'raw', 'uploads', slug);
         mkdirSync(dir, { recursive: true });
@@ -250,6 +276,7 @@ export function startConversion(
           });
         }
       } else {
+        recordProvenance(bookTitle); // book mode's identity is the filename — known from the start
         mkdirSync(uploadsDir, { recursive: true });
         let queuedCount = 0;
 
@@ -640,12 +667,20 @@ export async function compileOne(
       ? `${entry.book} (${entry.sourceUrl})`
       : `${entry.book} — ${entry.title}`;
     const videoUrl = entry.sourceUrl && isVideoUrl(entry.sourceUrl) ? entry.sourceUrl : null;
+    // The byline rides the same wrapper as the citation, for the same reason and with one extra
+    // rule: the source record's authors REPLACE whatever the model put in `authors`, they are not
+    // merged with it. A union would let a compile model append a byline the artifact never carried
+    // — which is the misattribution this whole feature exists to prevent, arriving through the one
+    // door we control. With no recorded authors the model's own field passes through untouched:
+    // engram stores names verbatim, and inventing an empty byline is not an improvement.
+    const recordedAuthors = sourceFor(cfg.vault, entry.book)?.authors ?? [];
     const withCitation = (tools: LoopTool[]): LoopTool[] =>
       tools.map((t) => (t.name !== 'write_page' || !t.execute ? t : {
         ...t,
         execute: (args: any) => t.execute!({
           ...args,
           ...(videoUrl && typeof args?.body === 'string' ? { body: linkifyTimestamps(args.body, videoUrl) } : {}),
+          ...(recordedAuthors.length > 0 ? { authors: recordedAuthors } : {}),
           sources: [...new Set([...(Array.isArray(args?.sources) ? args.sources : []), citation])],
         }),
       }));

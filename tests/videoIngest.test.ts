@@ -152,8 +152,11 @@ function fakeYtDlp(opts: { manualVtt?: string; autoVtt?: string }): ExecLike & {
 describe('fetchVideoTranscript', () => {
   it('uses manual captions without ever asking for auto ones', async () => {
     const exec = fakeYtDlp({ manualVtt: VTT, autoVtt: 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nwrong track\n' });
-    const { title, markdown } = await fetchVideoTranscript('https://youtu.be/abc', { exec });
+    const { title, channel, markdown } = await fetchVideoTranscript('https://youtu.be/abc', { exec });
     expect(title).toBe('Attention Is All You Watch');
+    // The channel comes back as data, not just as transcript-header prose: it is the platform's
+    // report of who published this URL, and ingest files it as the source's verified attribution.
+    expect(channel).toBe('Some Channel');
     expect(markdown).toContain("so today we're looking at");
     expect(markdown).not.toContain('wrong track');
     expect(exec.calls.some((a) => a.includes('--write-auto-subs'))).toBe(false);
@@ -206,6 +209,57 @@ describe('POST /api/ingest with a video URL', () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json).toMatchObject({ book: 'Attention Is All You Watch', converting: true });
+  });
+
+  // startConversion records provenance in its BACKGROUND continuation, once paper mode has
+  // resolved the book's final title — the route returns before that. Poll rather than sleep a
+  // fixed amount.
+  async function settledSources(vault: string) {
+    const { readSources } = await import('../src/server/provenance.js');
+    for (let i = 0; i < 100; i++) {
+      const s = readSources(vault);
+      if (s.length > 0) return s;
+      await new Promise((r) => { setTimeout(r, 20); });
+    }
+    return readSources(vault);
+  }
+
+  it('records the channel as the video’s VERIFIED byline — YouTube reported it, not a model', async () => {
+    const vault = makeVault();
+    const app = await buildApp(vault, fakeYtDlp({ manualVtt: VTT }));
+    await app.request('/api/ingest', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=abc123' }),
+    });
+
+    const sources = await settledSources(vault);
+    expect(sources).toHaveLength(1);
+    expect(sources[0]).toMatchObject({
+      book: 'Attention Is All You Watch',
+      authors: ['Some Channel'],
+      attribution: 'verified',
+      origin: { kind: 'video', url: 'https://www.youtube.com/watch?v=abc123', platform: 'YouTube' },
+    });
+    expect(sources[0].attributionWarning).toBeUndefined();
+  });
+
+  it('a claimed byline that contradicts the channel loses, and the learner is told', async () => {
+    // The 3blue1brown incident through the real door: a caller (in practice a model that found the
+    // link) asserts the wrong creator. The platform's report wins and the claim is recorded wrong.
+    const vault = makeVault();
+    const app = await buildApp(vault, fakeYtDlp({ manualVtt: VTT }));
+    await app.request('/api/ingest', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://www.youtube.com/watch?v=abc123', authors: ['3Blue1Brown'] }),
+    });
+
+    const [source] = await settledSources(vault);
+    expect(source.authors).toEqual(['Some Channel']);
+    expect(source.attribution).toBe('verified');
+    expect(source.attributionWarning)
+      .toBe('attributed to 3Blue1Brown, but the source itself credits Some Channel');
+    const { readFileSync: rf } = await import('node:fs');
+    expect(rf(join(vault, '.harness', 'guardrail.log'), 'utf8')).toContain('attribution mismatch');
   });
 
   it('surfaces the yt-dlp installHint as a 400, not a queue entry', async () => {

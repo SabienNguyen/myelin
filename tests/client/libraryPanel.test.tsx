@@ -17,9 +17,10 @@ function jsonRes(body: unknown, ok = true) {
   return { ok, json: async () => body } as any;
 }
 
-function routedFetch(queue: any[], bank: any[] = []) {
+function routedFetch(queue: any[], bank: any[] = [], sources: any[] = []) {
   return vi.fn(async (url: string) => {
     if (url === '/api/ingest/queue') return jsonRes(queue);
+    if (url === '/api/sources') return jsonRes(sources);
     if (url === '/api/status') return jsonRes({ autoCompile: false });
     if (url === '/api/gap/ladder') return NO_GAP; // keep PracticePanel a no-op for these tests
     if (url === '/api/course-bank') return jsonRes({ sources: bank });
@@ -58,6 +59,52 @@ describe('LibraryPanel — Course practice section', () => {
     render(<LibraryPanel />);
     await screen.findByText(/no books yet/i);
     expect(screen.queryByText('Course practice')).toBeNull();
+  });
+});
+
+describe('LibraryPanel — bylines say how much they are worth', () => {
+  const row = (book: string) => ({
+    book, chapter: `raw/uploads/${book}/ch-01-a.md`, title: 'Chapter one', status: 'pending',
+  });
+
+  it('a verified byline reads plainly — the platform said so', async () => {
+    vi.stubGlobal('fetch', routedFetch([row('How semiconductors work')], [], [
+      { book: 'How semiconductors work', authors: ['Branch Education'], attribution: 'verified' },
+    ]));
+    render(<LibraryPanel />);
+    await waitFor(() => expect(screen.getByText('by Branch Education')).not.toBeNull());
+    expect(screen.queryByText(/unverified/)).toBeNull();
+  });
+
+  it('a claimed byline is labelled unverified rather than shown as fact', async () => {
+    vi.stubGlobal('fetch', routedFetch([row('Some Paper')], [], [
+      { book: 'Some Paper', authors: ['Andrej Karpathy'], attribution: 'claimed' },
+    ]));
+    render(<LibraryPanel />);
+    await waitFor(() => expect(screen.getByText('by Andrej Karpathy (unverified)')).not.toBeNull());
+  });
+
+  it('a caught mismatch names who was actually credited and that the claim was wrong', async () => {
+    vi.stubGlobal('fetch', routedFetch([row('How semiconductors work')], [], [
+      {
+        book: 'How semiconductors work', authors: ['Branch Education'], attribution: 'verified',
+        attributionWarning: 'attributed to 3Blue1Brown, but the source itself credits Branch Education',
+      },
+    ]));
+    render(<LibraryPanel />);
+    await waitFor(() => expect(
+      screen.getByText('attributed to 3Blue1Brown, but the source itself credits Branch Education'),
+    ).not.toBeNull());
+    expect(screen.getByText('by Branch Education')).not.toBeNull();
+  });
+
+  it('a source with no known authors shows no byline at all — no invented line', async () => {
+    vi.stubGlobal('fetch', routedFetch([row('Mystery Upload')], [], [
+      { book: 'Mystery Upload', authors: [], attribution: 'unknown' },
+    ]));
+    render(<LibraryPanel />);
+    await screen.findByText('Mystery Upload');
+    expect(screen.queryByText(/^by /)).toBeNull();
   });
 });
 

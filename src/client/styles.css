@@ -1124,6 +1124,21 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .library-book h2:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
 .book-rename { font-family: var(--font-serif); font-size: 1rem; margin: 0.9rem 0 0.3rem; }
 
+/* The byline under a book heading. Muted like every other note in this panel — a verified "by X"
+   is context, not an alert. The warning below it is the exception: an attribution a model got
+   wrong is an integrity finding, so it takes --bad, the same chip shape the harper/session-plan
+   labels use, and nothing louder. */
+.library-byline { margin: 0 0 0.25rem; font-size: 0.8rem; color: var(--text-muted); }
+.library-attribution-warning {
+  display: inline-block;
+  margin: 0 0 0.35rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bad) 15%, transparent);
+  color: var(--bad);
+  font-size: 0.75rem;
+}
+
 /* ── Responsive: stack panels under ~900px ───────────── */
 @media (max-width: 900px) {
   .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(0, 55%) minmax(0, 45%); }

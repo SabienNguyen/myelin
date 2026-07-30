@@ -33,6 +33,7 @@ import { mineRepoBuiltin, type RepoMineReport } from './gap/mineRepo.js';
 import { ensureCompileDrain, slugify } from './ingest.js';
 import { analyzeLinkList, saveLinkDirectory, type DirectorySection } from './linkList.js';
 import type { Engram } from './mcp.js';
+import { recordIngest } from './provenance.js';
 import { enqueueChapters, readQueue, updateQueue, writeQueue, type QueueEntry } from './queueStore.js';
 
 // ── name/source derivation ──────────────────────────────────────────────────────────────────
@@ -411,6 +412,13 @@ export function ingestRepo(
     phase: 'cloning',
   });
   writeQueue(cfg.vault, ledger);
+
+  // A repo credits itself in a hundred half-authoritative ways (git history, a LICENSE, a
+  // package.json `author`) and none of them is the byline a learner chooses material by, so nothing
+  // here is `reported` — the record exists to say where the material came from and, honestly, that
+  // nobody is credited. The docs-pass chapters queue under this same `book` name, so a later
+  // re-ingest replaces this record rather than stacking one.
+  recordIngest(cfg.vault, { book: name, title: name, origin: { kind: 'repo', url: trimmedSource } });
 
   async function setPhase(phase: string): Promise<void> {
     await updateQueue(cfg.vault, (entries) => {

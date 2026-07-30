@@ -17,6 +17,36 @@ type Entry = {
   sourceUrl?: string; // URL ingests: the pasted URL — how LinkDirectory knows a link is already in
 };
 
+/** GET /api/sources — one per ingested source (server: provenance.ts). `attribution` is how much
+ *  the byline is worth: 'verified' came from the artifact or its platform, 'claimed' came from a
+ *  model, and attributionWarning is set only where the two disagreed. */
+type Source = {
+  book: string; authors: string[]; attribution: 'verified' | 'claimed' | 'unknown';
+  attributionWarning?: string;
+};
+
+/**
+ * The byline under a book heading — and the reason this panel shows three states instead of one.
+ *
+ * A model can produce a real, good artifact under a byline it invented (the 3blue1brown
+ * semiconductor video). Flattening "the platform says so" and "a model said so" into one confident
+ * "by X" is how that lands unnoticed, so: verified reads plainly, claimed says it is unverified,
+ * and a caught mismatch says who was actually credited and that the claim was wrong.
+ */
+function Byline({ source }: { source: Source | undefined }) {
+  if (!source || source.authors.length === 0) return null;
+  const by = source.authors.join(', ');
+  return (
+    <>
+      <p className="library-byline">
+        by {by}{source.attribution === 'claimed' ? ' (unverified)' : ''}
+      </p>
+      {source.attributionWarning
+        && <p className="library-attribution-warning">{source.attributionWarning}</p>}
+    </>
+  );
+}
+
 function elapsed(iso?: string): string {
   if (!iso) return '';
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
@@ -119,6 +149,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
   // the Library flashed a false statement at anyone who does have books.
   const [queue, setQueue] = useState<Entry[] | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [sources, setSources] = useState<Source[]>([]);
   // A ref, not `queue` in the effect's deps: this effect SETS queue, so depending on it would
   // tear down and rebuild the poll interval on every single response.
   const loadedOnceRef = useRef(false);
@@ -160,6 +191,20 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
     fetch('/api/status').then((r) => r.json())
       .then((s) => setAutoCompile(Boolean(s?.autoCompile))).catch(() => {});
   }, []);
+
+  // Provenance rides the same poll as the queue: a source's record is written when its conversion
+  // resolves the book's final title, which is after the row it belongs to is already on screen.
+  // A failed fetch costs bylines and nothing else, so it stays silent rather than claiming the
+  // library failed to load.
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    fetch('/api/sources')
+      .then((r) => r.json())
+      .then((s) => { if (!cancelled) setSources(Array.isArray(s) ? s : []); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [visible, converting, refresh, compiling]);
 
   async function compile(n: number) {
     setCompiling(true);
@@ -242,6 +287,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
       {books.map((book) => (
         <section key={book} className="library-book">
           <BookTitle book={book} onRenamed={() => setRefresh((r) => r + 1)} />
+          <Byline source={sources.find((s) => s.book === book)} />
           <ul>
             {queue.filter((e) => e.book === book).map((e) => (
               <li key={e.chapter} className={`q-${e.status}${e.mode === 'repo' ? ' q-repo' : ''}`} title={e.error ?? ''}>

@@ -506,6 +506,79 @@ describe('mechanical citation on write_page', async () => {
     expect(seen[0].sources).toContain('Attention Is All You Need (https://arxiv.org/pdf/1706.03762)');
   });
 
+  it('merges the source record’s authors into write_page, overriding what the model asserted', async () => {
+    // Same seam, same guarantee as the citation: the compile model does not have to remember the
+    // byline and cannot overwrite it. Override, not union — a union is how a model appends a
+    // creator the artifact never carried, which is the whole failure this feature exists for.
+    const { recordSource } = await import('../src/server/provenance.js');
+    const vault = mkTmp(j(tmpD(), 'lwh-authors-'));
+    mkDir(j(vault, 'raw', 'uploads', 'v'), { recursive: true });
+    writeF(j(vault, 'raw', 'uploads', 'v', 'paper.md'), '# V\ntranscript');
+    mkDir(j(vault, '.harness'), { recursive: true });
+    writeF(j(vault, '.harness', 'compile-queue.json'), JSON.stringify([{
+      book: 'How semiconductors work', chapter: 'raw/uploads/v/paper.md',
+      title: 'How semiconductors work', status: 'pending',
+    }]));
+    recordSource(vault, {
+      book: 'How semiconductors work', title: 'How semiconductors work',
+      authors: ['Branch Education'], attribution: 'verified',
+      origin: { kind: 'video', url: 'https://youtu.be/x', platform: 'YouTube' },
+      addedAt: new Date().toISOString(),
+    });
+
+    const model = turnsModel([
+      {
+        toolCalls: [{
+          toolName: 'write_page',
+          input: {
+            slug: 'doping', title: 'Doping', body: 'x', sources: [],
+            authors: ['3Blue1Brown'], // the model's own guess, from the incident
+          },
+        }],
+      },
+      { text: 'done' },
+    ]);
+
+    const seen: any[] = [];
+    const res = await compileNext(seeingLw(seen), { vault, student: 'kid', models: {} } as any, 1,
+      { model });
+    expect(res).toEqual({ compiled: 1, failed: 0 });
+    expect(seen[0].authors).toEqual(['Branch Education']);
+  });
+
+  it('the weak-model fallback path inherits the authors too — it writes through the same wrapper', async () => {
+    const { recordSource } = await import('../src/server/provenance.js');
+    const { textModel } = await import('./mockModel.js');
+    const vault = mkTmp(j(tmpD(), 'lwh-authors-fb-'));
+    mkDir(j(vault, 'raw', 'uploads', 'v'), { recursive: true });
+    writeF(j(vault, 'raw', 'uploads', 'v', 'paper.md'), '# V\ntranscript');
+    mkDir(j(vault, '.harness'), { recursive: true });
+    writeF(j(vault, '.harness', 'compile-queue.json'), JSON.stringify([{
+      book: 'How semiconductors work', chapter: 'raw/uploads/v/paper.md',
+      title: 'How semiconductors work', status: 'pending',
+    }]));
+    recordSource(vault, {
+      book: 'How semiconductors work', title: 'How semiconductors work',
+      authors: ['Branch Education'], attribution: 'verified',
+      origin: { kind: 'video', url: 'https://youtu.be/x', platform: 'YouTube' },
+      addedAt: new Date().toISOString(),
+    });
+
+    // Narrates instead of tool-calling (agentic pass empty), then answers the forced schema — the
+    // harness-driven distillation branch, which calls write_page itself and never sees `authors`.
+    const { model } = textModel(JSON.stringify({
+      title: 'Doping Distilled', body: 'Adding impurities changes a semiconductor’s carriers.',
+    }));
+
+    const seen: any[] = [];
+    const res = await compileNext(seeingLw(seen), { vault, student: 'kid', models: {} } as any, 1,
+      { model });
+    expect(res).toEqual({ compiled: 1, failed: 0 });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].authors).toEqual(['Branch Education']);
+    expect(seen[0].sources).toContain('How semiconductors work — How semiconductors work');
+  });
+
   it('a video-sourced compile also linkifies plain [M:SS] stamps in the body', async () => {
     const vault = mkTmp(j(tmpD(), 'lwh-vstamp-'));
     mkDir(j(vault, 'raw', 'uploads', 'v'), { recursive: true });
