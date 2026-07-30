@@ -16,6 +16,16 @@ describe('prompt assembly', () => {
     expect(instructions).toMatch(/show the journey in the\s+chat/);
   });
 
+  // The same live sitting's follow-up turn praised "your reasoning" the learner never typed (the
+  // block collected one word), asked "and why?" in a question buttons couldn't answer, and called
+  // one calibration pass a landed concept. Rule 3a is the fix; these phrases are load-bearing.
+  it('instructions forbid attributing unspoken reasoning and overselling a calibration pass', () => {
+    const instructions = buildInstructions();
+    expect(instructions).toMatch(/that they did not write/);
+    expect(instructions).toMatch(/a starting point, not a landed concept/);
+    expect(instructions).toMatch(/never put "and why\?"/);
+  });
+
   // Goal + cold start. Both exist because the system could previously answer "what next across the
   // whole vault" but not "how far through THIS subject am I", and because learn/review/quiz expose no
   // page-writing tools — so an empty vault left the tutor silently unable to act.
