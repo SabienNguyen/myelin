@@ -157,6 +157,15 @@ const configSchema = z.object({
 export type HarnessConfig = z.infer<typeof configSchema>;
 export type ModelRole = keyof HarnessConfig['models'];
 
+/** One wording for the removed `claude-sdk:` route, wherever such an id turns up — the boot guard
+ *  above, the models PUT route, and a hand-edited settings.json all point at the same fix. */
+export function removedRouteMessage(entries: string[], where: string): string {
+  return `model route 'claude-sdk:' has been removed (subscription auth is not permitted for `
+    + `third-party apps) — use an Anthropic API key (plain model id), 'ollama:', or `
+    + `'openai:' (any OpenAI-compatible provider, via OPENAI_COMPAT_BASE_URL). Update these `
+    + `roles in ${where}: ` + entries.join(', ');
+}
+
 /** Whether a config file was found, and where. index.ts reports this at boot so a typo'd
  *  HARNESS_CONFIG shows up as a message rather than as silently-default behaviour. */
 export interface ConfigSource { path: string; found: boolean }
@@ -184,12 +193,7 @@ export function loadConfig(path = process.env.HARNESS_CONFIG ?? './harness.confi
     .filter(([, r]) => r.model.startsWith('claude-sdk:'))
     .map(([role, r]) => `${role}: "${r.model}"`);
   if (removedRoute.length) {
-    throw new Error(
-      `model route 'claude-sdk:' has been removed (subscription auth is not permitted for `
-      + `third-party apps) — use an Anthropic API key (plain model id), 'ollama:', or `
-      + `'openai:' (any OpenAI-compatible provider, via OPENAI_COMPAT_BASE_URL). Update these `
-      + `roles in ${found ? file : 'your config'}: ` + removedRoute.join(', '),
-    );
+    throw new Error(removedRouteMessage(removedRoute, found ? file : 'your config'));
   }
   return {
     ...cfg,

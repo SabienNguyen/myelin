@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configSource, loadConfig } from './config.js';
 import { applyCredentials, credentialsPath } from './credentials.js';
+import { applySettings } from './settings.js';
 import { buildSetupRoutes, needsApiKey } from './setupRoutes.js';
 import { buildStaticRoutes } from './staticRoutes.js';
 import { Engram } from './mcp.js';
@@ -23,6 +24,11 @@ import { ensureCompileDrain, sweepInterruptedConversions } from './ingest.js';
 import { sendNotification } from './notify.js';
 
 const cfg = loadConfig();
+// Config merge order: defaults < harness.config.json (both inside loadConfig) < settings.json —
+// what the app's own UI saved is the most recent intent, so it wins. Exception, for the provider
+// env group only: a REAL environment variable set at process start beats the saved value, the same
+// rule applyCredentials enforces for ANTHROPIC_API_KEY.
+applySettings(cfg);
 
 /**
  * Boot preflight. Everything a first run needs that can be done without asking, done — and

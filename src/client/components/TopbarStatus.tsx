@@ -41,14 +41,12 @@ export function TopbarStatus() {
   return (
     <div className="topbar-status">
       {status.student && <StudentSwitcher current={status.student} onSwitched={(name) => setStatus((s) => ({ ...s, student: name }))} />}
-      {status.tutor && (() => {
-        const { name, how } = modelLabel(status.tutor);
-        return (
-          <span className="badge" title={`Tutor model: ${name}, via ${how} (${status.tutor})`}>
-            <Brain size={14} weight="duotone" /> {name}
-          </span>
-        );
-      })()}
+      {status.tutor && (
+        <ModelsMenu
+          tutor={status.tutor}
+          onSaved={(tutor) => setStatus((s) => ({ ...s, tutor }))}
+        />
+      )}
       {/* 'down' is omitted, not shown greyed: on a first run nobody has Anki installed, and an
           amber badge for a feature the learner never asked for reads as "something is broken".
           A backlog IS worth flagging — that one is about work they have already done. */}
@@ -160,6 +158,185 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
           />
           {note && <span className="student-note" role="status">{note}</span>}
         </span>
+      )}
+    </span>
+  );
+}
+
+const ROLE_ORDER = ['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile'] as const;
+type RoleName = typeof ROLE_ORDER[number];
+const URL_FIELDS = [
+  { key: 'OLLAMA_BASE_URL', label: 'ollama base url', placeholder: 'http://localhost:11434/v1' },
+  { key: 'OPENAI_COMPAT_BASE_URL', label: 'openai-compatible base url', placeholder: 'https://openrouter.ai/api/v1' },
+] as const;
+const KEY_FIELDS = [
+  { key: 'OLLAMA_API_KEY', label: 'ollama api key' },
+  { key: 'OPENAI_COMPAT_API_KEY', label: 'openai-compatible api key' },
+] as const;
+type EnvKey = (typeof URL_FIELDS | typeof KEY_FIELDS)[number]['key'];
+
+type ModelsState = {
+  roles: Record<string, { effective: string; saved: string | null }>;
+  env: Record<EnvKey, { value?: string; set?: boolean; shadowed: boolean }>;
+};
+
+/**
+ * The tutor badge, grown into the model configuration surface: every role's id and the provider
+ * endpoints models.ts reads, editable in place. Saves land in settings.json (GET/PUT
+ * /api/setup/models) and take effect on the next call — the server resolves providers per
+ * request, so there is no restart. Saved API keys never come back down; the server sends a
+ * `set` flag and the password fields show placeholder "saved" instead.
+ */
+function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [roles, setRoles] = useState<Record<RoleName, string>>(Object.fromEntries(ROLE_ORDER.map((r) => [r, ''])) as Record<RoleName, string>);
+  // What the server reported at load — a save only sends what changed against this.
+  const [loaded, setLoaded] = useState<ModelsState | null>(null);
+  const [env, setEnv] = useState<Record<EnvKey, string>>({
+    OLLAMA_BASE_URL: '', OLLAMA_API_KEY: '', OPENAI_COMPAT_BASE_URL: '', OPENAI_COMPAT_API_KEY: '',
+  });
+  const [note, setNote] = useState<{ text: string; err: boolean } | null>(null);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const badgeRef = useRef<HTMLButtonElement>(null);
+  const firstRef = useRef<HTMLInputElement>(null);
+
+  const takeState = (d: ModelsState) => {
+    setLoaded(d);
+    setRoles(Object.fromEntries(ROLE_ORDER.map((r) => [r, d.roles[r]?.effective ?? ''])) as Record<RoleName, string>);
+    // Key inputs stay empty — the value never leaves the server; base URLs are not secrets.
+    setEnv((e) => ({
+      ...e,
+      OLLAMA_BASE_URL: d.env.OLLAMA_BASE_URL.value ?? '',
+      OPENAI_COMPAT_BASE_URL: d.env.OPENAI_COMPAT_BASE_URL.value ?? '',
+      OLLAMA_API_KEY: '', OPENAI_COMPAT_API_KEY: '',
+    }));
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    setNote(null);
+    fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(() => {});
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setOpen(false); badgeRef.current?.focus(); }
+    };
+    document.addEventListener('mousedown', onDoc);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  useEffect(() => { if (open) firstRef.current?.focus(); }, [open]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    const models: Record<string, string> = {};
+    for (const r of ROLE_ORDER) {
+      const v = roles[r].trim();
+      if (v && v !== (loaded?.roles[r]?.effective ?? '')) models[r] = v;
+    }
+    const envOut: Record<string, string> = {};
+    for (const f of URL_FIELDS) {
+      const v = env[f.key].trim();
+      if (v && !loaded?.env[f.key]?.shadowed && v !== (loaded?.env[f.key]?.value ?? '')) envOut[f.key] = v;
+    }
+    for (const f of KEY_FIELDS) {
+      const v = env[f.key].trim();
+      if (v && !loaded?.env[f.key]?.shadowed) envOut[f.key] = v;
+    }
+    setBusy(true);
+    setNote(null);
+    try {
+      const res = await fetch('/api/setup/models', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ models, env: envOut }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setNote({ text: d.error ?? 'save failed', err: true }); return; }
+      takeState(d as ModelsState);
+      setNote({ text: 'saved — takes effect on the next call', err: false });
+      onSaved((d as ModelsState).roles.tutor?.effective ?? tutor);
+    } catch (err: any) {
+      setNote({ text: `save failed: ${err?.message ?? err}`, err: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const { name, how } = modelLabel(tutor);
+  return (
+    <span className="models-menu" ref={rootRef}>
+      <button
+        ref={badgeRef}
+        type="button" className="badge model-badge"
+        aria-haspopup="dialog" aria-expanded={open}
+        title={`Tutor model: ${name}, via ${how} (${tutor})`}
+        aria-label={`tutor model: ${name}, via ${how} — configure models`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <Brain size={14} weight="duotone" /> {name}
+      </button>
+      {/* A dialog for the same reason StudentSwitcher is one: text inputs cannot live in a menu. */}
+      {open && (
+        <form className="models-panel" role="dialog" aria-label="models" onSubmit={save}>
+          {ROLE_ORDER.map((r, i) => (
+            <span className="models-row" key={r}>
+              <label htmlFor={`models-role-${r}`}>{r}</label>
+              <input
+                id={`models-role-${r}`} ref={i === 0 ? firstRef : undefined}
+                list="model-id-list" autoComplete="off" spellCheck={false}
+                value={roles[r]}
+                onChange={(e) => setRoles((s) => ({ ...s, [r]: e.target.value }))}
+              />
+            </span>
+          ))}
+          <datalist id="model-id-list">
+            <option value="claude-sonnet-5" />
+            <option value="claude-haiku-4-5" />
+            <option value="claude-opus-5" />
+            <option value="ollama:qwen2.5-coder:14b" />
+            <option value="openai:deepseek/deepseek-chat" />
+          </datalist>
+          <span className="models-hint">
+            tutor and compile want the strongest model; grader, quiz_gen, card_gen run fine on a
+            cheap or local one
+          </span>
+          <span className="models-group">provider endpoints</span>
+          {/* Paired per provider: each base url sits directly above its key. */}
+          {([URL_FIELDS[0], KEY_FIELDS[0], URL_FIELDS[1], KEY_FIELDS[1]] as const).map((f) => {
+            const meta = loaded?.env[f.key];
+            const isKey = f.key.endsWith('_API_KEY');
+            return (
+              <span className="models-row" key={f.key}>
+                <label htmlFor={`models-env-${f.key}`}>{f.label}</label>
+                <input
+                  id={`models-env-${f.key}`}
+                  type={isKey ? 'password' : 'text'}
+                  autoComplete="off" spellCheck={false}
+                  placeholder={isKey ? (meta?.set ? 'saved' : '') : (f as { placeholder?: string }).placeholder}
+                  disabled={Boolean(meta?.shadowed)}
+                  value={env[f.key]}
+                  onChange={(e) => setEnv((s) => ({ ...s, [f.key]: e.target.value }))}
+                />
+                {meta?.shadowed && (
+                  <span className="models-shadow-note">overridden by {f.key} in the environment</span>
+                )}
+              </span>
+            );
+          })}
+          <span className="models-foot">
+            <button type="submit" disabled={busy}>{busy ? 'saving…' : 'save'}</button>
+            {note && (
+              <span className={`models-note${note.err ? ' err' : ''}`} role="status">{note.text}</span>
+            )}
+          </span>
+        </form>
       )}
     </span>
   );

@@ -1,10 +1,14 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Hono } from 'hono';
-import { configSource, type HarnessConfig } from './config.js';
+import { configSource, removedRouteMessage, type HarnessConfig, type ModelRole } from './config.js';
 import {
   applyCredentials, credentialsPath, looksLikeAnthropicKey, readCredentials, writeCredentials,
 } from './credentials.js';
+import {
+  applyEnvValues, envShadow, PROVIDER_ENV_KEYS, readSettings, settingsPath, writeSettings,
+  type ProviderEnvKey,
+} from './settings.js';
 
 /** A path as a person would say it. The absolute form of a vault path is four lines of monospace on
  *  a first-run card and nobody reads it; `~/Documents/Myelin` is the same information in six
@@ -110,6 +114,88 @@ export function buildSetupRoutes(
     process.env.ANTHROPIC_API_KEY = key;
     applyCredentials();
     return c.json(state());
+  });
+
+  const roleNames = () => Object.keys(cfg.models) as ModelRole[];
+
+  // What the models popover renders. The two API keys are write-only: a saved key comes back as
+  // `set: true`, never as its value — the same rule the Anthropic key flow follows. Base URLs are
+  // not secrets, so their saved values do come back.
+  const modelsState = () => {
+    const saved = readSettings();
+    const shadow = envShadow();
+    return {
+      roles: Object.fromEntries(roleNames().map((r) => [r, {
+        effective: cfg.models[r].model,
+        saved: saved.models?.[r] ?? null,
+      }])),
+      env: {
+        OLLAMA_BASE_URL: { value: saved.env?.OLLAMA_BASE_URL ?? '', shadowed: shadow.OLLAMA_BASE_URL },
+        OLLAMA_API_KEY: { set: Boolean(saved.env?.OLLAMA_API_KEY), shadowed: shadow.OLLAMA_API_KEY },
+        OPENAI_COMPAT_BASE_URL: {
+          value: saved.env?.OPENAI_COMPAT_BASE_URL ?? '', shadowed: shadow.OPENAI_COMPAT_BASE_URL,
+        },
+        OPENAI_COMPAT_API_KEY: {
+          set: Boolean(saved.env?.OPENAI_COMPAT_API_KEY), shadowed: shadow.OPENAI_COMPAT_API_KEY,
+        },
+      },
+      savedAt: displayPath(settingsPath()),
+    };
+  };
+
+  app.get('/api/setup/models', (c) => c.json(modelsState()));
+
+  app.put('/api/setup/models', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const models = Object.entries((body?.models ?? {}) as Record<string, unknown>);
+    const env = (body?.env ?? {}) as Record<string, unknown>;
+
+    for (const [role, id] of models) {
+      if (!roleNames().includes(role as ModelRole)) {
+        return c.json({ error: `unknown model role: "${role}" — roles are ${roleNames().join(', ')}` }, 400);
+      }
+      if (typeof id !== 'string' || !id.trim()) {
+        return c.json({ error: `model for ${role} is empty — give it a model id or leave the role out` }, 400);
+      }
+    }
+    for (const key of Object.keys(env)) {
+      if (!(PROVIDER_ENV_KEYS as readonly string[]).includes(key)) {
+        return c.json({ error: `unknown env field: "${key}" — fields are ${PROVIDER_ENV_KEYS.join(', ')}` }, 400);
+      }
+    }
+    const ids = models as [string, string][];
+    const removed = ids.filter(([, id]) => id.trim().startsWith('claude-sdk:'))
+      .map(([role, id]) => `${role}: "${id}"`);
+    if (removed.length) return c.json({ error: removedRouteMessage(removed, 'this request') }, 400);
+    // An openai: role with no base URL anywhere would fail mid-lesson (models.ts throws at call
+    // time); refuse the save here instead, where the fix is the field right below.
+    const openaiRole = ids.find(([, id]) => id.trim().startsWith('openai:'));
+    const baseUrl = String(env.OPENAI_COMPAT_BASE_URL ?? '').trim()
+      || process.env.OPENAI_COMPAT_BASE_URL;
+    if (openaiRole && !baseUrl) {
+      return c.json({
+        error: `model "${openaiRole[1].trim()}" needs an OpenAI-compatible base URL — fill it in `
+          + `below (e.g. https://openrouter.ai/api/v1) or set OPENAI_COMPAT_BASE_URL`,
+      }, 400);
+    }
+
+    // Persist: merge over what is already saved, so a request that only touches one role or one
+    // endpoint leaves the rest of settings.json alone.
+    const saved = readSettings();
+    const nextModels = { ...saved.models };
+    for (const [role, id] of ids) nextModels[role as ModelRole] = id.trim();
+    const nextEnv = { ...saved.env };
+    for (const k of PROVIDER_ENV_KEYS) {
+      const v = env[k];
+      if (typeof v === 'string' && v.trim()) nextEnv[k] = v.trim();
+    }
+    writeSettings({ ...saved, models: nextModels, env: nextEnv });
+
+    // Live, no restart: cfg.models is the object every route and modelFor call reads, and
+    // models.ts resolves the provider env per call.
+    for (const [role, id] of ids) cfg.models[role as ModelRole].model = id.trim();
+    applyEnvValues(nextEnv as Partial<Record<ProviderEnvKey, string>>);
+    return c.json(modelsState());
   });
 
   return app;
