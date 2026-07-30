@@ -225,6 +225,42 @@ describe('usage ledger', () => {
 });
 
 describe('grading round-trip (Bug 2)', () => {
+  // History diet wiring: a block graded in an EARLIER turn reaches the model as a verdict line
+  // (historyDiet.ts), while the turn's own pending block keeps its full payload.
+  it('compacts old graded blocks in the model transcript, keeps the pending one full', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
+      { model, now: () => new Date('2026-07-12') });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [{
+          type: 'tool-quick_check', toolCallId: 'tc-old', state: 'output-available',
+          input: { question: 'An old question with a distinctive payload marker OLDMARK', mode: 'choice', choices: ['a', 'b'], expected: 'a', pageSlug: 'arith' },
+          output: { answer: 'a', grading: { verdict: 'correct', source: 'mechanical', detail: 'exact match' } },
+        }, { type: 'text', text: 'Next one.' }],
+      },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'go on' }] },
+      {
+        id: 'a2', role: 'assistant', parts: [{
+          type: 'tool-quick_check', toolCallId: 'tc-new', state: 'output-available',
+          input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+          output: { answer: '4' },
+        }],
+      },
+    ] as any[];
+    await (await session.respond(history, 'learn', 'diet-thread')).text();
+
+    const all = JSON.stringify(calls[0].messages);
+    // The old block's distinctive choices payload is gone; its prompt survives in the verdict line.
+    expect(all).toMatch(/"compacted":true/);
+    expect(all).toMatch(/OLDMARK/); // the question is kept (capped), so the model knows WHAT was asked
+    expect(all).not.toMatch(/"choices":\["a","b"\]/);
+    // The pending block keeps its full payload, machine grade merged.
+    expect(all).toMatch(/"choices":\["3","4"\]/);
+    expect(all).toMatch(/"verdict":"correct"/);
+  }, 30_000);
+
   it('sends a tool-output-available chunk carrying the graded output for pending block outputs', async () => {
     // Design note: a `data-grading` data-part + client-side onData merge was tried first, but it
     // races the continuation's own replace-in-place write (see the "continues the SAME assistant

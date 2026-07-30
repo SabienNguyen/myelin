@@ -15,6 +15,7 @@ import { searchVideos } from './videoSearch.js';
 import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
 import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
+import { dietUiMessages } from './historyDiet.js';
 import { buildIngestTools } from './ingestTools.js';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
@@ -766,7 +767,12 @@ export function createTutorSession(
           + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
         ));
 
-        const model_messages = [...leading, ...uiMessagesToChatMessages(messages), ...trailing];
+        // History diet: blocks graded in EARLIER turns ride as verdict lines, not full payloads
+        // (historyDiet.ts). This turn's pending blocks stay full — they are what the model is
+        // about to grade-and-discuss, and their payload carries the machine grade merged above.
+        const keepIds = new Set(pending.map((p) => p.toolCallId));
+        const dieted = dietUiMessages(messages, keepIds);
+        const model_messages = [...leading, ...uiMessagesToChatMessages(dieted), ...trailing];
 
         // Bug 2 fix: the grading above only mutated the REQUEST's copy of the tool output
         // (p.output.grading, kept so the model sees student work + machine grade together in the
