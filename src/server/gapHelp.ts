@@ -11,13 +11,13 @@
 // `reference_answer` field at all, before ever calling buildHelpPrompt. There is no second,
 // unstripped endpoint this route could reach for instead, and no field on the prompt-builder's
 // input type to carry a reference answer even if one were mistakenly forwarded.
-import { generateText, type LanguageModel } from 'ai';
 import { Hono } from 'hono';
 import type { HarnessConfig } from './config.js';
 import { fetchLadderPayload } from './gapProxy.js';
 import { buildHelpPrompt, type HelpRungContext } from './helpPrompt.js';
+import { generateText, type ChatModel } from './llm/index.js';
 import type { Engram } from './mcp.js';
-import { modelFor } from './models.js';
+import { chatModelFor } from './models.js';
 
 const DRAFT_CAP = 20_000;
 const QUESTION_CAP = 2_000;
@@ -26,8 +26,8 @@ const QUESTION_CAP = 2_000;
 const PRIOR_HINT_CAP = 6;
 
 export interface GapHelpDeps {
-  /** Injectable model seam for tests (mirrors ingestRoutes.ts's deps.model). */
-  model?: LanguageModel;
+  /** Injectable model seam for tests (mirrors grading.ts's GradingDeps.model). */
+  model?: ChatModel;
 }
 
 interface HelpRequestBody {
@@ -105,7 +105,7 @@ export function buildGapHelpRoute(lw: Engram, cfg: HarnessConfig, deps: GapHelpD
 
     const { system, prompt } = buildHelpPrompt({ pattern, rung: rungContext, draft, failures, vaultPage, question, priorHints });
 
-    const { text } = await generateText({ model: deps.model ?? modelFor('tutor', cfg), system, prompt });
+    const { text } = await generateText({ model: deps.model ?? chatModelFor('tutor', cfg), system, prompt });
 
     return c.json({ hint: text.trim() });
   });
