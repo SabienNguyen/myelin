@@ -3,6 +3,7 @@ import { create, all } from 'mathjs';
 import { generateText, Output, type LanguageModel } from 'ai';
 import { annotationSchema, type BlockToolName, type WritingAnnotations } from '../shared/blocks.js';
 import { TONE_SYSTEMS, type ToneSystem } from '../shared/toneContour.js';
+import { mmss } from '../shared/videoUrl.js';
 import type { EvidenceKind } from '../shared/engram.js';
 import { modelFor } from './models.js';
 import type { HarnessConfig } from './config.js';
@@ -760,6 +761,30 @@ export async function gradeBlockOutput(
         : `${passes}/${required} clean — ${toneName} needs ${required} to count`,
       evidence: [ev(input.pageSlug, kind,
         `pronounced “${input.word}” (${toneName})`, 'mechanical')],
+    };
+  }
+
+  // watch_video — watching is an ENCOUNTER, and the evidence says exactly that: 'exposed', the
+  // kind engram's clock rules already refuse to let refresh a standing the learner didn't re-earn.
+  // Mechanical: the only fact graded is that the learner pressed "done watching"; the graded check
+  // the tutor issues after the video is where viewing becomes demonstrated knowledge. Not watched
+  // (block cancelled, conversation moved on) records NOTHING — same rule as code_exercise's
+  // unavailable case: an unwatched video demonstrates neither knowledge nor struggle.
+  if (tool === 'watch_video') {
+    if (result.watched !== true) {
+      return {
+        verdict: 'reviewed', source: 'mechanical',
+        detail: 'video not watched — nothing recorded', evidence: [],
+      };
+    }
+    const span = input.startSeconds != null || input.endSeconds != null
+      ? ` [${mmss(input.startSeconds ?? 0)}–${input.endSeconds != null ? mmss(input.endSeconds) : 'end'}]`
+      : '';
+    return {
+      verdict: 'reviewed',
+      source: 'mechanical',
+      detail: 'recorded as exposed — watching is an encounter; answering the next check is what makes it evidence',
+      evidence: [ev(input.pageSlug, 'exposed', `watched ${input.url}${span}`, 'mechanical')],
     };
   }
 

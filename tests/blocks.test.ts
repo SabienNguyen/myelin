@@ -5,9 +5,9 @@ describe('block schemas', () => {
   // Was "the five v1 kinds". structured_check is the sixth: the generic applied block, added so
   // applied evidence is reachable outside maths/prose/programming (see src/shared/blocks.ts). This
   // list stays exhaustive on purpose — a new block kind should have to be added here deliberately.
-  it('exposes exactly the eight block kinds', () => {
+  it('exposes exactly the nine block kinds', () => {
     expect(BLOCK_TOOL_NAMES.sort()).toEqual(
-      ['code_exercise', 'label_diagram', 'math_scratchpad', 'pronounce', 'quick_check', 'quiz', 'structured_check', 'writing_draft'],
+      ['code_exercise', 'label_diagram', 'math_scratchpad', 'pronounce', 'quick_check', 'quiz', 'structured_check', 'watch_video', 'writing_draft'],
     );
   });
   it('structured_check round-trips each checker kind', () => {
@@ -42,6 +42,19 @@ describe('block schemas', () => {
     expect(BLOCK_TOOLS.code_exercise.input.parse(input)).toEqual(input);
     const result = { completed: true, rungReached: 'full_body', testsPassed: 8, testsTotal: 8, wroteCode: true };
     expect(BLOCK_TOOLS.code_exercise.result.parse(result)).toEqual(result);
+  });
+  it('watch_video round-trips, with and without the snippet bounds', () => {
+    const full = {
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', startSeconds: 225, endSeconds: 300,
+      title: 'Quadratic formula', why: 'watch how completing the square becomes the formula',
+      pageSlug: 'quadratic-formula',
+    };
+    expect(BLOCK_TOOLS.watch_video.input.parse(full)).toEqual(full);
+    const bare = { url: 'https://youtu.be/dQw4w9WgXcQ', why: 'the whole short', pageSlug: 'p' };
+    expect(BLOCK_TOOLS.watch_video.input.parse(bare)).toEqual(bare);
+    expect(BLOCK_TOOLS.watch_video.result.parse({ watched: true })).toEqual({ watched: true });
+    // Negative seconds are a malformed assignment, not a snippet.
+    expect(() => BLOCK_TOOLS.watch_video.input.parse({ ...bare, startSeconds: -5 })).toThrow();
   });
   it('code_exercise rejects an unknown rung value', () => {
     expect(() => BLOCK_TOOLS.code_exercise.input.parse(

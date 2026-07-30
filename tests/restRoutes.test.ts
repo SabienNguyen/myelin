@@ -193,6 +193,47 @@ describe('GET /api/progress — honest progress aggregation', () => {
   });
 });
 
+describe('GET /api/graph — factory demo stubs stay out until touched', () => {
+  // On a cold start the built-in stream-consumer stub was the ONLY node in a new learner's
+  // graph — infrastructure presenting itself as their knowledge. It appears once they engage.
+  function lwWith(masteryForStub: any, status = 'stub') {
+    return {
+      listSlugs: async () => ['stream-consumer', 'derivatives'],
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') {
+          return masteryForStub ? { 'stream-consumer': masteryForStub } : {};
+        }
+        if (name === 'list_pages') {
+          return { pages: [
+            { slug: 'stream-consumer', title: 'Consuming SSE token streams', difficulty: 2, status, prereqs: [], deepens: [] },
+            { slug: 'derivatives', title: 'Derivatives', difficulty: 1, status: 'draft', prereqs: [], deepens: [] },
+          ] };
+        }
+        throw new Error(`unexpected call ${name}`);
+      },
+    } as any;
+  }
+  const vaultCfg = () => ({ student: 'kid', vault: mkdtempSync(join(tmpdir(), 'lwh-graph-')) } as HarnessConfig);
+
+  it('an untouched builtin stub is hidden; real pages stay', async () => {
+    const app = buildRestRoutes(lwWith(null), vaultCfg(), {});
+    const g = await (await app.request('/api/graph')).json();
+    expect(g.nodes.map((n: any) => n.slug)).toEqual(['derivatives']);
+  });
+
+  it('any mastery record brings it into the graph', async () => {
+    const app = buildRestRoutes(lwWith({ level: 'exposed', effective: 'exposed', last_reinforced: '2026-07-01' }), vaultCfg(), {});
+    const g = await (await app.request('/api/graph')).json();
+    expect(g.nodes.map((n: any) => n.slug).sort()).toEqual(['derivatives', 'stream-consumer']);
+  });
+
+  it('a stub the tutor grew past stub status shows even untouched', async () => {
+    const app = buildRestRoutes(lwWith(null, 'draft'), vaultCfg(), {});
+    const g = await (await app.request('/api/graph')).json();
+    expect(g.nodes.map((n: any) => n.slug).sort()).toEqual(['derivatives', 'stream-consumer']);
+  });
+});
+
 describe('GET /api/graph caching', () => {
   it('cold call hits lw once', async () => {
     const { lw, listSlugsCalls } = fakeLw();

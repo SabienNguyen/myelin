@@ -86,11 +86,11 @@ const stamp = (s: number) => {
 
 export interface VideoMeta { title: string; channel: string; duration: string; url: string }
 
-/** The video URL with a start-time parameter — YouTube honors ?t=/&t= seconds on watch,
- *  youtu.be, and shorts URLs alike. */
-export function atTime(url: string, seconds: number): string {
-  return `${url}${url.includes('?') ? '&' : '?'}t=${Math.floor(seconds)}s`;
-}
+/** The video URL with a start-time parameter — one definition, shared with the client's
+ *  watch_video block (videoUrl.ts). Re-exported so this module's callers keep their import. */
+import { atTime } from '../shared/videoUrl.js';
+
+export { atTime };
 
 /**
  * Turn plain [M:SS] / [H:MM:SS] references into deep links to those seconds of the video.

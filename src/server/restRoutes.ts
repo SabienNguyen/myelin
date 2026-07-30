@@ -10,6 +10,7 @@ import { getGraphCached, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
 import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
 import { readBank } from './courseBank.js';
+import { BUILTIN_PATTERN_SLUGS } from './seedPatternPages.js';
 
 async function fetchGraph(lw: Engram, cfg: HarnessConfig): Promise<GraphPayload> {
   // Two calls for the whole vault, however large. The old shape — read_page plus a per-slug
@@ -41,6 +42,12 @@ async function fetchGraph(lw: Engram, cfg: HarnessConfig): Promise<GraphPayload>
       };
     }));
   }
+  // A factory-shipped demo pattern the learner has never touched is infrastructure, not part of
+  // their knowledge story — on a cold start it was the ONLY node in the graph, a lone "Consuming
+  // SSE token streams" nobody asked for. It joins the graph once they engage (any mastery record)
+  // or the page grows past its stub; Practice and the Page tab list it regardless. Applied after
+  // both fetch paths so the version-skew fallback gets the same rule. See BUILTIN_PATTERN_SLUGS.
+  nodes = nodes.filter((n: any) => !(BUILTIN_PATTERN_SLUGS.has(n.slug) && n.mastery == null && n.status === 'stub'));
   // `goal` has been hardcoded null since this payload was written. It now carries the active
   // goal's slug so the Graph can centre on what the learner is actually working toward.
   return { nodes, goal: readGoal(cfg.vault)?.slug ?? null, summary: student };

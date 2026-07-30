@@ -90,7 +90,11 @@ export function App() {
               folder). Not one button per artifact; AddMaterial routes by what it was given. */}
           <AddMaterial />
           {/* Named: an unlabeled combobox announces as "combobox: learn" — four one-word options
-              with no hint of what any of them switches (the audit's keyboard pass caught it). */}
+              with no hint of what any of them switches (the audit's keyboard pass caught it).
+              Each OPTION carries its own title too, so hovering the open list explains the mode
+              under the pointer — the select-level summary only helps before the list is open, and
+              "freeform" is the one label that names a mechanism (the only mode where the tutor
+              writes pages) rather than an activity. */}
           <select
             value={mode}
             aria-label="Tutor mode"
@@ -98,7 +102,12 @@ export function App() {
               + 'quiz: open with a quiz · freeform: follow your lead (and build new pages)'}
             onChange={(e) => setMode(e.target.value)}
           >
-            {['learn', 'review', 'quiz', 'freeform'].map((m) => <option key={m}>{m}</option>)}
+            {Object.entries({
+              learn: 'teach the next lesson',
+              review: 're-prove your due pages first',
+              quiz: 'open with a quiz',
+              freeform: 'follow your lead — the one mode where the tutor writes new pages',
+            }).map(([m, help]) => <option key={m} title={help}>{m}</option>)}
           </select>
         </header>
         <main className="workspace">

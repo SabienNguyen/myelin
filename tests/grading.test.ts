@@ -289,6 +289,27 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(bad.evidence[0].kind).toBe('struggled');
   });
 
+  it('watch_video: done watching mints exposed — an encounter, nothing stronger', async () => {
+    const g = await gradeBlockOutput('watch_video',
+      { url: 'https://www.youtube.com/watch?v=abcdefghijk', startSeconds: 225, endSeconds: 300,
+        why: 'the derivation', pageSlug: 'quadratic-formula' },
+      { watched: true }, cfg);
+    expect(g.verdict).toBe('reviewed');
+    expect(g.source).toBe('mechanical');
+    expect(g.evidence).toEqual([{
+      slug: 'quadratic-formula', kind: 'exposed',
+      note: 'watched https://www.youtube.com/watch?v=abcdefghijk [3:45–5:00]',
+    }]);
+  });
+
+  it('watch_video: not watched records NOTHING — same rule as an unreachable sandbox', async () => {
+    const g = await gradeBlockOutput('watch_video',
+      { url: 'https://youtu.be/abcdefghijk', why: 'w', pageSlug: 'p' },
+      { watched: false }, cfg);
+    expect(g.verdict).toBe('reviewed');
+    expect(g.evidence).toEqual([]);
+  });
+
   it('names an unparseable step even when the final is correct', async () => {
     // The step call-out must not vanish under a green final — only parseability is checked, and
     // hiding the miss implied the whole derivation had been read.

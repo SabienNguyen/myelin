@@ -1831,10 +1831,17 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
    one moment where the app has to say what it is, and the examples span three unrelated subjects
    on purpose: the most useful thing to convey in the first three seconds is that this is a tutor,
    not a programming tutor. */
+/* Center the empty-state hero in the viewport instead of hanging it at a fixed 12vh — on a tall
+   window the pitch floated above a large dead field, and in a short one the third example chip
+   was pushed under the composer. Auto block margins are the overflow-safe centering idiom (they
+   collapse to zero when the content is taller than the viewport, so nothing ever clips); the
+   bottom padding lifts the group slightly above geometric center, where a lone card reads as
+   centered rather than sunk. */
+.thread-viewport:has(.thread-empty) { display: flex; flex-direction: column; }
 .thread-empty {
   max-width: 46ch;
-  margin: 12vh auto 0;
-  padding: 0 1.5rem;
+  margin: auto;
+  padding: 1rem 1.5rem 6vh;
   text-align: center;
 }
 .thread-empty h2 {
@@ -2015,6 +2022,21 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   border-radius: 4px;
   overflow-wrap: anywhere;
 }
+
+/* ── watch_video (WatchVideo.tsx) — assigned viewing, played in place ─────────
+   The embed enforces the snippet (start+end); the deep link is the fallback when the
+   player can't load (offline, embedding disabled). */
+.watch-video .wv-player {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 0.6rem 0 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-inset);
+}
+.watch-video .wv-link { margin: 0.25rem 0 0.5rem; font-size: 0.85rem; }
+.watch-video .wv-note { color: var(--text-muted); font-size: 0.8rem; }
 
 /* ── label_diagram (LabelDiagram.tsx) — the picture-subject applied block ─────
    Pins sit at percent coordinates over an inert <img>; the tray holds the labels.
@@ -2276,8 +2298,13 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   background: var(--bg-inset);
   color: var(--text-muted);
 }
-.session-plan-kind--review { background: color-mix(in srgb, var(--warn) 18%, var(--bg-inset)); color: var(--warn); }
-.session-plan-kind--misconception { background: color-mix(in srgb, var(--bad) 15%, var(--bg-inset)); color: var(--bad); }
+/* Chip TEXT is the status hue pulled 45% toward ink, not the raw token: raw --warn on the warn
+   wash measured 2.9:1 at this size (axe, serious) — status colors are tuned for dots and borders,
+   not 0.72rem text. Mixing toward --text lands ≥4.5:1 in both schemes automatically (darker ink on
+   the light wash, lighter ink on the dark one) while keeping the hue legible as warn/bad. --new
+   and --course pass as-is: the accent family is dark enough for text. */
+.session-plan-kind--review { background: color-mix(in srgb, var(--warn) 18%, var(--bg-inset)); color: color-mix(in srgb, var(--warn) 55%, var(--text)); }
+.session-plan-kind--misconception { background: color-mix(in srgb, var(--bad) 15%, var(--bg-inset)); color: color-mix(in srgb, var(--bad) 55%, var(--text)); }
 .session-plan-kind--new { background: var(--accent-soft); color: var(--accent); }
 /* Course items reuse the accent family deliberately — banked problems are new work drawn from the
    learner's own material, not a third status hue. The label text carries the distinction. */

@@ -9,6 +9,8 @@ import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
 import { markCorrect, nextProblems, readBank } from './courseBank.js';
 import { findCanonicalPapers, findRecentPapers } from './frontierResearch.js';
+import { fetchVideoTranscript } from './videoIngest.js';
+import { searchVideos } from './videoSearch.js';
 import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
 import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
@@ -382,7 +384,11 @@ export function buildCourseTools(vault: string): ToolSet {
  * about. Every mode gets it: asking about the frontier is a reading activity, not a vault write.
  * `fetchImpl` injected for tests.
  */
-export function buildFrontierTools(vault?: string, fetchImpl: typeof fetch = fetch): ToolSet {
+export function buildFrontierTools(
+  vault?: string, fetchImpl: typeof fetch = fetch,
+  // yt-dlp seams, injected by tests so no suite ever needs the binary or a network.
+  video: { search?: typeof searchVideos; transcript?: typeof fetchVideoTranscript } = {},
+): ToolSet {
   return {
     find_recent_papers: tool({
       description: 'Search the live literature indices (arXiv preprints + Crossref published '
@@ -445,6 +451,50 @@ export function buildFrontierTools(vault?: string, fetchImpl: typeof fetch = fet
           return await findCanonicalPapers(topic);
         } catch (e: any) {
           return { error: `could not reach the literature index: ${e?.message ?? e}` };
+        }
+      },
+    }),
+    find_video: tool({
+      description: 'Search YouTube for teaching videos on a topic (yt-dlp, no API key). Returns '
+        + 'title, url, channel, durationSeconds, views. Prefer a short well-viewed explainer over '
+        + 'a long lecture unless the student asked for depth. Then call video_transcript on your '
+        + 'pick to find the EXACT passage, and assign it with a watch_video block '
+        + '(startSeconds/endSeconds) — never make the student scrub a 40-minute video for a '
+        + '3-minute idea.',
+      inputSchema: z.object({
+        query: z.string().describe('what to search for, e.g. "quadratic formula derivation"'),
+        limit: z.number().int().min(1).max(10).optional().describe('results to return (default 5)'),
+      }),
+      execute: async ({ query, limit }: { query: string; limit?: number }) => {
+        try {
+          return { videos: await (video.search ?? searchVideos)(query, limit ?? 5) };
+        } catch (e: any) {
+          return { error: `video search failed: ${e?.message ?? e}` };
+        }
+      },
+    }),
+    video_transcript: tool({
+      description: "A YouTube video's own captions as a timestamped transcript ([M:SS] marks), no "
+        + 'download. Use it BEFORE assigning watch_video: find where the topic is actually '
+        + 'covered, convert the [M:SS] you picked to seconds, and pass startSeconds/endSeconds so '
+        + 'the assignment is the snippet, not the whole video. Works for any YouTube URL, '
+        + 'ingested or not.',
+      inputSchema: z.object({
+        url: z.string().describe('the YouTube URL from find_video or the student'),
+      }),
+      execute: async ({ url }: { url: string }) => {
+        try {
+          const { title, markdown } = await (video.transcript ?? fetchVideoTranscript)(url);
+          // A long lecture's transcript can be book-sized; cap what enters the turn and say so —
+          // the tutor can still deep-link anywhere the kept range covers.
+          const capped = markdown.length > 16_000;
+          return {
+            title,
+            transcript: capped ? markdown.slice(0, 16_000) : markdown,
+            ...(capped ? { note: 'transcript truncated at 16k characters — the tail is not shown' } : {}),
+          };
+        } catch (e: any) {
+          return { error: `could not fetch the transcript: ${e?.message ?? e}` };
         }
       },
     }),
