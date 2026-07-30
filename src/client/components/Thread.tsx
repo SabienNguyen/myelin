@@ -259,7 +259,8 @@ function Composer() {
     e.preventDefault();
     const text = composer.getState().text;
     if (!text.trim() && files.length === 0) return;
-    store.sendMessage(text, files);
+    // Whitespace-only text beside files sends as files-only — no junk text part in the history.
+    store.sendMessage(text.trim() ? text : '', files);
     composer.setText('');
     setFiles([]);
     setNote(null);
