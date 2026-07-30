@@ -10,14 +10,16 @@
 // A reply that does NOT parse stays plain text with no tool call, which generateStructured
 // rejects: exactly the "unparseable grade throws" behavior the grading tests pin.
 import {
-  zeroUsage, type ChatModel, type ChatRequest, type GenerateResult,
+  zeroUsage, type ChatModel, type ChatRequest, type GenerateResult, type Usage,
 } from '../src/server/llm/index.js';
 
 /** One scripted loop step: tool calls first, then text — the order the real adapters and the e2e
- * scripted model both emit. */
+ * scripted model both emit. `usage` rides the finish event (zeros when unscripted), for tests
+ * that assert the figures reach the usage ledger. */
 export interface FakeTurn {
   text?: string;
   toolCalls?: { toolName: string; input: unknown }[];
+  usage?: Usage;
 }
 
 /** A ChatModel whose stream() plays whatever `turn` returns per call — the first-party stand-in
@@ -46,7 +48,7 @@ export function streamModel(
         yield { type: 'text-delta', id: '0', text: t.text };
         yield { type: 'text-end', id: '0' };
       }
-      yield { type: 'finish', reason: toolCalls.length ? 'tool-calls' : 'stop', usage: zeroUsage() };
+      yield { type: 'finish', reason: toolCalls.length ? 'tool-calls' : 'stop', usage: t.usage ?? zeroUsage() };
     },
   };
 }

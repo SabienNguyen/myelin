@@ -168,6 +168,25 @@ describe('cold-start research unlock', () => {
   }, 30_000);
 });
 
+describe('usage ledger', () => {
+  it('a tutor turn appends a ledger row carrying the model-reported usage', async () => {
+    // 'hi' keeps the turn off the vault-gap path — this pins only that runLoop's summed usage
+    // lands in .harness/usage.jsonl under role 'tutor'. Figures are distinctive on purpose: the
+    // shared vault already holds all-zero rows from this file's other turns.
+    const model = streamModel(() => ({
+      text: 'hello', usage: { inputTokens: 111, outputTokens: 22, cacheReadTokens: 333, cacheWriteTokens: 44 },
+    }));
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any, 'learn',
+    )).text();
+    const rows = readFileSync(join(vault, '.harness', 'usage.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l));
+    const row = rows.find((r) => r.in === 111);
+    expect(row).toMatchObject({ role: 'tutor', in: 111, out: 22, cacheRead: 333, cacheWrite: 44 });
+  }, 30_000);
+});
+
 describe('grading round-trip (Bug 2)', () => {
   it('sends a tool-output-available chunk carrying the graded output for pending block outputs', async () => {
     // Design note: a `data-grading` data-part + client-side onData merge was tried first, but it

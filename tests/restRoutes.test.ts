@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { buildRestRoutes, interleaveByTopic } from '../src/server/restRoutes.js';
 import { invalidateGraphCache } from '../src/server/graphCache.js';
 import { saveProblems, markCorrect } from '../src/server/courseBank.js';
+import { recordUsage } from '../src/server/usageLedger.js';
 import type { HarnessConfig } from '../src/server/config.js';
 
 const TTL_MS = 60_000;
@@ -56,6 +57,35 @@ const cfg = { student: 'kid' } as HarnessConfig;
 
 beforeEach(() => { invalidateGraphCache(); });
 afterEach(() => { vi.useRealTimers(); });
+
+describe('GET /api/usage — token spend per role from the usage ledger', () => {
+  // /api/usage never touches the Engram client — a bare stub is the honest fixture.
+  const appFor = (vault: string) => buildRestRoutes({} as any, { student: 'kid', vault } as HarnessConfig);
+
+  it('summarizes recorded rows per role, today and week, with the cache-hit share', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-usage-route-'));
+    recordUsage(vault, {
+      role: 'tutor', model: 'claude-sonnet-5',
+      usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 300, cacheWriteTokens: 20 },
+    });
+    recordUsage(vault, {
+      role: 'grader', model: 'claude-haiku-4-5',
+      usage: { inputTokens: 40, outputTokens: 4, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    });
+    const body = await (await appFor(vault).request('/api/usage')).json();
+    expect(body.today.tutor).toEqual({ in: 100, out: 10, cacheRead: 300, cacheWrite: 20, calls: 1 });
+    expect(body.today.grader).toEqual({ in: 40, out: 4, cacheRead: 0, cacheWrite: 0, calls: 1 });
+    expect(body.week).toEqual(body.today); // just-recorded rows are inside both windows
+    expect(body.cacheHitShare).toBeCloseTo(300 / 440, 10); // cacheRead / (in + cacheRead)
+  });
+
+  it('no ledger yet → the empty shape, not an error', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-usage-route-empty-'));
+    const res = await appFor(vault).request('/api/usage');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ today: {}, week: {}, cacheHitShare: null });
+  });
+});
 
 describe('GET /api/progress — honest progress aggregation', () => {
   it('counts levels/slipping from state and this-week positive evidence from the ledger', async () => {

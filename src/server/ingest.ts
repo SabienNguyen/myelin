@@ -18,6 +18,7 @@ import {
   readQueue, updateQueue, writeQueue, type QueueEntry, type QueueStatus,
 } from './queueStore.js';
 import { sanitizeToolArgs, SLUG_LIST_CAP } from './session.js';
+import { recordUsage } from './usageLedger.js';
 import { isVideoUrl, linkifyTimestamps } from './videoIngest.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -563,6 +564,9 @@ export async function compileOne(
           messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
           tools,
           maxSteps: 16,
+        });
+        recordUsage(cfg.vault, {
+          role: 'compile', model: cfg.models?.compile?.model ?? 'unknown', usage: result.usage,
         });
         // "The loop finished" is not "the work happened" — small models sometimes narrate instead
         // of calling tools. Gate on THIS run's own steps (per-entry AND per-part accurate under

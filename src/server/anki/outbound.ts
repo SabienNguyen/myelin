@@ -6,6 +6,7 @@ import type { HarnessConfig } from '../config.js';
 import { generateStructured } from '../llm/index.js';
 import type { Engram } from '../mcp.js';
 import { chatModelFor } from '../models.js';
+import { recordUsage } from '../usageLedger.js';
 import type { AnkiClient } from './client.js';
 
 export type GenerateCards = (
@@ -68,11 +69,12 @@ async function llmGenerateCards(
     misconceptions.length ? `Known misconceptions: ${misconceptions.join('; ')}` : '',
     CARD_PROMPT,
   ].filter(Boolean);
-  const { object } = await generateStructured({
+  const { object, usage } = await generateStructured({
     model: chatModelFor('card_gen', cfg),
     prompt: parts.join('\n\n'),
     schema: cardsSchema, schemaName: 'cards',
   });
+  recordUsage(cfg.vault, { role: 'card_gen', model: cfg.models?.card_gen?.model ?? 'unknown', usage });
   return object.cards;
 }
 

@@ -18,6 +18,7 @@ import { buildHelpPrompt, type HelpRungContext } from './helpPrompt.js';
 import { generateText, type ChatModel } from './llm/index.js';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
+import { recordUsage } from './usageLedger.js';
 
 const DRAFT_CAP = 20_000;
 const QUESTION_CAP = 2_000;
@@ -105,7 +106,9 @@ export function buildGapHelpRoute(lw: Engram, cfg: HarnessConfig, deps: GapHelpD
 
     const { system, prompt } = buildHelpPrompt({ pattern, rung: rungContext, draft, failures, vaultPage, question, priorHints });
 
-    const { text } = await generateText({ model: deps.model ?? chatModelFor('tutor', cfg), system, prompt });
+    const { text, usage } = await generateText({ model: deps.model ?? chatModelFor('tutor', cfg), system, prompt });
+    // Help borrows the tutor MODEL but is its own ledger role — see usageLedger.ts's UsageRole.
+    recordUsage(cfg.vault, { role: 'help', model: cfg.models?.tutor?.model ?? 'unknown', usage });
 
     return c.json({ hint: text.trim() });
   });
