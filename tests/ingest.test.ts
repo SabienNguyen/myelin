@@ -426,6 +426,98 @@ describe('compileNext', () => {
     expect(entry?.status).toBe('done');
   }, 30_000);
 
+  it('a multi-part chapter gets a MOC hub linking every part in reading order, parts deepen it', async () => {
+    // A second, trivial H1 chapter — same trick as the parallel-distill test above: with only ONE
+    // H1, splitChapters treats the H2s as three separate chapters instead of one three-part
+    // chapter, which is not what this test is exercising.
+    const MOC_CHAPTER = [
+      '# Thermodynamics',
+      '## First Law',
+      'A'.repeat(200),
+      '## Second Law',
+      'B'.repeat(200),
+      '## Third Law',
+      'C'.repeat(200),
+      '# Appendix',
+      'Nothing under compile test here.',
+    ].join('\n');
+    await ingestBook(cfg, '/uploads/MOC Book.pdf', {
+      converter: async () => ({ markdown: MOC_CHAPTER }),
+    });
+
+    // Same two-role fake as the parallel-distill test, plus a third role for the MOC's chapter
+    // overview call — all three are forced-schema generateStructured calls, so textModel's JSON
+    // branch serves every one of them. Also compiles the trivial Appendix chapter (kept out of the
+    // counts below by filtering on "MOC Book" / the -moc suffix).
+    let distillCalls = 0;
+    const { model } = textModel((prompt) => {
+      if (prompt.includes('chapter overview')) return JSON.stringify({ overview: 'What this chapter covers.' });
+      if (prompt.includes('Distill this chapter part')) {
+        if (!prompt.includes('Thermodynamics')) return JSON.stringify({ title: 'Appendix Distilled', body: 'Nothing under compile test here, distilled.' });
+        distillCalls++;
+        return JSON.stringify({
+          title: `Thermo Part ${distillCalls}`,
+          body: 'A page body of enough words to be a page, distilled from the source chapter part.',
+        });
+      }
+      return 'I cannot call tools, sorry — here is a summary instead.';
+    });
+
+    // concurrency: 1 — this test cares about the MOC's reading order, which mapPieces's own
+    // dispatch order under real concurrency is deliberately allowed to reorder (see the parallel-
+    // distill test above); pinning to 1 keeps the assertion about the MOC feature, not the pool.
+    const localCfg: HarnessConfig = { ...cfg, models: { compile: { concurrency: 1 } } } as HarnessConfig;
+    const summary = await compileNext(lw, localCfg, 2, { model, chunkChars: 320 });
+    expect(summary).toEqual({ compiled: 2, failed: 0 });
+    expect(distillCalls).toBe(3);
+
+    const slugs = await lw.listSlugs();
+    const mocSlug = slugs.find((s) => s.endsWith('-moc'));
+    expect(mocSlug).toBeDefined();
+    const mocPage = readFileSync(join(vault, 'pages', `${mocSlug}.md`), 'utf8');
+    expect(mocPage).toContain('What this chapter covers.');
+
+    const partSlugs = ['thermo-part-1', 'thermo-part-2', 'thermo-part-3'];
+    const links = [...mocPage.matchAll(/\[\[([\w-]+)\]\]/g)].map((m) => m[1]);
+    expect(links).toEqual(partSlugs); // deterministic list, reading order
+
+    for (const s of partSlugs) {
+      const { page } = await lw.call('read_page', { slug: s });
+      expect(page.meta.deepens).toContain(mocSlug); // graph edge: part deepens the hub
+    }
+  }, 30_000);
+
+  it('a single-page chapter writes no MOC and makes no overview call', async () => {
+    await ingestBook(cfg, '/uploads/Single Page Book.pdf', {
+      converter: async () => ({ markdown: '# One Page Chapter\nJust one concept here.' }),
+    });
+    const prompts: string[] = [];
+    let step = 0;
+    const model = streamModel((req) => {
+      prompts.push(JSON.stringify(req.messages));
+      if (step++ === 0) {
+        return {
+          toolCalls: [{
+            toolName: 'write_page',
+            input: {
+              slug: 'one-page-chapter', title: 'One Page Chapter',
+              body: 'Just one concept here, explained in full.', status: 'draft',
+            },
+          }],
+        };
+      }
+      return { text: 'done' };
+    });
+
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    expect(prompts.some((p) => p.includes('chapter overview'))).toBe(false); // no overview call made
+
+    // No MOC for THIS chapter's one page — checked by absence, not by scanning the whole shared
+    // vault (which by now also carries the multi-part test's own MOC page above).
+    expect(existsSync(join(vault, 'pages', 'single-page-book-ch-1-moc.md'))).toBe(false);
+  }, 30_000);
+
   describe('concurrency', () => {
     /** A model whose response doesn't depend on call order — it looks at whether a tool result is
      * already in the transcript to tell "first step" (call write_page) from "second step" (stop),
@@ -746,13 +838,15 @@ describe('the source spine — compile records the book\'s own order', async () 
   ].join('\n');
 
   /** A fake Engram whose write_page just succeeds — the spine is collected in the harness's
-   * wrapper, above whatever engram does with the page. */
+   * wrapper, above whatever engram does with the page. `call` only needs to answer link_pages: a
+   * multi-page chapter here also gets a MOC hub, which links every part to it. */
   const fakeLw = () => ({
     listSlugs: async () => [],
     tools: async () => [{
       name: 'write_page', description: 'w', inputSchema: { type: 'object' },
       execute: async () => ({ ok: true }),
     }],
+    call: async () => ({ ok: true }),
   }) as any;
 
   const promptOf = (req: any) => req.messages
@@ -793,13 +887,15 @@ describe('the source spine — compile records the book\'s own order', async () 
         chapter: 'raw/uploads/spine-book/ch-01-photosynthesis-basics.md',
         chapterOrdinal: 1,
         title: 'Photosynthesis Basics',
-        pages: ['light-reactions', 'calvin-cycle'],
+        // Two pages -> a MOC hub, itself written through the same wrapper, so it lands in this
+        // chapter's own page list too — it's the last page the chapter produced.
+        pages: ['light-reactions', 'calvin-cycle', 'spine-book-ch-1-moc'],
       },
       {
         chapter: 'raw/uploads/spine-book/ch-02-cellular-respiration.md',
         chapterOrdinal: 2,
         title: 'Cellular Respiration',
-        pages: ['glycolysis'],
+        pages: ['glycolysis'], // one page: no MOC, a map of one place is noise
       },
     ]);
   });
@@ -838,7 +934,9 @@ describe('the source spine — compile records the book\'s own order', async () 
 
     const spine = sourceFor(vault, 'Recompiled Book')?.spine;
     expect(spine).toHaveLength(1); // chapter 2 was never compiled; chapter 1 has ONE slice
-    expect(spine?.[0].pages).toEqual(['second-pass-page', 'and-another']);
+    // The second pass wrote two pages, so it also got its own MOC — the slice is replaced whole,
+    // MOC included, not appended alongside the first pass's single page.
+    expect(spine?.[0].pages).toEqual(['second-pass-page', 'and-another', 'recompiled-book-ch-1-moc']);
   });
 
   it('a paper records no spine — one unit of work has no order to preserve', async () => {

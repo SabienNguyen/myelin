@@ -272,7 +272,11 @@ describe('ensureCompileDrain — the drain hands the book\'s order to a path', (
       doc = await lw.call('read_path', { slug: 'source-artifact-order-book' }).catch(() => null);
       if (!doc) await new Promise((r) => { setTimeout(r, 50); });
     }
-    expect(doc.pages).toEqual(['spine-drain-alpha', 'spine-drain-beta', 'spine-drain-gamma']);
+    // Chapter one wrote two pages, so it also got a MOC hub — itself written through the same
+    // wrapper, landing in the chapter's own page order right after the pages it maps.
+    expect(doc.pages).toEqual([
+      'spine-drain-alpha', 'spine-drain-beta', 'artifact-order-book-ch-1-moc', 'spine-drain-gamma',
+    ]);
     expect(doc.title).toBe('Artifact Order Book');
     expect(doc.body).toContain('order the source itself presents');
   }, 60_000);

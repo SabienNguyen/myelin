@@ -797,6 +797,50 @@ export async function compileOne(
       }
     }
 
+    // The MOC (Obsidian map-of-content): the chapter's one hub, linking every page it produced in
+    // reading order. Deterministic list + one small overview call with an empty-string floor — the
+    // hub must exist even when the model can't write prose. Single-page chapters skip it: a map of
+    // one place is noise. Re-fetches its own write_page (rather than reusing either branch's local
+    // `writePage`, which is agentic-loop- or distillation-scoped and may not exist in the other
+    // path) so the MOC always goes through the same citation wrapper the parts did.
+    if (writtenSlugs.length > 1) {
+      const mocSlugsBefore = await lw.listSlugs();
+      const mocWritePage = withCitation(guardTools(await lw.tools(), cfg.student, mocSlugsBefore))
+        .find((t) => t.name === 'write_page')?.execute;
+      if (mocWritePage) {
+        let overview = '';
+        try {
+          const { object, usage } = await generateStructured({
+            model,
+            prompt: `Write a 2-3 sentence chapter overview for "${entry.title}" of "${entry.book}", `
+              + `covering these pages: ${writtenSlugs.join(', ')}. Plain prose, no links, no headings.`,
+            schema: z.object({ overview: z.string().min(1) }),
+            schemaName: 'chapter_overview',
+          });
+          recordUsage(cfg.vault, { role: 'compile', model: cfg.models?.compile?.model ?? 'unknown', usage });
+          overview = object.overview;
+        } catch (e) {
+          if (isTransportFailure(e)) throw e;
+          // weak-output floor: the list below IS the map; prose was garnish.
+        }
+        const mocSlug = freshSlug(`${entry.book} ch ${chapterN} moc`, new Set(mocSlugsBefore));
+        await mocWritePage({
+          slug: mocSlug,
+          title: `${entry.title} — map of content`,
+          body: `${overview ? `${overview}\n\n` : ''}${writtenSlugs.map((s) => `- [[${s}]]`).join('\n')}`,
+          status: 'draft',
+        });
+        for (const s of writtenSlugs.filter((s) => s !== mocSlug)) {
+          // 'deepens' on the PART, pointing at the hub: the part goes deeper than the hub, not
+          // the reverse — matches the tool's own src-deepens-dst direction (graphTools.ts).
+          await lw.call('link_pages', {
+            src: s, dst: mocSlug, type: 'deepens',
+            rationale: 'this page is one part of its chapter, mapped by this hub',
+          });
+        }
+      }
+    }
+
     if (!wroteAny) {
       throw new Error(
         `model produced no pages (${partErrors.join('; ') || 'no write_page calls'}) — try a stronger compile model`,
