@@ -652,6 +652,14 @@ export async function compileOne(
   // source's spine (provenance.ts), filed in the finally so a chapter that failed halfway still
   // contributes the pages it did write. Declared out here for that reason alone.
   const writtenSlugs: string[] = [];
+  // Per-part outcome notes ('part 3: verbatim (weak-output: ...)', 'part 3: distilled') — hoisted
+  // above the try so the finally block can fold them into the ledger's `phase` even when a later
+  // part throws. Read only in the finally; nothing else consumes it.
+  const partNotes: string[] = [];
+  // Set once the MOC is written (writtenSlugs.length > 1 case only) so the finally block can
+  // exclude it from the recorded spine — a hub is not a lesson stop. Stays null for single-page
+  // chapters, which skip the MOC entirely and record every slug they wrote.
+  let mocSlug: string | null = null;
   // Book-mode uploads only: `ch-NN-` at the START of the filename is what carries an authored
   // position. A paper (paper.md) is one unit and has no order to preserve, and a repo's doc files
   // (<file>--ch-NN-…) each restart at 01 — several sequences, no single spine — so both correctly
@@ -705,7 +713,6 @@ export async function compileOne(
 
     let wroteAny = false;
     const partErrors: string[] = [];
-    const partNotes: string[] = [];
     // Stays true until some part proves the model can't drive write_page agentically. From that
     // part on, every remaining part (including the one that just proved it) skips the doomed
     // agentic round-trip: a model that narrated instead of calling tools on part 1 of a 32B-token
@@ -823,7 +830,7 @@ export async function compileOne(
           if (isTransportFailure(e)) throw e;
           // weak-output floor: the list below IS the map; prose was garnish.
         }
-        const mocSlug = freshSlug(`${entry.book} ch ${chapterN} moc`, new Set(mocSlugsBefore));
+        mocSlug = freshSlug(`${entry.book} ch ${chapterN} moc`, new Set(mocSlugsBefore));
         await mocWritePage({
           slug: mocSlug,
           title: `${entry.title} — map of content`,
@@ -833,10 +840,18 @@ export async function compileOne(
         for (const s of writtenSlugs.filter((s) => s !== mocSlug)) {
           // 'deepens' on the PART, pointing at the hub: the part goes deeper than the hub, not
           // the reverse — matches the tool's own src-deepens-dst direction (graphTools.ts).
-          await lw.call('link_pages', {
-            src: s, dst: mocSlug, type: 'deepens',
-            rationale: 'this page is one part of its chapter, mapped by this hub',
-          });
+          try {
+            await lw.call('link_pages', {
+              src: s, dst: mocSlug, type: 'deepens',
+              rationale: 'this page is one part of its chapter, mapped by this hub',
+            });
+          } catch (e) {
+            // Edges are enrichment; the pages are the product. A rejected edge (e.g. engram's
+            // 'page not found' for a src it hasn't indexed yet) must not flip an otherwise-
+            // successful chapter to 'error' and send every already-written page through the
+            // queue's requeue-and-rewrite path.
+            console.error(`[compile] MOC link ${s} -> ${mocSlug} failed:`, e);
+          }
         }
       }
     }
@@ -855,9 +870,14 @@ export async function compileOne(
     error = (e instanceof Error ? e.message : String(e)).slice(0, 500);
     return 'failed';
   } finally {
-    if (chapterOrdinal > 0 && writtenSlugs.length > 0) {
+    // The MOC is a hub (overview + link list), not a lesson: spinePages() (artifactPath.ts) walks
+    // the spine as the learner's path, one mastery-earning stop per slug. A hub that arrives last,
+    // after everything it maps, would be a pointless final "stop" — so it keeps its `deepens` edges
+    // in the graph but never enters the recorded spine slice.
+    const spineSlugs = writtenSlugs.filter((s) => s !== mocSlug);
+    if (chapterOrdinal > 0 && spineSlugs.length > 0) {
       recordSpineChapter(cfg.vault, entry.book, {
-        chapter: entry.chapter, chapterOrdinal, title: entry.title, pages: writtenSlugs,
+        chapter: entry.chapter, chapterOrdinal, title: entry.title, pages: spineSlugs,
       });
     }
     await updateQueue(cfg.vault, (entries) => {
@@ -865,6 +885,7 @@ export async function compileOne(
       if (live) {
         live.status = status;
         if (error !== undefined) live.error = error;
+        if (partNotes.length) live.phase = partNotes.join('; ');
       }
     });
   }

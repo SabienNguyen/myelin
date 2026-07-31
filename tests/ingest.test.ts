@@ -351,6 +351,20 @@ describe('compileNext', () => {
     expect(page).toContain('Verbatim Floor Book'); // citation still mechanical
   }, 30_000);
 
+  it('a floored part\'s diagnosed reason lands in the queue entry\'s phase, not just the page banner', async () => {
+    await ingestBook(cfg, '/uploads/Phase Ledger Book.pdf', {
+      converter: async () => ({ markdown: '# Phase Chapter\nThis part always fails distillation.' }),
+    });
+    const { model } = textModel('No JSON from me, just narration.');
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    const entry = readQueue(vault).find((e) => e.book === 'Phase Ledger Book');
+    expect(entry?.status).toBe('done');
+    // The page banner names the class too, but that's a separate write — this asserts the ledger
+    // itself carries it, which is what the queue UI and any future automation actually reads.
+    expect(entry?.phase).toMatch(/^part 1: verbatim \(weak-output: .+\)$/);
+  }, 30_000);
+
   it('a verbatim part names its diagnosed class in the page banner', async () => {
     await ingestBook(cfg, '/uploads/Verbatim Diagnostic Book.pdf', {
       converter: async () => ({ markdown: '# Distill Failure\nThis part always fails distillation.' }),
@@ -887,9 +901,9 @@ describe('the source spine — compile records the book\'s own order', async () 
         chapter: 'raw/uploads/spine-book/ch-01-photosynthesis-basics.md',
         chapterOrdinal: 1,
         title: 'Photosynthesis Basics',
-        // Two pages -> a MOC hub, itself written through the same wrapper, so it lands in this
-        // chapter's own page list too — it's the last page the chapter produced.
-        pages: ['light-reactions', 'calvin-cycle', 'spine-book-ch-1-moc'],
+        // Two pages -> a MOC hub too, but the hub is excluded from the recorded spine: it's a link
+        // list, not a lesson stop, and spinePages() walks this list as the learner's path.
+        pages: ['light-reactions', 'calvin-cycle'],
       },
       {
         chapter: 'raw/uploads/spine-book/ch-02-cellular-respiration.md',
@@ -934,9 +948,10 @@ describe('the source spine — compile records the book\'s own order', async () 
 
     const spine = sourceFor(vault, 'Recompiled Book')?.spine;
     expect(spine).toHaveLength(1); // chapter 2 was never compiled; chapter 1 has ONE slice
-    // The second pass wrote two pages, so it also got its own MOC — the slice is replaced whole,
-    // MOC included, not appended alongside the first pass's single page.
-    expect(spine?.[0].pages).toEqual(['second-pass-page', 'and-another', 'recompiled-book-ch-1-moc']);
+    // The second pass wrote two pages, so it also got its own MOC — but the MOC is excluded from
+    // the recorded slice, which is replaced whole with just the pages, not appended alongside the
+    // first pass's single page.
+    expect(spine?.[0].pages).toEqual(['second-pass-page', 'and-another']);
   });
 
   it('a paper records no spine — one unit of work has no order to preserve', async () => {

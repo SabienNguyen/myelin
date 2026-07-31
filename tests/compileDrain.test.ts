@@ -272,10 +272,11 @@ describe('ensureCompileDrain — the drain hands the book\'s order to a path', (
       doc = await lw.call('read_path', { slug: 'source-artifact-order-book' }).catch(() => null);
       if (!doc) await new Promise((r) => { setTimeout(r, 50); });
     }
-    // Chapter one wrote two pages, so it also got a MOC hub — itself written through the same
-    // wrapper, landing in the chapter's own page order right after the pages it maps.
+    // Chapter one wrote two pages, so it also got a MOC hub, but the hub is excluded from the
+    // recorded spine (it's a link list, not a lesson stop) — the path's page order is just the
+    // lesson pages themselves.
     expect(doc.pages).toEqual([
-      'spine-drain-alpha', 'spine-drain-beta', 'artifact-order-book-ch-1-moc', 'spine-drain-gamma',
+      'spine-drain-alpha', 'spine-drain-beta', 'spine-drain-gamma',
     ]);
     expect(doc.title).toBe('Artifact Order Book');
     expect(doc.body).toContain('order the source itself presents');
