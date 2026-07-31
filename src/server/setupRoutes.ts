@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Hono } from 'hono';
@@ -5,6 +6,7 @@ import { configSource, removedRouteMessage, type HarnessConfig, type ModelRole }
 import {
   applyCredentials, credentialsPath, looksLikeAnthropicKey, readCredentials, writeCredentials,
 } from './credentials.js';
+import { classifyConnectionError, detectOllama, type OllamaState } from './ollamaState.js';
 import {
   applyEnvValues, envShadow, PROVIDER_ENV_KEYS, readSettings, settingsPath, writeSettings,
   type ProviderEnvKey,
@@ -21,6 +23,30 @@ export function displayPath(path: string, home = homedir()): string {
   // rendered as if it were inside the user's own. Caught by the test, not by looking at it.
   const sep = path[home.length];
   return path.startsWith(home) && (sep === '/' || sep === '\\') ? `~${path.slice(home.length)}` : path;
+}
+
+/** What to say for each way a pull can fail to connect. Split out from the route so the wording is
+ *  testable and so it stays obvious that the three cases really do say different things. */
+export function pullFailureMessage(
+  reason: 'not-installed' | 'not-running' | 'unreachable', model: string, root: string,
+): string {
+  if (reason === 'not-installed') {
+    return `Ollama isn't installed yet — it's the local model runner that "${model}" downloads into. `
+      + `Install it, and this download will start on its own.`;
+  }
+  if (reason === 'not-running') {
+    return `Ollama is installed but isn't running, so "${model}" has nowhere to download to. `
+      + `Start it and this will pick up where it left off.`;
+  }
+  return `Couldn't reach Ollama at ${root} to pull "${model}", though something is listening there. `
+    + `A firewall or proxy between us is the usual cause.`;
+}
+
+/** Launch a detached `ollama serve` that outlives this request and survives the app quitting, with
+ *  its pipes released — an inherited stdio pipe nobody drains is a hang waiting to happen. */
+function spawnOllamaServe(binary: string): void {
+  const child = spawn(binary, ['serve'], { detached: true, stdio: 'ignore' });
+  child.unref();
 }
 
 /** Model ids that need an Anthropic API key: only a plain id routes through the Anthropic API.
@@ -48,7 +74,7 @@ export function buildSetupRoutes(
   cfg: HarnessConfig,
   // Injectable seam for tests: the real probes hit api.anthropic.com and the provider endpoints,
   // none of which belongs in a unit test of ROUTE behavior.
-  deps: { probeFetch?: typeof fetch } = {},
+  deps: { probeFetch?: typeof fetch; detect?: typeof detectOllama; startOllama?: (binary: string) => void } = {},
 ) {
   const app = new Hono();
 
@@ -191,13 +217,46 @@ export function buildSetupRoutes(
 
   app.get('/api/setup/models', async (c) => c.json({ ...modelsState(), available: await discoverModels() }));
 
+  const detect = (): Promise<OllamaState> =>
+    (deps.detect ?? detectOllama)(ollamaRoot(), { fetchImpl: deps.probeFetch });
+
+  /** Which of the three Ollama situations the learner is in. The first-run card fetches this before
+   *  offering a model so it can show an install path instead of a dead "Get" button, and polls it
+   *  after sending someone to ollama.com so the pull resumes on its own the moment the daemon
+   *  appears. Never fails: "we could not tell" is still an answer the UI can render. */
+  app.get('/api/setup/ollama', async (c) => c.json(await detect()));
+
+  /** Start a daemon that is installed but down, so "not running" costs a click instead of a trip to
+   *  a terminal. Only ever spawns a binary WE located on disk — never a name off the request. */
+  app.post('/api/setup/ollama/start', async (c) => {
+    const found = await detect();
+    if (found.state === 'running') return c.json(found);
+    if (found.state === 'absent') return c.json({ error: 'ollama is not installed', ...found }, 409);
+    try {
+      (deps.startOllama ?? spawnOllamaServe)(found.binary);
+    } catch (e) {
+      return c.json({ error: `couldn't start ollama: ${(e as Error).message}`, ...found }, 502);
+    }
+    // The daemon takes a moment to bind. Poll rather than making the client guess a sleep.
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise((r) => setTimeout(r, 250));
+      const now = await detect();
+      if (now.state === 'running') return c.json(now);
+    }
+    return c.json({ error: 'started ollama but it did not come up in 5s', ...found }, 504);
+  });
+
   /** Pull an Ollama model on the learner's behalf: the "choose a model, we install it" path. Proxies
    *  Ollama's streaming POST /api/pull and relays its newline-delimited JSON progress straight
    *  through — the client renders a progress bar from each line's {status,total,completed} and
    *  configures the roles once the stream ends clean. No timeout here (a model is gigabytes and the
    *  download runs for minutes); the request's own signal aborts the upstream pull if the learner
-   *  navigates away. Ollama unreachable is the ONE thing we can't do for them — surfaced as a 502
-   *  naming ollama.com, since a pull needs Ollama installed and running locally. */
+   *  navigates away.
+   *
+   *  A failed connection carries a `reason` tag, because the three ways this fails need three
+   *  different things from the learner and one sentence cannot serve all of them: install Ollama,
+   *  start Ollama, or look at their network. Telling someone who has it installed to go install it
+   *  is how this flow earned "doesn't work". */
   app.post('/api/setup/models/pull', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const model = String((body as { model?: unknown })?.model ?? '').trim();
@@ -212,11 +271,10 @@ export function buildSetupRoutes(
         body: JSON.stringify({ name: model, stream: true }),
         signal: c.req.raw.signal,
       });
-    } catch {
-      return c.json({
-        error: `couldn't reach Ollama at ${root} to pull "${model}" — install it from ollama.com `
-          + `and make sure it's running, then try again`,
-      }, 502);
+    } catch (err) {
+      const found = await detect();
+      const reason = classifyConnectionError(err, found);
+      return c.json({ error: pullFailureMessage(reason, model, root), reason, ollama: found }, 502);
     }
     if (!upstream.ok || !upstream.body) {
       return c.json({ error: `Ollama refused the pull of "${model}" (HTTP ${upstream.status})` }, 502);

@@ -312,18 +312,90 @@ describe('POST /api/setup/models/pull — choose a model, we install it', () => 
     expect(text.trim().split('\n')).toHaveLength(3); // passed through line-for-line
   });
 
-  it('a missing model name is a 400, and Ollama unreachable is a 502 that names ollama.com', async () => {
+  it('a missing model name is a 400', async () => {
     const app400 = buildSetupRoutes(cfgWith(plainModels()));
     expect((await app400.request('/api/setup/models/pull', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
     })).status).toBe(400);
+  });
 
-    const probeFetch = vi.fn(async () => { throw new Error('connect ECONNREFUSED'); });
-    const app502 = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
-    const res = await app502.request('/api/setup/models/pull', {
+  // This replaced a test asserting that ANY unreachable Ollama returns "install it from
+  // ollama.com". That was the bug, pinned: it sent someone whose daemon was merely stopped off to
+  // download software they already had. The 502 now carries which of the three it was, and the
+  // client renders a different next step for each.
+  const pullWith = async (detect: any, code = 'ECONNREFUSED') => {
+    const app = buildSetupRoutes(cfgWith(plainModels()), {
+      probeFetch: (async () => { throw Object.assign(new Error('fetch failed'), { cause: { code } }); }) as unknown as typeof fetch,
+      detect,
+    });
+    const res = await app.request('/api/setup/models/pull', {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: 'qwen3:8b' }),
     });
-    expect(res.status).toBe(502);
-    expect((await res.json()).error).toMatch(/ollama\.com/);
+    return { status: res.status, body: await res.json() as { error: string; reason: string; ollama: { state: string } } };
+  };
+
+  it('reports a missing Ollama as not-installed, with the install hint attached', async () => {
+    const { status, body } = await pullWith(async () => ({
+      state: 'absent', root: 'http://localhost:11434',
+      install: { platform: 'linux', url: 'https://ollama.com/download/linux', command: 'curl -fsSL https://ollama.com/install.sh | sh' },
+    }));
+    expect(status).toBe(502);
+    expect(body.reason).toBe('not-installed');
+    // The client needs the hint to render a link; the prose alone can't be clicked.
+    expect(body.ollama).toMatchObject({ state: 'absent', install: { platform: 'linux' } });
+  });
+
+  it('reports an installed-but-stopped Ollama as not-running, and does not say to install it', async () => {
+    const { status, body } = await pullWith(async () => ({
+      state: 'stopped', root: 'http://localhost:11434', binary: '/usr/local/bin/ollama',
+    }));
+    expect(status).toBe(502);
+    expect(body.reason).toBe('not-running');
+    expect(body.error).not.toMatch(/ollama\.com|install it/i);
+  });
+
+  it('blames the network, not the install, when a live daemon times out', async () => {
+    const running = async () => ({ state: 'running', root: 'http://localhost:11434' });
+    // A timeout against a daemon that just answered /api/tags is a firewall or proxy story.
+    expect((await pullWith(running, 'ETIMEDOUT')).body.reason).toBe('unreachable');
+    // A refusal from that same daemon means it died between the probe and the pull — asking the
+    // learner to start it is the useful advice, not "check your network".
+    expect((await pullWith(running, 'ECONNREFUSED')).body.reason).toBe('not-running');
+  });
+
+  it('GET /api/setup/ollama answers with the detected state', async () => {
+    const app = buildSetupRoutes(cfgWith(plainModels()), {
+      detect: (async () => ({ state: 'running', root: 'http://localhost:11434' })) as any,
+    });
+    const res = await app.request('/api/setup/ollama');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'running' });
+  });
+
+  it('refuses to start a daemon that is not installed, instead of spawning nothing', async () => {
+    const startOllama = vi.fn();
+    const app = buildSetupRoutes(cfgWith(plainModels()), {
+      detect: (async () => ({ state: 'absent', root: 'http://localhost:11434', install: { platform: 'linux', url: 'x' } })) as any,
+      startOllama,
+    });
+    const res = await app.request('/api/setup/ollama/start', { method: 'POST' });
+    expect(res.status).toBe(409);
+    expect(startOllama).not.toHaveBeenCalled();
+  });
+
+  it('starts a stopped daemon and reports it running once it binds', async () => {
+    const startOllama = vi.fn();
+    let up = false;
+    const app = buildSetupRoutes(cfgWith(plainModels()), {
+      detect: (async () => (up
+        ? { state: 'running', root: 'http://localhost:11434' }
+        : { state: 'stopped', root: 'http://localhost:11434', binary: '/usr/local/bin/ollama' })) as any,
+      startOllama: (b: string) => { startOllama(b); up = true; },
+    });
+    const res = await app.request('/api/setup/ollama/start', { method: 'POST' });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ state: 'running' });
+    // Only ever the binary we located — never a name off the request body.
+    expect(startOllama).toHaveBeenCalledWith('/usr/local/bin/ollama');
   });
 });
