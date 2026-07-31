@@ -3,7 +3,7 @@ import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blo
 import { UI_TOOLS } from '../shared/uiTools.js';
 import type { UIMessage } from '../shared/uiMessages.js';
 import {
-  createUiStream, runLoop, uiMessagesToChatMessages,
+  createUiStream, generateMessageId, runLoop, uiMessagesToChatMessages,
   type ChatMessage, type ChatModel, type LoopTool,
 } from './llm/index.js';
 import { recentLapses } from './anki/inbound.js';
@@ -565,6 +565,11 @@ export function createTutorSession(
     return `${ctx}\n${slugListLine(slugs, relevant)}`;
   }
 
+  // Block/tool names a protocol-failing model writes as literal `name:` prose lines. Anchored to
+  // a line start (optionally behind markdown heading marks, which the 7B run produced) so a
+  // sentence that merely discusses "a quick_check" never matches.
+  const PSEUDO_BLOCK_RE = /(^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:quick_check|write_page|record_evidence|quiz|code_exercise|structured_check|math_scratchpad|label_diagram)[ \t]*:/;
+
   function turnError(e: unknown): string {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[turn-error]', msg);
@@ -592,6 +597,11 @@ export function createTutorSession(
     if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId, signal);
 
     const pending = pendingBlockOutputs(messages);
+    // A PURE grading turn is the client's auto-resubmit: the history still ENDS on the answered
+    // block, no new words. A stranded block swept from earlier history (its grading continuation
+    // was aborted) arrives ALONGSIDE a fresh user message — the stale grade lands, but the new
+    // words deserve a full turn: block tools available, vaultGap consulted, mode switch honored.
+    const resubmitPending = pending.length > 0 && messages[messages.length - 1]?.role === 'assistant';
     const userTurn = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
 
     // Everything slow (grading, bootstrap, model turns) runs INSIDE the stream's execute so the
@@ -646,7 +656,7 @@ export function createTutorSession(
         // the already-answered message that staged the block — re-running it re-issues the same
         // research directive over the graded card, so the tutor re-researches and re-teaches the
         // whole topic instead of landing the grade.
-        const gap = pending.length ? null : await vaultGap(mode, messages, slugs, {
+        const gap = resubmitPending ? null : await vaultGap(mode, messages, slugs, {
           search: (query) => lw.call('search', { query }) as Promise<any>,
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
@@ -718,7 +728,7 @@ export function createTutorSession(
         // over it anyway; wording was tried twice and did not hold. With the tools absent the
         // offer is the only possible ending, and the student's "yes" is a real user turn where
         // the tools return. open_source stays available: navigation is not staging work.
-        const gradingOnly = pending.length > 0;
+        const gradingOnly = resubmitPending;
         const system = `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
           + (gradingOnly
             ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
@@ -733,7 +743,7 @@ export function createTutorSession(
         // Block submissions are excluded: they arrive under the mode that staged the block, and a
         // grade turn must stay a grade turn.
         const prevMode = lastModeByThread.get(threadId);
-        const modeSwitched = !isFirstTurn && !pending.length && prevMode !== undefined && prevMode !== mode;
+        const modeSwitched = !isFirstTurn && !resubmitPending && prevMode !== undefined && prevMode !== mode;
         lastModeByThread.set(threadId, mode);
         // Context placement is a caching decision as much as a prompting one. The transcript's
         // prefix (system + history) is what the anthropic adapter's cache breakpoints reuse turn
@@ -805,13 +815,25 @@ export function createTutorSession(
         // merged client-side via onData/setMessages — but it raced the continuation's own
         // replace-in-place write and got clobbered; this doesn't have that problem because it's
         // processed as part of the SAME stream/write sequence.)
+        // Only for parts of the message this stream CONTINUES (the resubmit case): the assembler
+        // holds no parts from older messages, and writing a swept stranded block's toolCallId
+        // throws ("no tool part for toolCallId") and kills the turn. A swept block's grade still
+        // lands everywhere durable — the model prompt, record_evidence, and the saved thread (the
+        // graded output mutation rides originalMessages into onEnd's save); the card shows it
+        // graded on the next thread load.
+        const lastMsg = messages[messages.length - 1];
+        const continuable = new Set(lastMsg?.role === 'assistant'
+          ? (lastMsg.parts as any[]).map((part) => part.toolCallId).filter(Boolean) : []);
         for (const p of pending) {
+          if (!continuable.has(p.toolCallId)) continue;
           writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
         }
         // Returns the record_evidence tool inputs the model actually emitted this run — the count
         // gates the guardrail below, and the (slug, kind) inside each drives the recording-integrity
         // check after (appliedGradeBypass). Prompt caching is live here: the anthropic adapter
         // places the breakpoints (system tail + last message); scripted/compat models ignore it.
+        let loopToolCalls = 0;
+        let loopText = '';
         const run = async (msgs: ChatMessage[]) => {
           const result = await runLoop({
             model, system, messages: msgs, tools, serverTools: webTools.serverTools,
@@ -823,6 +845,8 @@ export function createTutorSession(
           recordUsage(cfg.vault, {
             role: 'tutor', model: cfg.models?.tutor?.model ?? 'unknown', usage: result.usage,
           });
+          loopToolCalls += result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
+          loopText += result.steps.map((s) => s.text).join('\n');
           return result.steps.flatMap((s) => s.toolCalls)
             .filter((tc) => tc.toolName === 'record_evidence')
             .map((tc) => (tc.input ?? {}) as any);
@@ -855,6 +879,28 @@ export function createTutorSession(
             logGuardrail(cfg.vault, `record_evidence claimed applied-correctly past the machine grade for: ${laundered.join(', ')}`);
           }
         } catch { /* detection is telemetry; it must never affect the turn */ }
+
+        // A tutor that cannot hold the tool protocol "stages" its work as prose — literal
+        // `quick_check:` / `write_page:` lines with ZERO tool calls, observed live from both a 7B
+        // and a 14.8B ollama tutor on the same freeform turn a hosted tutor tools through. The
+        // learner reads promises of interactive work that never arrives, so say what happened IN
+        // the transcript (the data-guardrail channel is telemetry the client never renders). Any
+        // real tool call this turn clears the check: a model that tools can also mention a block
+        // name in prose legitimately.
+        if (loopToolCalls === 0 && PSEUDO_BLOCK_RE.test(loopText)) {
+          logGuardrail(cfg.vault, 'tutor emitted block syntax as prose with zero tool calls');
+          const noteId = generateMessageId();
+          writer.write({ type: 'text-start', id: noteId });
+          writer.write({
+            type: 'text-delta', id: noteId,
+            delta: `\n\n— Myelin: ${cfg.models?.tutor?.model ?? 'this model'} wrote its checks as `
+              + 'plain text — no interactive blocks were staged, so nothing in this turn can be '
+              + 'answered or graded. Small local models often cannot drive freeform teaching: '
+              + 'drills in learn, review, and quiz still work, or point the tutor role at a '
+              + 'stronger model (the model badge in the top bar).',
+          });
+          writer.write({ type: 'text-end', id: noteId });
+        }
       },
     });
   }

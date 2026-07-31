@@ -3,8 +3,14 @@
 // reference, the model authors ONLY the suite, and the standard gates verify that suite against
 // the real implementation before anything reaches the review queue.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+
+// ingestRepo's external-vs-builtin decision probes THE_GAP_ROOT once, at module load. Without
+// this pin the fallback test below is environment-dependent: green on CI (no checkout) but red
+// on any machine with a real ~/Dev/personal/the-gap, where the probe routes to the external
+// miner and the injected builtinMiner never runs. vi.hoisted executes before the import above.
+vi.hoisted(() => { process.env.THE_GAP_REPO = '/nonexistent-the-gap'; });
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import {

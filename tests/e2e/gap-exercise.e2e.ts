@@ -22,7 +22,7 @@ function completeReferenceFile(): string {
 
 // This file's dedicated backend+frontend pair (playwright.config.ts) serves on :4174/:4821 —
 // see that config's comment for why gap-exercise.e2e.ts doesn't share tutor-loop.e2e.ts's
-// :4173/:4820 pair.
+// :4183/:4830 pair.
 test.use({ baseURL: 'http://localhost:4174' });
 
 test('code_exercise: the built-in sandbox renders the full_body editor, the reference answer '

@@ -144,7 +144,8 @@ in-app, except that a provider variable set in the real environment always beats
 
 Installed models appear in the dialog automatically: opening it probes Ollama's tag list and the
 OpenAI-compatible endpoint's `/models`, so every model you've pulled is a pick, not an id typed
-from memory. A one-row local preset points the teaching roles (tutor, grader, quiz_gen, card_gen)
+from memory. Downloads run server-side: closing the dialog mid-pull costs nothing — keep using
+the app, and reopening the dialog picks the running progress bar back up. A one-row local preset points the teaching roles (tutor, grader, quiz_gen, card_gen)
 at an installed model and turns rails on in one click — compile stays where it is, because compile
 writes the vault and belongs on the strongest model you have. Structured generations are
 schema-constrained at the decoder on providers that support `response_format` (Ollama, LiteLLM,

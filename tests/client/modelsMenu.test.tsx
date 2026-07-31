@@ -109,19 +109,21 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
     expect(input.value).toBe('');
   });
 
-  it('shows a dense usage line per role with spend today, cache share included', async () => {
+  it('shows a dense usage line per role with spend today, cache reads and writes included', async () => {
     const totals = (t: object) => ({ cacheRead: 0, cacheWrite: 0, calls: 1, ...t });
     stubFetch(modelsState(), modelsState(), {
       today: {
-        tutor: totals({ in: 11_000, out: 2_130, cacheRead: 33_000 }), // 33k of 44k input cached
+        tutor: totals({ in: 11_000, out: 2_130, cacheRead: 33_000, cacheWrite: 4_200 }),
         help: totals({ in: 950, out: 80 }),
       },
       week: {}, cacheHitShare: 0.75,
     });
     await openPopover();
     await screen.findByText('usage today');
-    screen.getByText('tutor 11k in / 2.1k out · 75% cached');
-    screen.getByText('help 950 in / 80 out'); // no cache reads → no cached suffix
+    // The raw figures, not just a derived share: cache reads and writes are the numbers a bill
+    // (or a local cache's effectiveness) is actually made of.
+    screen.getByText('tutor 11k in / 2.1k out · cache 33k read / 4.2k write');
+    screen.getByText('help 950 in / 80 out'); // no cache traffic → no cache suffix
   });
 
   it('an empty ledger renders no usage section at all', async () => {
@@ -236,19 +238,18 @@ describe('ModelsMenu — live discovery', () => {
   // (takeState) reset the roles straight back to the saved claude defaults — the preset silently
   // vanished. The refresh must run BEFORE the preset is applied.
   it('the local getter pulls a model, then repoints the teaching roles at it with rails on', async () => {
-    // Discovery flips from "nothing installed" to "qwen3:8b installed" once the pull streams done.
+    // Discovery flips from "nothing installed" to "qwen3:8b installed" once the job lands. The
+    // pull is a server-side background job now: POST accepts, GET /pulls reports it done.
     let pulled = false;
-    const pullStream = () => new ReadableStream<Uint8Array>({
-      start(c) {
-        const e = new TextEncoder();
-        c.enqueue(e.encode('{"status":"downloading","total":10,"completed":10}\n'));
-        c.enqueue(e.encode('{"status":"success"}\n'));
-        c.close();
-      },
-    });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.endsWith('/api/setup/models/pull')) { pulled = true; return { ok: true, status: 200, body: pullStream() }; }
+      if (u.endsWith('/api/setup/models/pulls')) {
+        return {
+          ok: true,
+          json: async () => (pulled ? { 'qwen3:8b': { status: 'success', percent: null, error: null, done: true } } : {}),
+        };
+      }
+      if (u.endsWith('/api/setup/models/pull')) { pulled = true; return { ok: true, status: 202, json: async () => ({ started: true }) }; }
       if (u.endsWith('/api/status')) return { ok: true, json: async () => ({ student: 'e2e', tutor: 'claude-sonnet-5' }) };
       if (u.endsWith('/api/setup/models')) {
         return { ok: true, json: async () => modelsState({}, {}, pulled ? { ollama: ['qwen3:8b'] } : {}) };

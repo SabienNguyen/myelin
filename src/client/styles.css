@@ -2616,6 +2616,10 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   display: flex; flex-direction: column; gap: 0.25rem; min-width: 16rem;
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); padding: 0.5rem;
+  /* One row per student: the list grows without bound, and past the viewport the tail (the
+     new-student input included) was unreachable — same trap .models-panel had. Cap and scroll. */
+  max-height: calc(100vh - 5rem);
+  overflow-y: auto;
 }
 .student-menu button { text-align: left; }
 .student-menu button.on { color: var(--text-muted); cursor: default; }
@@ -2631,6 +2635,13 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   display: flex; flex-direction: column; gap: 0.4rem; width: 24rem;
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); padding: 0.6rem;
+  /* The panel outgrew short windows once the getter, preset, and endpoint groups stacked up —
+     with no cap the tail (save included) rendered below the viewport, and the app's fixed
+     layout gives the page itself nothing to scroll. Half the viewport, per request: tall
+     enough for the role rows, short enough that the conversation stays readable behind it;
+     the panel scrolls to the rest. */
+  max-height: 50vh;
+  overflow-y: auto;
 }
 .models-row { display: grid; grid-template-columns: 8rem 1fr; gap: 0 0.4rem; align-items: center; }
 .models-row label { font-size: 0.78rem; color: var(--text-muted); }

@@ -223,13 +223,15 @@ export function fmtTokens(n: number): string {
   return String(n);
 }
 
-/** One dialog line per role with any spend today. Cache share is per role — cacheRead over all
- * input (fresh + cached), the same split /api/usage reports overall. */
+/** One dialog line per role with any spend today. Cache traffic rides as the raw read/write
+ * figures (the numbers a bill is made of) rather than the derived share it once showed — the
+ * share is computable from these, not the other way round. Suffix only when there IS cache
+ * traffic: a local model with none keeps its short line. */
 export function usageLine(role: string, t: UsageTotals): string {
-  const cached = t.cacheRead > 0
-    ? ` · ${Math.round((t.cacheRead / (t.in + t.cacheRead)) * 100)}% cached`
+  const cache = t.cacheRead > 0 || t.cacheWrite > 0
+    ? ` · cache ${fmtTokens(t.cacheRead)} read / ${fmtTokens(t.cacheWrite)} write`
     : '';
-  return `${role} ${fmtTokens(t.in)} in / ${fmtTokens(t.out)} out${cached}`;
+  return `${role} ${fmtTokens(t.in)} in / ${fmtTokens(t.out)} out${cache}`;
 }
 
 /**

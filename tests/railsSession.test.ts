@@ -117,6 +117,33 @@ describe('rails turn (harness-driven)', () => {
     expect(all.filter((c) => c.type === 'tool-input-available')).toHaveLength(0);
   }, 30_000);
 
+  it('a stranded answered block — a new user message follows an aborted grade — is still graded and recorded', async () => {
+    // The strand: the grading continuation was cancelled mid-stream, so the answered block sits
+    // one message back and a fresh user message ends the history. pendingBlockOutputs sweeps it;
+    // the grading round-trip chunk must NOT be written for it (the stream continues no assistant
+    // message here, and the assembler would throw on the unknown toolCallId) — but the evidence
+    // must land all the same.
+    const { model } = railsModel('stop-offer');
+    const session = createTutorSession(lw, railsCfg(), { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'drill me' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [{
+          type: 'tool-quick_check', toolCallId: 'rails-9', state: 'output-available',
+          input: { question: 'Solve x+1=3', mode: 'choice', choices: ['1', '2', '3'], expected: '2', pageSlug: 'algebra' },
+          output: { answer: '2' },
+        }],
+      },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'keep going' }] },
+    ] as any[];
+    const body = await (await session.respond(history, 'review', 'rails-strand')).text();
+    const all = chunks(body);
+    expect(all.find((c) => c.type === 'error')).toBeUndefined();
+    const student = JSON.parse(readFileSync(join(vault, 'students', 'kid.json'), 'utf8'));
+    expect(student.algebra.evidence).toHaveLength(1);
+    expect(student.algebra.evidence[0]).toMatchObject({ kind: 'applied-correctly' });
+  }, 30_000);
+
   it("on 'continue' the next item is staged in the same stream, skipping the answered page", async () => {
     const { model } = railsModel('continue');
     const session = createTutorSession(lw, railsCfg(), { model });

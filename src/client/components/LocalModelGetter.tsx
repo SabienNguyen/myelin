@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { RECOMMENDED_LOCAL_MODELS } from '../../shared/localModels.js';
 import {
-  PullConnectionError, pullOllamaModel, type OllamaInstallHint, type PullFailureReason,
-  type PullProgress,
+  activePulls, PullConnectionError, pullOllamaModel, watchPull, type OllamaInstallHint,
+  type PullFailureReason, type PullProgress,
 } from '../lib/pullModel.js';
 
 /** The pull couldn't connect, and we're now waiting on the learner to fix the one thing we can't:
@@ -26,8 +26,10 @@ const OLLAMA_POLL_MS = 2000;
  * (first run: every role + lift the gate; dialog: the teaching-role preset).
  *
  * onConfigured fires for BOTH paths — a fresh pull and an already-installed "use it" — so the
- * caller has one place to point the roles at the chosen model. The pull is abortable: closing the
- * surface unmounts this and the in-flight fetch is cancelled by the AbortController.
+ * caller has one place to point the roles at the chosen model. The download itself is a server-
+ * side background job: closing the surface only stops WATCHING it (the AbortController cancels
+ * the poll), the gigabytes keep coming, and the mount-time re-attach below picks the job back up
+ * when the surface returns.
  */
 export function LocalModelGetter({
   installed, onConfigured, busy,
@@ -70,6 +72,32 @@ export function LocalModelGetter({
       abortRef.current = null;
     }
   };
+
+  // Re-attach on mount: a download started from an earlier surface (or this dialog before it was
+  // closed) is still running server-side. Pick it up so the bar reappears and completion still
+  // configures — without this, leaving the dialog mid-download looked like a failed pull.
+  useEffect(() => {
+    const ctrl = new AbortController();
+    void (async () => {
+      const jobs = await activePulls();
+      const id = RECOMMENDED_LOCAL_MODELS.map((m) => m.id)
+        .find((m) => jobs[m] && !jobs[m].done && !jobs[m].error);
+      if (!id || ctrl.signal.aborted) return;
+      setPulling(id);
+      setProgress({ status: jobs[id].status ?? '', percent: jobs[id].percent ?? null });
+      try {
+        await watchPull(id, setProgress, { signal: ctrl.signal });
+        if (!ctrl.signal.aborted) await onConfigured(id);
+      } catch (e: any) {
+        if (!ctrl.signal.aborted) setError(e?.message ?? String(e));
+      } finally {
+        if (!ctrl.signal.aborted) setPulling(null);
+      }
+    })();
+    return () => ctrl.abort();
+    // Mount-only on purpose: this recovers state, it does not track props.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // While blocked on a missing Ollama, watch for it to appear and resume the download unprompted.
   // Someone who just finished an installer should not have to find their way back to this card and

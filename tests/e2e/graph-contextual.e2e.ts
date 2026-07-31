@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 // This file's dedicated backend+frontend pair (playwright.config.ts) serves on :4174/:4821 — same
-// pair gap-exercise.e2e.ts uses, and for the same reason: it's the pair safe to point arbitrary
-// navigation at without disturbing whatever's actually live on :4173 (see playwright.config.ts's
-// own comment on the two webServer pairs).
+// pair gap-exercise.e2e.ts uses, and for the same reason: arbitrary navigation here never lands
+// on tutor-loop.e2e.ts's :4830/:4183 pair, whose scripted model counts turns for the life of its
+// process (see playwright.config.ts's own comment on the webServer pairs).
 test.use({ baseURL: 'http://localhost:4174' });
 
 // The 1-hop/2-hop fixture pages this file asserts against are written by global-setup.ts (see

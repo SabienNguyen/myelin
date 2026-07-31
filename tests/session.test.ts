@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { ChatRequest } from '../src/server/llm/index.js';
 import { Engram } from '../src/server/mcp.js';
 import { createTutorSession } from '../src/server/session.js';
-import { streamModel } from './mockModel.js';
+import { streamModel, turnsModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
 
 let lw: Engram; let vault: string;
@@ -386,5 +386,82 @@ describe('grading round-trip (Bug 2)', () => {
     const chunk = JSON.parse(line!.slice('data: '.length));
     expect(chunk.messageId).toBeTruthy();
     expect(chunk.messageId).not.toBe('u1');
+  }, 30_000);
+});
+
+// The strand: a learner answers a block, and the grading continuation is aborted before it lands
+// (observed live — sending a new message mid-grade cancels the in-flight run). The answered block
+// then sits EARLIER in the history with no grading, and a last-message-only pending scan never
+// sees it again: no grade, no evidence, ever. The sweep must catch it on the next turn — while
+// the new user words still get a full turn, not a tools-withheld grading turn.
+describe('stranded block recovery', () => {
+  it('an answered-ungraded block earlier in history is graded on the next turn, without turning it into a grading turn', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
+      { model, now: () => new Date('2026-07-12') });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      { id: 'a1', role: 'assistant', parts: [{
+        type: 'tool-quick_check', toolCallId: 'tcs1', state: 'output-available',
+        input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+        output: { answer: '4' },
+      }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'now tell me about subtraction' }] },
+    ] as any[];
+    await (await session.respond(history, 'learn')).text();
+    const userPrompt = JSON.stringify((calls[0].messages ?? []).filter((m: any) => m.role === 'user'));
+    expect(userPrompt).toMatch(/record_evidence/); // the stale answer got its machine grade
+    const tools = (calls[0].tools ?? []).map((t: any) => t.name);
+    expect(tools).toContain('quick_check'); // new words present — block tools stay available
+    // The durable half: the graded output rides originalMessages into the server-side thread
+    // save, so the next thread load shows the card graded. (The live stream cannot patch a part
+    // of an older message — the assembler only holds the continued message's parts.)
+    const saved = JSON.parse(readFileSync(join(vault, '.harness', 'sessions', 'default.json'), 'utf8'));
+    const savedBlock = saved.find((m: any) => m.id === 'a1')?.parts?.[0];
+    expect(savedBlock?.output?.grading).toBeTruthy();
+  }, 30_000);
+});
+
+// A tutor that cannot hold the tool protocol "stages" its work as prose — literal
+// `quick_check:` / `write_page:` lines with zero tool calls, observed live from BOTH a 7B and a
+// 14.8B ollama tutor on the same freeform turn a hosted tutor tools through. The learner reads
+// promises of interactive work that never arrives, and before this note nothing said so.
+describe('pseudo-block prose detection', () => {
+  it('a toolless turn that writes block syntax as prose earns the honest note', async () => {
+    const model = streamModel(() => ({
+      text: 'Machine learning is a way to learn from data!\n\n'
+        + 'quick_check: What distinguishes machine learning from other software?\n\n'
+        + 'write_page: Introduction to Machine Learning',
+    }));
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me machine learning' }] }] as any,
+      'freeform',
+    )).text();
+    expect(body).toMatch(/wrote its checks as plain text/);
+    expect(readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8'))
+      .toMatch(/block syntax as prose/);
+  }, 30_000);
+
+  it('a turn that stages real tool work gets no note even if prose mentions a block name', async () => {
+    const model = turnsModel([
+      { toolCalls: [{ toolName: 'search', input: { query: 'arithmetic' } }] },
+      { text: 'Found it. In a later turn I could use quick_check: style drills on this.' },
+    ]);
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'look up arithmetic' }] }] as any,
+      'freeform',
+    )).text();
+    expect(body).not.toMatch(/wrote its checks as plain text/);
+  }, 30_000);
+
+  it('plain prose without block syntax gets no note', async () => {
+    const { model } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any, 'freeform',
+    )).text();
+    expect(body).not.toMatch(/wrote its checks as plain text/);
   }, 30_000);
 });

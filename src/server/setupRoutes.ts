@@ -49,6 +49,47 @@ function spawnOllamaServe(binary: string): void {
   child.unref();
 }
 
+/** One background model download. Kept — final state included — for the life of the process, so a
+ *  poller that misses the last tick still reads `done`, and a reopened surface finds the download
+ *  it started. */
+export interface PullJob {
+  status: string;
+  percent: number | null;
+  error: string | null;
+  done: boolean;
+}
+
+/** Drain Ollama's NDJSON pull stream into the job — detached from any request, because the
+ *  download this tracks is measured in gigabytes and the surfaces that watch it come and go. */
+async function consumePull(model: string, job: PullJob, stream: AsyncIterable<Uint8Array>): Promise<void> {
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    for await (const chunk of stream) {
+      buf += decoder.decode(chunk, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let msg: { status?: string; error?: string; total?: number; completed?: number };
+        try { msg = JSON.parse(line); } catch { continue; } // a malformed fragment resyncs next line
+        // Ollama reports a failed pull as a mid-stream {error} line (bad model name, disk full).
+        if (msg.error) { job.error = msg.error; job.done = true; return; }
+        job.status = msg.status ?? job.status;
+        job.percent = typeof msg.total === 'number' && msg.total > 0
+          ? Math.min(100, Math.round(((msg.completed ?? 0) / msg.total) * 100))
+          : null;
+      }
+    }
+    job.done = true;
+  } catch (e) {
+    job.error = e instanceof Error ? e.message : String(e);
+    job.done = true;
+    console.error(`[model pull ${model}]`, job.error);
+  }
+}
+
 /** Model ids that need an Anthropic API key: only a plain id routes through the Anthropic API.
  *  `ollama:` is local and `openai:` rides OPENAI_COMPAT_BASE_URL with its own (optional) key —
  *  a setup running every role on a compat endpoint must not be walled at first run demanding an
@@ -77,6 +118,7 @@ export function buildSetupRoutes(
   deps: { probeFetch?: typeof fetch; detect?: typeof detectOllama; startOllama?: (binary: string) => void } = {},
 ) {
   const app = new Hono();
+  const pulls = new Map<string, PullJob>();
 
   const state = () => {
     const roles = needsApiKey(cfg);
@@ -261,15 +303,21 @@ export function buildSetupRoutes(
     const body = await c.req.json().catch(() => ({}));
     const model = String((body as { model?: unknown })?.model ?? '').trim();
     if (!model) return c.json({ error: 'pull requires a "model" name, e.g. "qwen3:8b"' }, 400);
+    // One download per model, however many watchers: a reopened dialog POSTs again and must find
+    // the running job, not start a second multi-gigabyte pull. A finished job (done or failed)
+    // does not block a retry — it is replaced below.
+    const existing = pulls.get(model);
+    if (existing && !existing.done) return c.json({ started: false, job: existing }, 200);
     const f = deps.probeFetch ?? fetch;
     const root = ollamaRoot();
     let upstream: Response;
     try {
+      // Deliberately NOT tied to this request's signal: the job must outlive the surface that
+      // started it — a learner who closes the dialog mid-download keeps their gigabytes.
       upstream = await f(`${root}/api/pull`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: model, stream: true }),
-        signal: c.req.raw.signal,
       });
     } catch (err) {
       const found = await detect();
@@ -279,12 +327,15 @@ export function buildSetupRoutes(
     if (!upstream.ok || !upstream.body) {
       return c.json({ error: `Ollama refused the pull of "${model}" (HTTP ${upstream.status})` }, 502);
     }
-    // Same NDJSON Ollama emits, passed through verbatim — the client parses {status,total,completed}
-    // and a terminal {error} line the same way it would talking to Ollama directly.
-    return new Response(upstream.body, {
-      headers: { 'content-type': 'application/x-ndjson', 'cache-control': 'no-cache', 'x-accel-buffering': 'no' },
-    });
+    const job: PullJob = { status: 'starting', percent: null, error: null, done: false };
+    pulls.set(model, job);
+    void consumePull(model, job, upstream.body);
+    return c.json({ started: true, job }, 202);
   });
+
+  /** Progress snapshots for every pull this process has run — the poll target for progress bars,
+   *  and how a reopened surface finds a download it started earlier. */
+  app.get('/api/setup/models/pulls', (c) => c.json(Object.fromEntries(pulls)));
 
   app.put('/api/setup/models', async (c) => {
     const body = await c.req.json().catch(() => ({}));

@@ -1,67 +1,64 @@
-// The pull-progress reader: turns Ollama's NDJSON stream into onProgress calls, resolves on a
-// clean end, and rejects on a terminal {error} line or a non-stream error response.
+// The pull watcher: POST starts the server-side background job, then GET /pulls polls the job —
+// onProgress per poll, resolve on done, reject on the job's error or the POST's refusal. The
+// NDJSON parsing these tests once covered client-side moved into the server's consumePull
+// (setupRoutesHttp.test.ts pins it there, split chunks included).
 import { describe, it, expect, vi } from 'vitest';
-import { pullOllamaModel, type PullProgress } from '../../src/client/lib/pullModel.js';
+import { pullOllamaModel, watchPull, type PullProgress } from '../../src/client/lib/pullModel.js';
 
-function streamResponse(chunks: string[]): Response {
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const enc = new TextEncoder();
-      for (const c of chunks) controller.enqueue(enc.encode(c));
-      controller.close();
-    },
+/** Serves the POST (202) and plays one jobs snapshot per GET; the last repeats. */
+function pollFetch(states: object[]) {
+  let i = 0;
+  return vi.fn(async (url: string, _init?: RequestInit) => {
+    if (String(url) === '/api/setup/models/pulls') {
+      const s = states[Math.min(i++, states.length - 1)];
+      return { ok: true, status: 200, json: async () => s } as unknown as Response;
+    }
+    return { ok: true, status: 202, json: async () => ({ started: true }) } as unknown as Response;
   });
-  return { ok: true, body, status: 200 } as unknown as Response;
 }
 
 describe('pullOllamaModel', () => {
-  it('reports percent from total/completed and null for size-less phases, then resolves', async () => {
+  it('starts the job, relays each poll to onProgress, and resolves on done', async () => {
     const seen: PullProgress[] = [];
-    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) => streamResponse([
-      '{"status":"pulling manifest"}\n',
-      '{"status":"downloading","total":200,"completed":50}\n',
-      '{"status":"downloading","total":200,"completed":200}\n',
-      '{"status":"success"}\n',
-    ]));
-    await pullOllamaModel('qwen3:8b', (p) => seen.push(p), { fetchImpl: fetchImpl as unknown as typeof fetch });
+    const fetchImpl = pollFetch([
+      { m: { status: 'pulling manifest', percent: null, error: null, done: false } },
+      { m: { status: 'downloading', percent: 25, error: null, done: false } },
+      { m: { status: 'success', percent: null, error: null, done: true } },
+    ]);
+    await pullOllamaModel('m', (p) => seen.push(p), { fetchImpl: fetchImpl as unknown as typeof fetch, pollMs: 1 });
     expect(seen).toEqual([
       { status: 'pulling manifest', percent: null },
       { status: 'downloading', percent: 25 },
-      { status: 'downloading', percent: 100 },
       { status: 'success', percent: null },
     ]);
     // The POST carried the model name.
     const init = fetchImpl.mock.calls[0][1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ model: 'qwen3:8b' });
+    expect(JSON.parse(String(init?.body))).toEqual({ model: 'm' });
   });
 
-  it('reassembles a JSON object split across two network chunks', async () => {
-    const seen: PullProgress[] = [];
-    const fetchImpl = vi.fn(async () => streamResponse([
-      '{"status":"downl',
-      'oading","total":10,"completed":10}\n{"status":"success"}\n',
-    ]));
-    await pullOllamaModel('m', (p) => seen.push(p), { fetchImpl: fetchImpl as unknown as typeof fetch });
-    expect(seen).toEqual([
-      { status: 'downloading', percent: 100 },
-      { status: 'success', percent: null },
+  it("rejects on the job's error", async () => {
+    const fetchImpl = pollFetch([
+      { 'nope:1b': { status: 'pulling manifest', percent: null, error: 'pull model manifest: file does not exist', done: true } },
     ]);
-  });
-
-  it('rejects on a terminal {error} line, mid-stream', async () => {
-    const fetchImpl = vi.fn(async () => streamResponse([
-      '{"status":"pulling manifest"}\n',
-      '{"error":"pull model manifest: file does not exist"}\n',
-    ]));
-    await expect(pullOllamaModel('nope:1b', () => {}, { fetchImpl: fetchImpl as unknown as typeof fetch }))
+    await expect(pullOllamaModel('nope:1b', () => {}, { fetchImpl: fetchImpl as unknown as typeof fetch, pollMs: 1 }))
       .rejects.toThrow(/file does not exist/);
   });
 
-  it('rejects with the proxy error when the response is not a stream (Ollama unreachable)', async () => {
+  it('rejects with the proxy error when the POST is refused (Ollama unreachable)', async () => {
     const fetchImpl = vi.fn(async () => ({
-      ok: false, status: 502, body: null, json: async () => ({ error: 'install it from ollama.com' }),
+      ok: false, status: 502, json: async () => ({ error: 'install it from ollama.com' }),
     } as unknown as Response));
     await expect(pullOllamaModel('m', () => {}, { fetchImpl: fetchImpl as unknown as typeof fetch }))
       .rejects.toThrow(/ollama\.com/);
+  });
+
+  it('an aborted watch resolves quietly — the surface left, the server keeps downloading', async () => {
+    const ctrl = new AbortController();
+    const fetchImpl = pollFetch([
+      { m: { status: 'downloading', percent: 10, error: null, done: false } },
+    ]);
+    await expect(watchPull('m', () => ctrl.abort(),
+      { fetchImpl: fetchImpl as unknown as typeof fetch, signal: ctrl.signal, pollMs: 1 }))
+      .resolves.toBeUndefined();
   });
 });

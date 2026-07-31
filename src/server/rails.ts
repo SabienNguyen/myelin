@@ -34,13 +34,16 @@ const HISTORY_LINE_CAP = 400;
 // How many find_analogies bridges ride into the prompt.
 const ANALOGY_CAP = 2;
 
-/** Find block-tool outputs in the tail of the incoming history (since the last user text turn).
- * Shared with session.ts's agentic respond — defined here because session.ts imports this module
- * and the reverse import would be circular. */
+/** Find answered-but-ungraded block outputs ANYWHERE in the incoming history. The common case is
+ * the tail (the client's auto-resubmit ends the history on the answered block), but a grading
+ * continuation aborted mid-stream — the learner sent a new message before the grade landed —
+ * leaves the answered block one or more messages back, and a last-message-only scan stranded it
+ * ungraded forever. The sweep is self-limiting: `!output.grading` stops matching the moment a
+ * turn grades it. Shared with session.ts's agentic respond — defined here because session.ts
+ * imports this module and the reverse import would be circular. */
 export function pendingBlockOutputs(messages: UIMessage[]) {
   const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
-  const last = messages[messages.length - 1];
-  for (const msg of [last]) {
+  for (const msg of messages) {
     if (msg?.role !== 'assistant') continue;
     for (const part of msg.parts as any[]) {
       const name = String(part.type).replace(/^tool-/, '') as BlockToolName;
@@ -467,11 +470,21 @@ export function createRailsSession(
         // Resubmit: grade with the same path the agentic loop uses, round-trip the grading to the
         // already-rendered card, then record the evidence OURSELVES — rails changes WHO calls
         // record_evidence, never what is recorded (spec invariant).
+        // Same guard as session.ts's agentic respond: the round-trip chunk is only writable for
+        // parts of the message this stream continues. A swept stranded block (its grading
+        // continuation was aborted, a newer user message ends the history) has no part in the
+        // assembler — writing its toolCallId throws and kills the turn. Its grade still reaches
+        // the saved thread via the output mutation, and the evidence lands below either way.
+        const lastMsg = messages[messages.length - 1];
+        const continuable = new Set(lastMsg?.role === 'assistant'
+          ? (lastMsg.parts as any[]).map((part) => part.toolCallId).filter(Boolean) : []);
         const graded: { question: string; answer: string; grade: Grade }[] = [];
         for (const p of pending) {
           const grade = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
           p.output.grading = grade;
-          writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
+          if (continuable.has(p.toolCallId)) {
+            writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
+          }
           graded.push({
             question: String(p.input?.question ?? p.input?.prompt ?? ''),
             answer: String(p.output?.answer ?? ''),

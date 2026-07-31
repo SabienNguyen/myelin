@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spec — The small-model pipeline</title>
+<style>
+  :root {
+    --bg: #faf6ee; --panel: #fffdf8; --ink: #2b2620; --muted: #7a7062;
+    --border: #e4dccb; --accent: #4a6d8c; --accent-soft: #e8eef4; --good: #3d7a4a; --warn: #9a6a2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1d1a16; --panel: #26221d; --ink: #e8e2d6; --muted: #9c9284;
+      --border: #3a342b; --accent: #8fb0cc; --accent-soft: #2c3540; --good: #7fb98a; --warn: #cfa05e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.65 Georgia, 'Times New Roman', serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+  h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 0.4rem; }
+  h2 { font-size: 1.15rem; margin: 2.4rem 0 0.6rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
+  h2 .n { color: var(--muted); font-weight: normal; margin-right: 0.5rem; }
+  p, li { margin: 0.5rem 0; }
+  .kicker { color: var(--muted); font-size: 0.9rem; margin-bottom: 2rem; }
+  .principle {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    padding: 0.7rem 1rem; margin: 1.2rem 0; border-radius: 0 6px 6px 0;
+  }
+  ul { padding-left: 1.3rem; }
+  li b:first-child { color: var(--ink); }
+  code {
+    font: 0.83em/1.5 'JetBrains Mono', ui-monospace, monospace;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0.08em 0.35em;
+  }
+  pre {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 0.9rem 1.1rem; overflow-x: auto;
+  }
+  pre code { border: none; background: none; padding: 0; }
+  ol.steps li { margin: 0.55rem 0; }
+  .m { color: var(--accent); font-weight: bold; }
+  .h { color: var(--muted); font-size: 0.85em; }
+  .rule { color: var(--good); }
+  .order { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0; list-style: none; counter-reset: step; }
+  .order li {
+    counter-increment: step; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.5rem 0.9rem;
+  }
+  .order li::before { content: counter(step) '. '; color: var(--accent); font-weight: bold; }
+  .note { color: var(--muted); font-size: 0.9rem; font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+  <h1>The small-model pipeline</h1>
+  <p class="kicker">One engine for compile, research, and rails · spec · 2026-07-31 ·
+  canonical source: <code>2026-07-31-small-model-pipeline-design.md</code></p>
+
+  <p>The harness already knows the trick that makes small local models useful: invert control —
+  the <em>harness</em> decides what happens, the model fills one narrow, schema-locked slot per
+  call. Rails proved it for drills; the weak-compile fallback re-implemented it by hand. This spec
+  extracts the trick into one engine with three consumers: a rebuilt compile, a new background
+  research drain, and (last, once proven) rails generation itself.</p>
+
+  <div class="principle"><b>The governing rule, enforced not prompted:</b> this system conveys
+  sourced human knowledge — it does not generate knowledge. Machine-written pages carry
+  mechanically-verified sources or stay <code>draft</code> forever.</div>
+
+  <h2><span class="n">1</span>The engine <span class="h">src/server/pipeline.ts</span></h2>
+  <ul>
+    <li><b>Fit check first</b> — token math (chars/4 floor) against the model's known context.
+      Too big → split; never send a prompt that will be silently truncated.</li>
+    <li><b>Recursive split</b> — bisect on natural boundaries (headings → paragraphs → hard
+      length) until every piece fits one call.</li>
+    <li><b>Parallel map</b> — pieces run concurrently (default 4, per-role knob).</li>
+    <li><b>One call per piece</b> — structured generation, constrained decoding, exactly one
+      rejection-retry (the rails recipe).</li>
+    <li><b>Vote for hard steps</b> — a step marked <code>vote: n</code> runs n calls, majority
+      wins. Off by default; synthesis and ranking opt in.</li>
+    <li><b>Diagnosed failure, never mystery</b> — every failure classified before any fallback:
+      <code>overflow</code> (fit math) · <code>weak-output</code> (schema rejected after retry) ·
+      <code>transport</code> (endpoint down — re-throws so queues retry). The class rides the
+      ledger receipt.</li>
+    <li><b>Merge step</b> — consumer-supplied reducer (writes the MOC, joins extracts), same
+      fit/retry machinery.</li>
+    <li><b>Floor</b> — consumer-supplied deterministic fallback per piece, always labeled with
+      the diagnosed reason. Model weakness never surfaces as a learner-facing error.</li>
+  </ul>
+  <pre><code>runPipeline({ role, steps, concurrency }, job) -> { results, receipts }
+// step: { name, prompt(piece), schema, vote?, floor?(piece, reason) }</code></pre>
+  <p class="note">Interface shape is a plan-level decision; this is the contract sketch.</p>
+
+  <h2><span class="n">2</span>Compile, rebuilt on it</h2>
+  <p>Chapter → fit check → recursive split → <b>parallel</b> distillation (one page per part,
+  150–400 words, faithful to the text) → <b>MOC merge</b>: one hub page per chapter — the
+  Obsidian map-of-content idiom — one line per part, <code>prereqs</code>/<code>deepens</code>
+  edges to every part page. Parts stay individually drillable with their own mastery.</p>
+  <ul>
+    <li>Citation wrapping stays mechanical: every part page carries its book/chapter source.</li>
+    <li>Verbatim floor survives, but only after diagnosis:
+      <code>part 3: verbatim (weak-output: schema rejected twice)</code> — never just "fallback".</li>
+    <li>The agentic compile path (strong models driving write_page) is untouched.</li>
+  </ul>
+
+  <h2><span class="n">3</span>The research drain <span class="h">background-first, compile-drain-shaped</span></h2>
+  <p><b>Triggers:</b> a planner-picked vaultGap page (stub / unsourced / thin) · a cold-topic ask ·
+  an explicit request. Drills never wait.</p>
+  <ol class="steps">
+    <li><span class="m">model</span> writes 2–3 search queries from the topic + what the vault has</li>
+    <li><span class="m">harness</span> hits SearXNG (<code>search.searxng</code> required — absent
+      → the drain refuses loudly at enqueue, it does not pretend)</li>
+    <li><span class="m">model</span> ranks result snippets (classification; <code>vote</code>)</li>
+    <li><span class="m">harness</span> fetches top pages (existing read_url machinery)</li>
+    <li><span class="m">model</span> extracts relevant passages, parallel per page</li>
+    <li><span class="m">model</span> writes page(s) from those passages <em>only</em>, inline
+      citations; multiple concepts → part pages + MOC, same shape as compile</li>
+    <li><span class="m">harness</span> <b>mechanical citation check</b> — every cited quote must
+      appear verbatim (whitespace-normalized) in its fetched source. Failing claims are cut. A
+      page that loses all citations is not written; the receipt says why</li>
+    <li><span class="m">harness</span> writes pages as <code>draft</code> with
+      <code>sources:</code> = verified URLs, via Engram (single-writer rule)</li>
+  </ol>
+  <p><b>Dead ends degrade loudly:</b> no results, failed fetches, or all citations cut → a
+  receipt saying exactly that. Nothing is invented to fill the gap — that is the point.</p>
+
+  <h2><span class="n">4</span>The enforcement rule</h2>
+  <ul>
+    <li class="rule">Pages written by compile or research always carry sources (the book, or the
+      verified URLs) — mechanically.</li>
+    <li class="rule">A page with no sources can never be promoted past <code>draft</code> by
+      machinery. The rule binds the harness, not the learner.</li>
+    <li>vaultGap already treats unsourced as a gap; the research drain finally closes that loop
+      for local-model setups.</li>
+  </ul>
+
+  <h2><span class="n">5</span>UX parity</h2>
+  <ul>
+    <li>Chip-style status while the drain works a visible request: "searching…", "reading
+      &lt;domain&gt;…", "writing &lt;page&gt;…"</li>
+    <li>Receipts in the library exactly like compile receipts; the progress card counts new pages.</li>
+    <li>A cold-topic ask stages its first drill the moment the <em>first</em> page lands.</li>
+    <li>The visible difference from a frontier model is wall-clock only — background-first hides
+      most of it.</li>
+  </ul>
+
+  <h2><span class="n">6</span>Config</h2>
+  <ul>
+    <li>New model role <code>research</code> (defaults to the compile model) — prefix routing,
+      sampler blocks, usage ledger all apply.</li>
+    <li><code>search.searxng</code> is the retrieval backend, unchanged.</li>
+    <li>Per-role <code>concurrency</code>, default 4.</li>
+  </ul>
+
+  <h2><span class="n">7</span>Testing</h2>
+  <ul>
+    <li><b>Engine:</b> pure offline unit tests — fit math, split boundaries, parallel map, vote,
+      failure classes, merge, floor labels.</li>
+    <li><b>Compile:</b> existing ingest tests carry over; new ones pin the MOC and the
+      diagnosed-reason ledger text; the CI weak-model server drives the whole ladder
+      (reject-rf included).</li>
+    <li><b>Research:</b> fake SearXNG + fake fetch pin ranking, extraction, the citation check
+      (a fabricated quote is cut; a page losing all citations is not written), dead-end receipts.
+      One e2e: trigger → receipt → page + MOC in the library.</li>
+    <li><b>Rails migration:</b> only after everything above is green; rails' e2e must not change
+      at all — byte-identical behavior is the acceptance test.</li>
+  </ul>
+
+  <h2><span class="n">·</span>Build order</h2>
+  <ol class="order">
+    <li>Engine + unit tests</li>
+    <li>Compile refit (offline, weak-model CI)</li>
+    <li>Research drain + UX receipts</li>
+    <li>Rails migrates; all specs stay green</li>
+  </ol>
+</main>
+</body>
+</html>
