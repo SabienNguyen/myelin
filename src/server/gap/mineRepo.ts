@@ -219,7 +219,8 @@ export interface RepoMineDeps {
 export interface RepoMineReport {
   candidates: number;
   qualified: number;
-  pending: string[];
+  /** Authored AND gate-verified — usable immediately (see the auto-approval note below). */
+  authored: string[];
   rejected: string[];
   /** Present when a whole language was skipped (e.g. python3 not installed) — the report must say
    *  so, or "0 candidates" from a Python repo reads as a miner fault instead of a missing runtime. */
@@ -237,7 +238,7 @@ export async function mineRepoBuiltin(
   vault: string, repoName: string, repoPath: string, deps: RepoMineDeps,
 ): Promise<RepoMineReport> {
   let all = findCandidates(repoPath);
-  const report: RepoMineReport = { candidates: all.length, qualified: 0, pending: [], rejected: [] };
+  const report: RepoMineReport = { candidates: all.length, qualified: 0, authored: [], rejected: [] };
   if (all.some((c) => c.lang === 'py') && !(await runtimeStatus('python3')).available) {
     all = all.filter((c) => c.lang !== 'py');
     report.note = 'python3 is not installed, so .py candidates were skipped';
@@ -248,7 +249,7 @@ export async function mineRepoBuiltin(
   const authorFailures: string[] = [];
 
   for (const c of all.slice(0, MAX_QUALIFY_CHECKS)) {
-    if (report.pending.length + report.rejected.length >= MAX_EXERCISES) break;
+    if (report.authored.length + report.rejected.length >= MAX_EXERCISES) break;
     if (seen.has(c.name)) continue;
     seen.add(c.name);
     if (!(await qualifies(c))) continue;
@@ -309,9 +310,13 @@ export async function mineRepoBuiltin(
       generatedAt: (deps.now?.() ?? new Date()).toISOString(),
     };
     ex.verification = await verifyExercise(ex);
-    if (!ex.verification.ok) ex.status = 'rejected';
+    // Verified means usable. The gates already prove the repo's own function passes every case and
+    // an empty stub fails, so a pending queue was gating on RELEVANCE while hiding the feature:
+    // code_exercise stages only from approvedGenerated, so a proven PyTorch exercise was
+    // unreachable until someone thought to open the Library. The Library keeps the reject path.
+    ex.status = ex.verification.ok ? 'approved' : 'rejected';
     saveGenerated(vault, ex);
-    (ex.status === 'pending' ? report.pending : report.rejected).push(pattern);
+    (ex.verification.ok ? report.authored : report.rejected).push(pattern);
   }
   if (authorFailures.length > 0) {
     const detail = `could not author ${authorFailures.length} qualifying function${authorFailures.length === 1 ? '' : 's'} (${authorFailures[0]})`;

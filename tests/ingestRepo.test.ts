@@ -39,7 +39,7 @@ function fakeLw(writes: any[] = [], slugs: string[] = []) {
 /** A no-op mining pass — every orchestration test below that isn't specifically exercising the
  * mining pass supplies this, so it never falls through to the real mineRepoBuiltin (which would
  * call a real model). */
-const noopMiner = async (): Promise<RepoMineReport> => ({ candidates: 0, qualified: 0, pending: [], rejected: [] });
+const noopMiner = async (): Promise<RepoMineReport> => ({ candidates: 0, qualified: 0, authored: [], rejected: [] });
 
 describe('isGitUrl / deriveRepoName', () => {
   it('recognizes https/git@/ssh/git URL forms', () => {
@@ -126,7 +126,7 @@ describe('ingestRepo orchestration (local path source)', () => {
     const result = ingestRepo(lw, cfg, repo, {
       builtinMiner: async (repoName, repoPath) => {
         minerCalls.push({ repoName, repoPath });
-        return { candidates: 3, qualified: 1, pending: ['widgets-pick'], rejected: [] };
+        return { candidates: 3, qualified: 1, authored: ['widgets-pick'], rejected: [] };
       },
     });
 
@@ -137,7 +137,7 @@ describe('ingestRepo orchestration (local path source)', () => {
     const entry = readQueue(vault).find((e) => e.book === placeholderBook && e.mode === 'repo')!;
     expect(entry.status).toBe('done');
     expect(entry.phase).toContain('docs: 1 queued');
-    expect(entry.phase).toContain('1 exercise waiting for your approval in the Library');
+    expect(entry.phase).toContain('1 exercise ready to practise in the Library');
 
     // docs pass queued exactly one normal pending chapter (README's single H1-split section).
     const docEntries = readQueue(vault).filter((e) => e.book === placeholderBook && e.mode !== 'repo');
@@ -206,14 +206,14 @@ describe('ingestRepo orchestration (local path source)', () => {
     const result = ingestRepo(fakeLw(), cfg, repo, {
       builtinMiner: async () => {
         builtinRan = true;
-        return { candidates: 5, qualified: 2, pending: ['a', 'b'], rejected: [] };
+        return { candidates: 5, qualified: 2, authored: ['a', 'b'], rejected: [] };
       },
     });
 
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
     const entry = readQueue(vault).find((e) => e.book === result.name)!;
     expect(builtinRan).toBe(true);
-    expect(entry.phase).toContain('2 exercises waiting for your approval in the Library');
+    expect(entry.phase).toContain('2 exercises ready to practise in the Library');
   });
 
   it('a nonexistent local path 400s synchronously (throws before any ledger write)', () => {

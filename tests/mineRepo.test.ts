@@ -144,9 +144,9 @@ describe('mineRepoBuiltin', () => {
   it('authors a pending exercise whose reference is the REPO function, verified by the gates', async () => {
     writeFileSync(join(repo, 'util.js'), CLAMP);
     const report = await mineRepoBuiltin(vault, 'myrepo', repo, { generate: async () => JSON.stringify(goodSuite) });
-    expect(report.pending).toEqual(['myrepo-clamp']);
+    expect(report.authored).toEqual(['myrepo-clamp']);
     const [ex] = listGenerated(vault);
-    expect(ex.status).toBe('pending');
+    expect(ex.status).toBe('approved');
     expect(ex.family).toBe('function');
     expect(ex.reference).toContain('function clamp');
     expect(ex.verification.ok).toBe(true);
@@ -159,7 +159,7 @@ describe('mineRepoBuiltin', () => {
       cases: goodSuite.cases.map((c, i) => (i === 0 ? { ...c, expect: 999 } : c)),
     };
     const report = await mineRepoBuiltin(vault, 'myrepo', repo, { generate: async () => JSON.stringify(wrong) });
-    expect(report.pending).toEqual([]);
+    expect(report.authored).toEqual([]);
     expect(report.rejected).toEqual(['myrepo-clamp']);
     const [ex] = listGenerated(vault);
     expect(ex.verification.gates.find((g) => g.gate === 'reference-passes')?.ok).toBe(false);
@@ -179,7 +179,7 @@ describe('mineRepoBuiltin', () => {
       prose: { context_line: 'From the repo.', hint: 'Sum first.', success_line: 'Done.' },
     };
     const report = await mineRepoBuiltin(vault, 'pyrepo', repo, { generate: async () => JSON.stringify(pySuite) });
-    expect(report.pending).toEqual(['pyrepo-tax-total']);
+    expect(report.authored).toEqual(['pyrepo-tax-total']);
     const [ex] = listGenerated(vault);
     expect(ex.family).toBe('exec');
     expect(ex.runtime).toBe('python3');
@@ -195,7 +195,7 @@ describe('mineRepoBuiltin', () => {
   it('a model that returns garbage for one candidate does not sink the pass', async () => {
     writeFileSync(join(repo, 'util.js'), CLAMP);
     const report = await mineRepoBuiltin(vault, 'myrepo', repo, { generate: async () => 'not json' });
-    expect(report.pending).toEqual([]);
+    expect(report.authored).toEqual([]);
     expect(report.rejected).toEqual([]);
     expect(report.qualified).toBe(1);
   });
@@ -212,14 +212,14 @@ describe('ingestRepo mining pass', () => {
         builtinCalls++;
         expect(rn).toBe(basename(repo));
         expect(rp).toBe(repo);
-        return { candidates: 3, qualified: 1, pending: ['x-clamp'], rejected: [] };
+        return { candidates: 3, qualified: 1, authored: ['x-clamp'], rejected: [] };
       },
     });
     await new Promise((r) => { setTimeout(r, 300); });
     expect(builtinCalls).toBe(1);
     const entry = readQueue(vault).find((e) => e.mode === 'repo');
     expect(entry?.status).toBe('done');
-    expect(entry?.phase).toContain('waiting for your approval');
+    expect(entry?.phase).toContain('ready to practise');
   });
 });
 
@@ -237,7 +237,7 @@ describe('authoring failures are reported, never swallowed', () => {
       generate: async () => { throw new Error('needs OPENAI_COMPAT_BASE_URL set'); },
     });
     expect(report.qualified).toBe(1);
-    expect(report.pending).toEqual([]);
+    expect(report.authored).toEqual([]);
     expect(report.note).toMatch(/could not author/i);
     // The CAUSE has to survive, not just the count — that is the whole point.
     expect(report.note).toMatch(/OPENAI_COMPAT_BASE_URL/);
@@ -258,7 +258,50 @@ describe('authoring failures are reported, never swallowed', () => {
         prose: { context_line: 'From the repo.', hint: 'Two comparisons.', success_line: 'Done.' },
       }),
     });
-    expect(report.pending).toEqual(['myrepo-clamp']);
+    expect(report.authored).toEqual(['myrepo-clamp']);
     expect(report.note ?? '').not.toMatch(/could not author/i);
+  });
+});
+
+/**
+ * Auto-approval (user decision, 2026-07-31). A mined exercise is already proven by the gates —
+ * the reference passes every case and an empty stub fails — so the pending queue was gating on
+ * relevance, not correctness, while making the whole feature invisible: `code_exercise` reads
+ * `approvedGenerated`, so a verified PyTorch exercise could not be staged until someone happened
+ * to visit the Library. Verified now means usable; the Library keeps the reject path.
+ */
+describe('verified exercises are usable immediately', () => {
+  const goodSuiteFor = () => JSON.stringify({
+    title: 'Clamp a value to a range',
+    statement: 'Return the value limited to [lo, hi].',
+    cases: [
+      { name: 'inside', args: [5, 0, 10], expect: 5 },
+      { name: 'below', args: [-3, 0, 10], expect: 0 },
+      { name: 'above', args: [42, 0, 10], expect: 10 },
+      { name: 'boundary', args: [10, 0, 10], expect: 10 },
+    ],
+    prose: { context_line: 'From the repo.', hint: 'Two comparisons.', success_line: 'Done.' },
+  });
+
+  it('a gate-passing mined exercise is approved on arrival and stageable with no human step', async () => {
+    const { approvedGenerated } = await import('../src/server/gap/generated.js');
+    writeFileSync(join(repo, 'util.js'), CLAMP);
+    await mineRepoBuiltin(vault, 'myrepo', repo, { generate: async () => goodSuiteFor() });
+    const [ex] = listGenerated(vault);
+    expect(ex.verification.ok).toBe(true);
+    expect(ex.status).toBe('approved');
+    // The load-bearing assertion: this is what code_exercise can actually stage.
+    expect(approvedGenerated(vault).map((e) => e.pattern)).toEqual(['myrepo-clamp']);
+  });
+
+  it('an exercise the gates refuse is still auto-rejected, never silently usable', async () => {
+    writeFileSync(join(repo, 'util.js'), CLAMP);
+    const wrong = JSON.parse(goodSuiteFor());
+    wrong.cases[0].expect = 999; // the real clamp cannot pass this
+    await mineRepoBuiltin(vault, 'myrepo', repo, { generate: async () => JSON.stringify(wrong) });
+    const [ex] = listGenerated(vault);
+    expect(ex.status).toBe('rejected');
+    const { approvedGenerated } = await import('../src/server/gap/generated.js');
+    expect(approvedGenerated(vault)).toEqual([]);
   });
 });
