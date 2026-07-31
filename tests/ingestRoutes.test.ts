@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { buildIngestRoutes } from '../src/server/ingestRoutes.js';
 import { streamModel } from './mockModel.js';
 import { readQueue } from '../src/server/ingest.js';
+import { writeQueue } from '../src/server/queueStore.js';
 import { saveLinkDirectory } from '../src/server/linkList.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import type { Converter } from '../src/server/convert.js';
@@ -439,5 +440,52 @@ describe('POST /api/curate', () => {
     expect(calls).toEqual([['author_affinity', { student: 'kid' }]]);
     expect(body.recommendations[0].knownAuthor).toBe(true);
     expect(body.recommendations[0].why[0]).toMatch(/you have proven 6 evidence entries/);
+  });
+});
+
+/**
+ * Retry: a failed chapter's source markdown is still on disk, so a failure whose CAUSE has been
+ * fixed (a bad model id corrected, a provider quirk handled) should be one click from compiling —
+ * not a dismiss-and-re-ingest-the-whole-book. Observed live: 54 chapters stranded in `error` after
+ * a provider refusal, every raw file intact, and no way in the app to ask for another go.
+ */
+describe('POST /api/ingest/entry/retry', () => {
+  const failedVault = () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-retry-'));
+    writeQueue(vault, [
+      { book: 'B', chapter: 'raw/uploads/b/ch-01.md', title: 'Ch 1', status: 'error', error: 'boom', phase: 'part 1: verbatim' },
+      { book: 'B', chapter: 'raw/uploads/b/ch-02.md', title: 'Ch 2', status: 'done' },
+      { book: 'B', chapter: 'raw/uploads/b/ch-03.md', title: 'Ch 3', status: 'pending' },
+    ] as any);
+    return vault;
+  };
+  const retry = (app: any, chapter: string) => app.request('/api/ingest/entry/retry', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chapter }),
+  });
+
+  it('flips a failed row back to pending and clears its stale error and phase', async () => {
+    const vault = failedVault();
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter, model: noToolModel() } as any);
+    const res = await retry(app, 'raw/uploads/b/ch-01.md');
+    expect(res.status).toBe(200);
+    const row = readQueue(vault).find((e) => e.chapter === 'raw/uploads/b/ch-01.md')!;
+    expect(row.status).toBe('pending');
+    expect(row.error).toBeUndefined();   // a retried row must not still show the old failure
+    expect(row.phase).toBeUndefined();
+  });
+
+  it('refuses a row that did not fail — retrying a finished chapter would duplicate its pages', async () => {
+    const vault = failedVault();
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter, model: noToolModel() } as any);
+    expect((await retry(app, 'raw/uploads/b/ch-02.md')).status).toBe(409);
+    expect((await retry(app, 'raw/uploads/b/ch-03.md')).status).toBe(409);
+    expect(readQueue(vault).find((e) => e.chapter === 'raw/uploads/b/ch-02.md')!.status).toBe('done');
+  });
+
+  it('404s an unknown chapter and 400s a missing one', async () => {
+    const vault = failedVault();
+    const app = buildIngestRoutes(fakeLw(), cfgFor(vault), { converter: fakeConverter, model: noToolModel() } as any);
+    expect((await retry(app, 'raw/uploads/b/nope.md')).status).toBe(404);
+    expect((await retry(app, '')).status).toBe(400);
   });
 });

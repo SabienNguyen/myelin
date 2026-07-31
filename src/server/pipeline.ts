@@ -4,11 +4,17 @@ import { LlmHttpError } from './llm/index.js';
 
 export type PipelineFailureClass = 'overflow' | 'weak-output' | 'transport';
 
-/** Endpoint-unreachable/erroring — not model-too-weak. LlmHttpError covers every non-2xx the
- * adapters surface (post-retry); undici's "fetch failed" TypeError is the connection-level face.
- * (Moved verbatim from ingest.ts — one definition, two consumers.) */
+/** Endpoint unreachable or having a moment — worth waiting and retrying, NOT worth falling back
+ * over. Only RETRYABLE http failures qualify (LlmHttpError.retryable: 408/409/429/5xx); undici's
+ * "fetch failed" TypeError is the connection-level face of the same thing.
+ *
+ * A permanent 4xx is the endpoint telling us this request is wrong, and it will be just as wrong
+ * next time. Treating those as transport cost a live user every chapter of an ingest: gpt-5.6-luna
+ * answers "function tools ... are not supported in /v1/chat/completions" with a 400, so compile
+ * failed the entry, requeued it, and failed identically forever — when the harness-driven
+ * distillation fallback (response_format, no function tools) would have compiled it fine. */
 export function isTransportFailure(e: unknown): boolean {
-  if (e instanceof LlmHttpError) return true;
+  if (e instanceof LlmHttpError) return e.retryable;
   return e instanceof TypeError && /fetch failed/i.test(e.message);
 }
 

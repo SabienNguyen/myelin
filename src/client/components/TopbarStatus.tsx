@@ -26,6 +26,14 @@ export function modelLabel(id: string): { name: string; how: string } {
   if (id.startsWith('ollama:')) {
     return { name: id.slice('ollama:'.length), how: 'local model via Ollama' };
   }
+  // The openai: route needed its own branch, not the Anthropic fallthrough: the badge exists to
+  // answer "which model, and whose bill", and it was naming the wrong vendor for every
+  // OpenAI-compatible model. The id is shown verbatim too — `pretty()` title-cases and rewrites
+  // trailing digits for `claude-sonnet-5`, which turned `openai:gpt-5.6-luna` into
+  // `Openai:gpt-5.6-luna`, an id that exists nowhere.
+  if (id.startsWith('openai:')) {
+    return { name: id.slice('openai:'.length), how: 'OpenAI-compatible endpoint' };
+  }
   return { name: pretty(id), how: 'Anthropic API' };
 }
 

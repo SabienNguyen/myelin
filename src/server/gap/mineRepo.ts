@@ -243,6 +243,9 @@ export async function mineRepoBuiltin(
     report.note = 'python3 is not installed, so .py candidates were skipped';
   }
   const seen = new Set<string>();
+  // Candidates that qualified but could not be authored — kept so the report can say WHY nothing
+  // was mined, instead of reporting an empty pass that looks like an empty repo.
+  const authorFailures: string[] = [];
 
   for (const c of all.slice(0, MAX_QUALIFY_CHECKS)) {
     if (report.pending.length + report.rejected.length >= MAX_EXERCISES) break;
@@ -256,8 +259,15 @@ export async function mineRepoBuiltin(
     try {
       const raw = await deps.generate((c.lang === 'py' ? AUTHOR_PROMPT_PY : AUTHOR_PROMPT)(repoName, c));
       parsed = JSON.parse(raw.trim().replace(/^```json?\n?|```$/g, ''));
-    } catch {
-      // A model that fails to author one candidate should not sink the whole mining pass.
+    } catch (e) {
+      // One candidate failing must not sink the pass — but it must not vanish either. Swallowing
+      // this made a misconfigured provider ("needs OPENAI_COMPAT_BASE_URL set", thrown once per
+      // candidate) read as `qualified=10, pending=[], rejected=0`, i.e. exactly like a repo with
+      // nothing worth mining. The reason rides out on the report's note, which the ingest ledger
+      // already surfaces to the learner.
+      const msg = e instanceof Error ? e.message : String(e);
+      authorFailures.push(`${c.name}: ${msg.slice(0, 160)}`);
+      console.error(`[mine ${repoName}] could not author ${c.name}: ${msg}`);
       continue;
     }
     const rawCases: any[] = Array.isArray(parsed.cases) ? parsed.cases : [];
@@ -302,6 +312,10 @@ export async function mineRepoBuiltin(
     if (!ex.verification.ok) ex.status = 'rejected';
     saveGenerated(vault, ex);
     (ex.status === 'pending' ? report.pending : report.rejected).push(pattern);
+  }
+  if (authorFailures.length > 0) {
+    const detail = `could not author ${authorFailures.length} qualifying function${authorFailures.length === 1 ? '' : 's'} (${authorFailures[0]})`;
+    report.note = report.note ? `${report.note}; ${detail}` : detail;
   }
   return report;
 }

@@ -750,7 +750,11 @@ export async function compileOne(
           firstFallbackPart = i;
         }
       } catch (partErr: any) {
-        const msg = (partErr instanceof Error ? partErr.message : String(partErr)).slice(0, 120);
+        // 400, not 120: a provider's error carries its own fix in the second half of the sentence
+        // ("Function tools ... are not supported in /v1/chat/completions. To use function tools,
+        // <do this>"), and 120 chars cut it off exactly there — the ledger named the problem and
+        // hid the remedy.
+        const msg = (partErr instanceof Error ? partErr.message : String(partErr)).slice(0, 400);
         // A transport failure fails the part outright — distillation would hit the same dead
         // endpoint; anything else (a weak model mangling the agentic turn) gets the ladder.
         if (isTransportFailure(partErr)) {

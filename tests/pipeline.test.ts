@@ -16,9 +16,26 @@ describe('budgetChars', () => {
 });
 
 describe('classifyFailure', () => {
-  it('transport: LlmHttpError and undici fetch-failed', () => {
+  it('transport: RETRYABLE LlmHttpError and undici fetch-failed', () => {
     expect(classifyFailure(new LlmHttpError('ollama', 503, 'boom'), 10, 100)).toBe('transport');
     expect(classifyFailure(new TypeError('fetch failed'), 10, 100)).toBe('transport');
+  });
+
+  // A permanent 4xx is the endpoint saying "this request is wrong", not "come back later".
+  // Treating it as transport made compile fail the entry and requeue it forever — observed live
+  // against gpt-5.6-luna, whose 400 for "function tools ... not supported in /v1/chat/completions"
+  // requeued every chapter into an identical failure instead of falling back to distillation
+  // (which uses response_format and would have succeeded).
+  it('a NON-retryable http error is not transport — it must reach the fallback ladder', () => {
+    const badRequest = new LlmHttpError('openai-compat', 400, 'function tools are not supported');
+    expect(isTransportFailure(badRequest)).toBe(false);
+    expect(classifyFailure(badRequest, 10, 100)).toBe('weak-output');
+  });
+
+  it('rate limits and server errors stay transport — those DO recover on retry', () => {
+    for (const status of [408, 409, 429, 500, 529]) {
+      expect(isTransportFailure(new LlmHttpError('p', status, 'x'))).toBe(true);
+    }
   });
   it('overflow: the prompt did not fit the budget', () => {
     expect(classifyFailure(new Error('schema rejected'), 200, 100)).toBe('overflow');

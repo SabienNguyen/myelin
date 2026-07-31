@@ -302,6 +302,24 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
                 {/* Terminal rows are history the learner has read — dismissable, so a failed
                     ingest from weeks ago stops haunting the Library. The server refuses
                     non-terminal rows, so this renders only where the request can succeed. */}
+                {/* Retry before dismiss: a failed row's source is still on disk, so when the
+                    CAUSE has been fixed the useful verb is "try again", not "forget this". */}
+                {(e.status === 'error' || e.status === 'convert-error') && (
+                  <button
+                    type="button"
+                    className="q-retry"
+                    aria-label={`retry ${e.title}`}
+                    title="compile this chapter again"
+                    onClick={async () => {
+                      await fetch('/api/ingest/entry/retry', {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ chapter: e.chapter }),
+                      });
+                      setRefresh((r) => r + 1);
+                    }}
+                  >retry</button>
+                )}
                 {(e.status === 'error' || e.status === 'convert-error' || (e.status === 'done' && e.mode === 'repo')) && (
                   <button
                     type="button"

@@ -222,3 +222,43 @@ describe('ingestRepo mining pass', () => {
     expect(entry?.phase).toContain('waiting for your approval');
   });
 });
+
+/**
+ * Authoring failures used to vanish: the per-candidate `catch { continue }` swallowed everything,
+ * so a run that qualified ten functions and authored none reported
+ * `qualified=10, pending=[], rejected=0` — indistinguishable from "this repo had nothing minable".
+ * Observed live against PyTorch, where the swallowed error was a perfectly actionable
+ * "needs OPENAI_COMPAT_BASE_URL set". A miner that cannot author must say why.
+ */
+describe('authoring failures are reported, never swallowed', () => {
+  it('surfaces the reason in the report note when every candidate fails to author', async () => {
+    writeFileSync(join(repo, 'util.js'), CLAMP);
+    const report = await mineRepoBuiltin(vault, 'myrepo', repo, {
+      generate: async () => { throw new Error('needs OPENAI_COMPAT_BASE_URL set'); },
+    });
+    expect(report.qualified).toBe(1);
+    expect(report.pending).toEqual([]);
+    expect(report.note).toMatch(/could not author/i);
+    // The CAUSE has to survive, not just the count — that is the whole point.
+    expect(report.note).toMatch(/OPENAI_COMPAT_BASE_URL/);
+  });
+
+  it('a clean run carries no failure note', async () => {
+    writeFileSync(join(repo, 'util.js'), CLAMP);
+    const report = await mineRepoBuiltin(vault, 'myrepo', repo, {
+      generate: async () => JSON.stringify({
+        title: 'Clamp a value to a range',
+        statement: 'Return the value limited to [lo, hi].',
+        cases: [
+          { name: 'inside', args: [5, 0, 10], expect: 5 },
+          { name: 'below', args: [-3, 0, 10], expect: 0 },
+          { name: 'above', args: [42, 0, 10], expect: 10 },
+          { name: 'boundary', args: [10, 0, 10], expect: 10 },
+        ],
+        prose: { context_line: 'From the repo.', hint: 'Two comparisons.', success_line: 'Done.' },
+      }),
+    });
+    expect(report.pending).toEqual(['myrepo-clamp']);
+    expect(report.note ?? '').not.toMatch(/could not author/i);
+  });
+});
