@@ -770,27 +770,20 @@ export async function compileOne(
       } else {
         const existingSlugs = new Set(slugs);
         const rest = chunks.slice(firstFallbackPart);
-        // NOTE (deferred, see task-4-context.md): mapPieces doesn't cancel sibling workers on a
-        // transport throw. A single transient 503 mid-batch can leave some pieces already written
-        // while this entry gets marked 'error' and requeued — the retry then redistills those same
-        // pieces under fresh freshSlug '-2' suffixes. Out of scope here; noted for the eventual fix.
+        // mapPieces hands back each piece's own index in `rest` — the one authoritative source for
+        // "(part N of M)" labels, so there is exactly one mechanism deciding a part's number
+        // (previously this closure re-derived it separately via a content match, which could
+        // silently disagree with the ledger note below if two chunks were ever identical text).
         const { receipts } = await mapPieces({
           pieces: rest,
           budget,
           concurrency: cfg.models?.compile?.concurrency ?? 4,
-          attempt: (piece, rejection) => {
-            // rest's chunks come from distinct sections of the chapter, so matching on content to
-            // recover this piece's position (for the "(part N of M)" label) is safe in practice;
-            // were two chunks ever byte-identical, the label on one would misname its part number
-            // — cosmetic only, since `piece` (not the recovered index) is what actually gets
-            // distilled and written.
-            const idx = firstFallbackPart + rest.indexOf(piece);
-            const partLabel = chunks.length > 1 ? ` (part ${idx + 1} of ${chunks.length})` : '';
+          attempt: (piece, rejection, k) => {
+            const partLabel = chunks.length > 1 ? ` (part ${firstFallbackPart + k + 1} of ${chunks.length})` : '';
             return distillPart(model, cfg, entry.book, entry.title, partLabel, piece, rejection, existingSlugs, writePage);
           },
-          floor: (piece, _cls, _reason) => {
-            const idx = firstFallbackPart + rest.indexOf(piece);
-            const partLabel = chunks.length > 1 ? ` (part ${idx + 1} of ${chunks.length})` : '';
+          floor: (piece, _cls, _reason, k) => {
+            const partLabel = chunks.length > 1 ? ` (part ${firstFallbackPart + k + 1} of ${chunks.length})` : '';
             return writeVerbatim(entry.title, partLabel, piece, existingSlugs, writePage);
           },
         });

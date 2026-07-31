@@ -38,36 +38,50 @@ export interface PieceReceipt {
 /** The ladder, per piece: one attempt, one rejection-retry (the rails recipe), then the
  * consumer's floor with a DIAGNOSED class. Transport rejects the whole map — a dead endpoint
  * would floor every piece into fallback content during an outage, which is exactly the
- * "consumed the entry with undistilled content" bug the old compile ladder guarded against. */
+ * "consumed the entry with undistilled content" bug the old compile ladder guarded against.
+ *
+ * `attempt`/`floor` get the piece's own index in `pieces` as their last argument — the one place
+ * that index is authoritative. Callers that need a stable per-piece label (a "part N of M" in a
+ * prompt, say) should use that index, not re-derive it by matching on piece content: two pieces
+ * can legitimately have identical text, and a content match would silently mislabel one of them. */
 export async function mapPieces<T>(opts: {
   pieces: string[];
   budget: number;
   concurrency?: number;
-  attempt: (piece: string, rejection?: string) => Promise<T>;
-  floor: (piece: string, cls: PipelineFailureClass, reason: string) => Promise<T>;
+  attempt: (piece: string, rejection: string | undefined, index: number) => Promise<T>;
+  floor: (piece: string, cls: PipelineFailureClass, reason: string, index: number) => Promise<T>;
 }): Promise<{ results: T[]; receipts: PieceReceipt[] }> {
   const results: T[] = new Array(opts.pieces.length);
   const receipts: PieceReceipt[] = new Array(opts.pieces.length);
   let next = 0;
+  // Set the instant any worker sees a transport failure, and checked before every new piece is
+  // claimed. Promise.all can't cancel the OTHER workers' in-flight `attempt`/`floor` calls (no
+  // AbortController plumbing here — out of scope), but without this flag they keep claiming and
+  // processing FRESH pieces after the entry is already doomed to be marked 'error' and requeued,
+  // so the requeue's retry redistills and re-writes those same pieces again under `-2` slug
+  // suffixes. This closes that window down to "at most the pieces already in flight when the
+  // transport failure landed", which is the best available without real cancellation.
+  let aborted = false;
   const worker = async (): Promise<void> => {
     for (;;) {
+      if (aborted) return;
       const i = next++;
       if (i >= opts.pieces.length) return;
       const piece = opts.pieces[i];
       try {
-        results[i] = await opts.attempt(piece);
+        results[i] = await opts.attempt(piece, undefined, i);
         receipts[i] = { piece: i, outcome: 'ok' };
       } catch (first) {
-        if (isTransportFailure(first)) throw first;
+        if (isTransportFailure(first)) { aborted = true; throw first; }
         const firstMsg = first instanceof Error ? first.message : String(first);
         try {
-          results[i] = await opts.attempt(piece, firstMsg);
+          results[i] = await opts.attempt(piece, firstMsg, i);
           receipts[i] = { piece: i, outcome: 'ok' };
         } catch (second) {
-          if (isTransportFailure(second)) throw second;
+          if (isTransportFailure(second)) { aborted = true; throw second; }
           const reason = (second instanceof Error ? second.message : String(second)).slice(0, 160);
           const cls = classifyFailure(second, piece.length, opts.budget);
-          results[i] = await opts.floor(piece, cls, reason);
+          results[i] = await opts.floor(piece, cls, reason, i);
           receipts[i] = { piece: i, outcome: 'floored', reason, class: cls };
         }
       }

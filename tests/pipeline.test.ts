@@ -81,4 +81,66 @@ describe('mapPieces', () => {
       floor: async () => 'never',
     })).rejects.toThrow(/fetch failed/);
   });
+
+  it('hands attempt/floor the piece\'s own index — not something the caller must re-derive', async () => {
+    const seenIndices: number[] = [];
+    await mapPieces({
+      pieces: ['a', 'b', 'c'],
+      budget: 100,
+      concurrency: 1,
+      attempt: async (_p, _rejection, i) => { seenIndices.push(i); return 'ok'; },
+      floor: async () => 'never',
+    });
+    expect(seenIndices).toEqual([0, 1, 2]);
+  });
+
+  it('a transport failure stops the worker from claiming any piece after it — a single-worker regression pin', async () => {
+    // concurrency: 1 makes this deterministic without timing games: one worker processes pieces in
+    // order, and a transport throw must end its loop rather than moving on to the next piece.
+    const attemptedPieces: string[] = [];
+    await expect(mapPieces({
+      pieces: ['a', 'b', 'c'],
+      budget: 100,
+      concurrency: 1,
+      attempt: async (p) => {
+        attemptedPieces.push(p);
+        if (p === 'a') throw new TypeError('fetch failed');
+        return p;
+      },
+      floor: async () => 'never',
+    })).rejects.toThrow(/fetch failed/);
+    expect(attemptedPieces).toEqual(['a']);
+  });
+
+  it('a transport failure stops SIBLING workers from claiming a fresh piece — the vault-corruption regression', async () => {
+    // Three pieces, concurrency 3: all three are claimed synchronously before any await (mapPieces'
+    // `next++` bump), so 'a', 'b', and 'c' all start "in flight" together. 'a' fails immediately
+    // (transport); 'b' and 'c' are held open on a gate so the test controls exactly when they
+    // finish — after they do, a worker becomes free and (pre-fix) would have claimed a 4th piece.
+    // Asserted on a call counter, not on wall-clock timing.
+    const attemptedPieces: string[] = [];
+    let releaseSlow: () => void = () => {};
+    const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve; });
+
+    const runningMap = mapPieces({
+      pieces: ['a', 'b', 'c', 'd', 'e'],
+      budget: 100,
+      concurrency: 3,
+      attempt: async (p) => {
+        attemptedPieces.push(p);
+        if (p === 'a') throw new TypeError('fetch failed');
+        if (p === 'b' || p === 'c') await slowGate; // held open past 'a's failure
+        return p;
+      },
+      floor: async () => 'never',
+    });
+
+    await expect(runningMap).rejects.toThrow(/fetch failed/);
+    // 'a' has already failed and set the abort flag; 'b' and 'c' are still gated. Release them now
+    // and give their workers a turn to loop back — a pre-fix worker would claim 'd' here.
+    releaseSlow();
+    await new Promise((r) => { setTimeout(r, 20); });
+
+    expect(attemptedPieces.sort()).toEqual(['a', 'b', 'c']);
+  });
 });
