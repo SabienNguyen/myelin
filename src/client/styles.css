@@ -2672,6 +2672,28 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .local-getter-progress progress { flex: 1; min-width: 0; height: 0.6rem; accent-color: var(--accent); }
 .local-getter-status { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
 .local-getter-error { font-size: 0.75rem; color: var(--bad); margin: 0.2rem 0 0; }
+/* The missing-Ollama panel. Deliberately NOT styled as an error: nothing has gone wrong, there is
+   simply one install between the learner and a working local model. Warm surface + border rather
+   than --bad, so it reads as the next step instead of a failure. */
+.local-getter-blocked {
+  margin-top: 0.4rem; padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset);
+}
+.local-getter-blocked-lead { font-size: 0.82rem; margin: 0; font-weight: 600; }
+.local-getter-blocked-body { font-size: 0.76rem; color: var(--text-muted); margin: 0.35rem 0 0; }
+.local-getter-blocked-actions {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem;
+}
+.local-getter-install {
+  font-size: 0.8rem; padding: 0.25rem 0.8rem; white-space: nowrap; text-decoration: none;
+  background: var(--accent); color: var(--accent-text); border: none; border-radius: 5px; cursor: pointer;
+}
+.local-getter-install:disabled { opacity: 0.5; cursor: default; }
+.local-getter-command {
+  font-family: var(--font-mono); font-size: 0.72rem; padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border); border-radius: 4px; overflow-x: auto; white-space: nowrap;
+}
+.local-getter-blocked-foot { font-size: 0.72rem; color: var(--text-muted); margin: 0.5rem 0 0; }
 .firstrun-getter-lede { font-size: 0.85rem; margin: 0.4rem 0 0; }
 .models-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3rem; }
 .models-note { font-size: 0.78rem; color: var(--text-muted); }

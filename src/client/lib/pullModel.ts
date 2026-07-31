@@ -3,6 +3,28 @@
 // the stream ends clean, rejects on a terminal {error} line or a transport failure — so a caller
 // can `await pullOllamaModel(...)` and then configure the roles, sure the model is on disk.
 
+/** Why a pull couldn't connect, straight from the proxy. The caller renders a different next step
+ *  for each — install, start, or check the network — so this stays a tag, not prose. */
+export type PullFailureReason = 'not-installed' | 'not-running' | 'unreachable';
+
+export interface OllamaInstallHint {
+  platform: 'macos' | 'windows' | 'linux';
+  url: string;
+  command?: string;
+}
+
+/** A connection failure that the UI can act on, rather than a string it can only print. */
+export class PullConnectionError extends Error {
+  constructor(
+    message: string,
+    readonly reason: PullFailureReason,
+    readonly install?: OllamaInstallHint,
+  ) {
+    super(message);
+    this.name = 'PullConnectionError';
+  }
+}
+
 export interface PullProgress {
   /** Ollama's phase text, e.g. 'pulling manifest', 'downloading', 'verifying sha256', 'success'. */
   status: string;
@@ -25,8 +47,14 @@ export async function pullOllamaModel(
   });
   if (!res.ok || !res.body) {
     // The proxy reports Ollama-unreachable and bad-request as JSON, not a stream.
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as { error?: string }).error ?? `pull failed (HTTP ${res.status})`);
+    const err = await res.json().catch(() => ({})) as {
+      error?: string; reason?: PullFailureReason; ollama?: { install?: OllamaInstallHint };
+    };
+    const message = err.error ?? `pull failed (HTTP ${res.status})`;
+    // A connection failure is recoverable and the UI has a specific offer for each kind; anything
+    // else (a bad model name, a 400) is just a message.
+    if (err.reason) throw new PullConnectionError(message, err.reason, err.ollama?.install);
+    throw new Error(message);
   }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
