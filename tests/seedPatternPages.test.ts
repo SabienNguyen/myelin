@@ -16,7 +16,6 @@ beforeAll(async () => {
   mkdirSync(join(vault, 'pages'), { recursive: true });
   cfg = {
     vault, student: 'testkid',
-    gap: { url: 'http://localhost:4930' },
     engram: { command: 'npx', args: ['tsx', join(LW_REPO, 'src/server.ts')], embeddings: 'fake' },
   } as HarnessConfig;
   lw = await Engram.connect(cfg);

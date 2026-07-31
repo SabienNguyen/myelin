@@ -334,9 +334,10 @@ Nothing to install; the starter pattern page is seeded at boot, and the Library'
 section lists each pattern you've touched with an owned/rented/new badge derived from the student
 model — the factory demo stays out of sight until the tutor assigns it or you ask for it.
 
-An external sidecar with more patterns can be pointed at via `gap.url` in `harness.config.json`;
-a configured url takes precedence over the built-in sandbox. Either way the tutor UI is the one
-place to learn — the sandbox only serves ladders and runs tests for it.
+Repo-mining ("Add repo" in Library) authors more exercises the same way: it runs the built-in
+miner (`src/server/gap/mineRepo.ts`) over the checkout in-process, no external service to run or
+configure. The tutor UI is the one place to learn — the sandbox only serves ladders and runs
+tests for it.
 
 ## Tests
 

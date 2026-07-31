@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  deriveArtifactTitle, deriveRepoName, discoverDocFiles, ingestRepo, isGitUrl, parseMineReport,
-  runCommand, seedMinedArtifactPage, type MineReport, type PassedArtifact,
+  deriveRepoName, discoverDocFiles, ingestRepo, isGitUrl, runCommand,
 } from '../src/server/ingestRepo.js';
+import type { RepoMineReport } from '../src/server/gap/mineRepo.js';
 import { readQueue } from '../src/server/ingest.js';
 import { readLinkDirectories } from '../src/server/linkList.js';
 import type { HarnessConfig } from '../src/server/config.js';
@@ -35,6 +35,11 @@ function fakeLw(writes: any[] = [], slugs: string[] = []) {
     },
   } as any;
 }
+
+/** A no-op mining pass — every orchestration test below that isn't specifically exercising the
+ * mining pass supplies this, so it never falls through to the real mineRepoBuiltin (which would
+ * call a real model). */
+const noopMiner = async (): Promise<RepoMineReport> => ({ candidates: 0, qualified: 0, pending: [], rejected: [] });
 
 describe('isGitUrl / deriveRepoName', () => {
   it('recognizes https/git@/ssh/git URL forms', () => {
@@ -97,93 +102,6 @@ describe('discoverDocFiles', () => {
   });
 });
 
-describe('deriveArtifactTitle', () => {
-  it('prefers the first exported function name, humanized', () => {
-    const src = 'export async function fetchAllPages(url) { return []; }';
-    expect(deriveArtifactTitle(src, 'Fetch All Pages Ts', 'packages-core-src-fetch-all-pages')).toBe('Fetch All Pages');
-  });
-
-  it('handles an exported const arrow function', () => {
-    const src = "export const parseThing = (x) => x;\nimport { z } from 'node:zlib';";
-    expect(deriveArtifactTitle(src, 'whatever', 'some-id')).toBe('Parse Thing');
-  });
-
-  it('falls back to the meta title when no export matches', () => {
-    const src = 'function helper() {}\nmodule.exports = helper;';
-    expect(deriveArtifactTitle(src, 'Format Helper', 'some-id')).toBe('Format Helper');
-  });
-
-  it('falls back to the humanized artifact directory id when source AND meta title are unusable', () => {
-    expect(deriveArtifactTitle('', '', 'packages-core-src-tone')).toBe('Packages Core Src Tone');
-  });
-
-  it('NEVER returns the literal "Artifact" — the exact bug the queue nit calls out', () => {
-    // Adversarial: an exported function literally named Artifact, and a meta title of "Artifact"
-    // (the "copied filename" bug this function exists to avoid) — both must be skipped.
-    expect(deriveArtifactTitle('export function Artifact() {}', 'Artifact', 'my-mined-id')).toBe('My Mined Id');
-    expect(deriveArtifactTitle('no exports here', 'artifact', 'my-mined-id-2')).toBe('My Mined Id 2');
-  });
-});
-
-describe('parseMineReport', () => {
-  const report: MineReport = { candidates: 2, passed: [], rejected: [] };
-
-  it('parses clean JSON stdout', () => {
-    expect(parseMineReport(JSON.stringify(report))).toEqual(report);
-  });
-
-  it('extracts JSON from stdout with noise around it (e.g. a wrapping pnpm exec banner)', () => {
-    const noisy = `Executing via pnpm...\n${JSON.stringify(report)}\n`;
-    expect(parseMineReport(noisy)).toEqual(report);
-  });
-
-  it('throws with a stderr tail when nothing parseable is present', () => {
-    expect(() => parseMineReport('not json at all', 'boom: module not found')).toThrow(/boom: module not found/);
-  });
-});
-
-describe('seedMinedArtifactPage', () => {
-  function fixtureArtifact(source: string, title: string, dirName = 'packages-core-src-fetch-all-pages'): PassedArtifact {
-    const dir = mkdtempSync(join(tmpdir(), 'lwh-artifact-'));
-    const named = join(dir, dirName);
-    mkdirSync(named, { recursive: true });
-    writeFileSync(join(named, 'artifact.ts'), source);
-    return { dir: named, title, source: { repo: '/repo', commit: 'abc123', path: 'src/fetch.ts' } };
-  }
-
-  it('writes a stub page via lw.call(write_page) with a derived title and source citation', async () => {
-    const artifact = fixtureArtifact('export function fetchAllPages(url) { return []; }', 'Fetch All Pages Ts');
-    const writes: any[] = [];
-    const lw = fakeLw(writes);
-    const result = await seedMinedArtifactPage(lw, artifact, new Set());
-
-    expect(result).toEqual({ slug: 'packages-core-src-fetch-all-pages', seeded: true, title: 'Fetch All Pages' });
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({
-      slug: 'packages-core-src-fetch-all-pages',
-      title: 'Fetch All Pages',
-      status: 'stub',
-      domain: 'programming',
-    });
-    expect(writes[0].sources).toContain('/repo@abc123:src/fetch.ts');
-    expect(writes[0].body).toContain('src/fetch.ts');
-    // The tutor reads this page freeform to author a code_exercise block's `pattern` field —
-    // this line gives it the exact, un-paraphrasable slug to copy (final integration, docs/
-    // superpowers/plans/2026-07-21-coding-stage.md contract point 4).
-    expect(writes[0].body).toContain('pattern: packages-core-src-fetch-all-pages');
-  });
-
-  it('is idempotent — skips a slug already in existingSlugs, never calls write_page', async () => {
-    const artifact = fixtureArtifact('export function x() {}', 'X', 'already-seeded-id');
-    const writes: any[] = [];
-    const lw = fakeLw(writes);
-    const result = await seedMinedArtifactPage(lw, artifact, new Set(['already-seeded-id']));
-
-    expect(result).toEqual({ slug: 'already-seeded-id', seeded: false, title: 'X' });
-    expect(writes).toHaveLength(0);
-  });
-});
-
 describe('ingestRepo orchestration (local path source)', () => {
   function repoFixture(opts: { docs?: boolean } = {}): string {
     const repo = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-'));
@@ -196,33 +114,20 @@ describe('ingestRepo orchestration (local path source)', () => {
     return repo;
   }
 
-  function passedArtifactFixture(dirName: string, source = 'export function pick(x) { return x; }'): PassedArtifact {
-    const outer = mkdtempSync(join(tmpdir(), 'lwh-mined-'));
-    const dir = join(outer, dirName);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'artifact.ts'), source);
-    return { dir, title: 'Pick', source: { repo: '/repo', commit: 'deadbeef', path: 'src/pick.ts' } };
-  }
-
-  it('runs docs pass + mining pass, seeds pages, and completes with a pages/exercises summary', async () => {
+  it('runs docs pass + mining pass and completes with a docs/exercises summary', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
     const repo = repoFixture();
     const cfg = cfgFor(vault);
 
-    const minerCalls: { repoPath: string; outDir: string }[] = [];
-    const report: MineReport = {
-      candidates: 1,
-      passed: [passedArtifactFixture('mined-pick')],
-      rejected: [],
-    };
-    const restartCalls: string[] = [];
+    const minerCalls: { repoName: string; repoPath: string }[] = [];
     const writes: any[] = [];
     const lw = fakeLw(writes);
 
     const result = ingestRepo(lw, cfg, repo, {
-      miner: async (repoPath, outDir) => { minerCalls.push({ repoPath, outDir }); return report; },
-      restartSidecar: async () => { restartCalls.push('restarted'); },
-      pingGap: async () => true,
+      builtinMiner: async (repoName, repoPath) => {
+        minerCalls.push({ repoName, repoPath });
+        return { candidates: 3, qualified: 1, pending: ['widgets-pick'], rejected: [] };
+      },
     });
 
     expect(result).toEqual({ name: expect.any(String), ingesting: true });
@@ -230,8 +135,9 @@ describe('ingestRepo orchestration (local path source)', () => {
 
     await until(() => readQueue(vault).find((e) => e.book === placeholderBook && e.status === 'done'));
     const entry = readQueue(vault).find((e) => e.book === placeholderBook && e.mode === 'repo')!;
-    expect(entry.phase).toBe('pages: 1 queued, exercises: 1');
     expect(entry.status).toBe('done');
+    expect(entry.phase).toContain('docs: 1 queued');
+    expect(entry.phase).toContain('1 exercise waiting for your approval in the Library');
 
     // docs pass queued exactly one normal pending chapter (README's single H1-split section).
     const docEntries = readQueue(vault).filter((e) => e.book === placeholderBook && e.mode !== 'repo');
@@ -239,19 +145,9 @@ describe('ingestRepo orchestration (local path source)', () => {
     expect(docEntries[0].status).toBe('pending');
     expect(docEntries[0].sourceUrl).toBe(`${repo} — README.md`);
 
-    // mining pass ran with a FLAT --out dir under vault/.harness/mined.
+    // the mining pass ran against the resolved repo checkout, in-process — no external CLI.
     expect(minerCalls).toHaveLength(1);
     expect(minerCalls[0].repoPath).toBe(repo);
-    expect(minerCalls[0].outDir).toBe(join(vault, '.harness', 'mined'));
-
-    // seeding happened, with the derived (exported-function) title, not the meta "Pick" title verbatim
-    // truncated — here the export name IS "pick", so humanized -> "Pick", matching meta anyway.
-    expect(writes).toHaveLength(1);
-    expect(writes[0].slug).toBe('mined-pick');
-    expect(writes[0].title).toBe('Pick');
-
-    // sidecar restarted + polled since >=1 artifact passed.
-    expect(restartCalls).toEqual(['restarted']);
   });
 
   it('flows through discoverable phase text: cloning is skipped for a local path, straight to docs/mining', async () => {
@@ -261,81 +157,63 @@ describe('ingestRepo orchestration (local path source)', () => {
     const writes: any[] = [];
     const lw = fakeLw(writes);
 
-    const result = ingestRepo(lw, cfg, repo, {
-      miner: async () => ({ candidates: 0, passed: [], rejected: [] }),
-      restartSidecar: async () => { throw new Error('must not be called — nothing passed'); },
-    });
+    const result = ingestRepo(lw, cfg, repo, { builtinMiner: noopMiner });
 
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
     const entry = readQueue(vault).find((e) => e.book === result.name)!;
-    expect(entry.phase).toBe('pages: 0 queued, exercises: 0');
+    // The FINAL phase text comes from runBuiltinPass's finish() call, not the intermediate
+    // "no markdown files found" phase — that one is overwritten once mining completes.
+    expect(entry.phase).toBe('docs: 0 queued — no exercises authored (0/0 candidate functions qualified)');
 
     const docEntries = readQueue(vault).filter((e) => e.book === result.name && e.mode !== 'repo');
     expect(docEntries).toHaveLength(0); // zero markdown files is fine, not an error
   });
 
-  it('an external miner failure FALLS BACK to the built-in pass, naming the failure, never touching the sidecar', async () => {
-    // The 'mining failed: spawn npm ENOENT' dead end: a the-gap checkout exists but its toolchain
-    // is broken (the packaged app's normal state). The ingest must still mine — via the built-in
-    // pass — and the ledger must still say the external CLI died.
+  it('mining authoring failure still reports done — the docs pass already succeeded', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
-    const repo = repoFixture();
+    const repo = repoFixture({ docs: false });
     const cfg = cfgFor(vault);
-    let restarted = false;
-    let builtinRan = false;
 
     const result = ingestRepo(fakeLw(), cfg, repo, {
-      miner: async () => { throw new Error('miner exploded: no module foo'); },
+      builtinMiner: async () => { throw new Error('model unreachable'); },
+    });
+
+    await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
+    const entry = readQueue(vault).find((e) => e.book === result.name)!;
+    expect(entry.status).toBe('done');
+    expect(entry.phase).toContain('exercise authoring failed: model unreachable');
+  });
+
+  // Pins the real production incident: ingestRepo.ts used to pick its miner with
+  // `deps.miner !== undefined || existsSync(THE_GAP_ROOT)`, where THE_GAP_ROOT defaulted to
+  // ~/Dev/personal/the-gap — an unrelated directory in the developer's home folder. On a machine
+  // that happened to have that checkout, a real ingest took the external CLI path and mined ZERO
+  // artifacts, while the built-in miner found 932 qualifying candidates in the identical clone.
+  // The outcome must never again depend on what else exists on disk — mining always runs the
+  // built-in pass now, so a the-gap-shaped directory sitting right next to the repo changes
+  // nothing.
+  it('mines through the built-in pass even when a the-gap-shaped directory exists on disk', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'lwh-fake-home-'));
+    const theGapLookalike = join(home, 'Dev', 'personal', 'the-gap');
+    mkdirSync(theGapLookalike, { recursive: true });
+    writeFileSync(join(theGapLookalike, 'package.json'), '{"name":"@the-gap/miner"}');
+
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
+    const repo = repoFixture({ docs: false });
+    const cfg = cfgFor(vault);
+
+    let builtinRan = false;
+    const result = ingestRepo(fakeLw(), cfg, repo, {
       builtinMiner: async () => {
         builtinRan = true;
-        return { candidates: 2, qualified: 1, pending: ['x-clamp'], rejected: [] };
+        return { candidates: 5, qualified: 2, pending: ['a', 'b'], rejected: [] };
       },
-      restartSidecar: async () => { restarted = true; },
     });
 
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
     const entry = readQueue(vault).find((e) => e.book === result.name)!;
     expect(builtinRan).toBe(true);
-    expect(entry.status).toBe('done');
-    expect(entry.phase).toMatch(/external miner failed \(miner exploded: no module foo\)/);
-    expect(entry.phase).toMatch(/waiting for your approval/);
-    expect(restarted).toBe(false);
-  });
-
-  it('warns (but still finishes done) when the sidecar does not come back up in time', async () => {
-    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
-    const repo = repoFixture({ docs: false });
-    const cfg = cfgFor(vault);
-    const writes: any[] = [];
-
-    const result = ingestRepo(fakeLw(writes), cfg, repo, {
-      miner: async () => ({ candidates: 1, passed: [passedArtifactFixture('warn-artifact')], rejected: [] }),
-      restartSidecar: async () => {},
-      pingGap: async () => false, // never comes up
-      gapRestartTimeoutMs: 1, // tiny timeout — the poll gives up on its very first failed ping
-    });
-
-    await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
-    const entry = readQueue(vault).find((e) => e.book === result.name)!;
-    expect(entry.status).toBe('done'); // warning is not fatal
-    expect(entry.phase).toMatch(/did not come back up/);
-  });
-
-  it('does not restart the sidecar when nothing passed the gauntlet', async () => {
-    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
-    const repo = repoFixture({ docs: false });
-    const cfg = cfgFor(vault);
-    let restartCalled = false;
-
-    const result = ingestRepo(fakeLw(), cfg, repo, {
-      miner: async () => ({ candidates: 3, passed: [], rejected: [{ path: 'a.ts', gate: 'gate1', reason: 'nope' }] }),
-      restartSidecar: async () => { restartCalled = true; },
-    });
-
-    await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
-    expect(restartCalled).toBe(false);
-    const entry = readQueue(vault).find((e) => e.book === result.name)!;
-    expect(entry.phase).toBe('pages: 0 queued, exercises: 0');
+    expect(entry.phase).toContain('2 exercises waiting for your approval in the Library');
   });
 
   it('a nonexistent local path 400s synchronously (throws before any ledger write)', () => {
@@ -383,11 +261,7 @@ describe('ingestRepo — link-directory explosion', () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-vault-'));
     const repo = awesomeRepoFixture();
 
-    const result = ingestRepo(fakeLw(), cfgFor(vault), repo, {
-      miner: async () => ({ candidates: 0, passed: [], rejected: [] }),
-      restartSidecar: async () => {},
-      pingGap: async () => true,
-    });
+    const result = ingestRepo(fakeLw(), cfgFor(vault), repo, { builtinMiner: noopMiner });
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
 
     // No chapter entries — the directory was exploded, not compiled into TOC pages.
@@ -415,11 +289,7 @@ describe('ingestRepo — link-directory explosion', () => {
     const repo = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-'));
     writeFileSync(join(repo, 'README.md'), '# My Repo\nSome intro text about the project.');
 
-    const result = ingestRepo(fakeLw(), cfgFor(vault), repo, {
-      miner: async () => ({ candidates: 0, passed: [], rejected: [] }),
-      restartSidecar: async () => {},
-      pingGap: async () => true,
-    });
+    const result = ingestRepo(fakeLw(), cfgFor(vault), repo, { builtinMiner: noopMiner });
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
 
     expect(readQueue(vault).filter((e) => e.book === result.name && e.mode !== 'repo')).toHaveLength(1);
@@ -439,7 +309,7 @@ describe('ingestRepo orchestration (git URL source, clone/reingest dispatch)', (
         mkdirSync(destDir, { recursive: true });
       },
       reingest: async () => { throw new Error('must not reingest — no prior checkout'); },
-      miner: async () => ({ candidates: 0, passed: [], rejected: [] }),
+      builtinMiner: noopMiner,
     });
 
     expect(result.name).toBe('widgets');
@@ -459,7 +329,7 @@ describe('ingestRepo orchestration (git URL source, clone/reingest dispatch)', (
     const result = ingestRepo(fakeLw(), cfg, 'https://example.com/org/widgets.git', {
       clone: async () => { throw new Error('must not clone — a checkout already exists'); },
       reingest: async () => { reingestCalled = true; },
-      miner: async () => ({ candidates: 0, passed: [], rejected: [] }),
+      builtinMiner: noopMiner,
     });
 
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
@@ -469,10 +339,9 @@ describe('ingestRepo orchestration (git URL source, clone/reingest dispatch)', (
 
 describe('runCommand', () => {
   it('captures the whole of a large stdout, not a truncated tail', async () => {
-    // The miner's JSON report arrives on stdout and parseMineReport must see all of it. Resolving on
-    // 'exit' rather than 'close' truncated the capture once output passed the OS pipe buffer (~64KB):
-    // the process had ended but its stdout pipe still held unread bytes. 300KB is well past that, so
-    // this would come back short under the old event; on 'close' it is always complete.
+    // Re-ingest's `git fetch`/`reset` and clone's `git clone` both run through this same spawn
+    // helper — a large-output regression here would silently corrupt a real re-ingest's git
+    // plumbing output just as it once corrupted the (now-removed) external miner's JSON report.
     const N = 300_000;
     const { stdout } = await runCommand(process.execPath, ['-e', `process.stdout.write("x".repeat(${N}))`]);
     expect(stdout.length).toBe(N);

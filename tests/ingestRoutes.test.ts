@@ -283,7 +283,7 @@ describe('POST /api/ingest/repo (B2c)', () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-repo-'));
     const repoDir = mkdtempSync(join(tmpdir(), 'lwh-ingest-route-repo-src-'));
     const app = buildIngestRoutes(fakeLw(), cfgFor(vault), {
-      ingestRepoDeps: { miner: async () => ({ candidates: 0, passed: [], rejected: [] }) },
+      ingestRepoDeps: { builtinMiner: async () => ({ candidates: 0, qualified: 0, pending: [], rejected: [] }) },
     });
     const res = await app.request('/api/ingest/repo', {
       method: 'POST', headers: { 'content-type': 'application/json' },
