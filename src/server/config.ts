@@ -24,6 +24,10 @@ const roleSchema = z.object({
   model: z.string(),
   effort: z.enum(['low', 'medium', 'high']).optional(),
   sampler: samplerSchema,
+  // Both serve the small-model pipeline (spec 2026-07-31 §6): contextTokens caps what one call
+  // may carry (budgetChars), concurrency caps the parallel map — VRAM respect, not a speed knob.
+  contextTokens: z.number().int().positive().optional(),
+  concurrency: z.number().int().positive().optional(),
 });
 
 // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the teaching
