@@ -11,7 +11,8 @@ import {
 } from './convert.js';
 import { extractProblems, saveProblems } from './courseBank.js';
 import { analyzeLinkList, saveLinkDirectory } from './linkList.js';
-import { generateStructured, runLoop, LlmHttpError, type ChatModel, type LoopTool } from './llm/index.js';
+import { generateStructured, runLoop, type ChatModel, type LoopTool } from './llm/index.js';
+import { isTransportFailure } from './pipeline.js';
 import { z } from 'zod';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
@@ -543,13 +544,6 @@ export function buildCompilePrompt(
 // Material always lands in the vault; only an unreachable endpoint still fails the entry — that
 // must stay an error so the queue retries when the endpoint recovers, instead of consuming the
 // entry with undistilled content during an outage.
-
-/** Endpoint-unreachable/erroring — not model-too-weak. LlmHttpError covers every non-2xx the
- * adapters surface (post-retry); undici's "fetch failed" TypeError is the connection-level face. */
-function isTransportFailure(e: unknown): boolean {
-  if (e instanceof LlmHttpError) return true;
-  return e instanceof TypeError && /fetch failed/i.test(e.message);
-}
 
 const distilledPageSchema = z.object({
   title: z.string().min(1),
