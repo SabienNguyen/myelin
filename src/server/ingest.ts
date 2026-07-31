@@ -12,7 +12,7 @@ import {
 import { extractProblems, saveProblems } from './courseBank.js';
 import { analyzeLinkList, saveLinkDirectory } from './linkList.js';
 import { generateStructured, runLoop, type ChatModel, type LoopTool } from './llm/index.js';
-import { isTransportFailure } from './pipeline.js';
+import { budgetChars, isTransportFailure, mapPieces } from './pipeline.js';
 import { z } from 'zod';
 import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
@@ -539,11 +539,16 @@ export function buildCompilePrompt(
 // cannot do (it narrates instead of calling tools; observed live: every chapter erroring with
 // "no write_page calls — try a stronger compile model"). Same medicine as rails mode: when the
 // loop comes back empty, the HARNESS does the orchestration and the model does one narrow
-// structured generation (title + distilled body, constrained decoding + one retry); if even that
-// fails, the deterministic floor writes the source text itself as a draft page, honestly labeled.
-// Material always lands in the vault; only an unreachable endpoint still fails the entry — that
-// must stay an error so the queue retries when the endpoint recovers, instead of consuming the
+// structured generation per part (title + distilled body, constrained decoding + one retry); if
+// even that fails, the deterministic floor writes the source text itself as a draft page, honestly
+// labeled. Material always lands in the vault; only an unreachable endpoint still fails the entry —
+// that must stay an error so the queue retries when the endpoint recovers, instead of consuming the
 // entry with undistilled content during an outage.
+//
+// Once the FIRST part proves the model can't drive tools, compileOne stops trying the agentic loop
+// on the parts after it and hands them all to pipeline.ts's mapPieces, which runs the ladder above
+// (attempt, rejection-retry, floor) on `concurrency` parts at once instead of one slow agentic
+// round-trip at a time. distillPart is the "attempt" half, writeVerbatim the "floor" half.
 
 const distilledPageSchema = z.object({
   title: z.string().min(1),
@@ -576,55 +581,49 @@ function freshSlug(title: string, taken: Set<string>): string {
 }
 
 /**
- * The fallback ladder for one part: structured distillation (one rejection-retry, the rails
- * recipe) then the verbatim floor. Throws ONLY transport failures and write_page failures —
- * model weakness never escapes this function.
+ * One structured-distillation attempt for one part: title + body, constrained decoding (or a
+ * forced tool call on adapters without response-format support). `mapPieces` owns the ladder now
+ * (one attempt, one rejection-retry, then the floor) — this function makes exactly one call and
+ * lets any failure (transport or a schema-rejecting model) propagate, so it must never be given
+ * its own internal retry or the engine's retry count would silently double.
  */
-async function weakCompileFallback(
+async function distillPart(
   model: ChatModel, cfg: HarnessConfig,
-  book: string, chapterTitle: string, partLabel: string, chunk: string,
+  book: string, chapterTitle: string, partLabel: string, chunk: string, rejection: string | undefined,
   existingSlugs: Set<string>,
   writePage: (args: unknown) => Promise<unknown>,
-): Promise<'distilled' | 'verbatim'> {
+): Promise<void> {
   const prompt = buildDistillPrompt(book, chapterTitle, partLabel, chunk);
-  const distillOnce = async (rejection?: string) => {
-    const { object, usage } = await generateStructured({
-      model,
-      prompt: rejection
-        ? `${prompt}\n\nYour previous attempt was rejected: ${rejection}. Return a corrected page.`
-        : prompt,
-      schema: distilledPageSchema,
-      schemaName: 'compiled_page',
-    });
-    recordUsage(cfg.vault, { role: 'compile', model: cfg.models?.compile?.model ?? 'unknown', usage });
-    return object;
-  };
-  const write = (title: string, body: string) => writePage({
-    slug: freshSlug(title, existingSlugs), title, body, status: 'draft',
+  const { object, usage } = await generateStructured({
+    model,
+    prompt: rejection
+      ? `${prompt}\n\nYour previous attempt was rejected: ${rejection}. Return a corrected page.`
+      : prompt,
+    schema: distilledPageSchema,
+    schemaName: 'compiled_page',
   });
+  recordUsage(cfg.vault, { role: 'compile', model: cfg.models?.compile?.model ?? 'unknown', usage });
+  await writePage({ slug: freshSlug(object.title, existingSlugs), title: object.title, body: object.body, status: 'draft' });
+}
 
-  try {
-    const page = await distillOnce();
-    await write(page.title, page.body);
-    return 'distilled';
-  } catch (first) {
-    if (isTransportFailure(first)) throw first;
-    try {
-      const page = await distillOnce(first instanceof Error ? first.message : String(first));
-      await write(page.title, page.body);
-      return 'distilled';
-    } catch (second) {
-      if (isTransportFailure(second)) throw second;
-      // The floor: the source itself becomes the page — honest, useful, and replaceable. A
-      // stronger compile model recompiling the chapter writes real distillations alongside.
-      await write(
-        `${chapterTitle}${partLabel}`,
-        '> Compiled verbatim: the compile model could not distill this part, so the source text '
-        + 'below is the page. Recompile with a stronger model to replace it.\n\n' + chunk,
-      );
-      return 'verbatim';
-    }
-  }
+/**
+ * The verbatim floor for one part: the source text itself becomes the page — honest, useful, and
+ * replaceable. A stronger compile model recompiling the chapter writes a real distillation
+ * alongside it. `cls`/`reason` (why distillation gave up) are threaded through for the ledger note
+ * the caller builds from `mapPieces`'s receipts; the page body itself stays a fixed, calm label.
+ */
+async function writeVerbatim(
+  chapterTitle: string, partLabel: string, chunk: string,
+  existingSlugs: Set<string>,
+  writePage: (args: unknown) => Promise<unknown>,
+): Promise<void> {
+  await writePage({
+    slug: freshSlug(`${chapterTitle}${partLabel}`, existingSlugs),
+    title: `${chapterTitle}${partLabel}`,
+    body: '> Compiled verbatim: the compile model could not distill this part, so the source text '
+      + 'below is the page. Recompile with a stronger model to replace it.\n\n' + chunk,
+    status: 'draft',
+  });
 }
 
 /**
@@ -659,7 +658,11 @@ export async function compileOne(
   try {
     const chapterMarkdown = readFileSync(join(cfg.vault, entry.chapter), 'utf8');
     const chapterN = Number(entry.chapter.match(/ch-(\d+)-/)?.[1] ?? 1);
-    const chunks = chunkChapter(chapterMarkdown, chunkChars);
+    // The configured compile model's own context window caps a part further than the caller's
+    // chunkChars might — whichever is tighter wins, so a small-context local model still gets
+    // parts it can actually fit (see pipeline.ts's budgetChars doc comment for the char/token math).
+    const budget = Math.min(chunkChars, budgetChars(cfg.models?.compile?.contextTokens));
+    const chunks = chunkChapter(chapterMarkdown, budget);
 
     // Citation is a MECHANICAL guarantee, not a prompt hope: every write_page
     // during this compile gets the canonical source merged into its sources array, whether or not
@@ -679,10 +682,10 @@ export async function compileOne(
     // engram stores names verbatim, and inventing an empty byline is not an improvement.
     const recordedAuthors = sourceFor(cfg.vault, entry.book)?.authors ?? [];
     // The spine rides this wrapper too, and for the same reason the citation does: it is the one
-    // place BOTH compile routes go through — the agentic loop's write_page and weakCompileFallback's
-    // harness-driven one — so neither can produce a page the chapter's order forgets. Call order is
-    // the page order; a slug written twice in one chapter (the model updating its own page) stays at
-    // its first position rather than becoming a second stop.
+    // place BOTH compile routes go through — the agentic loop's write_page and distillPart/
+    // writeVerbatim's harness-driven one — so neither can produce a page the chapter's order
+    // forgets. Call order is the page order; a slug written twice in one chapter (the model
+    // updating its own page) stays at its first position rather than becoming a second stop.
     const withCitation = (tools: LoopTool[]): LoopTool[] =>
       tools.map((t) => (t.name !== 'write_page' || !t.execute ? t : {
         ...t,
@@ -701,35 +704,21 @@ export async function compileOne(
     let wroteAny = false;
     const partErrors: string[] = [];
     const partNotes: string[] = [];
-    for (let i = 0; i < chunks.length; i++) {
-      // Refresh slugs per part: part 2's prereq/link candidates include part 1's new pages.
+    // Stays true until some part proves the model can't drive write_page agentically. From that
+    // part on, every remaining part (including the one that just proved it) skips the doomed
+    // agentic round-trip: a model that narrated instead of calling tools on part 1 of a 32B-token
+    // physics chapter will do the same on parts 2 through 40, one slow agentic turn at a time, for
+    // no benefit over going straight to harness-driven distillation.
+    let agenticAlive = true;
+    let firstFallbackPart = chunks.length; // unreached unless the loop below sets it
+    for (let i = 0; i < chunks.length && agenticAlive; i++) {
+      // Refresh slugs per part: part 2's prereq/link candidates include part 1's new pages. Only
+      // meaningful for the agentic path — distillation below never links, so it snapshots once.
       const slugs = await lw.listSlugs();
       const partLabel = chunks.length > 1 ? ` (part ${i + 1} of ${chunks.length})` : '';
       const prompt = buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel);
-
       const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
-      // The citation-wrapped execute, so fallback pages get the same mechanical source guarantee
-      // (and video-timestamp linkify) every agentic write_page gets.
-      const writePage = tools.find((t) => t.name === 'write_page')?.execute;
-      // Weak-model fallback for THIS part: harness-driven distillation, then the verbatim floor.
-      // Only transport failures (endpoint unreachable) surface as part errors — a reachable model
-      // that is merely too weak always ends in a written page.
-      const fallback = async (agenticFailure?: string) => {
-        if (!writePage) {
-          partErrors.push(`part ${i + 1}: ${agenticFailure ?? 'no write_page calls'}`);
-          return;
-        }
-        try {
-          const how = await weakCompileFallback(
-            model, cfg, entry.book, entry.title, partLabel, chunks[i], new Set(slugs), writePage,
-          );
-          wroteAny = true;
-          partNotes.push(`part ${i + 1}: ${how} fallback${agenticFailure ? ` after: ${agenticFailure}` : ''}`);
-        } catch (fbErr) {
-          const msg = fbErr instanceof Error ? fbErr.message : String(fbErr);
-          partErrors.push(`part ${i + 1}: ${agenticFailure ? `${agenticFailure}; ` : ''}fallback: ${msg.slice(0, 120)}`);
-        }
-      };
+
       try {
         const result = await runLoop({
           model,
@@ -745,14 +734,71 @@ export async function compileOne(
         // of calling tools. Gate on THIS run's own steps (per-entry AND per-part accurate under
         // concurrency; a global vault-slug diff would misattribute other workers' pages).
         const wrotePage = result.steps.some((step) => step.toolCalls.some((tc) => tc.toolName === 'write_page'));
-        if (wrotePage) wroteAny = true;
-        else await fallback();
+        if (wrotePage) {
+          wroteAny = true;
+        } else {
+          agenticAlive = false;
+          firstFallbackPart = i;
+        }
       } catch (partErr: any) {
         const msg = (partErr instanceof Error ? partErr.message : String(partErr)).slice(0, 120);
-        // A transport failure fails the part outright — the fallback would hit the same dead
+        // A transport failure fails the part outright — distillation would hit the same dead
         // endpoint; anything else (a weak model mangling the agentic turn) gets the ladder.
-        if (isTransportFailure(partErr)) partErrors.push(`part ${i + 1}: ${msg}`);
-        else await fallback(msg);
+        if (isTransportFailure(partErr)) {
+          partErrors.push(`part ${i + 1}: ${msg}`);
+        } else {
+          agenticAlive = false;
+          firstFallbackPart = i;
+        }
+      }
+    }
+
+    if (!agenticAlive) {
+      // Harness-driven distillation for parts firstFallbackPart..end, `concurrency` at a time. One
+      // tools() fetch and one slug snapshot for the whole batch (not per-part, as the agentic loop
+      // needs): distillation never links pages together, so there is nothing later parts need to
+      // see that earlier ones just wrote.
+      const slugs = await lw.listSlugs();
+      const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
+      // The citation-wrapped execute, so distilled/verbatim pages get the same mechanical source
+      // guarantee (and video-timestamp linkify) every agentic write_page gets.
+      const writePage = tools.find((t) => t.name === 'write_page')?.execute;
+      if (!writePage) {
+        for (let i = firstFallbackPart; i < chunks.length; i++) {
+          partErrors.push(`part ${i + 1}: no write_page tool available`);
+        }
+      } else {
+        const existingSlugs = new Set(slugs);
+        const rest = chunks.slice(firstFallbackPart);
+        // NOTE (deferred, see task-4-context.md): mapPieces doesn't cancel sibling workers on a
+        // transport throw. A single transient 503 mid-batch can leave some pieces already written
+        // while this entry gets marked 'error' and requeued — the retry then redistills those same
+        // pieces under fresh freshSlug '-2' suffixes. Out of scope here; noted for the eventual fix.
+        const { receipts } = await mapPieces({
+          pieces: rest,
+          budget,
+          concurrency: cfg.models?.compile?.concurrency ?? 4,
+          attempt: (piece, rejection) => {
+            // rest's chunks come from distinct sections of the chapter, so matching on content to
+            // recover this piece's position (for the "(part N of M)" label) is safe in practice;
+            // were two chunks ever byte-identical, the label on one would misname its part number
+            // — cosmetic only, since `piece` (not the recovered index) is what actually gets
+            // distilled and written.
+            const idx = firstFallbackPart + rest.indexOf(piece);
+            const partLabel = chunks.length > 1 ? ` (part ${idx + 1} of ${chunks.length})` : '';
+            return distillPart(model, cfg, entry.book, entry.title, partLabel, piece, rejection, existingSlugs, writePage);
+          },
+          floor: (piece, _cls, _reason) => {
+            const idx = firstFallbackPart + rest.indexOf(piece);
+            const partLabel = chunks.length > 1 ? ` (part ${idx + 1} of ${chunks.length})` : '';
+            return writeVerbatim(entry.title, partLabel, piece, existingSlugs, writePage);
+          },
+        });
+        receipts.forEach((r, k) => {
+          const n = firstFallbackPart + k + 1;
+          wroteAny = true;
+          partNotes.push(r.outcome === 'ok' ? `part ${n}: distilled` : `part ${n}: verbatim (${r.class}: ${r.reason})`);
+        });
       }
     }
 

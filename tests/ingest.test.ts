@@ -351,6 +351,63 @@ describe('compileNext', () => {
     expect(page).toContain('Verbatim Floor Book'); // citation still mechanical
   }, 30_000);
 
+  it('a weak model distills the remaining parts in PARALLEL once part 1 proves it cannot drive tools', async () => {
+    // A second H1 chapter (trivial, untouched by this test) so splitChapters treats "Cell Biology"
+    // as ONE chapter with three H2 subsections, rather than splitting on H2 into three chapters —
+    // chunkChapter, not ingestBook, is what must produce the three parts here.
+    const THREE_PART_CHAPTER = [
+      '# Cell Biology',
+      '## Mitochondria',
+      'A'.repeat(200),
+      '## Ribosomes',
+      'B'.repeat(200),
+      '## Golgi Apparatus',
+      'C'.repeat(200),
+      '# Appendix',
+      'Nothing under compile test here.',
+    ].join('\n');
+    await ingestBook(cfg, '/uploads/Parallel Distill Book.pdf', {
+      converter: async () => ({ markdown: THREE_PART_CHAPTER }),
+    });
+
+    // One fake plays both halves of the ladder, same trick as the single-part fallback tests: text
+    // (no tool calls) for the agentic pass, forced-schema JSON for every distillation call. The
+    // reply function keys off prompt content, not call order, precisely because this task's point
+    // is that the distillation calls no longer arrive in a fixed sequential order. It also compiles
+    // the trivial Appendix chapter (so this shared vault's queue never leaks a pending entry to a
+    // later test) — kept out of the counts below by filtering on "Cell Biology".
+    let distillCalls = 0;
+    const { model, prompts } = textModel((prompt) => {
+      if (prompt.includes('Distill this chapter part')) {
+        if (!prompt.includes('Cell Biology')) return JSON.stringify({ title: 'Appendix Distilled', body: 'Nothing under compile test here, distilled.' });
+        distillCalls++;
+        return JSON.stringify({
+          title: `Distilled Part ${distillCalls}`,
+          body: 'A page body of enough words to be a page, distilled from the source chapter part.',
+        });
+      }
+      return 'I cannot call tools, sorry — here is a summary instead.';
+    });
+
+    const localCfg: HarnessConfig = { ...cfg, models: { compile: { concurrency: 3 } } } as HarnessConfig;
+    const summary = await compileNext(lw, localCfg, 2, { model, chunkChars: 320 });
+    expect(summary).toEqual({ compiled: 2, failed: 0 });
+
+    // Exactly one agentic attempt on "Cell Biology": part 1 tried and fell back; parts 2 and 3
+    // skipped the doomed agentic round-trip entirely instead of narrating twice more.
+    const agenticPrompts = prompts.filter((p) => p.includes('You are compiling one textbook chapter') && p.includes('Cell Biology'));
+    expect(agenticPrompts).toHaveLength(1);
+
+    // All three parts distilled — including part 1, whose agentic attempt produced no page and so
+    // is redistilled by the harness alongside parts 2 and 3, not left half-handled.
+    expect(distillCalls).toBe(3);
+    const slugs = await lw.listSlugs();
+    expect(slugs.filter((s) => s.startsWith('distilled-part-'))).toHaveLength(3);
+
+    const entry = readQueue(vault).find((e) => e.book === 'Parallel Distill Book');
+    expect(entry?.status).toBe('done');
+  }, 30_000);
+
   describe('concurrency', () => {
     /** A model whose response doesn't depend on call order — it looks at whether a tool result is
      * already in the transcript to tell "first step" (call write_page) from "second step" (stop),
