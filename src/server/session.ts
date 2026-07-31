@@ -163,17 +163,31 @@ export function availableBlocks(): BlockToolName[] {
 /** The turn's block toolset under structural rule 1a: a pure grading turn withholds every block
  *  except open_source (navigation is not staging work) — two live probes showed prompt wording
  *  alone does not stop the model staging a block over its own next-step offer. Exported for tests. */
-export function turnBlockTools(gradingOnly: boolean): LoopTool[] {
-  if (!gradingOnly) return blockTools();
+export function turnBlockTools(gradingOnly: boolean, patterns: string[] = []): LoopTool[] {
+  if (!gradingOnly) return blockTools(patterns);
   const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
-  return blockTools().filter((t) => keep.has(t.name));
+  return blockTools(patterns).filter((t) => keep.has(t.name));
 }
 
 /** Frontend tools: no execute — the loop pauses on them (runLoop's external-tool halt); the
  *  browser supplies output via addToolOutput and the resubmit carries it back. */
-export function blockTools(): LoopTool[] {
+export function blockTools(patterns: string[] = []): LoopTool[] {
+  // code_exercise's `pattern` is an id from a RUNTIME list, not free text. Without the list in the
+  // description a tutor asked for "something to DO" staged a whole prose paragraph as the pattern
+  // and the block hung at input-available forever (observed on a PyTorch vault). Advertise what
+  // exists — and when nothing does, say so, so the tutor reaches for another instrument instead of
+  // inventing an id.
+  const codeExerciseHelp = patterns.length > 0
+    ? `Present a code_exercise block to the student and wait for their work. \`pattern\` MUST be one `
+      + `of these exact ids — do not invent one, and do not put a task description here: `
+      + `${patterns.join(', ')}.`
+    : 'Present a code_exercise block to the student and wait for their work. NONE AVAILABLE right '
+      + 'now: no exercises exist in this vault, so do not call this tool — use another instrument '
+      + '(writing_draft, structured_check, math_scratchpad) or generate_exercise in freeform.';
   const blocks = availableBlocks().map((name) => zodTool(name, {
-    description: `Present a ${name} block to the student and wait for their work.`,
+    description: name === 'code_exercise'
+      ? codeExerciseHelp
+      : `Present a ${name} block to the student and wait for their work.`,
     input: BLOCK_TOOLS[name].input as z.ZodTypeAny,
   }));
   // UI tools ride the same frontend transport but are navigation, not graded work — the client
@@ -735,7 +749,10 @@ export function createTutorSession(
             : '');
         const tools: LoopTool[] = [
           ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(cfg.vault),
-          ...webTools.tools, ...ingestTools, ...generateTool, ...turnBlockTools(gradingOnly),
+          ...webTools.tools, ...ingestTools, ...generateTool,
+          // Read per turn, not per boot: an exercise mined or generated mid-session becomes
+          // stageable in the very next turn.
+          ...turnBlockTools(gradingOnly, builtinPatterns(cfg.vault)),
         ];
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
