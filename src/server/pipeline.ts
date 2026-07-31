@@ -27,3 +27,53 @@ export function classifyFailure(e: unknown, promptChars: number, budget: number)
   if (promptChars > budget) return 'overflow';
   return 'weak-output';
 }
+
+export interface PieceReceipt {
+  piece: number;
+  outcome: 'ok' | 'floored';
+  reason?: string;
+  class?: PipelineFailureClass;
+}
+
+/** The ladder, per piece: one attempt, one rejection-retry (the rails recipe), then the
+ * consumer's floor with a DIAGNOSED class. Transport rejects the whole map — a dead endpoint
+ * would floor every piece into fallback content during an outage, which is exactly the
+ * "consumed the entry with undistilled content" bug the old compile ladder guarded against. */
+export async function mapPieces<T>(opts: {
+  pieces: string[];
+  budget: number;
+  concurrency?: number;
+  attempt: (piece: string, rejection?: string) => Promise<T>;
+  floor: (piece: string, cls: PipelineFailureClass, reason: string) => Promise<T>;
+}): Promise<{ results: T[]; receipts: PieceReceipt[] }> {
+  const results: T[] = new Array(opts.pieces.length);
+  const receipts: PieceReceipt[] = new Array(opts.pieces.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= opts.pieces.length) return;
+      const piece = opts.pieces[i];
+      try {
+        results[i] = await opts.attempt(piece);
+        receipts[i] = { piece: i, outcome: 'ok' };
+      } catch (first) {
+        if (isTransportFailure(first)) throw first;
+        const firstMsg = first instanceof Error ? first.message : String(first);
+        try {
+          results[i] = await opts.attempt(piece, firstMsg);
+          receipts[i] = { piece: i, outcome: 'ok' };
+        } catch (second) {
+          if (isTransportFailure(second)) throw second;
+          const reason = (second instanceof Error ? second.message : String(second)).slice(0, 160);
+          const cls = classifyFailure(second, piece.length, opts.budget);
+          results[i] = await opts.floor(piece, cls, reason);
+          receipts[i] = { piece: i, outcome: 'floored', reason, class: cls };
+        }
+      }
+    }
+  };
+  const n = Math.max(1, Math.min(opts.concurrency ?? 4, opts.pieces.length));
+  await Promise.all(Array.from({ length: n }, worker));
+  return { results, receipts };
+}

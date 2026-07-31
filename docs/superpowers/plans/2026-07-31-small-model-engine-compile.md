@@ -58,7 +58,7 @@ describe('budgetChars', () => {
 
 describe('classifyFailure', () => {
   it('transport: LlmHttpError and undici fetch-failed', () => {
-    expect(classifyFailure(new LlmHttpError(503, 'boom', 'x'), 10, 100)).toBe('transport');
+    expect(classifyFailure(new LlmHttpError('ollama', 503, 'boom'), 10, 100)).toBe('transport');
     expect(classifyFailure(new TypeError('fetch failed'), 10, 100)).toBe('transport');
   });
   it('overflow: the prompt did not fit the budget', () => {

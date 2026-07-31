@@ -27,3 +27,58 @@ describe('classifyFailure', () => {
     expect(classifyFailure(new Error('schema rejected'), 50, 100)).toBe('weak-output');
   });
 });
+
+import { mapPieces } from '../src/server/pipeline.js';
+
+describe('mapPieces', () => {
+  it('runs pieces concurrently up to the cap, results in piece order', async () => {
+    let live = 0; let peak = 0;
+    const { results, receipts } = await mapPieces({
+      pieces: ['a', 'b', 'c', 'd', 'e'],
+      budget: 100,
+      concurrency: 2,
+      attempt: async (p) => {
+        live++; peak = Math.max(peak, live);
+        await new Promise((r) => setTimeout(r, 10));
+        live--;
+        return p.toUpperCase();
+      },
+      floor: async () => 'FLOOR',
+    });
+    expect(results).toEqual(['A', 'B', 'C', 'D', 'E']);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(receipts.every((r) => r.outcome === 'ok')).toBe(true);
+  });
+
+  it('retries once with the rejection message, then floors with a diagnosed class', async () => {
+    const attempts: (string | undefined)[] = [];
+    const { results, receipts } = await mapPieces({
+      pieces: ['x'.repeat(10)],
+      budget: 100,
+      attempt: async (_p, rejection) => { attempts.push(rejection); throw new Error('schema rejected'); },
+      floor: async (_p, cls, reason) => `floored:${cls}:${reason}`,
+    });
+    expect(attempts).toEqual([undefined, 'schema rejected']); // retry carried the why
+    expect(results[0]).toBe('floored:weak-output:schema rejected');
+    expect(receipts[0]).toMatchObject({ outcome: 'floored', class: 'weak-output' });
+  });
+
+  it('an oversize piece floors as overflow', async () => {
+    const { receipts } = await mapPieces({
+      pieces: ['y'.repeat(500)],
+      budget: 100,
+      attempt: async () => { throw new Error('cut off'); },
+      floor: async () => 'floored',
+    });
+    expect(receipts[0].class).toBe('overflow');
+  });
+
+  it('transport failure rejects the whole map — queues must retry later, not consume', async () => {
+    await expect(mapPieces({
+      pieces: ['a'],
+      budget: 100,
+      attempt: async () => { throw new TypeError('fetch failed'); },
+      floor: async () => 'never',
+    })).rejects.toThrow(/fetch failed/);
+  });
+});
