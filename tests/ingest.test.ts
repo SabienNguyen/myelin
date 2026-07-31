@@ -346,9 +346,27 @@ describe('compileNext', () => {
     expect(entry?.status).toBe('done');
     const slug = 'krebs-cycle'; // slugified chapter title — the floor names the page after the source
     const page = readFileSync(join(vault, 'pages', `${slug}.md`), 'utf8');
-    expect(page).toContain('Compiled verbatim');
+    expect(page).toContain('Compiled verbatim (weak-output)');
     expect(page).toContain('Eight steps oxidize acetyl-CoA'); // the source text IS the page
     expect(page).toContain('Verbatim Floor Book'); // citation still mechanical
+  }, 30_000);
+
+  it('a verbatim part names its diagnosed class in the page banner', async () => {
+    await ingestBook(cfg, '/uploads/Verbatim Diagnostic Book.pdf', {
+      converter: async () => ({ markdown: '# Distill Failure\nThis part always fails distillation.' }),
+    });
+    // textModel's generate() throws, so the ladder lands on the verbatim floor; text mode returns
+    // no tool calls, so the agentic loop decides weak output early and switches to harness distillation.
+    const { model } = textModel('No JSON from me, just narration.');
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    const entry = readQueue(vault).find((e) => e.book === 'Verbatim Diagnostic Book');
+    expect(entry?.status).toBe('done');
+    const slug = 'distill-failure';
+    const page = readFileSync(join(vault, 'pages', `${slug}.md`), 'utf8');
+    // Page banner should contain the diagnosed failure class.
+    expect(page).toMatch(/^> Compiled verbatim \(weak-output\):/m);
+    expect(page).toContain('This part always fails distillation'); // source text still present
   }, 30_000);
 
   it('a weak model distills the remaining parts in PARALLEL once part 1 proves it cannot drive tools', async () => {

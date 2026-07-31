@@ -616,11 +616,13 @@ async function writeVerbatim(
   chapterTitle: string, partLabel: string, chunk: string,
   existingSlugs: Set<string>,
   writePage: (args: unknown) => Promise<unknown>,
+  cls?: string, reason?: string,
 ): Promise<void> {
+  const clsLabel = cls ? ` (${cls})` : '';
   await writePage({
     slug: freshSlug(`${chapterTitle}${partLabel}`, existingSlugs),
     title: `${chapterTitle}${partLabel}`,
-    body: '> Compiled verbatim: the compile model could not distill this part, so the source text '
+    body: `> Compiled verbatim${clsLabel}: the compile model could not distill this part, so the source text `
       + 'below is the page. Recompile with a stronger model to replace it.\n\n' + chunk,
     status: 'draft',
   });
@@ -782,9 +784,9 @@ export async function compileOne(
             const partLabel = chunks.length > 1 ? ` (part ${firstFallbackPart + k + 1} of ${chunks.length})` : '';
             return distillPart(model, cfg, entry.book, entry.title, partLabel, piece, rejection, existingSlugs, writePage);
           },
-          floor: (piece, _cls, _reason, k) => {
+          floor: (piece, cls, reason, k) => {
             const partLabel = chunks.length > 1 ? ` (part ${firstFallbackPart + k + 1} of ${chunks.length})` : '';
-            return writeVerbatim(entry.title, partLabel, piece, existingSlugs, writePage);
+            return writeVerbatim(entry.title, partLabel, piece, existingSlugs, writePage, cls, reason);
           },
         });
         receipts.forEach((r, k) => {
