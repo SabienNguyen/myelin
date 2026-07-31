@@ -804,13 +804,18 @@ export async function compileOne(
       }
     }
 
-    // The MOC (Obsidian map-of-content): the chapter's one hub, linking every page it produced in
-    // reading order. Deterministic list + one small overview call with an empty-string floor — the
-    // hub must exist even when the model can't write prose. Single-page chapters skip it: a map of
-    // one place is noise. Re-fetches its own write_page (rather than reusing either branch's local
-    // `writePage`, which is agentic-loop- or distillation-scoped and may not exist in the other
+    // The MOC (Obsidian map-of-content): the WEAK-MODEL path's hub, linking every page the harness-
+    // driven distillation ladder produced, in reading order. `!agenticAlive` is the same flag that
+    // routed this chapter through mapPieces above — a hub compensates for a model that couldn't
+    // write connected prose or link pages itself, so a strong model driving write_page directly
+    // gets none of this: no overview call, no hub page, no `deepens` edges, no extra spine stop
+    // (spec §2's "the agentic path is untouched" promise). Deterministic list + one small overview
+    // call with an empty-string floor — the hub must exist even when the model can't write prose.
+    // Single-page chapters skip it: a map of one place is noise. Re-fetches its own write_page
+    // (rather than reusing either branch's local `writePage`, which is agentic-loop- or
+    // distillation-scoped and may not exist in the other
     // path) so the MOC always goes through the same citation wrapper the parts did.
-    if (writtenSlugs.length > 1) {
+    if (!agenticAlive && writtenSlugs.length > 1) {
       const mocSlugsBefore = await lw.listSlugs();
       const mocWritePage = withCitation(guardTools(await lw.tools(), cfg.student, mocSlugsBefore))
         .find((t) => t.name === 'write_page')?.execute;

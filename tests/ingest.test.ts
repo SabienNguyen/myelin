@@ -532,6 +532,36 @@ describe('compileNext', () => {
     expect(existsSync(join(vault, 'pages', 'single-page-book-ch-1-moc.md'))).toBe(false);
   }, 30_000);
 
+  it('a multi-page chapter compiled agentically gets no MOC — the hub is weak-path-only', async () => {
+    // A strong model driving write_page itself, multiple pages, no narration anywhere — the
+    // agentic path never proves itself weak, so agenticAlive stays true for the whole chapter and
+    // the MOC block (gated on !agenticAlive) must not run at all.
+    await ingestBook(cfg, '/uploads/Agentic MOC Book.pdf', {
+      converter: async () => ({ markdown: '# Agentic Chapter\nTwo concepts worth two pages.' }),
+    });
+    const prompts: string[] = [];
+    const model = streamModel((req) => {
+      prompts.push(JSON.stringify(req.messages));
+      if (sawToolResult(req)) return { text: 'done' };
+      return {
+        toolCalls: [
+          { toolName: 'write_page', input: { slug: 'agentic-page-one', title: 'Agentic Page One', body: 'First concept, in full.', status: 'draft' } },
+          { toolName: 'write_page', input: { slug: 'agentic-page-two', title: 'Agentic Page Two', body: 'Second concept, in full.', status: 'draft' } },
+        ],
+      };
+    });
+
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    expect(prompts.some((p) => p.includes('chapter overview'))).toBe(false); // no overview call made
+
+    expect(existsSync(join(vault, 'pages', 'agentic-moc-book-ch-1-moc.md'))).toBe(false);
+    // Scoped to this book's own slug prefix — the shared vault also carries the earlier weak-path
+    // test's own (legitimate) MOC page.
+    const slugs = await lw.listSlugs();
+    expect(slugs.some((s) => s.startsWith('agentic-moc-book') && s.endsWith('-moc'))).toBe(false);
+  }, 30_000);
+
   describe('concurrency', () => {
     /** A model whose response doesn't depend on call order — it looks at whether a tool result is
      * already in the transcript to tell "first step" (call write_page) from "second step" (stop),
@@ -852,8 +882,9 @@ describe('the source spine — compile records the book\'s own order', async () 
   ].join('\n');
 
   /** A fake Engram whose write_page just succeeds — the spine is collected in the harness's
-   * wrapper, above whatever engram does with the page. `call` only needs to answer link_pages: a
-   * multi-page chapter here also gets a MOC hub, which links every part to it. */
+   * wrapper, above whatever engram does with the page. `call` only needs to answer link_pages for
+   * the weak-path tests below, whose fallback compile gets a MOC hub; the agentic tests never
+   * reach it, since the MOC is now weak-path-only. */
   const fakeLw = () => ({
     listSlugs: async () => [],
     tools: async () => [{
@@ -901,8 +932,8 @@ describe('the source spine — compile records the book\'s own order', async () 
         chapter: 'raw/uploads/spine-book/ch-01-photosynthesis-basics.md',
         chapterOrdinal: 1,
         title: 'Photosynthesis Basics',
-        // Two pages -> a MOC hub too, but the hub is excluded from the recorded spine: it's a link
-        // list, not a lesson stop, and spinePages() walks this list as the learner's path.
+        // Agentic compile (the model calls write_page itself): no MOC — the hub is a weak-path
+        // compensation, and the spec promises the agentic path is untouched by it.
         pages: ['light-reactions', 'calvin-cycle'],
       },
       {
@@ -948,9 +979,8 @@ describe('the source spine — compile records the book\'s own order', async () 
 
     const spine = sourceFor(vault, 'Recompiled Book')?.spine;
     expect(spine).toHaveLength(1); // chapter 2 was never compiled; chapter 1 has ONE slice
-    // The second pass wrote two pages, so it also got its own MOC — but the MOC is excluded from
-    // the recorded slice, which is replaced whole with just the pages, not appended alongside the
-    // first pass's single page.
+    // Both passes are agentic, so neither gets a MOC. The slice is replaced whole with the second
+    // pass's two pages, not appended alongside the first pass's single page.
     expect(spine?.[0].pages).toEqual(['second-pass-page', 'and-another']);
   });
 

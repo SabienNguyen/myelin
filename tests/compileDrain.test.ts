@@ -272,9 +272,8 @@ describe('ensureCompileDrain — the drain hands the book\'s order to a path', (
       doc = await lw.call('read_path', { slug: 'source-artifact-order-book' }).catch(() => null);
       if (!doc) await new Promise((r) => { setTimeout(r, 50); });
     }
-    // Chapter one wrote two pages, so it also got a MOC hub, but the hub is excluded from the
-    // recorded spine (it's a link list, not a lesson stop) — the path's page order is just the
-    // lesson pages themselves.
+    // Both chapters compile agentically (the model calls write_page itself), so neither gets a
+    // MOC — the hub is weak-path-only. The path's page order is just the lesson pages.
     expect(doc.pages).toEqual([
       'spine-drain-alpha', 'spine-drain-beta', 'spine-drain-gamma',
     ]);
