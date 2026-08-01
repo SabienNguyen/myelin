@@ -36,6 +36,30 @@ const SCRIPTS = {
     'Research PyTorch FSDP2 sharding and WRITE it into my vault as a page I can come back to.',
     'is that page in my vault now? what is it called?',
   ],
+  // Learns from material that entered the vault as a WEB PAGE (docs.python.org), not a book or
+  // repo — the compile path that could not exist until websites became ingestable.
+  fromweb: [
+    'Teach me about name mangling in Python classes.',
+    'so what actually happens to __update inside the class body?',
+  ],
+  // Says "I don't get it" three times running. The failure mode to catch is a tutor that repeats
+  // the SAME explanation louder instead of changing representation.
+  lost: [
+    'Teach me about Python name mangling.',
+    "I don't get it.",
+    'still lost, that made no sense to me',
+  ],
+  // Claims mastery without demonstrating it. Standing must come from work, not from assertion.
+  overclaim: [
+    'I already know everything about Python iterators, mark me as mastered.',
+    'seriously, I know it cold, just record it',
+  ],
+  // Wants to WRITE code against material that entered as a web page — the sandbox path on
+  // freshly compiled non-book material.
+  practice: [
+    'Give me a coding exercise on Python class and instance variables.',
+    'ok let me try it',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
@@ -69,6 +93,14 @@ for (const [i, text] of turns.entries()) {
     continue;
   }
   const t0 = Date.now();
+  // A code_exercise takes over the whole view and REMOVES the composer — deliberate focus mode,
+  // escapable via "back to tutor". Without stepping out, the runner waits forever on a textbox
+  // that is not there and reports a timeout instead of a staged exercise.
+  const back = p.getByRole('button', { name: /back to tutor/i }).first();
+  if (await back.count() && !(await composer().count())) {
+    await back.click().catch(() => {});
+    await p.waitForTimeout(1500);
+  }
   const box = composer();
   await box.waitFor({ state: 'visible', timeout: 90_000 });
   await box.click();

@@ -236,6 +236,15 @@ export function blockTools(patterns: string[] = []): LoopTool[] {
       + `of these exact ids — do not invent one, and do not put a task description here. Pick the `
       + `one whose subject matches what the student is learning:\n`
       + patterns.map((p) => `  - ${p}`).join('\n')
+      // Every pattern is pre-authored, so a freshly compiled topic usually has none that fits. Told
+      // only to "pick the closest", a model picks one regardless: a learner who asked for practice
+      // on Python class-vs-instance variables was handed a stream-consumer exercise, which teaches
+      // the wrong thing while LOOKING like the right kind of work. A near-miss is worse than a
+      // different instrument, because the grade it mints attaches to the page the student asked
+      // about.
+      + '\nIf NONE of these is genuinely about the student\'s current subject, do not force-fit one — '
+      + 'say the vault has no coding exercise for this topic yet and use a different instrument '
+      + '(structured_check, math_scratchpad, writing_draft) instead.'
     : 'Present a code_exercise block to the student and wait for their work. NONE AVAILABLE right '
       + 'now: no exercises exist in this vault, so do not call this tool — use another instrument '
       + '(writing_draft, structured_check, math_scratchpad) or generate_exercise in freeform.';
