@@ -32,8 +32,34 @@ const ledgerPath = (vault: string) => join(vault, '.harness', 'usage.jsonl');
 /** Append one usage row. All-zero usage still writes — mock and scripted models report zeros,
  * and a zero row is data (the call happened) — but any filesystem failure is swallowed with a
  * console.error: the ledger is telemetry and must never break the turn it measures. */
-export function recordUsage(vault: string, entry: { role: UsageRole; model: string; usage: Usage }): void {
+/** Warn when a call's input exceeded the context the role's model was configured with.
+ *
+ *  A twelve-turn session on a local 32k model sat around 11k input per turn — the history diet
+ *  doing its job — and then one research turn sent 53,716. Ollama does not error on that: it
+ *  truncates to fit, silently, and the turn is answered from whatever survived. The learner sees a
+ *  worse answer with nothing to explain it.
+ *
+ *  Detection only, deliberately. Budgeting tool results against a model's window is a real feature
+ *  and guessing at it would trade a rare bad answer for routinely truncated sources. Naming it in
+ *  the log is what turns a silent degradation into something diagnosable. */
+export function overContext(
+  inputTokens: number | undefined, contextTokens: number | undefined,
+): boolean {
+  return Boolean(inputTokens && contextTokens && inputTokens > contextTokens);
+}
+
+export function recordUsage(
+  vault: string,
+  entry: { role: UsageRole; model: string; usage: Usage; contextTokens?: number },
+): void {
   try {
+    if (overContext(entry.usage.inputTokens, entry.contextTokens)) {
+      console.error(
+        `[context] ${entry.role} call sent ${entry.usage.inputTokens} tokens to ${entry.model}, `
+        + `configured for ${entry.contextTokens} — the provider will have truncated it, so this `
+        + 'answer was produced from an incomplete prompt',
+      );
+    }
     if (!vault) return; // some test fixtures carry no vault; nothing to record into
     mkdirSync(join(vault, '.harness'), { recursive: true });
     const row = {

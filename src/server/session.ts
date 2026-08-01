@@ -1179,7 +1179,10 @@ export function createTutorSession(
           // Charged to the CONFIGURED tutor id even when opts.model/LW_MOCK_MODEL injected the
           // model — the role is what the ledger tracks, and the injected cases report zeros anyway.
           recordUsage(cfg.vault, {
-            role: 'tutor', model: cfg.models?.tutor?.model ?? 'unknown', usage: result.usage,
+            role: 'tutor',
+            model: cfg.models?.tutor?.model ?? 'unknown',
+            usage: result.usage,
+            contextTokens: cfg.models?.tutor?.contextTokens,
           });
           loopToolCalls += result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
           loopText += result.steps.map((s) => s.text).join('\n');
