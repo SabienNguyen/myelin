@@ -171,13 +171,18 @@ function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
     const lines = plan.map((p, i) => {
       // A quiz item covers SEVERAL pages in one block, so the row has to name all of them —
       // otherwise the tutor quizzes the first slug and the batching is lost.
-      const what = p.covers?.length ? p.covers.map((c) => `"${c}"`).join(', ') : `"${p.slug}"`;
+      // The instruction rides the ROW. As a trailing note after six numbered items it lost to the
+      // header's "one item at a time" — the tutor read a 4-page quiz row and staged a single-page
+      // structured_check. The row now says what it is before it says what it covers.
+      const what = p.covers?.length
+        ? `ONE quiz block with ${p.covers.length} items, one per page: ${p.covers.map((c) => `"${c}"`).join(', ')}`
+        : `"${p.slug}"`;
       return `${i + 1}. [${p.kind}] ${what} — ${p.why}${p.transfer ? ` — ${p.transfer}` : ''}`;
     }).join('\n');
     composer.setText(
       `Run today's session, in this order, one item at a time:\n${lines}\n`
       + 'For reviews and misconceptions, probe or set an exercise before any reteaching; for new items, teach then check. '
-      + 'A [quiz] row is ONE quiz block with an item per page it names, not one block per page.',
+      + 'A [quiz] row is a single quiz covering every page it names — the row itself says so.',
     );
     composer.send();
   };
