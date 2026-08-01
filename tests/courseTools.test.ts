@@ -22,7 +22,7 @@ const exec = (tools: any[], name: string, args: any) => tools.find((t) => t.name
 describe('course_problems', () => {
   it('returns the banked problems verbatim, with ids the model can hand back', async () => {
     const vault = bankedVault();
-    const { problems } = await exec(buildCourseTools(vault), 'course_problems', {});
+    const { problems } = await exec(buildCourseTools(vault, 'kid'), 'course_problems', {});
     expect(problems.map((p: any) => p.id)).toEqual(['midterm-2#1', 'midterm-2#2']);
     expect(problems[0].text).toBe('State the pumping lemma for regular languages.');
     expect(problems[0].answer).toBe('see notes');
@@ -30,14 +30,14 @@ describe('course_problems', () => {
 
   it('says the bank is empty rather than inventing problems', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-course-tools-'));
-    const out = await exec(buildCourseTools(vault), 'course_problems', {});
+    const out = await exec(buildCourseTools(vault, 'kid'), 'course_problems', {});
     expect(out.problems).toEqual([]);
     expect(out.note).toMatch(/empty/);
   });
 
   it('respects k', async () => {
     const vault = bankedVault();
-    const { problems } = await exec(buildCourseTools(vault), 'course_problems', { k: 1 });
+    const { problems } = await exec(buildCourseTools(vault, 'kid'), 'course_problems', { k: 1 });
     expect(problems).toHaveLength(1);
   });
 });
@@ -45,14 +45,14 @@ describe('course_problems', () => {
 describe('mark_course_problem', () => {
   it('sets lastCorrect on the named problem — the never-answered count drops', async () => {
     const vault = bankedVault();
-    const out = await exec(buildCourseTools(vault), 'mark_course_problem', { id: 'midterm-2#1' });
+    const out = await exec(buildCourseTools(vault, 'kid'), 'mark_course_problem', { id: 'midterm-2#1' });
     expect(out).toEqual({ marked: 'midterm-2#1' });
     expect(readBank(vault).filter((p) => !p.lastCorrect).map((p) => p.id)).toEqual(['midterm-2#2']);
   });
 
   it('an unknown id is an error the model can read, not a silent no-op', async () => {
     const vault = bankedVault();
-    const out = await exec(buildCourseTools(vault), 'mark_course_problem', { id: 'midterm-2#9' });
+    const out = await exec(buildCourseTools(vault, 'kid'), 'mark_course_problem', { id: 'midterm-2#9' });
     expect(out.error).toMatch(/no banked problem/);
     expect(readBank(vault).every((p) => !p.lastCorrect)).toBe(true);
   });

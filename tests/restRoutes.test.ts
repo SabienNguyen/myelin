@@ -724,7 +724,7 @@ describe('GET /api/due and /api/session-plan', () => {
 
     it('answered problems stay out — only never-answered ones enter the plan', async () => {
       const bcfg = bankedCfg([{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
-      markCorrect(bcfg.vault, 'midterm-2#1');
+      markCorrect(bcfg.vault, 'midterm-2#1', 'kid');
       const { plan } = await (await buildRestRoutes(spacedLw(), bcfg).request('/api/session-plan')).json();
       expect(plan.filter((p: any) => p.kind === 'course').map((p: any) => p.slug)).toEqual(['midterm-2#2']);
     });
@@ -783,7 +783,7 @@ describe('GET /api/course-bank', () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-bank-route-'));
     saveProblems(vault, 'midterm-2', [{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
     saveProblems(vault, 'pset-7', [{ n: 1, text: 'c' }]);
-    markCorrect(vault, 'midterm-2#1');
+    markCorrect(vault, 'midterm-2#1', 'kid');
     const app = buildRestRoutes(lw, { ...cfg, vault } as HarnessConfig);
     const { sources } = await (await app.request('/api/course-bank')).json();
     expect(sources).toEqual([

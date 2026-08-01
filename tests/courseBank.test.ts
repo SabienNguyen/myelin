@@ -1,7 +1,7 @@
 // The course bank: past exams and problem sets extracted VERBATIM into a drillable bank.
 // The alignment contract under test: what the professor wrote is what the learner is asked.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { extractProblems, readBank, saveProblems, markCorrect, nextProblems } from '../src/server/courseBank.js';
@@ -82,8 +82,8 @@ describe('bank storage', () => {
 
   it('nextProblems serves never-answered first, then correct-longest-ago', () => {
     saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
-    expect(markCorrect(vault, 'chem201-midterm2#1')).toBe(true);
-    const next = nextProblems(vault, 4);
+    expect(markCorrect(vault, 'chem201-midterm2#1', 'kid')).toBe(true);
+    const next = nextProblems(vault, 'kid', 4);
     // 2,3,4 are unanswered and come first; 1 (answered today) is last.
     expect(next.map((p) => p.n)).toEqual([2, 3, 4, 1]);
   });
@@ -103,7 +103,7 @@ describe('bank storage', () => {
       'two-part-exam#1', 'two-part-exam#2', 'two-part-exam#1~2', 'two-part-exam#1~3',
     ]);
     // The suffixed id is individually markable — the collision made this impossible before.
-    expect(markCorrect(vault, 'two-part-exam#1~2')).toBe(true);
+    expect(markCorrect(vault, 'two-part-exam#1~2', 'kid')).toBe(true);
     const bank = readBank(vault);
     expect(bank.find((e) => e.text === 'Section B problem one')!.lastCorrect).toBeTruthy();
     expect(bank.find((e) => e.text === 'Section A problem one')!.lastCorrect).toBeUndefined();
@@ -114,7 +114,7 @@ describe('bank storage', () => {
 
   it('markCorrect on an unknown id reports failure rather than inventing an entry', () => {
     saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
-    expect(markCorrect(vault, 'nope#9')).toBe(false);
+    expect(markCorrect(vault, 'nope#9', 'kid')).toBe(false);
     expect(readBank(vault)).toHaveLength(4);
   });
 });
@@ -138,5 +138,35 @@ describe('courseSeeds', () => {
     const { courseSeeds } = await import('../src/server/seedPatternPages.js');
     const v = mkd(j(tmp(), 'lwh-seed-'));
     try { expect(courseSeeds(v)).toEqual([]); } finally { rms(v, { recursive: true, force: true }); }
+  });
+});
+
+/**
+ * The bank is vault-level material, but "have you answered this" is a fact about a PERSON. With one
+ * shared flag the first learner to answer a past-exam question hid it from everyone else on the
+ * vault — while their evidence stayed properly separate, which is what made it easy to miss.
+ */
+describe('the bank tracks answers per student', () => {
+  it('one student answering does not hide the problem from another', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-bank-multi-'));
+    saveProblems(vault, 'exam1', [{ n: 1, text: 'First problem.' }, { n: 2, text: 'Second problem.' }]);
+    const first = nextProblems(vault, 'ana')[0];
+
+    expect(markCorrect(vault, first.id, 'ana')).toBe(true);
+    // ana has answered it, so it drops behind her never-answered ones.
+    expect(nextProblems(vault, 'ana')[0].id).not.toBe(first.id);
+    // ben has answered nothing: it is still his first.
+    expect(nextProblems(vault, 'ben')[0].id).toBe(first.id);
+  });
+
+  it('honours a legacy bank written before per-student answers existed', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-bank-legacy-'));
+    saveProblems(vault, 'exam1', [{ n: 1, text: 'First problem.' }, { n: 2, text: 'Second problem.' }]);
+    const all = readBank(vault);
+    // The old shape: a bare lastCorrect with no lastCorrectBy.
+    writeFileSync(join(vault, '.harness', 'course-bank.jsonl'),
+      all.map((e, i) => JSON.stringify(i === 0 ? { ...e, lastCorrect: '2026-01-01' } : e)).join('\n') + '\n');
+    // Reads as answered, so a single-student vault behaves exactly as it did before.
+    expect(nextProblems(vault, 'ana')[0].id).not.toBe(all[0].id);
   });
 });

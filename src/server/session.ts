@@ -492,7 +492,7 @@ export async function vaultGap(
  * problems are drilled VERBATIM, so course_problems hands the tutor the exact text plus a stable
  * id, and mark_course_problem is how a correct answer reaches the bank's spacing.
  */
-export function buildCourseTools(vault: string): LoopTool[] {
+export function buildCourseTools(vault: string, student: string): LoopTool[] {
   return [
     zodTool('course_problems', {
       description: 'The next banked course problems (past exams, problem sets) worth drilling — '
@@ -503,7 +503,7 @@ export function buildCourseTools(vault: string): LoopTool[] {
         k: z.number().int().min(1).max(5).optional().describe('how many problems (default 5)'),
       }),
       execute: async ({ k }) => {
-        const problems = nextProblems(vault, k ?? 5);
+        const problems = nextProblems(vault, student, k ?? 5);
         return problems.length
           ? {
             problems: problems.map((p) => ({
@@ -522,7 +522,7 @@ export function buildCourseTools(vault: string): LoopTool[] {
       input: z.object({
         id: z.string().describe('the problem id from course_problems, e.g. "midterm-2#3"'),
       }),
-      execute: async ({ id }) => (markCorrect(vault, id)
+      execute: async ({ id }) => (markCorrect(vault, id, student)
         ? { marked: id }
         : { error: `no banked problem with id "${id}"` }),
     }),
@@ -922,7 +922,7 @@ export function createTutorSession(
             ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
             : '');
         const tools: LoopTool[] = [
-          ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(cfg.vault),
+          ...activeMcp, ...buildCourseTools(cfg.vault, cfg.student), ...buildFrontierTools(cfg.vault),
           ...webTools.tools, ...ingestTools, ...generateTool,
           // Read per turn, not per boot: an exercise mined or generated mid-session becomes
           // stageable in the very next turn.

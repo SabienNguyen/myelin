@@ -26,7 +26,14 @@ export interface CourseProblem {
   /** ISO date the bank entry was created. */
   added: string;
   /** Set when the learner has been drilled on it and got it right (spacing decides re-asks). */
+  /** Legacy single-student field: the date this was last answered correctly, by whoever was using
+   *  the vault. Still written so anything reading the old shape keeps working, and still honoured
+   *  on read for banks that predate `lastCorrectBy`. */
   lastCorrect?: string;
+  /** Per-student answer dates. The bank is vault-level material but "have you answered this" is a
+   *  fact about a PERSON: with one shared flag, the first learner to answer a past-exam question
+   *  hid it from everyone else on the vault, while their evidence stayed properly separate. */
+  lastCorrectBy?: Record<string, string>;
 }
 
 const bankPath = (vault: string) => join(vault, '.harness', 'course-bank.jsonl');
@@ -147,24 +154,33 @@ export function saveProblems(
   return fresh;
 }
 
-/** Mark a problem correctly answered today — spacing reads this to decide re-asks. */
-export function markCorrect(vault: string, id: string): boolean {
+/** Mark a problem correctly answered today BY THIS STUDENT — spacing reads this to decide re-asks. */
+export function markCorrect(vault: string, id: string, student: string): boolean {
   const all = readBank(vault);
   const hit = all.find((e) => e.id === id);
   if (!hit) return false;
-  hit.lastCorrect = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  hit.lastCorrectBy = { ...(hit.lastCorrectBy ?? {}), [student]: today };
+  hit.lastCorrect = today; // legacy mirror
   writeFileSync(bankPath(vault), all.map((e) => JSON.stringify(e)).join('\n') + '\n');
   return true;
+}
+
+/** When THIS student last answered it, or undefined. A bank written before `lastCorrectBy` existed
+ *  has only the shared field; treating that as this student's own answer preserves the behaviour
+ *  every single-student vault already has, and new answers are recorded per student from here on. */
+function answeredOn(e: CourseProblem, student: string): string | undefined {
+  return e.lastCorrectBy ? e.lastCorrectBy[student] : e.lastCorrect;
 }
 
 /**
  * The next problems worth drilling: never-answered first (in source order), then correct-longest-ago.
  * The tutor asks these VERBATIM — the alignment contract of the whole feature.
  */
-export function nextProblems(vault: string, k = 5): CourseProblem[] {
+export function nextProblems(vault: string, student: string, k = 5): CourseProblem[] {
   const all = readBank(vault);
-  const fresh = all.filter((e) => !e.lastCorrect);
-  const answered = all.filter((e) => e.lastCorrect)
-    .sort((a, b) => (a.lastCorrect ?? '').localeCompare(b.lastCorrect ?? ''));
+  const fresh = all.filter((e) => !answeredOn(e, student));
+  const answered = all.filter((e) => answeredOn(e, student))
+    .sort((a, b) => (answeredOn(a, student) ?? '').localeCompare(answeredOn(b, student) ?? ''));
   return [...fresh, ...answered].slice(0, k);
 }
