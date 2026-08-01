@@ -38,7 +38,13 @@ export function lastUserText(messages: UIMessage[]): string {
 const AUTHORING = [
   /\b(build|make|create|set ?up|design|plan)\b[^.?!]{0,40}\b(path|syllabus|curriculum|course|roadmap|track)\b/i,
   /\b(add|ingest|import|compile|pull in)\b[^.?!]{0,40}\b(this|these|book|paper|repo|repository|video|pdf|page|site|url|material|source)\b/i,
-  /\bwrite (it |this |that )?(up|down)\b|\bsave (this|that|it)\b[^.?!]{0,20}\b(vault|page|note)?/i,
+  // "Keep this" is asked in many more ways than the first cut allowed: a live sitting said "save
+  // what we covered as a page I can come back to", which matched none of `save (this|that|it)` and
+  // so never unlocked writing at all.
+  /\bwrite\s+(it|this|that|what|everything|them)?\s*(up|down)\b/i,
+  /\b(save|keep|store)\b[^.?!]{0,40}\b(page|note|vault|for later|come back|reference)\b/i,
+  /\b(save|keep|store)\s+(this|that|it|what|everything|our|the)\b/i,
+  /\bmake (me )?a page\b|\bturn (this|that) into a page\b/i,
 ];
 
 /** Asking to be TESTED across what they know, rather than taught something. */

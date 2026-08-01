@@ -16,11 +16,14 @@ export const UI_TOOLS = {
       error: z.string().optional(),
     }),
   },
-  // Offer a one-click "write this up" button from a teaching mode, where the tutor can't write
-  // pages itself (the single-writer rule keeps writing freeform-only). Instead of telling the
-  // learner to find the mode selector and switch to freeform, the tutor calls this; the button
-  // arms a one-shot write and the server promotes just that turn to freeform. Navigation-class,
-  // never graded.
+  // A one-click "write this up" button for the case where nothing has unlocked writing and the
+  // learner has not asked for it — something simply came out of the conversation worth keeping.
+  // The button arms a one-shot write and the server promotes just that turn to freeform.
+  //
+  // Narrower than it once was. Writing now unlocks on a vault gap (session.ts's vaultGap), and an
+  // explicit "save that" derives to freeform on its own (deriveMode.ts) — in both of those the
+  // tutor writes the page instead of offering. Offering a button to someone who already asked is
+  // making them ask twice. Navigation-class, never graded.
   offer_write: {
     input: z.object({
       /** What the page would be called — shown on the button ("Write “Vietnamese tones” up"). */

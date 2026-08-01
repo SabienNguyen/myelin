@@ -117,6 +117,14 @@ const SCRIPTS = {
     'build me a path for jazz harmony from scratch',
     'quiz me on what I have learned',
   ],
+  // A whole sitting with no selector: teach, then continue, then ask to be tested, then ask to
+  // keep the work — four different modes, none of them chosen by hand.
+  nosel: [
+    'Teach me about Python name mangling.',
+    'ok next',
+    'quiz me on that',
+    'save what we covered as a page I can come back to',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',

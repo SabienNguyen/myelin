@@ -76,3 +76,71 @@ describe('deriveMode — ordinary teaching is not mistaken for something else', 
     expect(m("don't forget the chain rule — explain it to me")).toBe('learn');
   });
 });
+
+/**
+ * The failure mode that matters once the selector is gone: an ordinary teaching request that
+ * happens to CONTAIN a mode word being hijacked into the wrong mode. A learner asking about A/B
+ * testing must not be quizzed, and one asking how to build a compiler must not have a syllabus
+ * authored at them.
+ */
+describe('deriveMode — mode words inside a subject', () => {
+  const learn = [
+    'explain how unit tests work in pytest',
+    'teach me about A/B testing',
+    'what is test-driven development?',
+    'explain code review culture',
+    'how do I build a compiler?',
+    'teach me how to build a neural network from scratch',
+    'explain the quiz show scandal of 1958',
+    'what does the reviewer do in peer review?',
+    'teach me about course design',
+    'how does a learning path in Duolingo work?',
+    'explain how to add two matrices',
+    'what is a curriculum learning strategy in ML?',
+  ];
+  it.each(learn)('%s → learn', (text) => {
+    expect(deriveMode({ text })).toBe('learn');
+  });
+
+  const asks: [string, string][] = [
+    ['quiz me', 'quiz'],
+    ['test me on chapter 3', 'quiz'],
+    ['can we review what I did last week', 'review'],
+    ['review my weak pages', 'review'],
+    ['build me a syllabus for music theory', 'freeform'],
+    ['create a learning path for rust', 'freeform'],
+    ['add this paper to my library', 'freeform'],
+    ['import this repo', 'freeform'],
+  ];
+  it.each(asks)('%s → %s', (text, want) => {
+    expect(deriveMode({ text })).toBe(want);
+  });
+});
+
+/**
+ * "Keep this" has many more phrasings than the first cut allowed. A live sitting asked "save what
+ * we covered as a page I can come back to" and got a one-click offer button instead of a page,
+ * because the derivation never unlocked writing — the learner had to ask twice for something they
+ * had already asked for plainly.
+ */
+describe('deriveMode — asking to keep the work', () => {
+  const keeps = [
+    'save what we covered as a page I can come back to',
+    'save this',
+    'save that as a note',
+    'keep this for later',
+    'store what we did in my vault',
+    'write this up',
+    'write that down',
+    'make me a page on this',
+    'turn this into a page',
+  ];
+  it.each(keeps)('%s → freeform', (text) => {
+    expect(deriveMode({ text })).toBe('freeform');
+  });
+
+  it('does not fire on ordinary teaching that mentions saving', () => {
+    expect(deriveMode({ text: 'explain how autosave works in vim' })).toBe('learn');
+    expect(deriveMode({ text: 'teach me how databases keep data durable' })).toBe('learn');
+  });
+});
