@@ -17,6 +17,8 @@ import { chatModelFor } from './models.js';
 import type { Mode } from './prompt.js';
 import type { Stance } from '../shared/commands.js';
 import { saveThread } from './sessionStore.js';
+import { lastUserText } from './deriveMode.js';
+import { topicTokens } from './session.js';
 import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 
@@ -73,7 +75,9 @@ export interface RailsItem {
   title: string;
   /** The student's effective level for the page — 'unseen' when nothing is known. */
   level: string;
-  reason: 'due' | 'lesson' | 'neighbor';
+  /** 'asked' — the learner named this subject in the message that opened the turn; it outranks
+   *  everything the frontier would have chosen. */
+  reason: 'due' | 'lesson' | 'neighbor' | 'asked';
 }
 
 /**
@@ -374,6 +378,29 @@ const STOP_OFFER = 'Stop here, or keep going? Say "go on" for another.';
 const EXHAUSTED = 'Nothing left to drill right now — everything due or suggested has been staged '
   + 'this session. Switch modes, or come back after some review has decayed.';
 
+/** The page the learner ASKED for this turn, if their message named a subject the vault covers.
+ *  Exported for the test: rails choosing its own subject regardless of the message is the failure
+ *  this exists to prevent, and it is worth pinning without standing up a whole session. */
+export async function askedForItem(
+  lw: Engram, student: string, asked: string, staged: ReadonlySet<string>,
+): Promise<RailsItem | null> {
+  const topic = topicTokens(asked);
+  if (topic.length === 0) return null;
+  const hits = await lw.call('search', { query: topic.join(' ') })
+    .then((r: any) => (Array.isArray(r?.results) ? r.results : Array.isArray(r) ? r : []))
+    .catch(() => []);
+  const best = hits.find((h: any) => h?.slug && !staged.has(h.slug));
+  if (!best) return null;
+  const page = await lw.call('read_page', { slug: best.slug })
+    .then((r: any) => r?.page).catch(() => null);
+  return {
+    slug: best.slug,
+    title: page?.meta?.title ?? best.slug,
+    level: best.level ?? 'unseen',
+    reason: 'asked',
+  };
+}
+
 export function createRailsSession(
   lw: Engram, cfg: HarnessConfig, opts: { model?: ChatModel } = {},
 ) {
@@ -382,7 +409,13 @@ export function createRailsSession(
   // session.ts's lastModeByThread; seedStaged() rebuilds it from the thread after a restart.
   const stagedByThread = new Map<string, Set<string>>();
 
-  async function planNext(staged: ReadonlySet<string>): Promise<RailsItem | null> {
+  async function planNext(staged: ReadonlySet<string>, asked = ''): Promise<RailsItem | null> {
+    // What the learner SAID outranks the frontier. Rails picked purely from working_set and
+    // next_lessons — it never read the message at all — so a learner asking about gradient
+    // accumulation was handed a quick_check on jazz-harmony path ordering, with nothing
+    // acknowledging the swap. Harness-driven does not have to mean deaf.
+    const asked_ = await askedForItem(lw, cfg.student, asked, staged);
+    if (asked_) return asked_;
     const [ws, nl] = await Promise.all([
       lw.call('working_set', { student: cfg.student }),
       lw.call('next_lessons', { student: cfg.student }),
@@ -442,7 +475,7 @@ export function createRailsSession(
         };
 
         const stageNext = async (w: UiStreamWriter): Promise<void> => {
-          const item = await planNext(staged);
+          const item = await planNext(staged, lastUserText(messages));
           if (!item) { say(EXHAUSTED); return; }
           staged.add(item.slug);
           const { page, analogies } = await assemble(item);
