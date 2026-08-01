@@ -1018,3 +1018,30 @@ async function gradeOpenAnswer(
     evidence: [ev(slug, ok ? 'applied-correctly' : 'struggled', `open answer: ${question}`, 'model')],
   };
 }
+
+/**
+ * Evidence recorded against a page this turn never touched.
+ *
+ * A learner asked about PyTorch FSDP2 on a vault with no FSDP page. The tutor must name a REAL
+ * slug (the prompt lists them, capped to a shortlist on a large vault), so it named a real but
+ * unrelated one — `pytorch-build-command` — and the student's record gained a page they had never
+ * met, noted "Explained FSDP2 sharding strategy axes". A mastery graph that invents pages is the
+ * exact failure this system exists to prevent, and slug repair cannot catch it: the slug IS valid,
+ * it is just about something else.
+ *
+ * The honest signal is provenance, not similarity: legitimate evidence is about a page the turn
+ * READ, STAGED a block on, or WROTE. (Writing the page first is the correct freeform answer to a
+ * topic the vault lacks.) DETECTION ONLY, like appliedGradeBypass — this flags for the guardrail
+ * log so a human can see it; it never blocks a turn.
+ */
+export function untouchedSlugEvidence(
+  recorded: { slug: string; kind: EvidenceKind }[],
+  touched: { read: string[]; staged: string[]; written: string[] },
+): string[] {
+  const seen = new Set([...touched.read, ...touched.staged, ...touched.written]);
+  const flagged: string[] = [];
+  for (const r of recorded) {
+    if (r.slug && !seen.has(r.slug) && !flagged.includes(r.slug)) flagged.push(r.slug);
+  }
+  return flagged;
+}

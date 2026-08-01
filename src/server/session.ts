@@ -14,7 +14,7 @@ import { fetchVideoTranscript } from './videoIngest.js';
 import { searchVideos } from './videoSearch.js';
 import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
-import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
+import { appliedGradeBypass, gradeBlockOutput, untouchedSlugEvidence } from './grading.js';
 import { createRailsSession, pendingBlockOutputs } from './rails.js';
 import { dietUiMessages } from './historyDiet.js';
 import { buildIngestTools } from './ingestTools.js';
@@ -856,6 +856,8 @@ export function createTutorSession(
         // places the breakpoints (system tail + last message); scripted/compat models ignore it.
         let loopToolCalls = 0;
         let loopText = '';
+        // Which pages this turn actually touched — the provenance the evidence check below needs.
+        const touched = { read: [] as string[], staged: [] as string[], written: [] as string[] };
         const run = async (msgs: ChatMessage[]) => {
           const result = await runLoop({
             model, system, messages: msgs, tools, serverTools: webTools.serverTools,
@@ -869,6 +871,14 @@ export function createTutorSession(
           });
           loopToolCalls += result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
           loopText += result.steps.map((s) => s.text).join('\n');
+          for (const tc of result.steps.flatMap((s) => s.toolCalls)) {
+            const a = (tc.input ?? {}) as { slug?: unknown; pageSlug?: unknown };
+            const slug = typeof a.slug === 'string' ? a.slug : undefined;
+            const pageSlug = typeof a.pageSlug === 'string' ? a.pageSlug : undefined;
+            if (tc.toolName === 'read_page' && slug) touched.read.push(slug);
+            else if (tc.toolName === 'write_page' && slug) touched.written.push(slug);
+            else if (pageSlug) touched.staged.push(pageSlug);
+          }
           return result.steps.flatMap((s) => s.toolCalls)
             .filter((tc) => tc.toolName === 'record_evidence')
             .map((tc) => (tc.input ?? {}) as any);
@@ -893,6 +903,15 @@ export function createTutorSession(
         // the tutor recorded 'applied-correctly' for a page whose machine grade this turn was
         // lesser. Wrapped so a telemetry slip can never break the turn.
         try {
+          // A page the turn never read, staged, or wrote has no business gaining mastery. Seen
+          // live: an FSDP2 question on a vault with no FSDP page recorded 'exposed' against
+          // pytorch-build-command. Detection only — the turn still stands.
+          const stray = untouchedSlugEvidence(
+            recordedCalls.map((c) => ({ slug: String(c?.slug ?? ''), kind: c?.kind })), touched,
+          );
+          if (stray.length) {
+            logGuardrail(cfg.vault, `record_evidence named pages this turn never read, staged or wrote: ${stray.join(', ')}`);
+          }
           const laundered = appliedGradeBypass(
             grades.flatMap((g) => g.evidence),
             recordedCalls.map((c) => ({ slug: String(c?.slug ?? ''), kind: c?.kind })),

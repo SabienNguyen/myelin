@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appliedGradeBypass, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
+import { appliedGradeBypass, untouchedSlugEvidence, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
 import { textModel } from './mockModel.js';
 
 describe('mathEquivalent (numeric sampling)', () => {
@@ -792,6 +792,39 @@ describe('appliedGradeBypass — the recording-integrity detector', () => {
     expect(appliedGradeBypass(
       [{ slug: 'x', kind: 'struggled' }],
       [applied('x'), applied('x')],
+    )).toEqual(['x']);
+  });
+});
+
+/**
+ * Evidence must land on a page the turn actually touched. Observed live: a learner asked about
+ * PyTorch FSDP2, the vault had no FSDP page, and the tutor — required to name a REAL slug and
+ * shown only a shortlist of the 273-page vault — recorded `exposed` against
+ * `pytorch-build-command`, noted "Explained FSDP2 sharding strategy axes". The mastery graph then
+ * claims a page the learner never met, which is the one thing this system exists not to do.
+ * repairSlug is innocent here (it leaves fsdp-shaped guesses alone); the tutor simply picked a
+ * real-but-unrelated slug. Detection only, like appliedGradeBypass: flag, log, never block.
+ */
+describe('untouchedSlugEvidence', () => {
+  it('flags evidence on a page the turn never read, staged, or wrote', () => {
+    expect(untouchedSlugEvidence(
+      [{ slug: 'pytorch-build-command', kind: 'exposed' }],
+      { read: ['autograd'], staged: [], written: [] },
+    )).toEqual(['pytorch-build-command']);
+  });
+
+  it('accepts evidence on a page the turn read, staged a block on, or just wrote', () => {
+    const touched = { read: ['autograd'], staged: ['retain-graph'], written: ['fsdp2-sharding'] };
+    expect(untouchedSlugEvidence([{ slug: 'autograd', kind: 'exposed' }], touched)).toEqual([]);
+    expect(untouchedSlugEvidence([{ slug: 'retain-graph', kind: 'struggled' }], touched)).toEqual([]);
+    // Writing the page first is the CORRECT freeform path for a topic the vault lacks.
+    expect(untouchedSlugEvidence([{ slug: 'fsdp2-sharding', kind: 'exposed' }], touched)).toEqual([]);
+  });
+
+  it('reports each offending slug once', () => {
+    expect(untouchedSlugEvidence(
+      [{ slug: 'x', kind: 'exposed' }, { slug: 'x', kind: 'struggled' }],
+      { read: [], staged: [], written: [] },
     )).toEqual(['x']);
   });
 });

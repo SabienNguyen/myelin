@@ -1,0 +1,127 @@
+// Scenario runner: one learner archetype per invocation, on the PyTorch vault with Luna.
+// Records which instrument each turn reached for, plus grading outcomes and errors.
+import { chromium } from '@playwright/test';
+import { writeFileSync } from 'node:fs';
+
+const S = '/tmp/claude-1000/-home-sabien-Dev-personal-myelin/41aef935-49b2-44f8-9881-962caa5b97ed/scratchpad';
+const NAME = process.argv[2];
+const SCRIPTS = {
+  // Wants to produce prose, not pick options — should reach writing_draft.
+  explain: [
+    'Ask me to explain in my own words what gradient accumulation is, and grade what I write.',
+    'Now make me write a short explanation of why we call zero_grad() before backward().',
+  ],
+  // Gets things wrong on purpose — should surface and repair a misconception, not just mark ✗.
+  struggling: [
+    'Teach me about retain_graph.',
+    'I think retain_graph makes training faster by caching gradients, right?',
+    'so it is a speed optimisation then',
+  ],
+  // Comes back after weeks away with decayed pages — review should go to what SLIPPED, and the
+  // tutor should say the page fell rather than teaching it as if fresh.
+  returning: [
+    '/review',
+    'I have been away for two months. What should I go over?',
+    'ok test me on the one that slipped the most',
+  ],
+  // A topic the vault does not cover — should research and cite, not improvise from memory.
+  firstcontact: [
+    '/freeform',
+    'Teach me about PyTorch FSDP2 sharding strategies. I do not think we have a page on it.',
+  ],
+  // Asks across topics — should keep continuity rather than jumping to the global frontier.
+  crosstopic: [
+    'Teach me how autograd and CUDA streams interact.',
+    'stay on that — what breaks if the stream is not synchronised?',
+    'whats next',
+  ],
+};
+const turns = SCRIPTS[NAME] ?? SCRIPTS[NAME.replace(/[0-9]+$/, '')];
+if (!turns) { console.error('unknown scenario', NAME); process.exit(1); }
+
+const out = [];
+const errs = [];
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1500, height: 1000 } });
+p.on('pageerror', (e) => errs.push(`[pageerror] ${e.message}`));
+p.on('console', (m) => m.type() === 'error' && errs.push(`[console] ${m.text().slice(0, 160)}`));
+
+await p.goto(`http://localhost:4297/#/t/${NAME}`, { waitUntil: 'domcontentloaded' });
+await p.waitForTimeout(8000);
+const composer = () => p.getByRole('textbox', { name: 'Ask your tutor…' });
+await composer().waitFor({ state: 'visible', timeout: 60_000 });
+
+for (const [i, text] of turns.entries()) {
+  const t0 = Date.now();
+  const box = composer();
+  await box.waitFor({ state: 'visible', timeout: 90_000 });
+  await box.click();
+  await box.fill(text);
+  await p.keyboard.press('Enter');
+  await p.waitForTimeout(1500);
+  await p.getByText('tutor is working', { exact: false })
+    .waitFor({ state: 'hidden', timeout: 300_000 })
+    .catch(() => out.push('  !! still working at deadline'));
+  await p.waitForTimeout(1200);
+  out.push(`T${i + 1} (${((Date.now() - t0) / 1000).toFixed(1)}s): ${text}`);
+  // Answer whatever block is open. quick_check in CHOICE mode renders its options as plain
+  // buttons — an earlier version of this runner only knew how to type, so it skipped every
+  // choice block, then cancelled it by sending the next message ("User cancelled tool call by
+  // sending a new message") and reported turns as answered that were never graded.
+  // The richer blocks (structured_check, math_scratchpad, code_exercise, writing_draft) render
+  // through StagePortal into #stage-root, OUTSIDE the .block element in the transcript — a
+  // selector scoped to .block finds no controls and wrongly reports the block unanswerable.
+  const stage = p.locator('#stage-root');
+  const stageSubmit = stage.getByRole('button', { name: /submit|check|run|grade/i }).first();
+  if (await stageSubmit.count()) {
+    const before = await p.locator('.verdict').count();
+    for (const sel of await stage.locator('select').all()) {
+      const opts = await sel.locator('option').allTextContents();
+      if (opts.length > 1) await sel.selectOption({ index: 1 }).catch(() => {});
+    }
+    const ta = stage.locator('textarea, input[type="text"], [contenteditable="true"]').first();
+    if (await ta.count()) await ta.fill('gradients accumulate into .grad').catch(() => {});
+    await stageSubmit.click().catch(() => {});
+    const graded = await p.waitForFunction(
+      (n) => document.querySelectorAll('.verdict').length > n, before, { timeout: 300_000 },
+    ).then(() => true).catch(() => false);
+    await p.getByText('tutor is working', { exact: false })
+      .waitFor({ state: 'hidden', timeout: 300_000 }).catch(() => {});
+    out.push(`   [answered a STAGE block -> ${graded ? 'GRADED' : 'NO VERDICT ARRIVED'}]`);
+    continue;
+  }
+  const open = p.locator('.block:not(.done)').first();
+  if (await open.count()) {
+    const before = await p.locator('.verdict').count();
+    const choices = open.locator('> button');
+    const typed = open.locator('textarea, input[name="a"], [contenteditable="true"]').first();
+    let acted = '';
+    if (await choices.count()) {
+      const labels = await choices.allTextContents();
+      await choices.first().click().catch(() => {});
+      acted = `chose "${labels[0]?.slice(0, 40)}"`;
+    } else if (await typed.count()) {
+      await typed.click().catch(() => {});
+      await typed.fill('Gradients add into .grad across backward calls instead of replacing it, so you clear them each step.').catch(() => {});
+      const submit = open.getByRole('button', { name: /submit|check|grade|done/i }).first();
+      if (await submit.count()) await submit.click().catch(() => {});
+      else await p.keyboard.press('Enter').catch(() => {});
+      acted = 'typed an answer';
+    }
+    if (acted) {
+      const graded = await p.waitForFunction(
+        (n) => document.querySelectorAll('.verdict').length > n, before, { timeout: 300_000 },
+      ).then(() => true).catch(() => false);
+      await p.getByText('tutor is working', { exact: false })
+        .waitFor({ state: 'hidden', timeout: 300_000 }).catch(() => {});
+      out.push(`   [${acted} -> ${graded ? 'GRADED' : 'NO VERDICT ARRIVED'}]`);
+    } else {
+      out.push('   [block open but no answerable control found]');
+    }
+  }
+}
+
+writeFileSync(`${S}/scenario-${NAME}.txt`, out.join('\n') + '\n\nERRORS:\n' + (errs.join('\n') || 'none'));
+console.log(out.join('\n'));
+console.log('ERRORS:', errs.length || 'none');
+await b.close();
