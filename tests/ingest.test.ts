@@ -998,3 +998,34 @@ describe('the source spine — compile records the book\'s own order', async () 
     expect(sourceFor(vault, 'Attention Is All You Need')?.spine).toBeUndefined();
   });
 });
+
+/**
+ * The URL a document came from must survive onto the real chapter rows. It is set on the
+ * 'converting' placeholder, which the post-conversion rows REPLACE — so when it was not carried
+ * across, every URL-sourced ingest (arXiv PDF, YouTube transcript, web article) compiled pages
+ * whose `sources` read "book — title" instead of the address. For a web source that link back is
+ * the whole of its provenance.
+ */
+describe('sourceUrl survives conversion', () => {
+  it('lands on the paper-mode chapter row, so compiled pages cite the URL', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-srcurl-'));
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    const file = join(vault, 'article.md');
+    writeFileSync(file, '# An Article\n\n' + 'Real prose about a topic. '.repeat(60) + '\n');
+
+    const done = new Promise<void>((resolve) => {
+      startConversion({} as any, { vault } as any, file, {
+        mode: 'paper',
+        title: 'An Article',
+        sourceUrl: 'https://example.com/an-article',
+        converter: async () => ({ markdown: readFileSync(file, 'utf8') }),
+        onComplete: () => resolve(),
+      } as any);
+    });
+    await done;
+
+    const row = readQueue(vault).find((e: any) => String(e.chapter).endsWith('paper.md'));
+    expect(row).toBeTruthy();
+    expect((row as any).sourceUrl).toBe('https://example.com/an-article');
+  });
+});

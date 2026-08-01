@@ -173,8 +173,10 @@ describe('ingest routes — JSON url ingest', () => {
         return;
       }
       if (url.pathname === '/notapaper') {
-        res.setHeader('content-type', 'text/html');
-        res.end('<html>nope</html>');
+        // text/html is a SUPPORTED source now — it extracts to markdown and compiles like any
+        // other document — so this case needs a type the pipeline genuinely cannot read.
+        res.setHeader('content-type', 'image/png');
+        res.end('not a document');
         return;
       }
       res.statusCode = 404; res.end('nope');

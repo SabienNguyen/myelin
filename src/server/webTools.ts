@@ -1,4 +1,4 @@
-import { convert } from 'html-to-text';
+import { htmlToText } from './htmlText.js';
 import { z } from 'zod';
 import type { HarnessConfig } from './config.js';
 import type { LoopTool, ServerTool } from './llm/index.js';
@@ -71,17 +71,7 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
           });
           if (!res.ok) return { error: `fetch failed: HTTP ${res.status}` };
           const html = await res.text();
-          const text = convert(html, {
-            wordwrap: false,
-            selectors: [
-              { selector: 'nav', format: 'skip' },
-              { selector: 'footer', format: 'skip' },
-              { selector: 'script', format: 'skip' },
-              { selector: 'style', format: 'skip' },
-              { selector: 'a', options: { ignoreHref: true } },
-              { selector: 'img', format: 'skip' },
-            ],
-          }).replace(/\n{3,}/g, '\n\n').trim();
+          const text = htmlToText(html);
           return {
             url,
             truncated: text.length > MAX_PAGE_CHARS,

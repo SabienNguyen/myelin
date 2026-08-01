@@ -273,6 +273,12 @@ export function startConversion(
             const kept = entries.filter((e) => e.chapter !== placeholderKey);
             kept.push({
               book: title, chapter: `raw/uploads/${slug}/paper.md`, title, status: 'pending',
+              // The URL has to survive onto the REAL row. It was set on the 'converting'
+              // placeholder, which this replaces — so without carrying it here every URL-sourced
+              // ingest (arXiv PDF, YouTube transcript, web article) compiled pages citing
+              // "book — title" instead of the address, and the one thing a web source exists to
+              // give a learner, a link back to it, was the one thing the page lost.
+              ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
             });
             return kept;
           });
@@ -315,6 +321,7 @@ export function startConversion(
             writeFileSync(join(uploadsDir, filename), `${header}${ch.body}\n`);
             return {
               book: bookTitle, chapter: `raw/uploads/${bookSlug}/${filename}`, title: ch.title, status: 'pending' as const,
+              ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}), // see the paper-mode note above
             };
           });
           queuedCount += newSections.length;

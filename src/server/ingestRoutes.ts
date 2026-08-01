@@ -101,6 +101,9 @@ export function buildIngestRoutes(
       // reload-safe 'converting' placeholder immediately.
       const result = startConversion(lw, cfg, downloaded.path, {
         converter: deps.converter, mode: body.mode ?? 'paper', model: deps.model, sourceUrl: body.url,
+        // An HTML source reports its own <title>; without it a saved article lands in the Library
+        // named "page" (the temp file) or after a URL slug that is often just an id.
+        ...(downloaded.title ? { title: downloaded.title } : {}),
         cleanupInputDir: dirname(downloaded.path),
         // A downloaded PDF carries no machine-readable byline this pipeline reads (the converted
         // text does, but only a model would be reading it — which is the claim side, not the
