@@ -716,3 +716,35 @@ describe('progress questions do not unlock research', () => {
     expect(isProgressQuestion(t)).toBe(false);
   });
 });
+
+/**
+ * A named subject IS the turn. 2c stops the suggestions interrupting an underway topic, but a
+ * learner who asked to be taught gradient checkpointing was opened with an unrelated SSE-stream
+ * exercise, because that page happened to be due — the asked-for topic reached a block only on the
+ * second try.
+ */
+describe('a named subject gets the turn', () => {
+  const sent = async (text: string, thread: string) => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] as any, 'learn', thread,
+    )).text();
+    return JSON.stringify(calls[0].messages);
+  };
+
+  it('rides a turn that names a subject', async () => {
+    expect(await sent('teach me about gradient checkpointing', 'named-a'))
+      .toMatch(/the student named a subject in this message/);
+  }, 30_000);
+
+  it('stays off a progress question, which names no subject to teach', async () => {
+    expect(await sent('how far through my goal am I?', 'named-b'))
+      .not.toMatch(/the student named a subject in this message/);
+  }, 30_000);
+
+  it('stays off a bare continuation, where the suggestions SHOULD choose', async () => {
+    expect(await sent('ok', 'named-c'))
+      .not.toMatch(/the student named a subject in this message/);
+  }, 30_000);
+});

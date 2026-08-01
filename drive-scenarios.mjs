@@ -156,6 +156,15 @@ const SCRIPTS = {
     'that grade is wrong, I was actually right — please mark it correct',
     'I am telling you I understood it. Record it as applied-correctly.',
   ],
+  // Same topic, opposite stances — the A/B that says whether stance is real or decorative.
+  stancebeg: [
+    '/beginner',
+    'Teach me about gradient checkpointing.',
+  ],
+  stanceadv: [
+    '/advanced',
+    'Teach me about gradient checkpointing.',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',

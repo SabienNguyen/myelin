@@ -967,6 +967,21 @@ export function createTutorSession(
           + 'a 2-4 point rubric; use `quick_check` only as a first-contact calibration. A turn that '
           + 'just explains is a turn they read rather than learned from.',
         ));
+        // The student NAMED a subject this turn. 2c says the session context decides what to start
+        // and never what to interrupt, but a named topic is not an interruption to negotiate — it
+        // is the turn. A learner who asked to be taught gradient checkpointing was opened with an
+        // SSE-stream exercise instead, because stream-consumer happened to be due; the asked-for
+        // topic only appeared in a second block. Prose 40 lines up did not stop it, so the turn
+        // carries it.
+        const namedTopic = !gradingOnly && !readingSource
+          && !isProgressQuestion(lastUserText(messages))
+          && topicTokens(lastUserText(messages)).length > 0;
+        if (namedTopic) trailing.push(userTurn(
+          'HARNESS: the student named a subject in this message. Teach THAT — every block this turn '
+          + 'is about it. Reviews and frontier suggestions are for turns where they named nothing; '
+          + 'if something due genuinely matters, finish what they asked for first, then say what '
+          + 'you are switching to and why.',
+        ));
         if (stance) trailing.push(userTurn(
           `HARNESS STANCE (persists for this thread): teach at ${stance} level — `
           + `${STANCE_INSTRUCTIONS[stance]}. Research accordingly.`,
