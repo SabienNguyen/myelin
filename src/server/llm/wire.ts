@@ -87,30 +87,14 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
   if (opts.signal?.aborted) abort.abort(opts.signal.reason);
   else opts.signal?.addEventListener('abort', linkUpstream, { once: true });
 
-  // The consumer letting go of the body is NOT a reason to stop teaching. A learner who reloads
-  // mid-answer used to get the turn killed here: cancel() aborted it, onEnd persisted whatever had
-  // happened so far, and they came back to an assistant message holding three tool calls and no
-  // text. The turn now runs to completion with nobody listening, and onEnd saves the whole thing,
-  // so the answer is waiting when the thread reloads.
-  //
-  // The assembler still sees every chunk — that is what onEnd persists. Only the enqueue stops,
-  // because the controller is closed once cancelled and enqueuing to it throws.
-  let detached = false;
   const stream = new ReadableStream<Uint8Array>({
-    cancel() {
-      detached = true;
+    cancel(reason) {
+      abort.abort(reason);
     },
     start(controller) {
       const emit = (chunk: UiChunk) => {
         assembler.apply(chunk);
-        if (detached) return;
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-        } catch {
-          // Raced the cancel: the controller closed between the check and the enqueue. The turn
-          // keeps going; only this chunk's delivery is lost, and it is already in the assembler.
-          detached = true;
-        }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
       };
       const writer: UiStreamWriter = {
         write: emit,
