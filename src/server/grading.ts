@@ -957,7 +957,14 @@ export async function gradeBlockOutput(
     if (annRes.status === 'fulfilled') {
       annotations = annRes.value;
     } else {
-      console.error(`writing_draft: rubric judged, but annotation grading failed: ${(annRes.reason as Error)?.message ?? annRes.reason}`);
+      // Name the VALUE the model reached for, not just the enum it missed. Zod's message lists the
+      // options and the path but never what arrived, so a live failure — an annotation category
+      // outside strong/wordy/vague/structure/grammar — left nothing in the log to act on: no way to
+      // tell whether the model wanted a sensible sixth category or emitted noise.
+      console.error(
+        `writing_draft: rubric judged, but annotation grading failed: ${(annRes.reason as Error)?.message ?? annRes.reason}`
+        + `${rejectedValues(annRes.reason)}`,
+      );
       annMiss = '; annotations unavailable';
     }
     return {
@@ -998,6 +1005,18 @@ async function annotateDraft(
   });
   recordUsage(cfg.vault, { role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage });
   return object;
+}
+
+/** The values a zod failure actually received, pulled off the issue list. Zod reports the expected
+ *  options and the path but not what arrived, which is the one thing needed to decide whether the
+ *  schema is too narrow or the model is wrong. Returns '' when the shape is anything else. */
+export function rejectedValues(reason: unknown): string {
+  const issues = (reason as any)?.issues;
+  if (!Array.isArray(issues)) return '';
+  const got = issues
+    .map((i: any) => (i?.received !== undefined ? `${(i.path ?? []).join('.')}=${JSON.stringify(i.received)}` : null))
+    .filter(Boolean);
+  return got.length ? ` — received ${got.join(', ')}` : '';
 }
 
 /** Suffix a quick_check confidence marker onto a grade's evidence notes. gradeOpenAnswer is shared

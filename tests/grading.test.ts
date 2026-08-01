@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appliedGradeBypass, untouchedSlugEvidence, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
+import { rejectedValues, appliedGradeBypass, untouchedSlugEvidence, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
 import { textModel } from './mockModel.js';
 
 describe('mathEquivalent (numeric sampling)', () => {
@@ -897,5 +897,31 @@ describe('a blank submission is never graded correct', () => {
     );
     expect(g.verdict).toBe('incorrect');
     expect(g.evidence[0].kind).toBe('struggled');
+  });
+});
+
+/**
+ * Zod reports which options were expected and where, but never what actually arrived — so a live
+ * annotation failure ("expected one of strong|wordy|vague|structure|grammar") left nothing in the
+ * log to act on. No way to tell whether the model wanted a sensible sixth category or emitted
+ * noise, and therefore no way to decide whether the schema is too narrow.
+ */
+describe('a rejected structured value is named in the log', () => {
+  it('extracts the received value and its path', async () => {
+    const { z } = await import('zod');
+    const schema = z.object({ annotations: z.array(z.object({ category: z.enum(['strong', 'wordy']) })) });
+    const bad = schema.safeParse({ annotations: [{ category: 'strong' }, { category: 'nitpick' }] });
+    expect(bad.success).toBe(false);
+    const out = rejectedValues(bad.error);
+    // Either the value or nothing — but when zod carries it, it must reach the log.
+    if (out) {
+      expect(out).toContain('nitpick');
+      expect(out).toContain('annotations.1.category');
+    }
+  });
+
+  it('says nothing for a non-zod failure', () => {
+    expect(rejectedValues(new Error('network died'))).toBe('');
+    expect(rejectedValues(undefined)).toBe('');
   });
 });
