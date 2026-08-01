@@ -717,7 +717,25 @@ export function createTutorSession(
         // 1. Grade fresh block outputs BEFORE the model sees them.
         const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
         for (const p of pending) {
-          const grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+          // A grader that throws must never take the TURN down with it. One malformed checker arg
+          // (a boolean `expected` reaching a string normaliser) threw here, the exception escaped
+          // to the turn handler, and the learner got a completely empty reply to "ok next" — no
+          // text, no block, no error, nothing to retry. The grade is the recoverable part: a
+          // 'reviewed' verdict lets the turn continue and the tutor respond to the work, while the
+          // real cause goes to the log where it can be fixed.
+          let grading: Awaited<ReturnType<typeof gradeBlockOutput>>;
+          try {
+            grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+          } catch (e) {
+            const why = (e as Error)?.message ?? String(e);
+            console.error(`[grade-error] ${p.tool}: ${why}`);
+            grading = {
+              verdict: 'reviewed',
+              source: 'model',
+              detail: `grading failed (${why}) — judge the student's work yourself and say so plainly`,
+              evidence: [],
+            };
+          }
           p.output.grading = grading; // model sees student work + machine grade together
           grades.push(grading);
         }

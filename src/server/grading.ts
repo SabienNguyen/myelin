@@ -443,9 +443,15 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     return { allCorrect: v.ok, anyCorrect: v.ok, detail: v.detail };
   }
 
-  // pattern
-  const ok = normKey(clean[0] ?? '') === normKey(checker.expected);
-  return { allCorrect: ok, anyCorrect: ok, detail: ok ? 'exact match' : `expected "${checker.expected}"` };
+  // pattern. `expected` is typed string | boolean | number: the schema was widened because models
+  // legitimately send `expected: true` for a yes/no probe ("what does x.requires_grad evaluate
+  // to?"), and rejecting those turned working blocks into error cards. The checker has to accept
+  // the same shapes the schema does — comparing a boolean through a string normaliser threw
+  // "s.trim is not a function", which killed the whole TURN, not just the grade: the learner saw an
+  // empty reply to "ok next" with no indication anything had gone wrong.
+  const expected = String(checker.expected ?? '');
+  const ok = normKey(clean[0] ?? '') === normKey(expected);
+  return { allCorrect: ok, anyCorrect: ok, detail: ok ? 'exact match' : `expected "${expected}"` };
 }
 
 /**

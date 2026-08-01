@@ -73,6 +73,20 @@ const SCRIPTS = {
     'I want to learn music theory from scratch.',
     'not sure — just start me somewhere sensible',
   ],
+  // The app-built interleaved plan, executed as a plan (rule 2a): items IN ORDER, retrieval
+  // before reteaching on [review]/[fix].
+  plan: [
+    'Run today\'s session',
+    'ok next',
+    'keep going',
+  ],
+  // A tone language — the one subject where text alone cannot teach the distinction. Exercises
+  // the speak/pronounce path that previously white-screened on a missing lang.
+  tones: [
+    '!freeform',
+    'Teach me the six Vietnamese tones and let me hear them.',
+    'which two are hardest to tell apart?',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',

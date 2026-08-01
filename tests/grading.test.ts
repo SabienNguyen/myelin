@@ -828,3 +828,35 @@ describe('untouchedSlugEvidence', () => {
     )).toEqual(['x']);
   });
 });
+
+/**
+ * The pattern checker's `expected` is typed string | boolean | number — models legitimately send
+ * `expected: true` for a yes/no probe, and rejecting those turned working blocks into error cards.
+ * Comparing a boolean through a string normaliser threw "s.trim is not a function", which killed
+ * the whole TURN: an empty reply to "ok next", with no indication anything had gone wrong.
+ */
+describe('pattern checker accepts every shape its schema allows', () => {
+  const grade = (expected: unknown, answer: string) => gradeStructured(
+    { kind: 'pattern', expected } as any,
+    [answer],
+  );
+
+  it('grades a boolean expected without throwing', () => {
+    expect(() => grade(true, 'True')).not.toThrow();
+    expect(grade(true, 'True').allCorrect).toBe(true);
+    expect(grade(true, 'False').allCorrect).toBe(false);
+  });
+
+  it('grades a numeric expected without throwing', () => {
+    expect(grade(42, '42').allCorrect).toBe(true);
+    expect(grade(42, '43').allCorrect).toBe(false);
+  });
+
+  it('still grades strings as before', () => {
+    expect(grade('requires_grad', ' Requires_Grad ').allCorrect).toBe(true);
+  });
+
+  it('reports the expected value in the detail rather than [object Object]', () => {
+    expect(grade(true, 'no').detail).toMatch(/expected "true"/);
+  });
+});
