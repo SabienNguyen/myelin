@@ -337,7 +337,7 @@ export function topicTokens(text: string): string[] {
     .filter((t) => t.length > 2 && !STOPWORDS.has(t));
 }
 
-function lastUserText(messages: UIMessage[]): string {
+export function lastUserText(messages: UIMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role !== 'user') continue;
     return (messages[i].parts as any[])

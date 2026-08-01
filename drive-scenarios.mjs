@@ -108,6 +108,10 @@ const SCRIPTS = {
     'ok next', 'what am I still weak on here?',
     'keep going', 'summarise what I learned today',
   ],
+  // The turn that called get_student_state four times — verifies the per-turn read cache.
+  weakspots: [
+    'what am I still weak on across everything I have studied?',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',

@@ -1,0 +1,132 @@
+<meta charset="utf-8">
+<title>One mode — design</title>
+<style>
+  :root{--bg:#fbfaf7;--fg:#1c1a17;--mut:#6b655c;--line:#e0dbd1;--accent:#2f5d8a;--warn:#8a4b2f;--ok:#2f7d4f;--code:#f2efe9}
+  @media (prefers-color-scheme:dark){:root{--bg:#14130f;--fg:#e9e5dd;--mut:#9a938a;--line:#2e2b25;--accent:#7fb0dd;--warn:#d9906a;--ok:#7fc79a;--code:#1e1c17}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+  main{max-width:50rem;margin:0 auto;padding:3rem 1.5rem 6rem}
+  h1{font-size:1.9rem;line-height:1.2;margin:0 0 .3rem;letter-spacing:-.02em}
+  .sub{color:var(--mut);margin:0 0 2.5rem}
+  h2{font-size:1.15rem;margin:2.6rem 0 .8rem;padding-top:1.2rem;border-top:1px solid var(--line)}
+  h3{font-size:.95rem;margin:1.6rem 0 .5rem;color:var(--accent)}
+  p,li{margin:.5rem 0}
+  table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem}
+  th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.04em}
+  code{background:var(--code);padding:.1rem .35rem;border-radius:3px;font-size:.85em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .box{border:1px solid var(--line);border-left:3px solid var(--accent);padding:.9rem 1.1rem;margin:1.2rem 0;border-radius:0 4px 4px 0;background:var(--code)}
+  .box.warn{border-left-color:var(--warn)}
+  .box.ok{border-left-color:var(--ok)}
+  .box p:first-child{margin-top:0}.box p:last-child{margin-bottom:0}
+  .lab{font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);display:block;margin-bottom:.3rem}
+  .rec{display:inline-block;font-size:.7rem;background:var(--ok);color:var(--bg);padding:.1rem .45rem;border-radius:3px;vertical-align:middle;margin-left:.4rem;letter-spacing:.03em}
+  ol.steps{padding-left:1.2rem}ol.steps li{margin:.6rem 0}
+  .tw{overflow-x:auto}
+</style>
+
+<main>
+<h1>One mode</h1>
+<p class="sub">Collapsing the mode selector — design, 31 Jul 2026</p>
+
+<h2>1. What the four modes actually are</h2>
+
+<p>Read from <code>prompt.ts</code> and <code>session.ts</code>, not from memory:</p>
+
+<div class="tw">
+<table>
+<tr><th>Mode</th><th>What it changes</th><th>Enforced by</th></tr>
+<tr><td><code>learn</code></td><td>“Teach the next suggested lesson.”</td><td>nothing — one sentence</td></tr>
+<tr><td><code>review</code></td><td>“Re-prove decayed/due pages before anything new.”</td><td>nothing — one sentence</td></tr>
+<tr><td><code>quiz</code></td><td>“Open with a quiz block covering recent pages.”</td><td>nothing — one sentence</td></tr>
+<tr><td><code>freeform</code></td><td>adds <code>ingest</code> + <code>create_path</code>; always agentic (never rails)</td><td>real code</td></tr>
+</table>
+</div>
+
+<div class="box">
+<span class="lab">The finding</span>
+<p>Three of the four modes are a <strong>framing sentence</strong>. No tool gate, no code path, nothing enforced. Everything they nominally control the harness already computes independently: <code>next_lessons</code> picks the frontier, decay picks what is due, and the session plan already interleaves <code>[review]</code>&nbsp;/&nbsp;<code>[new]</code>&nbsp;/&nbsp;<code>[fix]</code> items in a deliberate order.</p>
+<p>Only <code>freeform</code> is real — and it is not a <em>learning</em> mode. It is a permission level: <em>may this turn restructure the vault?</em></p>
+</div>
+
+<h2>2. The codebase already routes around the selector</h2>
+
+<p>Three separate mechanisms exist for no other purpose. This is the system’s own evidence that the control is in the wrong place.</p>
+
+<h3>coldStartMode.ts</h3>
+<p>Auto-picks <code>freeform</code> when the vault has no real pages, because <code>learn</code> could not write and “the newcomer’s first lesson researched well, taught well, and then evaporated.”</p>
+
+<h3>writeIntent.ts + <code>writeUp</code></h3>
+<p>A one-shot promotion of a single turn to freeform, existing verbatim so the learner does not have to “hunt for the mode selector and flip to freeform by hand.” The visible mode never changes; the next turn reverts.</p>
+
+<h3>Mode slash commands</h3>
+<p><code>/review</code>, <code>/freeform</code> override the selector for one turn — a second way to say the same thing, because the persistent selector is the wrong granularity.</p>
+
+<div class="box ok">
+<span class="lab">And as of today</span>
+<p><code>write_page</code> now unlocks in teaching modes whenever a vault gap opened research. The freeform boundary is already <em>mostly</em> gone; what is left of it is ingest and <code>create_path</code>.</p>
+</div>
+
+<h2>3. Proposal</h2>
+
+<p><strong>Remove the mode selector. Keep <code>Mode</code> internally as a derived value.</strong></p>
+
+<p>That second half is the point. Deleting the concept would touch the plan builder, rails, the prompt, the slash commands and a large number of tests. Deriving it instead is a small change with the same user-visible result, and it leaves every internal seam intact.</p>
+
+<div class="tw">
+<table>
+<tr><th>Today</th><th>Replaced by</th></tr>
+<tr><td>User picks <code>learn</code>/<code>review</code>/<code>quiz</code></td><td>The session plan. It already computes review-due, frontier and fix items, and rule 2a already says execute it in order.</td></tr>
+<tr><td>User picks <code>quiz</code></td><td>“quiz me” as a sentence, plus the existing <code>/quiz</code> command.</td></tr>
+<tr><td>User picks <code>freeform</code> to write a page</td><td>Already automatic — <code>vaultGap</code> unlocks <code>write_page</code>.</td></tr>
+<tr><td>User picks <code>freeform</code> to build a syllabus / add material</td><td>An explicit intent affordance — see 4.</td></tr>
+</table>
+</div>
+
+<h2>4. The one real decision: authoring</h2>
+
+<p><code>ingest</code> and <code>create_path</code> are the only capabilities with no automatic trigger. Two options.</p>
+
+<h3>A. Auto-unlock on intent<span class="rec">recommended</span></h3>
+<p>Unlock them when the turn’s text asks for them — “build me a path for X”, “add this material”. Same shape as <code>vaultGap</code>: a per-turn unlock, decided by the harness, announced to the model in the tail note.</p>
+<p><em>Why:</em> consistent with everything else here, and with rule 1b — the system should not ask the user to answer a question it can answer itself. <em>Risk:</em> a model authoring a path nobody asked for. Mitigated by the same thing that mitigates it today — <code>create_path</code> is visible, reversible, and the tutor must say what it built.</p>
+
+<h3>B. Keep an explicit affordance</h3>
+<p>No auto-unlock; a button (“build me a syllabus”) arms one turn, exactly like the existing <code>writeUp</code> latch.</p>
+<p><em>Why:</em> zero risk of unasked-for authoring, and reuses a proven mechanism. <em>Cost:</em> a learner who says “build me a path for music theory” in words gets told to press a button instead — the failure this whole redesign is meant to remove.</p>
+
+<h2>5. Risks, named</h2>
+
+<div class="box warn">
+<span class="lab">Rails</span>
+<p>Rails currently gates on <code>mode !== 'freeform'</code>. If freeform stops being a persistent mode, that gate needs a new definition. Proposed: <strong>rails drives plan execution; any turn that unlocks writing, ingest or path-building goes agentic.</strong> That is what the current gate means in practice, stated in terms of capability rather than mode.</p>
+</div>
+
+<div class="box warn">
+<span class="lab">Losing manual control</span>
+<p>Some sessions genuinely want forcing. The slash commands stay — <code>/review</code>, <code>/quiz</code>, <code>/freeform</code> — as per-turn overrides. What goes is the <em>persistent</em> selector, not the ability to say what you want.</p>
+</div>
+
+<div class="box warn">
+<span class="lab">The plan must carry more weight</span>
+<p>The honest cost. Today the framing sentence does quiet steering (“open with a quiz”). Removing it means that steering has to move into the plan builder, which currently emits <code>[review]</code>/<code>[new]</code>/<code>[fix]</code> but never “this page is ripe for a quiz”. This is the actual work of the change; the deletion is trivial by comparison.</p>
+</div>
+
+<h2>6. Migration</h2>
+<ol class="steps">
+<li>Add <code>deriveMode(plan, text, vault)</code> — one pure function, unit-testable, returning today’s <code>Mode</code>. Ship it behind the existing selector, asserting it agrees.</li>
+<li>Teach the plan builder to mark quiz-ripe items, so <code>quiz</code>’s steering survives its framing sentence.</li>
+<li>Restate the rails gate in capability terms.</li>
+<li>Add the authoring unlock (option A).</li>
+<li>Remove the selector from the topbar. Keep the slash commands.</li>
+<li>Delete <code>coldStartMode</code> — with writing auto-unlocked it has nothing left to decide.</li>
+</ol>
+
+<h2>7. What I would not do</h2>
+<ul>
+<li><strong>Delete the <code>Mode</code> type.</strong> It is a fine internal representation; the bug is asking a human to set it.</li>
+<li><strong>Collapse to one mode and stop.</strong> Without step 2 the quiz steering is silently lost and nobody notices for weeks.</li>
+<li><strong>Remove the slash commands.</strong> They are the escape hatch that makes removing the selector safe.</li>
+</ul>
+
+</main>

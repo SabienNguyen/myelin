@@ -1013,3 +1013,54 @@ describe('GET /api/paths — nextTitle resolution', () => {
     expect(body.paths[1].nextTitle).toBeNull();
   });
 });
+
+/**
+ * `quiz` mode's framing sentence ("open with a quiz block covering recent pages") was the only one
+ * of the three teaching modes that steered anything the plan could not already express. Removing
+ * the mode selector means that steering has to live in the plan instead — otherwise it vanishes
+ * silently and nobody notices for weeks.
+ */
+describe('/api/session-plan quiz batching', () => {
+  const lwWith = (slugs: string[]) => {
+    const state: Record<string, any> = {};
+    slugs.forEach((s, i) => {
+      state[s] = {
+        level: 'practicing', effective: 'practicing', last_reinforced: '2000-01-01',
+        days_left: i + 1, slipped: false, misconceptions: [],
+      };
+    });
+    return {
+      listSlugs: async () => Object.keys(state),
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') return state;
+        if (name === 'next_lessons') return { lessons: [] };
+        if (name === 'read_page') return { page: { meta: { title: `T:${args.slug}`, tags: [args.slug] } } };
+        throw new Error(`unexpected ${name}`);
+      },
+    } as any;
+  };
+
+  it('leaves an ordinary review session alone — individual items keep their transfer directives', async () => {
+    const lw = lwWith(['a', 'b', 'c', 'd']);
+    const { plan } = await (await buildRestRoutes(lw, cfg).request('/api/session-plan')).json();
+    expect(plan.every((p: any) => p.kind === 'review')).toBe(true);
+    expect(plan.every((p: any) => p.transfer)).toBe(true);
+  });
+
+  it('batches a slice into one quiz once probing each would swamp the sitting', async () => {
+    const lw = lwWith(['a', 'b', 'c', 'd', 'e', 'f', 'g']);
+    const { plan } = await (await buildRestRoutes(lw, cfg).request('/api/session-plan')).json();
+    const quiz = plan.find((p: any) => p.kind === 'quiz');
+    expect(quiz).toBeTruthy();
+    expect(quiz.covers).toHaveLength(4);
+    expect(quiz.why).toMatch(/quizzed together/);
+  });
+
+  it('never drops the pages it did not batch', async () => {
+    const lw = lwWith(['a', 'b', 'c', 'd', 'e', 'f', 'g']);
+    const { plan } = await (await buildRestRoutes(lw, cfg).request('/api/session-plan')).json();
+    const covered = new Set<string>(plan.flatMap((p: any) => p.covers ?? [p.slug]));
+    // Every page that made the plan is reachable — batched into the quiz or standing on its own.
+    expect(covered.size).toBe(plan.reduce((n: number, p: any) => n + (p.covers?.length ?? 1), 0));
+  });
+});
