@@ -571,3 +571,57 @@ describe('a page written this turn becomes recordable in the same turn', () => {
     expect(known).not.toContain('never-written');
   });
 });
+
+/**
+ * A live turn called get_student_state four times, each re-reading the vault to produce a
+ * byte-identical answer. That is latency on every model and real money on a metered one. Cached
+ * for the turn — but only until something writes, because the read a tutor makes right after
+ * recording evidence is precisely the one that must see the new standing.
+ */
+describe('read-only MCP calls are cached within a turn', () => {
+  const build = () => {
+    const calls: string[] = [];
+    const raw = [
+      {
+        name: 'get_student_state',
+        description: 'state',
+        execute: async () => { calls.push('state'); return { level: 'exposed' }; },
+      },
+      {
+        name: 'record_evidence',
+        description: 'record',
+        execute: async () => { calls.push('record'); return { ok: true }; },
+      },
+      {
+        name: 'search',
+        description: 'search',
+        execute: async (a: any) => { calls.push(`search:${a.query}`); return { hits: [] }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', ['p'], [], undefined), calls };
+  };
+
+  it('serves a repeated identical read from the cache', async () => {
+    const { tools, calls } = build();
+    await tools[0].execute!({ student: 'kid' });
+    await tools[0].execute!({ student: 'kid' });
+    await tools[0].execute!({ student: 'kid' });
+    expect(calls.filter((c) => c === 'state')).toHaveLength(1);
+  });
+
+  it('does not conflate different arguments', async () => {
+    const { tools, calls } = build();
+    await tools[2].execute!({ query: 'iterators' });
+    await tools[2].execute!({ query: 'generators' });
+    await tools[2].execute!({ query: 'iterators' });
+    expect(calls.filter((c) => c.startsWith('search:'))).toEqual(['search:iterators', 'search:generators']);
+  });
+
+  it('re-reads after a write, so evidence just recorded is visible', async () => {
+    const { tools, calls } = build();
+    await tools[0].execute!({ student: 'kid' });
+    await tools[1].execute!({ student: 'kid', slug: 'p', kind: 'exposed', note: 'n' });
+    await tools[0].execute!({ student: 'kid' });
+    expect(calls).toEqual(['state', 'record', 'state']);
+  });
+});

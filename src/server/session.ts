@@ -47,6 +47,23 @@ const PROVING_KINDS = new Set(['applied-correctly', 'rubric-passed']);
 // Tools whose `slug` argument must name a real vault page.
 const SLUG_TOOLS = ['record_evidence', 'read_page', 'find_analogies'];
 
+/** Read-only MCP tools whose answer cannot change unless something writes. Repeating one with the
+ *  same arguments inside a single turn re-reads the vault to produce a byte-identical answer — a
+ *  live turn called `get_student_state` four times — which costs latency on every model and real
+ *  money on a metered one. Cached per turn, and dropped entirely the moment anything writes. */
+const CACHEABLE_TOOLS = new Set([
+  'get_student_state', 'next_lessons', 'list_paths', 'read_path', 'read_page', 'search',
+  'find_analogies',
+]);
+
+/** Tools that change what the cacheable ones would return. Any of these clears the turn cache, so
+ *  a `get_student_state` after a `record_evidence` sees the new standing rather than a stale copy —
+ *  which is exactly the read the tutor makes when deciding what to teach next. */
+const INVALIDATING_TOOLS = new Set([
+  'record_evidence', 'write_page', 'link_pages', 'unlink_pages', 'create_path',
+  'mark_course_problem', 'compile_source',
+]);
+
 function levenshtein(a: string, b: string): number {
   const m = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
   for (let j = 1; j <= b.length; j++) m[0][j] = j;
@@ -142,6 +159,9 @@ export function guardMcpTools(
   vault?: string,
 ): LoopTool[] {
   const earnedKeys = new Set(earned.map((e) => `${e.slug}|${e.kind}`));
+  // One cache per guardMcpTools call, and guardMcpTools is called once per turn — so its lifetime
+  // is exactly the turn, with no cross-turn staleness to reason about.
+  const readCache = new Map<string, unknown>();
   return tools.map((t) => ({
     ...t,
     execute: t.execute
@@ -173,7 +193,18 @@ export function guardMcpTools(
             };
           }
         }
+        const cacheKey = CACHEABLE_TOOLS.has(t.name)
+          ? `${t.name}|${JSON.stringify(clean ?? null)}`
+          : null;
+        if (cacheKey !== null && readCache.has(cacheKey)) return readCache.get(cacheKey);
+
         const result = await t.execute!(clean);
+
+        if (INVALIDATING_TOOLS.has(t.name)) readCache.clear();
+        // Errors are never cached: a failed read is exactly the call worth making again, and the
+        // retry logic elsewhere would otherwise be handed the same failure from memory.
+        else if (cacheKey !== null && !(result as any)?.isError) readCache.set(cacheKey, result);
+
         // A page written THIS TURN has to become recordable immediately. knownSlugs was read once
         // at turn start, and sanitizeToolArgs runs every slug through repairSlug against it — so
         // without this, the tutor writes "frontal-neocortex", then record_evidence's brand-new slug
