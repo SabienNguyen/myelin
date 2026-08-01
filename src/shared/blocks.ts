@@ -159,7 +159,18 @@ const structuredCheck = {
           + 'matching that big with no distractors will not count as applied practice.'),
       }),
       // Normalised free text: nomenclature, notation, a term of art.
-      z.object({ kind: z.literal('pattern'), expected: z.string() }),
+      // `expected` is compared as TEXT, so a boolean or number is a perfectly sensible thing for a
+      // model to send for a true/false or numeric-token answer — and they do: a live tutor wrote
+      // `{ kind: 'pattern', expected: false }`, which the grader had always coerced. Normalising
+      // here keeps the schema describing what genuinely works, instead of failing a block that
+      // renders and grades correctly.
+      z.object({
+        kind: z.literal('pattern'),
+        // No .transform(): these schemas are converted with z.toJSONSchema() for the model's tool
+        // definitions, and a transform cannot be represented there. The grader already compares
+        // this as text, which is why a boolean `expected` graded correctly all along.
+        expected: z.union([z.string(), z.boolean(), z.number()]),
+      }),
       // A quantity where the UNIT is part of being right and equivalent units must count — graded
       // by real unit algebra (mathjs), so "1 N·m" satisfies an expected "1 J" and "72 km/h"
       // satisfies "20 m/s". Physics, chemistry, engineering.

@@ -134,3 +134,36 @@ describe('code_exercise advertises the patterns that actually exist', () => {
     expect(t.description).not.toContain('stream-consumer');
   });
 });
+
+/**
+ * Luna writes true/false checks as `{ kind: 'pattern', expected: false }` — a BOOLEAN. The schema
+ * demanded a string, and the grader had always coerced it happily (a live run graded one, verdict
+ * "incorrect", detail `expected "false"`). Once the wire started validating block args, that
+ * working block became an error card — a regression my own change introduced, caught by re-running
+ * a real lesson. A pattern answer is compared as text, so accepting a boolean or number and
+ * normalising to string keeps the schema honest about what actually works.
+ */
+describe('pattern checker accepts the shapes models really send', () => {
+  const parse = (expected: unknown) => BLOCK_TOOLS.structured_check.input.safeParse({
+    prompt: 'True or false: retain_graph is a speed optimisation.',
+    pageSlug: 'retain-graph',
+    checker: { kind: 'pattern', expected },
+  });
+
+  // The value is NOT rewritten here — the grader compares it as text, which is why a boolean
+  // expected graded correctly before validation existed. The schema only has to stop calling a
+  // working block malformed.
+  it('accepts a boolean, as models actually send for true/false checks', () => {
+    expect(parse(false).success).toBe(true);
+  });
+
+  it('accepts a number', () => {
+    expect(parse(42).success).toBe(true);
+  });
+
+  it('still accepts a plain string', () => {
+    const r = parse('mitochondria');
+    expect(r.success).toBe(true);
+    expect((r as any).data.checker.expected).toBe('mitochondria');
+  });
+});
