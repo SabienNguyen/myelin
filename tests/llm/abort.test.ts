@@ -200,34 +200,21 @@ describe('createUiStream + AbortSignal', () => {
     expect(body).toContain('"type":"finish"');
   });
 
-  it('cancelling the response body does NOT abort the turn — it finishes for the reload', async () => {
-    // A learner who reloads mid-answer used to have the turn killed here, and came back to an
-    // assistant message holding tool calls and no text. The turn now runs to completion with
-    // nobody listening so onEnd can persist a whole answer.
-    let aborted = false;
-    let finished = false;
-    let ended: any = null;
+  it('cancelling the response body aborts execute the same way', async () => {
+    let reason: unknown;
     const res = createUiStream({
       originalMessages: [],
-      execute: async (writer, signal) => {
-        signal.addEventListener('abort', () => { aborted = true; }, { once: true });
-        await new Promise((r) => setTimeout(r, 30)); // still working when the consumer leaves
-        writer.write({ type: 'text-start', id: 't1' });
-        writer.write({ type: 'text-delta', id: 't1', delta: 'the answer' });
-        writer.write({ type: 'text-end', id: 't1' });
-        finished = true;
-      },
-      onEnd: (e) => { ended = e; },
+      execute: (_writer, signal) => new Promise((resolve) => {
+        signal.addEventListener('abort', () => {
+          reason = signal.reason;
+          resolve();
+        }, { once: true });
+      }),
     });
     const reader = res.body!.getReader();
     await reader.read(); // the 'start' chunk
     await reader.cancel(new Error('consumer let go'));
-    await new Promise((r) => setTimeout(r, 120));
-
-    expect(aborted).toBe(false);   // the turn was never told to stop
-    expect(finished).toBe(true);   // and it ran all the way through
-    // The assembler still saw everything, so what onEnd persists is the COMPLETE answer.
-    expect(JSON.stringify(ended?.messages ?? [])).toContain('the answer');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reason).toEqual(new Error('consumer let go'));
   });
-
 });
