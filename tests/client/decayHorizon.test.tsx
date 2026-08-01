@@ -50,7 +50,9 @@ describe('DecayHorizon', () => {
     stubHorizon(PAGES);
     render(<DecayHorizon />);
     await screen.findByRole('button', { name: 'Buffers — due now' });
-    const names = screen.getAllByRole('button').map((b) => b.getAttribute('aria-label'));
+    // The section's fold toggle is a button too; this assertion is about the TICKS, which are the
+    // labelled ones — scoping to them keeps the urgency-order intent without asserting the header.
+    const names = screen.getAllByRole('button').map((b) => b.getAttribute('aria-label')).filter(Boolean);
     expect(names).toEqual(['Buffers — due now', 'Streams — slips in 9 days', 'Sockets — slips in 45 days']);
   });
 

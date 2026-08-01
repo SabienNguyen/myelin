@@ -2742,3 +2742,27 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 /* `lit`, not `on` — the house `.block button.on` selected-answer pill would swallow it. */
 .cite-link.lit { text-decoration-style: solid; }
+
+/* --- Collapsible sections (Library + Pages) ------------------------------------------------ */
+/* The header row is a flex line so section-level controls (rename) sit beside the toggle rather
+   than inside it — a button inside a button never receives its click. */
+.collapsible-head { display: flex; align-items: center; gap: 0.25rem; }
+.collapsible-toggle {
+  flex: 1; display: flex; align-items: center; gap: 0.4rem;
+  background: none; border: 0; padding: 0.5rem 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.collapsible-toggle:hover .collapsible-title { color: var(--accent); }
+/* The caret is the whole affordance, so it must read as rotating rather than swapping glyphs. */
+.collapsible-caret { flex: none; transition: transform 120ms ease; opacity: 0.55; }
+.collapsible[aria-hidden] { display: block; }
+.collapsible-toggle[aria-expanded="true"] .collapsible-caret { transform: rotate(90deg); }
+.collapsible-title {
+  font-family: var(--font-serif); font-size: 1rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 0.35rem;
+}
+/* A folded section keeps its rule so the stack still reads as a list of parts, not a gap. */
+.collapsible.is-collapsed { border-bottom: 1px solid var(--border); }
+/* These sections previously supplied their own heading margins; the toggle row now owns the
+   spacing, so drop the doubled gap the old h2/h3 rules leave behind. */
+.collapsible .collapsible-body > :first-child { margin-top: 0; }

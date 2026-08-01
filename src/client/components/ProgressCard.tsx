@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Collapsible } from './Collapsible.js';
 import { getProgress, type Progress } from '../lib/api.js';
 
 /**
@@ -41,8 +42,7 @@ export function ProgressCard({ visible = true }: { visible?: boolean }) {
   if (known === 0 && p.earnedThisWeek === 0 && p.slipping === 0 && todaySegments.length === 0) return null;
 
   return (
-    <section className="progress-card" aria-label="Your progress">
-      <h2 className="progress-title">Your progress</h2>
+    <Collapsible id="progress" className="progress-card" title="Your progress">
       <p className="progress-known">
         <strong>{known}</strong> {known === 1 ? 'page' : 'pages'} you can do right now
         {p.byLevel.mastered > 0 && <span className="progress-sub"> · {p.byLevel.mastered} mastered</span>}
@@ -77,6 +77,6 @@ export function ProgressCard({ visible = true }: { visible?: boolean }) {
           next slip: <strong>{p.nextSlip.title}</strong>, {p.nextSlip.daysLeft}d — a quick review keeps it.
         </p>
       )}
-    </section>
+    </Collapsible>
   );
 }

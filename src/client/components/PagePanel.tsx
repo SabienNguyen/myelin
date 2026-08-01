@@ -1,3 +1,4 @@
+import { Collapsible } from './Collapsible.js';
 import { useEffect, useState } from 'react';
 import { getGraph, getPage } from '../lib/api.js';
 import { POLL_MS } from './GraphPanel.js';
@@ -94,11 +95,17 @@ function EdgeList({
   group: { dir: Dir; heading: string; blurb: string };
 }) {
   return (
-    <section className="page-edge-group">
-      <h4>
-        {group.heading}
-        {group.blurb && <span className="page-edge-blurb"> — {group.blurb}</span>}
-      </h4>
+    <Collapsible
+      id={`edges:${group.dir}:${group.heading}`}
+      label={group.heading}
+      level={4} className="page-edge-group"
+      title={(
+        <>
+          {group.heading}
+          {group.blurb && <span className="page-edge-blurb"> — {group.blurb}</span>}
+        </>
+      )}
+    >
       <ul>
         {edges.map((e, i) => {
           const slug = group.dir === 'out' ? e.dst : e.src;
@@ -127,7 +134,7 @@ function EdgeList({
           );
         })}
       </ul>
-    </section>
+    </Collapsible>
   );
 }
 
@@ -258,8 +265,7 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
       </div>
 
       {standing && (
-        <section className="page-standing">
-          <h3>Your standing</h3>
+        <Collapsible id="standing" level={3} className="page-standing" title="Your standing">
           <p className="page-standing-level">
             <MasteryDot level={standing.effective} />
             <span>{MASTERY_LABEL[standing.effective] ?? standing.effective}</span>
@@ -308,18 +314,17 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
               ))}
             </ul>
           )}
-        </section>
+        </Collapsible>
       )}
       {/* A page with NO standing at all still gets the route hint and the claim probe, in its own
           small section — a learner who has never attempted a page is the one who most needs to
           know how it could be confirmed, and the one most likely to already know it. */}
       {!standing && (routeHint || claimBtn) && (
-        <section className="page-standing">
-          <h3>Your standing</h3>
+        <Collapsible id="standing" level={3} className="page-standing" title="Your standing">
           <p className="page-standing-why">Nothing recorded yet.</p>
           {routeHint}
           {claimBtn}
-        </section>
+        </Collapsible>
       )}
 
       {/* Vault-authored warnings (e.g. a body that outgrew its `stub` status). Previously visible
@@ -336,19 +341,17 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
       <RichMarkdown text={wikiPreprocess(page.page.body)} wikiLinks />
 
       {groups.length > 0 && (
-        <div className="page-edges">
-          <h3>Connections</h3>
+        <Collapsible id="connections" level={3} className="page-edges" title="Connections">
           {groups.map(({ g, edges: es }) => (
             <EdgeList key={`${g.dir}-${g.type}`} edges={es} neighbors={neighbors} group={g} />
           ))}
-        </div>
+        </Collapsible>
       )}
 
       {(meta.sources ?? []).length > 0 && (
-        <div className="page-sources">
-          <h3>Sources</h3>
+        <Collapsible id="sources" level={3} className="page-sources" title="Sources">
           <ul>{meta.sources.map((s: string, i: number) => <li key={i}>{s}</li>)}</ul>
-        </div>
+        </Collapsible>
       )}
     </article>
   );

@@ -174,6 +174,18 @@ export function guardMcpTools(
           }
         }
         const result = await t.execute!(clean);
+        // A page written THIS TURN has to become recordable immediately. knownSlugs was read once
+        // at turn start, and sanitizeToolArgs runs every slug through repairSlug against it — so
+        // without this, the tutor writes "frontal-neocortex", then record_evidence's brand-new slug
+        // gets "repaired" to whatever unrelated page happens to be nearest, filing the learner's
+        // evidence under the wrong page. Mutating the array the closure already holds keeps every
+        // later call in this turn consistent.
+        if (t.name === 'write_page' && !(result as any)?.isError) {
+          const written = (clean as { slug?: unknown })?.slug;
+          if (typeof written === 'string' && written && !knownSlugs.includes(written)) {
+            knownSlugs.push(written);
+          }
+        }
         if (result && typeof result === 'object' && (result as any).isError) {
           const text = ((result as any).content ?? []).map((c: any) => c?.text ?? '').join(' ');
           console.error(`[tool-error] ${t.name} args=${JSON.stringify(clean)} -> ${text.slice(0, 300)}`);
@@ -705,8 +717,6 @@ export function createTutorSession(
         const mcpTools = guardMcpTools(
           await lw.tools(), cfg.student, slugs, grades.flatMap((g) => g.evidence), cfg.vault,
         );
-        const activeMcp = mcpTools.filter((t) => mode === 'freeform' || TEACH_TOOLS.includes(t.name));
-
         // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
         // wherever the vault has a GAP — no page, a stub, an unsourced page, a page too thin to
         // teach from. See vaultGap above for why each of those counts.
@@ -719,6 +729,19 @@ export function createTutorSession(
           search: (query) => lw.call('search', { query }) as Promise<any>,
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
+        // A researched topic must be able to LAND. Teaching modes used to research a gap and then
+        // hold no way to keep what they found: the tutor taught it, the harness demanded
+        // record_evidence for the grade, and the guard refused the slug because no such page
+        // existed — so a learner who answered correctly was told "evidence not recorded" and the
+        // work evaporated. write_page unlocks on exactly the gaps that opened research, so the page
+        // the tutor just grounded in real sources becomes the page the evidence attaches to.
+        // The single-writer rule is untouched: write_page IS Engram's tool, so Engram still does
+        // every write.
+        const canWrite = mode === 'freeform' || gap !== null;
+        const activeMcp = mcpTools.filter((t) => mode === 'freeform'
+          || TEACH_TOOLS.includes(t.name)
+          || (canWrite && t.name === 'write_page'));
+
         const webTools = gap ? buildWebTools(cfg, searchModelId) : { tools: [], serverTools: [] };
         const hasWebSearch = [...webTools.tools, ...webTools.serverTools].some((t) => t.name === 'web_search');
         // ingest_paper needs cfg (to queue) AND lw (to kick a background compile) — same
@@ -839,10 +862,11 @@ export function createTutorSession(
           `HARNESS: your memory has a gap here — ${gap.detail}. `
           + 'web_search and read_url are unlocked for this turn. Research it, cite what you read '
           + 'in your answer, and teach from that rather than from '
-          + `${gap.slug ? 'the existing page' : 'memory'}. You still have NO page-writing tools `
-          + 'here, so nothing you find is being saved: once the student has their answer, offer to '
-          + `switch to freeform so ${gap.slug ? `“${gap.slug}” can be rewritten properly` : 'the subject can be researched and compiled'} `
-          + 'into pages that track their progress.',
+          + `${gap.slug ? 'the existing page' : 'memory'}. `
+          + `write_page is unlocked too: once you have researched it, ${gap.slug ? `rewrite “${gap.slug}”` : 'write the page'} `
+          + 'with the sources you actually read in its `sources` frontmatter, BEFORE you record any '
+          + 'evidence — evidence attaches to a page, so a topic with no page loses the student\'s '
+          + 'work entirely. Write the page first, then grade, then record against that slug.',
         ));
         if (grades.length) trailing.push(userTurn(
           `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `

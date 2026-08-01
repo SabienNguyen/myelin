@@ -207,8 +207,12 @@ describe('cold-start research unlock', () => {
     expect(tools).toContain('read_url');
     expect(prompt).toMatch(/your memory has a gap here/);
     expect(prompt).toMatch(/no page covers what the student just asked/);
-    // The unlock must not quietly become a write unlock — that is the single-writer rule.
-    expect(tools).not.toContain('write_page');
+    // The unlock DOES carry write_page. Researching without it stranded the learner's work: the
+    // tutor taught a researched topic, the harness demanded record_evidence for the grade, and the
+    // guard refused the slug because the page did not exist — "evidence not recorded" on a correct
+    // answer. The single-writer rule is intact either way, since write_page is Engram's own tool.
+    expect(tools).toContain('write_page');
+    expect(prompt).toMatch(/write the page/i);
   }, 30_000);
 
   it('unlocks for a page that EXISTS but cites nothing, and says which page', async () => {
@@ -220,8 +224,10 @@ describe('cold-start research unlock', () => {
     expect(prompt).toMatch(/cites no sources/);
     expect(prompt).toMatch(/photosynthesis/);
     // And it must point at rewriting THAT page, not at researching the subject from scratch.
-    expect(prompt).toMatch(/can be rewritten properly/);
-    expect(tools).not.toContain('write_page');
+    expect(prompt).toMatch(/rewrite “photosynthesis”/);
+    // Same unlock as the no-page case: an unsourced page is REWRITTEN with what was just read,
+    // rather than taught from and left unsourced for the next session to hit again.
+    expect(tools).toContain('write_page');
   }, 30_000);
 
   it('withholds them when a solid sourced page covers it — evidence and edges beat a blog post', async () => {
@@ -511,5 +517,57 @@ describe('proving evidence cannot be talked into existence', () => {
       await tools[0].execute!({ student: 'kid', slug: 'arith', kind, note: 'observed' });
     }
     expect(calls).toHaveLength(3);
+  });
+});
+
+/**
+ * A page written DURING a turn has to be recordable in that same turn. knownSlugs is read once at
+ * turn start and sanitizeToolArgs runs every slug through repairSlug against it, so a brand-new
+ * slug would otherwise be silently rewritten to whatever existing page is nearest — filing the
+ * learner's evidence under an unrelated topic. This is the ordering the research unlock depends on:
+ * research → write_page → record_evidence, all inside one turn.
+ */
+describe('a page written this turn becomes recordable in the same turn', () => {
+  const build = () => {
+    const calls: any[] = [];
+    const known = ['frontal-lobe-anatomy'];
+    const raw = [
+      {
+        name: 'write_page',
+        description: 'write',
+        execute: async (a: unknown) => { calls.push(['write', a]); return { ok: true }; },
+      },
+      {
+        name: 'record_evidence',
+        description: 'record',
+        execute: async (a: unknown) => { calls.push(['record', a]); return { ok: true }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', known, [], undefined), calls, known };
+  };
+
+  it('does not repair a freshly written slug into a different existing page', async () => {
+    const { tools, calls, known } = build();
+    await tools[0].execute!({ slug: 'frontal-neocortex', title: 'Frontal neocortex', body: 'x' });
+    expect(known).toContain('frontal-neocortex'); // the turn's slug set grew
+
+    await tools[1].execute!({
+      student: 'kid', slug: 'frontal-neocortex', kind: 'exposed', note: 'researched and taught',
+    });
+    const recorded = calls.find((c) => c[0] === 'record')![1];
+    expect(recorded.slug).toBe('frontal-neocortex');
+  });
+
+  it('leaves a failed write out of the slug set', async () => {
+    const calls: any[] = [];
+    const known = ['frontal-lobe-anatomy'];
+    const raw = [{
+      name: 'write_page',
+      description: 'write',
+      execute: async (a: unknown) => { calls.push(a); return { isError: true, content: [{ type: 'text', text: 'nope' }] }; },
+    }] as any;
+    const tools = guardMcpTools(raw, 'kid', known, [], undefined);
+    await tools[0].execute!({ slug: 'never-written', title: 'x', body: 'y' });
+    expect(known).not.toContain('never-written');
   });
 });
