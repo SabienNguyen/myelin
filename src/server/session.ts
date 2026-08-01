@@ -947,7 +947,10 @@ export function createTutorSession(
         if (readingSource) trailing.push(userTurn(
           'HARNESS: this came from the reader — the source is ALREADY open beside the conversation '
           + 'and the quoted passage is on the student\'s screen. Do not re-open it (open_source is '
-          + 'withheld this turn). Explain the passage itself, then stage a block on it.',
+          + 'withheld this turn). Explain the passage, then END THE TURN ON A BLOCK about it: '
+          + '`writing_draft` asking them to put the passage in their own words (with a rubric), or '
+          + '`quick_check` on the one claim it makes that they could get wrong. Naming the '
+          + 'instrument is not optional — a turn that only explains is a turn they read.',
         ));
         if (grades.length) trailing.push(userTurn(
           `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
