@@ -199,7 +199,35 @@ export function guardMcpTools(
           : null;
         if (cacheKey !== null && readCache.has(cacheKey)) return readCache.get(cacheKey);
 
-        const result = await t.execute!(clean);
+        let result = await t.execute!(clean);
+
+        // create_path requires every stop to EXIST. A tutor that has just sketched a six-stop
+        // syllabus and had it approved has written one page, so it could only build a one-stop
+        // path — the learner reads six stops in the chat and sees 0/1 in the UI. Rather than change
+        // what a path means, fill the gap: stub the missing stops through Engram's own write_page
+        // (single-writer intact) and retry once. A stub is exactly what vaultGap already treats as
+        // "not yet known", so each stop gets researched properly when the learner reaches it — a
+        // path becomes a syllabus you grow into rather than a record of what is already written.
+        if (t.name === 'create_path' && (result as any)?.isError) {
+          const text = (((result as any).content ?? []) as any[]).map((c) => c?.text ?? '').join(' ');
+          const missing = /pages not found:\s*([^\n]+)/i.exec(text)?.[1]
+            ?.split(',').map((x) => x.trim()).filter(Boolean) ?? [];
+          const writer = tools.find((x) => x.name === 'write_page');
+          if (missing.length && writer?.execute) {
+            for (const slug of missing) {
+              const title = slug.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+              await writer.execute({
+                slug,
+                title,
+                body: `Planned stop on this path. Not yet written — it will be researched and filled in when you reach it.`,
+                status: 'stub',
+              }).catch(() => {});
+              if (!knownSlugs.includes(slug)) knownSlugs.push(slug);
+            }
+            console.error(`[create_path] stubbed ${missing.length} planned stop(s): ${missing.join(', ')}`);
+            result = await t.execute!(clean);
+          }
+        }
 
         if (INVALIDATING_TOOLS.has(t.name)) readCache.clear();
         // Errors are never cached: a failed read is exactly the call worth making again, and the

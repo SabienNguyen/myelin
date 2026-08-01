@@ -779,3 +779,61 @@ describe('code_exercise is withheld when no pattern fits the subject', () => {
     expect(turnBlockTools(false, PATTERNS, false, []).map((t) => t.name)).toContain('code_exercise');
   });
 });
+
+/**
+ * create_path requires every stop to EXIST. A tutor that has just had a six-stop syllabus approved
+ * has written one page, so it could only build a one-stop path — the learner reads six stops in the
+ * chat and sees 0/1 in the UI. The harness fills the gap through Engram's own write_page.
+ */
+describe('a path can name stops that are not written yet', () => {
+  const build = () => {
+    const calls: any[] = [];
+    let created = false;
+    const raw = [
+      {
+        name: 'create_path',
+        description: 'path',
+        execute: async (a: any) => {
+          calls.push(['create_path', a.pages]);
+          if (created) return { ok: true };
+          created = true;
+          return {
+            isError: true,
+            content: [{ type: 'text', text: 'pages not found: intervals-and-scales, chords-and-triads' }],
+          };
+        },
+      },
+      {
+        name: 'write_page',
+        description: 'write',
+        execute: async (a: any) => { calls.push(['write_page', a.slug, a.status]); return { ok: true }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', ['pitch-and-rhythm'], [], undefined), calls };
+  };
+
+  it('stubs the missing stops and retries once', async () => {
+    const { tools, calls } = build();
+    const res: any = await tools[0].execute!({
+      slug: 'music-theory', title: 'Music Theory', narrative: 'x',
+      pages: ['pitch-and-rhythm', 'intervals-and-scales', 'chords-and-triads'],
+    });
+    expect(res.isError).toBeFalsy();
+    const written = calls.filter((c) => c[0] === 'write_page');
+    expect(written.map((c) => c[1])).toEqual(['intervals-and-scales', 'chords-and-triads']);
+    // Stubs, not fabricated content — vaultGap treats a stub as "not yet known" and researches it
+    // when the learner reaches that stop.
+    expect(written.every((c) => c[2] === 'stub')).toBe(true);
+    expect(calls.filter((c) => c[0] === 'create_path')).toHaveLength(2); // failed, then retried
+  });
+
+  it('leaves a path whose pages all exist completely alone', async () => {
+    const { tools, calls } = build();
+    // First call succeeds only on retry in this fake; assert the no-error path separately.
+    await tools[0].execute!({ slug: 'p', title: 'P', narrative: 'x', pages: ['pitch-and-rhythm'] });
+    await tools[0].execute!({ slug: 'p2', title: 'P2', narrative: 'x', pages: ['pitch-and-rhythm'] });
+    // The SECOND create_path succeeds outright, so it must not have triggered any further writes.
+    const writesAfter = calls.slice(calls.findIndex((c) => c[0] === 'create_path' && calls.indexOf(c) > 0));
+    expect(writesAfter.filter((c) => c[0] === 'write_page')).toHaveLength(0);
+  });
+});
