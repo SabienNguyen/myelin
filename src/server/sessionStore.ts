@@ -21,14 +21,26 @@ export function saveThread(vault: string, threadId: string, messages: unknown[])
   // Merge with what's on disk instead of replacing it. Two tabs on the same thread each write
   // their own view; a blind replace let the staler tab silently erase the other's entire
   // exchange (found by a live two-tab probe). Threads only grow — there is no message-edit or
-  // branch UI — so union-by-id loses nothing: messages the writer already knows keep the
-  // writer's (fresher) version, and messages it has never seen are kept in front, matching the
-  // usual case of a stale tab writing after another tab's turns. Order under truly interleaved
-  // writers is best-effort; content survival is the guarantee.
-  const incoming = dedupeById(messages);
-  const incomingIds = new Set((incoming as any[]).map((m) => m?.id));
-  const unseen = (loadThread(vault, threadId) as any[]).filter((m) => !incomingIds.has(m?.id));
-  writeFileSync(join(dir(vault), `${threadId}.json`), JSON.stringify([...unseen, ...incoming]));
+  // branch UI — so union-by-id loses nothing.
+  //
+  // DISK ORDER WINS. This used to write [unseen, ...incoming], putting anything the writer had
+  // not seen in FRONT, and that reorders a conversation whenever a writer lands late: a turn
+  // holding only its own two messages saved after the learner had asked something else, and the
+  // newer exchange jumped ahead of the older one — a transcript reading "what is a decorator?"
+  // before the question asked minutes earlier. A merge that can reorder recorded history is worse
+  // than one that occasionally appends in an odd place, so: keep the file's order, let the writer
+  // refresh messages it also knows about IN PLACE, and append only genuinely new ones at the end.
+  const incoming = dedupeById(messages) as any[];
+  const byId = new Map(incoming.map((m) => [m?.id, m]));
+  const onDisk = loadThread(vault, threadId) as any[];
+  const seen = new Set<unknown>();
+  const merged: any[] = [];
+  for (const m of onDisk) {
+    merged.push(byId.get(m?.id) ?? m); // fresher version if the writer has one, same position
+    seen.add(m?.id);
+  }
+  for (const m of incoming) if (!seen.has(m?.id)) merged.push(m);
+  writeFileSync(join(dir(vault), `${threadId}.json`), JSON.stringify(merged));
 }
 /** Restores a persisted thread. A corrupt file (invalid JSON, or JSON that isn't an array) must
  * never 500 the GET — it's treated as an empty thread instead. Deduped by id as a durable

@@ -182,3 +182,38 @@ describe('deleteThread', () => {
     expect(() => deleteThread(vault, 'doesnotexist')).not.toThrow();
   });
 });
+
+/**
+ * A late writer must never reorder recorded history. The merge used to place messages the writer
+ * had not seen in FRONT, so a turn that finished after the learner had already asked something
+ * else pushed the newer exchange ahead of the older one — a transcript reading "what is a
+ * decorator?" before the question asked minutes before it.
+ */
+describe('the thread merge preserves disk order', () => {
+  it('appends a late writer\'s view instead of jumping it to the front', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-order-'));
+    // The conversation as it actually happened.
+    saveThread(vault, 't', [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'first question' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'partial' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'second question' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'answer two' }] },
+    ]);
+    // A detached turn-1 lands late, knowing only its own two messages.
+    saveThread(vault, 't', [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'first question' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'the FULL answer one' }] },
+    ]);
+    const out = loadThread(vault, 't') as any[];
+    expect(out.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2']); // order unchanged
+    // ...and the late writer's fresher content replaced the stub, in place.
+    expect(JSON.stringify(out[1])).toContain('the FULL answer one');
+  });
+
+  it('still keeps content a writer never saw', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-order2-'));
+    saveThread(vault, 't', [{ id: 'a', role: 'user', parts: [] }, { id: 'b', role: 'assistant', parts: [] }]);
+    saveThread(vault, 't', [{ id: 'c', role: 'user', parts: [] }]);
+    expect((loadThread(vault, 't') as any[]).map((m) => m.id)).toEqual(['a', 'b', 'c']);
+  });
+});
