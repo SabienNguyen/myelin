@@ -176,6 +176,12 @@ const SCRIPTS = {
   lapses: [
     'What should I work on today?',
   ],
+  // The last link of the misconception lifecycle: the learner demonstrates the corrected idea,
+  // and the confusion should be RESOLVED off the standing list, not merely re-noted.
+  repair: [
+    'I want to fix my misunderstanding about retain_graph. Test me on it.',
+    'retain_graph keeps the graph alive for another backward pass; it costs memory and does not speed anything up.',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',

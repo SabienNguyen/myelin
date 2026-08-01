@@ -1063,6 +1063,34 @@ export function createTutorSession(
           + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
         ));
 
+        // Rule 8 asks the tutor to pass `resolves` when a graded answer shows a recorded
+        // misconception corrected, and it requires QUOTING the recorded text — which the tutor has
+        // to remember from a tool result several turns back. It did not: a learner explained
+        // retain_graph correctly, earned explained-correctly, and the confusion stayed on the
+        // record, so the repair queue would propose it again forever.
+        //
+        // The harness knows both halves — which pages this turn graded, and what confusions those
+        // pages carry — so it hands over the exact strings rather than asking the model to recall
+        // them. Only for pages graded WELL: a struggle is not a repair.
+        const passed = new Set(grades.flatMap((g) => g.evidence)
+          .filter((e: any) => e.kind === 'explained-correctly' || e.kind === 'applied-correctly'
+            || e.kind === 'rubric-passed')
+          .map((e: any) => e.slug));
+        if (passed.size > 0) {
+          const state = await lw.call('get_student_state', { student: cfg.student })
+            .catch(() => ({})) as Record<string, any>;
+          const open = [...passed]
+            .map((slug) => ({ slug, ms: (state?.[slug]?.misconceptions ?? []) as string[] }))
+            .filter((x) => x.ms.length > 0);
+          if (open.length) trailing.push(userTurn(
+            `HARNESS: ${open.map((x) => `"${x.slug}" still carries: ${x.ms.map((m) => JSON.stringify(m)).join(', ')}`).join('; ')}. `
+            + 'If the work you just graded shows one of these actually corrected, pass `resolves` '
+            + 'with that string COPIED EXACTLY on the record_evidence call for that page — a '
+            + 'confusion nobody resolves returns in every future session plan. If the work did not '
+            + 'address it, leave it alone and say what still needs proving.',
+          ));
+        }
+
         // History diet: blocks graded in EARLIER turns ride as verdict lines, not full payloads
         // (historyDiet.ts). This turn's pending blocks stay full — they are what the model is
         // about to grade-and-discuss, and their payload carries the machine grade merged above.

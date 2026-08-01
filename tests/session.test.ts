@@ -837,3 +837,62 @@ describe('a path can name stops that are not written yet', () => {
     expect(writesAfter.filter((c) => c[0] === 'write_page')).toHaveLength(0);
   });
 });
+
+/**
+ * Rule 8 asks the tutor to pass `resolves` when graded work shows a recorded misconception
+ * corrected, and it requires QUOTING the recorded text — which the tutor has to recall from a tool
+ * result several turns back. It did not: a learner explained retain_graph correctly, earned
+ * explained-correctly, and the confusion stayed on the record, so the repair queue would propose it
+ * forever. The harness knows both halves, so it hands over the exact strings.
+ */
+describe('the resolve-this note', () => {
+  // `correct` drives a real exact-match grade (the harness re-grades; an injected verdict is
+  // ignored), so these exercise the actual path rather than a hand-written grading object.
+  const drive = async (correct: boolean, misconceptions: string[], thread: string) => {
+    const { model, calls } = textOnly();
+    // Spread loses the prototype's methods (listSlugs is one), so delegate explicitly.
+    const lwWithState = {
+      listSlugs: (...a: any[]) => (lw as any).listSlugs(...a),
+      tools: (...a: any[]) => (lw as any).tools(...a),
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') return { 'p-a': { misconceptions } };
+        return (lw as any).call(name, args);
+      },
+    } as any;
+    const session = createTutorSession(
+      lwWithState, { student: 'kid', vault, models: {} } as any, { model },
+    );
+    // A graded block output in the history is what makes this a grading turn.
+    await (await session.respond([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'check me' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{
+          type: 'tool-quick_check',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { question: 'q', pageSlug: 'p-a', mode: 'text', expected: 'mangled name' },
+          output: { answer: correct ? 'mangled name' : 'something else entirely' },
+        }],
+      },
+    ] as any, 'learn', thread)).text();
+    return JSON.stringify(calls[0].messages);
+  };
+
+  it('hands over the exact recorded string after a page is graded WELL', async () => {
+    const msgs = await drive(true, ['retain_graph makes training faster'], 'res-a');
+    expect(msgs).toMatch(/still carries/);
+    expect(msgs).toContain('retain_graph makes training faster'); // verbatim, to copy
+    expect(msgs).toMatch(/COPIED EXACTLY/);
+  }, 30_000);
+
+  it('stays silent when the page carries no misconception', async () => {
+    expect(await drive(true, [], 'res-b')).not.toMatch(/still carries/);
+  }, 30_000);
+
+  it('stays silent when the learner STRUGGLED — a struggle is not a repair', async () => {
+    expect(await drive(false, ['retain_graph makes training faster'], 'res-c'))
+      .not.toMatch(/still carries/);
+  }, 30_000);
+});
