@@ -158,3 +158,35 @@ describe('doc-site chrome extraction', () => {
     expect(text).not.toMatch(/¶/);
   });
 });
+
+/** A transient failure used to kill an entire ingest — a learner adding a book lost the whole
+ *  compile to one blip. A 404 still fails on the first try: that is an answer about the URL. */
+describe('download retries', () => {
+  it('recovers from a 503 and returns the document', async () => {
+    let n = 0;
+    const file = await downloadToTemp('https://example.com/paper.pdf', {
+      fetchImpl: (async () => {
+        n += 1;
+        if (n < 2) return { ok: false, status: 503, headers: new Headers() } as Response;
+        return {
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/pdf' }),
+          arrayBuffer: async () => new TextEncoder().encode('%PDF-1.4 ok').buffer,
+        } as unknown as Response;
+      }) as unknown as typeof fetch,
+    });
+    expect(n).toBe(2);
+    expect(file.path.endsWith('.pdf')).toBe(true);
+  });
+
+  it('does not retry a 404', async () => {
+    let n = 0;
+    await expect(downloadToTemp('https://example.com/gone.pdf', {
+      fetchImpl: (async () => {
+        n += 1;
+        return { ok: false, status: 404, headers: new Headers() } as Response;
+      }) as unknown as typeof fetch,
+    })).rejects.toThrow(/404/);
+    expect(n).toBe(1);
+  });
+});

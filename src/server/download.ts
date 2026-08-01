@@ -2,6 +2,9 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { htmlToText, htmlTitle } from './htmlText.js';
+import {
+  HttpStatusError, isRetryableError, isRetryableStatus, withRetry,
+} from './retry.js';
 
 /** Shared by the JSON-url ingest route (ingestRoutes.ts) and the ingest_paper tutor tool
  * (ingestTools.ts) — one place to change timeout/size/content-type policy for URL downloads. */
@@ -54,8 +57,24 @@ export async function downloadToTemp(
   const doFetch = opts.fetchImpl ?? fetch;
   const target = rewriteArxivUrl(url);
 
-  const res = await doFetch(target, { redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status} for ${target}`);
+  // Retried like the tutor's own fetches: a transient failure here used to kill an entire ingest,
+  // so a learner adding a book or an article lost the whole compile to one blip. A 404 or 403 still
+  // fails on the first try — that is an answer about the URL, not an accident (see retry.ts).
+  let res: Response;
+  try {
+    res = await withRetry(
+      async () => {
+        const r = await doFetch(target, { redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
+        if (!r.ok) throw new HttpStatusError(r.status, target);
+        return r;
+      },
+      (e) => (e instanceof HttpStatusError ? isRetryableStatus(e.status) : isRetryableError(e)),
+      { onRetry: (n, why) => console.error(`[download] retry ${n} for ${target}: ${why}`) },
+    );
+  } catch (e) {
+    if (e instanceof HttpStatusError) throw new Error(`download failed: HTTP ${e.status} for ${target}`);
+    throw e;
+  }
 
   const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
 
