@@ -656,3 +656,29 @@ describe('a selected passage does not get the source re-opened', () => {
     expect(turnBlockTools(true, [], true).map((t) => t.name)).not.toContain('open_source');
   });
 });
+
+/**
+ * 10c ("every teaching turn ends in something the learner produces") is a prompt rule, and a local
+ * 14B honoured it on one turn then taught with no instrument on the next. Same shape as the reader
+ * fix: an abstract directive does little, naming the tool works — so the rule also rides the turn
+ * as a note. Asserted against the assembled transcript, not a re-derived condition.
+ */
+describe('the produce-something note rides a teaching turn', () => {
+  const sent = async (parts: any[], thread: string) => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond([{ id: 'u1', role: 'user', parts }] as any, 'learn', thread)).text();
+    return JSON.stringify(calls[0].messages);
+  };
+
+  it('names the instrument on an ordinary teaching turn', async () => {
+    const msgs = await sent([{ type: 'text', text: 'teach me about tensors' }], 'note-a');
+    expect(msgs).toMatch(/end this turn on something the student PRODUCES/);
+    expect(msgs).toMatch(/writing_draft/); // the tool, not "a block"
+  }, 30_000);
+
+  it('stays out of a bare command turn, which has nothing to teach about yet', async () => {
+    const msgs = await sent([{ type: 'data-command', data: { command: 'learn' } }], 'note-b');
+    expect(msgs).not.toMatch(/end this turn on something the student PRODUCES/);
+  }, 30_000);
+});

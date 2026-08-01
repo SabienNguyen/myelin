@@ -926,6 +926,17 @@ export function createTutorSession(
         // below: after the history, so the cached prefix stays byte-stable. It leads the other
         // tail notes because it frames HOW the work they direct (research, grading) should read.
         const stance = readStance(cfg.vault, threadId);
+        // 10c, next to the work rather than 150 lines up. A local 14B honoured the rule on one turn
+        // and taught with no instrument at all on the next, which is the same failure the reader
+        // note fixed: an abstract directive ("stage a block") does little, naming the tool works.
+        // Skipped on a grading turn — 1a owns that one, and it must end on the offer, not a block —
+        // and on a bare command turn, which has no words to teach about yet.
+        if (!gradingOnly && !readingSource && lastUserText(messages).trim()) trailing.push(userTurn(
+          'HARNESS: end this turn on something the student PRODUCES, not on prose. If nothing more '
+          + 'specific fits, call `writing_draft` asking them to put the idea in their own words with '
+          + 'a 2-4 point rubric; use `quick_check` only as a first-contact calibration. A turn that '
+          + 'just explains is a turn they read rather than learned from.',
+        ));
         if (stance) trailing.push(userTurn(
           `HARNESS STANCE (persists for this thread): teach at ${stance} level — `
           + `${STANCE_INSTRUCTIONS[stance]}. Research accordingly.`,
