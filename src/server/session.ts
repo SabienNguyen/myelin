@@ -22,6 +22,7 @@ import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
+import { lastUserText } from './deriveMode.js';
 import { logGuardrail, saveThread } from './sessionStore.js';
 import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
@@ -337,14 +338,7 @@ export function topicTokens(text: string): string[] {
     .filter((t) => t.length > 2 && !STOPWORDS.has(t));
 }
 
-export function lastUserText(messages: UIMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role !== 'user') continue;
-    return (messages[i].parts as any[])
-      .filter((p) => p?.type === 'text').map((p) => p.text).join(' ');
-  }
-  return '';
-}
+
 
 /** A page this short is a placeholder, whatever its frontmatter claims. Engram's own auto-stub
  *  body is one sentence; a real page that teaches something is not 400 characters long. */
@@ -699,10 +693,14 @@ export function createTutorSession(
   async function respond(
     messages: UIMessage[], mode: Mode, threadId = 'default', signal?: AbortSignal,
   ): Promise<Response> {
-    // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): teaching modes hand the loop
-    // to the harness when the flag is set — read per turn so the models-dialog toggle is live.
-    // Freeform always runs the full agentic loop (writing pages needs real tool use), which also
-    // keeps chatRoute's one-shot writeUp promotion agentic.
+    // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the loop
+    // when the flag is set — read per turn so the models-dialog toggle is live.
+    //
+    // The gate is a CAPABILITY test wearing a mode's name. What it actually asks is "does this turn
+    // need to author?" — building a path or ingesting material needs real tool use, so those turns
+    // run the full agentic loop. Now that the mode is derived rather than chosen (deriveMode.ts),
+    // that is exactly what `freeform` means here: the harness routes a turn to it by reading the
+    // learner's own words, and chatRoute's one-shot writeUp promotion lands in the same place.
     if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId, signal);
 
     const pending = pendingBlockOutputs(messages);

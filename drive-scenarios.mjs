@@ -112,6 +112,11 @@ const SCRIPTS = {
   weakspots: [
     'what am I still weak on across everything I have studied?',
   ],
+  // No selector any more: each of these must land in the right mode from WORDS alone.
+  derived: [
+    'build me a path for jazz harmony from scratch',
+    'quiz me on what I have learned',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
@@ -139,7 +144,9 @@ for (const [i, text] of turns.entries()) {
   // only the turn it rides on (chatRoute: "a mode command overrides the turn mode"), so a
   // scenario that needs freeform for several turns has to use the select.
   if (text.startsWith('!')) {
-    await p.locator('select').first().selectOption(text.slice(1));
+    // The mode selector no longer exists — the harness derives the mode. A scenario that used to
+    // set it now just says what it wants, which is the whole point of the change.
+    await p.waitForTimeout(200);
     await p.waitForTimeout(2000);
     out.push(`mode := ${text.slice(1)}`);
     continue;

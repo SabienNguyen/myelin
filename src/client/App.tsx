@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BookOpenTextIcon as BookOpenText } from '@phosphor-icons/react';
 import { getGraph } from './lib/api.js';
-import { coldStartMode } from './lib/coldStartMode.js';
 import { Runtime } from './runtime.js';
 import { Thread } from './components/Thread.js';
 import { SidePanel } from './components/SidePanel.js';
@@ -14,18 +13,27 @@ import { panelBus } from './lib/panelBus.js';
 import { parseHash, serializeHash } from './lib/urlState.js';
 
 export function App() {
-  const [mode, setMode] = useState('learn');
+  // '' means "let the harness decide" — the mode selector is gone. Three of the four modes were
+  // only a framing sentence, and the three mechanisms that had grown up to route around the
+  // selector (coldStartMode, writeIntent, the mode slash commands) were the system saying so.
+  // A mode slash command still sets this for its one turn; see deriveMode.ts and the design at
+  // docs/superpowers/specs/2026-07-31-one-mode-design.html.
+  const [mode, setMode] = useState('');
   const [threadId, setThreadId] = useState(() => parseHash(location.hash).threadId);
 
-  // Only ever switches AWAY from the untouched default: by the time the fetch resolves, a mode
-  // the user picked by hand is never 'learn' (re-selecting the current option fires no change
-  // event), so the `m !== 'learn'` guard doubles as the touched check. Graph unreachable →
-  // stay put: the setup gate or TopbarStatus already surfaces that failure.
+  // Whether the vault has anything real to teach from. This used to pick a MODE (coldStartMode:
+  // an empty vault opened in freeform, because teaching modes could not write and a newcomer's
+  // first lesson "researched well, taught well, and then evaporated"). It is now just an input to
+  // the harness's own decision — a fact about the vault rather than a control setting. Stubs do
+  // not count: both boot-seeded pattern stubs and Engram's auto-created prereq stubs are
+  // placeholders, exactly what vaultGap refuses to ground in. Graph unreachable → assume it is
+  // fine; the setup gate and TopbarStatus already surface that failure.
+  const [emptyVault, setEmptyVault] = useState(false);
   useEffect(() => {
     let cancelled = false;
     getGraph()
       .then((g) => {
-        if (!cancelled) setMode((m) => (m === 'learn' ? coldStartMode(g.nodes ?? []) : m));
+        if (!cancelled) setEmptyVault(!(g.nodes ?? []).some((n: { status?: string }) => n.status !== 'stub'));
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -82,7 +90,7 @@ export function App() {
     <FirstRun>
     {/* onSetMode: a /learn-family slash command must land on this selector too — the server only
         overrides the one turn the command rides; persistence is the selector's job. */}
-    <Runtime key={threadId} mode={mode} threadId={threadId} onSetMode={setMode}>
+    <Runtime key={threadId} mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={setMode}>
       <div className={appClass}>
         <header className="topbar">
           <h1><BookOpenText size={20} weight="duotone" /> Myelin</h1>
@@ -91,26 +99,6 @@ export function App() {
           {/* THE add entry point — one control for every kind of material (file, git URL, local
               folder). Not one button per artifact; AddMaterial routes by what it was given. */}
           <AddMaterial />
-          {/* Named: an unlabeled combobox announces as "combobox: learn" — four one-word options
-              with no hint of what any of them switches (the audit's keyboard pass caught it).
-              Each OPTION carries its own title too, so hovering the open list explains the mode
-              under the pointer — the select-level summary only helps before the list is open, and
-              "freeform" is the one label that names a mechanism (the only mode where the tutor
-              writes pages) rather than an activity. */}
-          <select
-            value={mode}
-            aria-label="Tutor mode"
-            title={'Tutor mode — learn: teach the next lesson · review: re-prove due pages first · '
-              + 'quiz: open with a quiz · freeform: follow your lead (and build new pages)'}
-            onChange={(e) => setMode(e.target.value)}
-          >
-            {Object.entries({
-              learn: 'teach the next lesson',
-              review: 're-prove your due pages first',
-              quiz: 'open with a quiz',
-              freeform: 'follow your lead — the one mode where the tutor writes new pages',
-            }).map(([m, help]) => <option key={m} title={help}>{m}</option>)}
-          </select>
         </header>
         <main className="workspace">
           <div className="thread-column">

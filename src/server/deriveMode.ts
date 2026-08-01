@@ -1,4 +1,17 @@
 import type { Mode } from './prompt.js';
+import type { UIMessage } from '../shared/uiMessages.js';
+
+/** The text of the most recent user message. Lives here rather than in session.ts because the chat
+ *  route needs it to derive a mode, and importing it from session.ts would drag the entire tutor
+ *  loop into the route's dependency graph. */
+export function lastUserText(messages: UIMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== 'user') continue;
+    return (messages[i].parts as any[])
+      .filter((p) => p?.type === 'text').map((p) => p.text).join(' ');
+  }
+  return '';
+}
 
 /**
  * Which mode a turn should run in, decided by the harness instead of by a dropdown.

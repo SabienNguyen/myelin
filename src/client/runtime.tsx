@@ -9,7 +9,7 @@ import { toolkit } from './toolkit.js';
  * persists the REQUEST side; the assistant's turns are saved by the chat store's onFinish PUT.
  * `threadId` defaults to 'default'; App.tsx remounts this component (via `key={threadId}`) on
  * every conversation switch so `initial` is always re-fetched for the right thread. */
-export function Runtime({ mode, threadId = 'default', onSetMode, children }: PropsWithChildren<{ mode: string; threadId?: string; onSetMode?: (mode: string) => void }>) {
+export function Runtime({ mode, emptyVault = false, threadId = 'default', onSetMode, children }: PropsWithChildren<{ mode: string; emptyVault?: boolean; threadId?: string; onSetMode?: (mode: string) => void }>) {
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
   useEffect(() => {
     fetch(`/api/thread/${threadId}`).then((r) => r.json())
@@ -17,16 +17,16 @@ export function Runtime({ mode, threadId = 'default', onSetMode, children }: Pro
       .catch(() => setInitial([]));
   }, [threadId]);
   if (initial === null) return null; // one settled frame while the thread restores
-  return <RuntimeInner mode={mode} threadId={threadId} onSetMode={onSetMode} initial={initial}>{children}</RuntimeInner>;
+  return <RuntimeInner mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={onSetMode} initial={initial}>{children}</RuntimeInner>;
 }
 
 function RuntimeInner(
-  { mode, threadId, onSetMode, initial, children }: PropsWithChildren<{ mode: string; threadId: string; onSetMode?: (mode: string) => void; initial: UIMessage[] }>,
+  { mode, emptyVault, threadId, onSetMode, initial, children }: PropsWithChildren<{ mode: string; emptyVault?: boolean; threadId: string; onSetMode?: (mode: string) => void; initial: UIMessage[] }>,
 ) {
   // mode changes WITHOUT remounting (only threadId remounts, via App's key); the hook tracks it
   // per render so each request carries the CURRENT topbar selection. onSetMode is the reverse
   // direction: a /learn-family slash command flips the topbar selector through it.
-  const { runtime, store } = useChatCoreRuntime({ mode, threadId, initialMessages: initial, onModeCommand: onSetMode });
+  const { runtime, store } = useChatCoreRuntime({ mode, emptyVault, threadId, initialMessages: initial, onModeCommand: onSetMode });
   const aui = useAui({ tools: Tools({ toolkit }) });
   // Mounting a NON-EMPTY thread races assistant-ui v0.14's store: message DOM (with MessageRoot's
   // hover listeners) attaches at React's commit, but the store's per-message tap resources only
