@@ -29,6 +29,13 @@ const SCRIPTS = {
     '/freeform',
     'Teach me about PyTorch FSDP2 sharding strategies. I do not think we have a page on it.',
   ],
+  // Explicitly asks for the material to be KEPT — freeform has write_page, so a researched
+  // topic should land in the vault as a real page, not evaporate when the turn ends.
+  buildit: [
+    '!freeform',
+    'Research PyTorch FSDP2 sharding and WRITE it into my vault as a page I can come back to.',
+    'is that page in my vault now? what is it called?',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
@@ -52,6 +59,15 @@ const composer = () => p.getByRole('textbox', { name: 'Ask your tutor…' });
 await composer().waitFor({ state: 'visible', timeout: 60_000 });
 
 for (const [i, text] of turns.entries()) {
+  // '!mode' sets the dropdown, which persists across turns. A '/mode' slash command overrides
+  // only the turn it rides on (chatRoute: "a mode command overrides the turn mode"), so a
+  // scenario that needs freeform for several turns has to use the select.
+  if (text.startsWith('!')) {
+    await p.locator('select').first().selectOption(text.slice(1));
+    await p.waitForTimeout(2000);
+    out.push(`mode := ${text.slice(1)}`);
+    continue;
+  }
   const t0 = Date.now();
   const box = composer();
   await box.waitFor({ state: 'visible', timeout: 90_000 });

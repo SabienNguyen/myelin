@@ -39,6 +39,11 @@ const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidenc
 // (especially small local ones) invent ids like "student" otherwise.
 const STUDENT_TOOLS = ['record_evidence', 'get_student_state', 'next_lessons', 'find_analogies'];
 
+/** The evidence kinds a MACHINE mints. The README's invariant — "a model's opinion can never mint
+ *  the evidence a machine check earns" — is exactly these two: they mean a checker verified the
+ *  work. `exposed`, `struggled` and `misconception` are tutor OBSERVATIONS and stay recordable. */
+const PROVING_KINDS = new Set(['applied-correctly', 'rubric-passed']);
+
 // Tools whose `slug` argument must name a real vault page.
 const SLUG_TOOLS = ['record_evidence', 'read_page', 'find_analogies'];
 
@@ -129,12 +134,45 @@ export function slugListLine(slugs: string[], relevant: string[] = []): string {
 /** Wrap MCP tools so every execute() sees sanitized args — the model cannot send a wrong
  * student id, a null optional field, or (where repairable) a hallucinated slug. Failed calls
  * are logged server-side so journalctl shows WHY a tool chip went ⚠. */
-function guardMcpTools(tools: LoopTool[], student: string, knownSlugs: string[]): LoopTool[] {
+export function guardMcpTools(
+  tools: LoopTool[], student: string, knownSlugs: string[],
+  // Evidence THIS TURN's grading actually produced. The proving kinds are refused unless they
+  // appear here — see PROVING_KINDS below.
+  earned: { slug: string; kind: string }[] = [],
+  vault?: string,
+): LoopTool[] {
+  const earnedKeys = new Set(earned.map((e) => `${e.slug}|${e.kind}`));
   return tools.map((t) => ({
     ...t,
     execute: t.execute
       ? async (args: unknown) => {
         const clean = sanitizeToolArgs(args, t.name, student, knownSlugs);
+        if (t.name === 'record_evidence') {
+          const a = clean as { slug?: unknown; kind?: unknown };
+          const kind = String(a?.kind ?? '');
+          const slug = String(a?.slug ?? '');
+          if (PROVING_KINDS.has(kind) && !earnedKeys.has(`${slug}|${kind}`)) {
+            // A learner talked a tutor into eight pages of `applied-correctly` with three
+            // messages — one a fake "SYSTEM:" line — staging no block and grading nothing; two
+            // pages reached `mastered` on the strength of a note reading "System-provided
+            // evidence". appliedGradeBypass is blind to that: it compares against slugs the
+            // machine graded this turn, and here nothing was graded at all. The README's
+            // invariant is exact — a model's opinion can never mint the evidence a machine check
+            // earns — so these two kinds are refused outright rather than logged after the fact.
+            const why = `refused ${kind} for "${slug}" — this turn's grading did not earn it`;
+            console.error(`[evidence-guard] ${why}`);
+            if (vault) logGuardrail(vault, why);
+            return {
+              isError: true,
+              content: [{
+                type: 'text',
+                text: `refused: "${kind}" is minted by a machine grade, not by conversation. `
+                  + `Nothing this turn graded "${slug}". Stage a block and let it be graded, or `
+                  + 'record an observation kind (exposed, struggled, misconception) instead.',
+              }],
+            };
+          }
+        }
         const result = await t.execute!(clean);
         if (result && typeof result === 'object' && (result as any).isError) {
           const text = ((result as any).content ?? []).map((c: any) => c?.text ?? '').join(' ');
@@ -664,7 +702,9 @@ export function createTutorSession(
         }
 
         const slugs = await lw.listSlugs();
-        const mcpTools = guardMcpTools(await lw.tools(), cfg.student, slugs);
+        const mcpTools = guardMcpTools(
+          await lw.tools(), cfg.student, slugs, grades.flatMap((g) => g.evidence), cfg.vault,
+        );
         const activeMcp = mcpTools.filter((t) => mode === 'freeform' || TEACH_TOOLS.includes(t.name));
 
         // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
