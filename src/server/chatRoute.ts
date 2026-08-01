@@ -62,9 +62,15 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     // the tutor answers it already teaching at the new level.
     if (isStance(command)) setStance(cfg.vault, threadId, command);
     saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
-    // The request's own signal: the runtime fires it when the client disconnects (tab closed,
-    // send superseded), and respond threads it down to the in-flight provider request.
-    return respond(body.messages, effectiveMode, threadId, c.req.raw.signal);
+    // Deliberately NOT passing the request's abort signal. It fires whenever the browser goes away
+    // — reload, closed tab, superseded send — and killing the turn there is what made a reload
+    // mid-answer come back to an assistant message with three tool calls and no text. The turn now
+    // runs to completion and session.ts's onEnd persists it, so the answer is waiting when the
+    // thread reloads (wire.ts carries the other half: a cancelled body no longer aborts).
+    //
+    // The cost is that an abandoned turn finishes and spends its tokens. For a tutor that is the
+    // right way round: the expensive thing is a learner losing an answer they waited for.
+    return respond(body.messages, effectiveMode, threadId);
   });
   app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
   app.get('/api/thread/:id', (c) => c.json(loadThread(cfg.vault, c.req.param('id'))));
