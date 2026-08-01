@@ -143,6 +143,12 @@ const SCRIPTS = {
     'how far through my current goal am I, and what is next?',
     'ok teach me that one',
   ],
+  // A three-deep prereq chain, none of it known: cost-function -> gradient-descent ->
+  // gradient-as-parameter-importance. Asking for the deepest should route to the base.
+  prereq: [
+    'Teach me about the gradient as a measure of parameter importance.',
+    'ok next',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
