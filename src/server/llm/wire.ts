@@ -3,6 +3,8 @@
 // ai@6 validates every SSE chunk against a STRICT zod union (unknown chunk types AND unknown
 // fields are rejected), so every chunk emitted here carries only fields that schema allows —
 // see "The wire contract, pinned" in docs/superpowers/specs/2026-07-30-own-harness-design.md.
+import { BLOCK_TOOLS, BLOCK_TOOL_NAMES } from '../../shared/blocks.js';
+import { UI_TOOLS } from '../../shared/uiTools.js';
 import type { LoopEvent } from './loop.js';
 import type { ChatMessage, ContentPart, FinishReason } from './types.js';
 import {
@@ -121,11 +123,40 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
               return emit({ type: 'tool-input-start', toolCallId: event.toolCallId, toolName: event.toolName });
             case 'tool-input-delta':
               return emit({ type: 'tool-input-delta', toolCallId: event.toolCallId, inputTextDelta: event.delta });
-            case 'tool-call':
-              return emit({
+            case 'tool-call': {
+              // Validate a BLOCK's args here, where the input is COMPLETE. (Never on
+              // tool-input-delta: a streaming input is partial by definition and would fail every
+              // schema mid-flight.) Rails parses its own blocks; the agentic path used to forward
+              // raw model args straight to the client, so a `speak` with no `lang` threw out of
+              // pickVoice and white-screened the page. Checked against 38 real block inputs from
+              // live sessions: only genuinely broken ones fail.
+              emit({
                 type: 'tool-input-available',
                 toolCallId: event.toolCallId, toolName: event.toolName, input: event.input,
               });
+              // UI tools render components too — `speak` is one, and a `speak` with no `lang`
+              // is precisely the crash this exists to stop, so both registries are checked.
+              const schema = (BLOCK_TOOL_NAMES as readonly string[]).includes(event.toolName)
+                ? BLOCK_TOOLS[event.toolName as keyof typeof BLOCK_TOOLS].input
+                : (UI_TOOLS as Record<string, { input?: { safeParse: (v: unknown) => any } }>)[event.toolName]?.input;
+              if (schema) {
+                const parsed = schema.safeParse(event.input);
+                if (!parsed.success) {
+                  // The part is emitted FIRST and errored second on purpose: the assembler can
+                  // only attach output to a part it already holds ("no tool part for toolCallId").
+                  // The learner gets an honest broken card instead of a blank screen.
+                  const why = parsed.error.issues
+                    .map((i: { path: (string | number)[]; message: string }) => `${i.path.join('.') || 'input'}: ${i.message}`)
+                    .slice(0, 3).join('; ');
+                  console.error(`[block-args] ${event.toolName} rejected — ${why}`);
+                  emit({
+                    type: 'tool-output-error', toolCallId: event.toolCallId,
+                    errorText: `this ${event.toolName} arrived malformed (${why}) — it cannot be answered`,
+                  });
+                }
+              }
+              return;
+            }
             case 'server-tool-call':
               return emit({
                 type: 'tool-input-available',

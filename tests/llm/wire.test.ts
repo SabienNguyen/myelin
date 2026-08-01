@@ -112,7 +112,7 @@ const scriptedRun: LoopEvent[] = [
   { type: 'tool-input-start', toolCallId: 'tc9', toolName: 'quick_check' },
   { type: 'tool-input-delta', toolCallId: 'tc9', delta: '{"question":' },
   { type: 'tool-input-delta', toolCallId: 'tc9', delta: '"3+3?"}' },
-  { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' } },
+  { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?', mode: 'text', expected: '6', pageSlug: 'arith' } },
   {
     type: 'finish', reason: 'tool-calls',
     usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
@@ -149,7 +149,7 @@ describe('createUiStream wire shape', () => {
     expect(chunks[3]).toEqual({ type: 'text-delta', id: '0', delta: 'Try ' });
     expect(chunks[7]).toEqual({ type: 'tool-input-delta', toolCallId: 'tc9', inputTextDelta: '{"question":' });
     expect(chunks[9]).toEqual({
-      type: 'tool-input-available', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' },
+      type: 'tool-input-available', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?', mode: 'text', expected: '6', pageSlug: 'arith' },
     });
     // The loop's per-step finish reason surfaces once, on the stream-level finish chunk.
     expect(chunks[chunks.length - 1]).toEqual({ type: 'finish', finishReason: 'tool-calls' });
@@ -302,7 +302,7 @@ describe('createUiStream wire shape', () => {
     // The tool part transitioned input-streaming -> input-available -> output-available in place.
     expect(message.parts[2]).toMatchObject({
       type: 'tool-quick_check', toolCallId: 'tc9', state: 'output-available',
-      input: { question: '3+3?' }, output: { shown: true },
+      input: { question: '3+3?', mode: 'text', expected: '6', pageSlug: 'arith' }, output: { shown: true },
     });
     expect(message.parts).toHaveLength(3);
   });
@@ -431,7 +431,7 @@ describe('uiMessagesToChatMessages', () => {
           { type: 'text', state: 'done', text: "Let's warm up." },
           {
             type: 'tool-quick_check', toolCallId: 'tc1', state: 'output-available',
-            input: { question: '2+2?' }, output: { answer: '4' },
+            input: { question: '2+2?', mode: 'text', expected: '4', pageSlug: 'arith' }, output: { answer: '4' },
           },
         ],
       },
@@ -442,7 +442,7 @@ describe('uiMessagesToChatMessages', () => {
         role: 'assistant',
         content: [
           { type: 'text', text: "Let's warm up." },
-          { type: 'tool-call', toolCallId: 'tc1', toolName: 'quick_check', input: { question: '2+2?' } },
+          { type: 'tool-call', toolCallId: 'tc1', toolName: 'quick_check', input: { question: '2+2?', mode: 'text', expected: '4', pageSlug: 'arith' } },
         ],
       },
       {
@@ -545,14 +545,14 @@ describe('uiMessagesToChatMessages', () => {
         id: 'a1', role: 'assistant',
         parts: [{
           type: 'tool-quick_check', toolCallId: 'tc1', state: 'input-available',
-          input: { question: '2+2?' },
+          input: { question: '2+2?', mode: 'text', expected: '4', pageSlug: 'arith' },
         }],
       },
     ];
     expect(uiMessagesToChatMessages(messages)).toEqual([
       {
         role: 'assistant',
-        content: [{ type: 'tool-call', toolCallId: 'tc1', toolName: 'quick_check', input: { question: '2+2?' } }],
+        content: [{ type: 'tool-call', toolCallId: 'tc1', toolName: 'quick_check', input: { question: '2+2?', mode: 'text', expected: '4', pageSlug: 'arith' } }],
       },
     ]);
   });
@@ -616,7 +616,7 @@ describe('uiMessagesToChatMessages', () => {
           { type: 'text', state: 'done', text: 'Try this.' },
           {
             type: 'tool-quick_check', toolCallId: 'tc1', state: 'output-available',
-            input: { question: '2+2?' }, output: { answer: '4' },
+            input: { question: '2+2?', mode: 'text', expected: '4', pageSlug: 'arith' }, output: { answer: '4' },
           },
           { type: 'step-start' },
           { type: 'reasoning', state: 'done', text: '', providerMetadata: { redactedData: 'opaque==' } },
@@ -630,7 +630,7 @@ describe('uiMessagesToChatMessages', () => {
         content: [
           { type: 'thinking', text: 'Warm-up first.', signature: 'sig_1' },
           { type: 'text', text: 'Try this.' },
-          { type: 'tool-call', toolCallId: 'tc1', toolName: 'quick_check', input: { question: '2+2?' } },
+          { type: 'tool-call', toolCallId: 'tc1', toolName: 'quick_check', input: { question: '2+2?', mode: 'text', expected: '4', pageSlug: 'arith' } },
         ],
       },
       {
@@ -669,7 +669,7 @@ describe('uiMessagesToChatMessages', () => {
         role: 'assistant',
         content: [
           { type: 'text', text: 'Try this.' },
-          { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' } },
+          { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?', mode: 'text', expected: '6', pageSlug: 'arith' } },
         ],
       },
     ]);
@@ -687,7 +687,7 @@ describe('thinking round trip: stream -> onEnd messages -> ChatMessage transcrip
       { type: 'text-delta', id: '1', text: 'Try this.' },
       { type: 'text-end', id: '1' },
       { type: 'tool-input-start', toolCallId: 'tc9', toolName: 'quick_check' },
-      { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' } },
+      { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?', mode: 'text', expected: '6', pageSlug: 'arith' } },
       {
         type: 'finish', reason: 'tool-calls',
         usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
@@ -710,7 +710,7 @@ describe('thinking round trip: stream -> onEnd messages -> ChatMessage transcrip
         content: [
           { type: 'thinking', text: 'Quiz them.', signature: 'sig_9' },
           { type: 'text', text: 'Try this.' },
-          { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?' } },
+          { type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check', input: { question: '3+3?', mode: 'text', expected: '6', pageSlug: 'arith' } },
         ],
       },
     ]);
@@ -722,3 +722,37 @@ describe('thinking round trip: stream -> onEnd messages -> ChatMessage transcrip
 const _premodel: UiChunk = { type: 'tool-output-available', toolCallId: 'x', output: {} };
 const _guardrail: UiChunk = { type: 'data-guardrail', data: { warning: 'w' }, transient: true };
 void _premodel; void _guardrail;
+
+
+describe('malformed block args become an error card, not a crash', () => {
+  const run = async (toolName: string, input: unknown) => {
+    const res = createUiStream({
+      originalMessages: [],
+      execute: async (writer) => {
+        writer.forward({ type: 'tool-call', toolCallId: 'b1', toolName, input } as any);
+      },
+    });
+    return (await collect(res)).chunks;
+  };
+
+  it('flags a speak block with no language tag', async () => {
+    const chunks = await run('speak', { text: 'xin chao' });
+    expect(chunks.find((c) => c.type === 'tool-input-available' && c.toolCallId === 'b1'),
+      'the part must still be created — the assembler cannot attach output to a part it lacks').toBeTruthy();
+    const err = chunks.find((c) => c.type === 'tool-output-error' && c.toolCallId === 'b1');
+    expect(err).toBeTruthy();
+    expect(String(err?.errorText)).toMatch(/lang/i);
+  });
+
+  it('leaves a valid block completely alone', async () => {
+    const chunks = await run('quick_check',
+      { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' });
+    expect(chunks.find((c) => c.type === 'tool-input-available' && c.toolCallId === 'b1')).toBeTruthy();
+    expect(chunks.find((c) => c.type === 'tool-output-error')).toBeFalsy();
+  });
+
+  it('does not police non-block tools', async () => {
+    const chunks = await run('search', {});
+    expect(chunks.find((c) => c.type === 'tool-output-error')).toBeFalsy();
+  });
+});
