@@ -131,6 +131,12 @@ const SCRIPTS = {
     'Teach me the parts of a neuron and make me label them.',
     'ok next',
   ],
+  // Rule 11e: a topic better shown than told. The tutor should find a video, READ its transcript
+  // to locate the moment, assign a SNIPPET with start/end, then check what the snippet showed.
+  video: [
+    'I learn better from video — show me how gradient descent actually works.',
+    'ok I watched it',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
