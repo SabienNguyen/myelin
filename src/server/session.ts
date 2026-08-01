@@ -27,7 +27,7 @@ import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated } from './gap/generated.js';
-import { builtinPatterns } from './gap/service.js';
+import { builtinPatterns, patternChoices } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { zodTool } from './zodTool.js';
 
@@ -177,10 +177,15 @@ export function blockTools(patterns: string[] = []): LoopTool[] {
   // and the block hung at input-available forever (observed on a PyTorch vault). Advertise what
   // exists — and when nothing does, say so, so the tutor reaches for another instrument instead of
   // inventing an id.
+  // Ids alone were not enough: offered `stream-consumer, pytorch-bytes-to-hex-array,
+  // pytorch-construct-name`, a tutor asked for "a coding exercise from the pytorch repo" staged
+  // stream-consumer — the built-in SSE demo. The list has to say what each id IS so the choice can
+  // be about the subject rather than the order they happen to appear in.
   const codeExerciseHelp = patterns.length > 0
     ? `Present a code_exercise block to the student and wait for their work. \`pattern\` MUST be one `
-      + `of these exact ids — do not invent one, and do not put a task description here: `
-      + `${patterns.join(', ')}.`
+      + `of these exact ids — do not invent one, and do not put a task description here. Pick the `
+      + `one whose subject matches what the student is learning:\n`
+      + patterns.map((p) => `  - ${p}`).join('\n')
     : 'Present a code_exercise block to the student and wait for their work. NONE AVAILABLE right '
       + 'now: no exercises exist in this vault, so do not call this tool — use another instrument '
       + '(writing_draft, structured_check, math_scratchpad) or generate_exercise in freeform.';
@@ -752,7 +757,7 @@ export function createTutorSession(
           ...webTools.tools, ...ingestTools, ...generateTool,
           // Read per turn, not per boot: an exercise mined or generated mid-session becomes
           // stageable in the very next turn.
-          ...turnBlockTools(gradingOnly, builtinPatterns(cfg.vault)),
+          ...turnBlockTools(gradingOnly, patternChoices(cfg.vault)),
         ];
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;

@@ -87,6 +87,14 @@ export function builtinPatterns(vault?: string): string[] {
   return [...Object.keys(EXERCISES), ...generated];
 }
 
+/** `id — title` for every stageable exercise. The tutor picks a pattern from a list, so the list
+ *  has to say what each one IS: given bare ids, a tutor asked for a PyTorch exercise staged the
+ *  built-in SSE demo. Titles make that choice about the subject. */
+export function patternChoices(vault?: string): string[] {
+  const generated = vault ? approvedGenerated(vault).map((e) => `${e.pattern} — ${e.title}`) : [];
+  return [...Object.keys(EXERCISES).map((p) => `${p} — built-in demo ladder`), ...generated];
+}
+
 /** An approved generated exercise, lifted into the same shape the hand-built registry uses: one
  *  full_body rung, statement as the visible_pre comment, the harness's own hostile chunking. */
 function liftGenerated(g: GeneratedExercise): BuiltinExercise {
