@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import type { ChatRequest } from '../src/server/llm/index.js';
 import { Engram } from '../src/server/mcp.js';
 import {
-  createTutorSession, guardMcpTools, isProgressQuestion, isSelectedPassage, turnBlockTools,
+  createTutorSession, guardMcpTools, isProgressQuestion, isSelectedPassage, relatedPattern,
+  turnBlockTools,
 } from '../src/server/session.js';
 import { streamModel, turnsModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
@@ -747,4 +748,34 @@ describe('a named subject gets the turn', () => {
     expect(await sent('ok', 'named-c'))
       .not.toMatch(/the student named a subject in this message/);
   }, 30_000);
+});
+
+/**
+ * Every code_exercise pattern is pre-authored, so most subjects have none. Told to pick "the
+ * closest", the model picks one regardless: a gradient-checkpointing request was answered with an
+ * SSE-stream exercise, twice, across two prose rules written to stop exactly that. The tool is
+ * withheld when nothing fits, leaving the tutor its other instruments.
+ */
+describe('code_exercise is withheld when no pattern fits the subject', () => {
+  const PATTERNS = ['stream-consumer — Consume an SSE token stream', 'pytorch-construct-name — Format a test id'];
+
+  it('keeps it when a pattern genuinely covers the subject', () => {
+    const names = turnBlockTools(false, PATTERNS, false, ['stream', 'consumer']).map((t) => t.name);
+    expect(names).toContain('code_exercise');
+  });
+
+  it('matches on the pattern TITLE too, not just its id', () => {
+    expect(relatedPattern(PATTERNS, ['token'])).toBe(true);
+  });
+
+  it('withholds it for a subject nothing covers, leaving other instruments', () => {
+    const names = turnBlockTools(false, PATTERNS, false, ['gradient', 'checkpointing']).map((t) => t.name);
+    expect(names).not.toContain('code_exercise');
+    expect(names).toContain('writing_draft');
+    expect(names).toContain('structured_check');
+  });
+
+  it('leaves a topicless turn alone — nothing to judge relatedness against', () => {
+    expect(turnBlockTools(false, PATTERNS, false, []).map((t) => t.name)).toContain('code_exercise');
+  });
 });

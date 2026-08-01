@@ -258,13 +258,34 @@ export function isSelectedPassage(text: string): boolean {
  *  open_source — re-opening what they were reading, no explanation, no block. A prompt rule did not
  *  stop it (it sits 300 lines from the work); removing the tool does. */
 export function turnBlockTools(
-  gradingOnly: boolean, patterns: string[] = [], readingSource = false,
+  gradingOnly: boolean, patterns: string[] = [], readingSource = false, topic: string[] = [],
 ): LoopTool[] {
-  const drop = (tools: LoopTool[]) =>
-    (readingSource ? tools.filter((t) => t.name !== 'open_source') : tools);
+  const unrelated = !relatedPattern(patterns, topic);
+  const drop = (tools: LoopTool[]) => tools.filter((t) => {
+    if (readingSource && t.name === 'open_source') return false;
+    // Every code_exercise pattern is pre-authored, so most subjects have none — and told merely to
+    // pick "the closest", the model picks one anyway. A learner asking about gradient checkpointing
+    // was handed an SSE-stream exercise, twice, across two prose rules written to stop exactly
+    // that. Withholding the tool when nothing fits leaves the tutor its other instruments, which is
+    // the honest answer to "there is no coding exercise for this yet".
+    if (t.name === 'code_exercise' && topic.length > 0 && unrelated) return false;
+    return true;
+  });
   if (!gradingOnly) return drop(blockTools(patterns));
   const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
   return drop(blockTools(patterns).filter((t) => keep.has(t.name)));
+}
+
+/** Does any available pattern plausibly cover what the student just asked about? Deliberately a
+ *  LOOSE token overlap, not a judgement: the cost of a false negative is the tutor reaching for
+ *  writing_draft instead, and the cost of a false positive is the bug above. Patterns arrive as
+ *  "id — title" strings, so the title's words count too. */
+export function relatedPattern(patterns: string[], topic: string[]): boolean {
+  if (patterns.length === 0 || topic.length === 0) return false;
+  const words = new Set(
+    patterns.flatMap((p) => p.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2)),
+  );
+  return topic.some((t) => words.has(t) || [...words].some((w) => w.startsWith(t) || t.startsWith(w)));
 }
 
 /** Frontend tools: no execute — the loop pauses on them (runLoop's external-tool halt); the
@@ -926,7 +947,8 @@ export function createTutorSession(
           ...webTools.tools, ...ingestTools, ...generateTool,
           // Read per turn, not per boot: an exercise mined or generated mid-session becomes
           // stageable in the very next turn.
-          ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource),
+          ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource,
+            topicTokens(lastUserText(messages))),
         ];
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
