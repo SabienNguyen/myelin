@@ -60,6 +60,19 @@ const SCRIPTS = {
     'Give me a coding exercise on Python class and instance variables.',
     'ok let me try it',
   ],
+  // Jumps straight at an advanced topic with none of its prerequisites known. Rule 7/prereq
+  // gating should route them rather than teach it cold.
+  toodeep: [
+    'Teach me distributed FSDP2 sharding with mixed precision right now.',
+    'no, I want the advanced one',
+  ],
+  // A subject the vault has nothing on. Rule 7a: ONE compact intake, then a sketched path the
+  // learner approves — not a page taught from nowhere.
+  newsubject: [
+    '!freeform',
+    'I want to learn music theory from scratch.',
+    'not sure — just start me somewhere sensible',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
