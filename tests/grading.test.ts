@@ -860,3 +860,42 @@ describe('pattern checker accepts every shape its schema allows', () => {
     expect(grade(true, 'no').detail).toMatch(/expected "true"/);
   });
 });
+
+/**
+ * Nothing submitted cannot demonstrate knowledge. A four-item quiz submitted entirely EMPTY came
+ * back 4/4 CORRECT and minted evidence on four separate pages — the grader model was asked to judge
+ * empty strings and obliged. The quiz path's own guard only covered a MALFORMED submission; one
+ * carrying entries whose `answer` is "" looked well-formed and went straight to the model.
+ */
+describe('a blank submission is never graded correct', () => {
+  const cfg = { vault: '/tmp', student: 'kid', models: {} } as any;
+  // If any of these reach the model, the stub makes them CORRECT — so a passing test proves the
+  // guard fired before the model was ever consulted.
+  const yesMan = { model: { generateText: async () => ({ text: 'CORRECT — looks right', usage: {} }) } } as any;
+
+  it('marks an all-empty quiz incorrect, and struggles every page', async () => {
+    const input = {
+      title: 'q',
+      items: [
+        { id: 'a', type: 'short', prompt: 'Explain A', pageSlug: 'page-a' },
+        { id: 'b', type: 'short', prompt: 'Explain B', pageSlug: 'page-b' },
+      ],
+    };
+    const out = { answers: [{ id: 'a', answer: '' }, { id: 'b', answer: '   ' }] };
+    const g = await gradeBlockOutput('quiz', input as any, out as any, cfg, yesMan);
+    expect(g.verdict).toBe('incorrect');
+    expect(g.detail).toBe('0/2');
+    expect(g.evidence.every((e: any) => e.kind === 'struggled')).toBe(true);
+    expect(g.evidence.map((e: any) => e.slug).sort()).toEqual(['page-a', 'page-b']);
+  });
+
+  it('marks an empty writing_draft incorrect without consulting the rubric judge', async () => {
+    const g = await gradeBlockOutput(
+      'writing_draft',
+      { prompt: 'Argue X', pageSlug: 'essay', rubric: ['cites a source', 'has a thesis'] } as any,
+      { draft: '   ' } as any, cfg, yesMan,
+    );
+    expect(g.verdict).toBe('incorrect');
+    expect(g.evidence[0].kind).toBe('struggled');
+  });
+});

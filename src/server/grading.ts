@@ -870,6 +870,17 @@ export async function gradeBlockOutput(
     };
   }
 
+  // An empty draft is not judged, for the same reason an empty quiz answer is not: a model asked
+  // whether nothing satisfies four criteria is being invited to be agreeable, and the quiz path
+  // showed exactly where that leads (a blank submission graded 4/4). Junk text still goes to the
+  // grader — that is a real answer, and grading it honestly is the grader's job.
+  if (tool === 'writing_draft' && !String(result?.draft ?? '').trim()) {
+    return {
+      verdict: 'incorrect', source: 'model', detail: 'no draft was submitted',
+      evidence: [ev(input.pageSlug, 'struggled', 'writing_draft: nothing submitted', 'model')],
+    };
+  }
+
   // writing_draft with an explicit rubric — the judged-work path for essay subjects. The grader
   // marks each stated criterion pass/fail; passing ALL of them mints 'rubric-passed', the third
   // positive evidence kind (engram caps it at practicing and decays it on its own shorter
@@ -1011,6 +1022,18 @@ async function gradeOpenAnswer(
   question: string, answer: string, slug: string, cfg: HarnessConfig, deps: GradingDeps = {},
   expected?: string,
 ): Promise<Grade> {
+  // A BLANK answer never reaches the model. Nothing submitted cannot demonstrate knowledge, and
+  // asking a grader to judge an empty string invites exactly what it produced live: a four-item
+  // quiz submitted entirely empty came back 4/4 CORRECT and minted evidence on four separate
+  // pages. The quiz path's own guard only covered a MALFORMED submission — one carrying entries
+  // whose `answer` is "" looked well-formed and went straight through. Central, because
+  // quick_check and quiz both land here.
+  if (!answer || !answer.trim()) {
+    return {
+      verdict: 'incorrect', source: 'model', detail: 'no answer was submitted',
+      evidence: [ev(slug, 'struggled', `open answer: ${question}`, 'model')],
+    };
+  }
   // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
   // model, never copied into the evidence note.
   const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
