@@ -58,10 +58,14 @@ async function openPopover() {
 }
 
 describe('ModelsMenu — the tutor badge opens the model configuration dialog', () => {
-  it('renders all five roles with their effective ids, off a shared datalist', async () => {
+  it('renders every CALLABLE role with its effective id, off a shared datalist', async () => {
+    // quiz_gen is deliberately not among them: nothing calls it (quiz blocks are staged by the
+    // tutor as a block tool), so offering it asked the learner to pick a model that could not
+    // change anything. The config key still exists for compatibility.
     stubFetch();
     await openPopover();
-    for (const role of ['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile']) {
+    expect(screen.queryByLabelText('quiz_gen')).toBeNull();
+    for (const role of ['tutor', 'grader', 'card_gen', 'compile']) {
       const input = await screen.findByLabelText(role) as HTMLInputElement;
       expect(input.getAttribute('list')).toBe('model-id-list');
     }
@@ -170,13 +174,13 @@ describe('ModelsMenu — live discovery', () => {
     expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('claude-sonnet-5');
   });
 
-  it('the local preset sets the four teaching roles, checks rails, and leaves compile alone', async () => {
+  it('the local preset sets the teaching roles, checks rails, and leaves compile alone', async () => {
     stubFetch(discovered());
     await openPopover();
     await screen.findByText('installed locally:');
     fireEvent.change(screen.getByLabelText('local preset'), { target: { value: 'llama3.1:8b' } });
     fireEvent.click(screen.getByRole('button', { name: 'apply' }));
-    for (const r of ['tutor', 'grader', 'quiz_gen', 'card_gen']) {
+    for (const r of ['tutor', 'grader', 'card_gen']) {
       expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:llama3.1:8b');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5');
@@ -266,7 +270,7 @@ describe('ModelsMenu — live discovery', () => {
     await screen.findByText(/qwen3:8b ready/);
     // THE assertion the clobber bug failed: the roles are the pulled model, rails on — not the
     // claude defaults the /api/setup/models refresh returns.
-    for (const r of ['tutor', 'grader', 'quiz_gen', 'card_gen']) {
+    for (const r of ['tutor', 'grader', 'card_gen']) {
       expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:qwen3:8b');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5'); // preset leaves compile

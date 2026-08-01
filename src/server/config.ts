@@ -150,6 +150,9 @@ const configSchema = z.object({
     // spend that is the user's call, not a default. Override any role in harness.config.json.
     tutor: tutorRoleSchema.default({ model: 'claude-sonnet-5' }),
     grader: roleSchema.default({ model: 'claude-haiku-4-5' }),
+    // Retained so existing settings files still load, but nothing calls it: quiz blocks are staged
+    // by the tutor as a block tool, and there is no separate quiz model. Not offered in the model
+    // picker for that reason — a setting that cannot change behaviour should not ask to be set.
     quiz_gen: roleSchema.default({ model: 'claude-sonnet-5' }),
     card_gen: roleSchema.default({ model: 'claude-haiku-4-5' }),
     compile: roleSchema.default({ model: 'claude-sonnet-5' }),

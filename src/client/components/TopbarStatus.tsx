@@ -172,7 +172,11 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
   );
 }
 
-const ROLE_ORDER = ['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile'] as const;
+// quiz_gen is deliberately absent. It is a configurable role nothing ever calls — quiz blocks are
+// staged by the TUTOR as a block tool, there is no separate quiz model — so offering it here asked
+// the learner to choose a model that could not affect anything, and reserved a usage row that never
+// filled. The config key is kept (config.ts) so existing settings still load.
+const ROLE_ORDER = ['tutor', 'grader', 'card_gen', 'compile'] as const;
 type RoleName = typeof ROLE_ORDER[number];
 const URL_FIELDS = [
   { key: 'OLLAMA_BASE_URL', label: 'ollama base url', placeholder: 'http://localhost:11434/v1' },
@@ -215,7 +219,7 @@ export function discoveredModelIds(available: Available): string[] {
 
 /** The roles the local preset repoints. compile stays put: it writes the vault, so it keeps the
  * strongest model configured. */
-const PRESET_ROLES = ['tutor', 'grader', 'quiz_gen', 'card_gen'] as const;
+const PRESET_ROLES = ['tutor', 'grader', 'card_gen'] as const;
 
 type UsageTotals = { in: number; out: number; cacheRead: number; cacheWrite: number; calls: number };
 type UsageSummary = { today: Record<string, UsageTotals> };
@@ -480,13 +484,13 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                 </span>
               </span>
               <span className="models-hint">
-                sets tutor, grader, quiz_gen, card_gen to it and turns rails on. compile stays put —
+                sets tutor, grader, card_gen to it and turns rails on. compile stays put —
                 compile writes the vault, keep it on the strongest model you have. save still applies.
               </span>
             </>
           )}
           <span className="models-hint">
-            tutor and compile want the strongest model; grader, quiz_gen, card_gen run fine on a
+            tutor and compile want the strongest model; grader and card_gen run fine on a
             cheap or local one
           </span>
           <span className="models-group">provider endpoints</span>
