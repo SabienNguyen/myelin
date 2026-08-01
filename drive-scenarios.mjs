@@ -98,6 +98,16 @@ const SCRIPTS = {
     'Teach me how to derive the gradient of the softmax cross-entropy loss.',
     'ok give me a concrete one to compute',
   ],
+  // Twelve turns on one subject. The small-model question: does turn 12 still stage instruments,
+  // stay on topic, and answer as fast as turn 2 — or does it degrade as context grows?
+  marathon: [
+    'Teach me about Python iterators and generators, step by step.',
+    'ok next', 'keep going', 'what about generator expressions?',
+    'ok next', 'how does this relate to memory use?',
+    'keep going', 'give me a harder one',
+    'ok next', 'what am I still weak on here?',
+    'keep going', 'summarise what I learned today',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
