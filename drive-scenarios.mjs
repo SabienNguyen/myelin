@@ -137,6 +137,12 @@ const SCRIPTS = {
     'I learn better from video — show me how gradient descent actually works.',
     'ok I watched it',
   ],
+  // A learner with an active GOAL: the tutor should teach toward it and be able to say how far
+  // through the syllabus they are.
+  goalrun: [
+    'how far through my current goal am I, and what is next?',
+    'ok teach me that one',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',

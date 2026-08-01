@@ -356,6 +356,32 @@ export function topicTokens(text: string): string[] {
 
 
 
+/** Questions ABOUT the session rather than about a subject: progress, what is next, what was
+ *  covered. These must never unlock research. Their words look like topic words to topicTokens —
+ *  "how far through my current goal am I" yields ["far","through","current","goal"] — so the gap
+ *  check searched for them, found nothing on "current", and let the tutor research and WRITE a
+ *  page. A live run answered a progress question and wrote `cuda-current-device`, matched off the
+ *  word "current".
+ *
+ *  Detected by SHAPE, not by stripping the words: "current" is a legitimate topic (CUDA's current
+ *  device, electric current), and a stopword list would blind the vault to it everywhere. */
+const PROGRESS_QUESTIONS = [
+  /\bhow (far|much).{0,24}\b(through|into|left|done|goal|path|way)\b/i,
+  /\bhow (am|are) (i|we) doing\b/i,
+  // "next" ENDS the clause in a session question ("what should I do next?") but MODIFIES a noun in
+  // a subject ("the next token prediction objective"). The lookahead is the whole distinction.
+  /\bwhat\b[^.?!]{0,20}\bnext\b(?!\s+\w)/i,
+  /\bwhat\b[^.?!]{0,20}\b(left|remaining)\b/i,
+  /\bwhat (did|have) we (cover|do|learn)/i,
+  /\bwhere (am|are) (i|we)\b/i,
+  /\bmy progress\b|\bhow many.{0,20}\b(pages|left|to go)\b/i,
+];
+
+/** True when the turn is asking about the SESSION, not about something to learn. */
+export function isProgressQuestion(text: string): boolean {
+  return PROGRESS_QUESTIONS.some((re) => re.test(text));
+}
+
 /** A page this short is a placeholder, whatever its frontmatter claims. Engram's own auto-stub
  *  body is one sentence; a real page that teaches something is not 400 characters long. */
 const THIN_BODY_CHARS = 400;
@@ -415,7 +441,11 @@ export async function vaultGap(
     return { reason: 'empty-vault', detail: 'the vault has no pages at all' };
   }
 
-  const tokens = topicTokens(lastUserText(messages));
+  const text = lastUserText(messages);
+  // Asking about the session is not asking to be taught something: no subject means nothing to
+  // research, and researching anyway writes pages nobody asked for (see PROGRESS_QUESTIONS).
+  if (isProgressQuestion(text)) return null;
+  const tokens = topicTokens(text);
   // "ok", "next", "go on" — the student is continuing, not naming a subject. Continuing a lesson the
   // vault already holds is precisely the case that should stay grounded.
   if (tokens.length === 0) return null;

@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatRequest } from '../src/server/llm/index.js';
 import { Engram } from '../src/server/mcp.js';
-import { createTutorSession, guardMcpTools, isSelectedPassage, turnBlockTools } from '../src/server/session.js';
+import {
+  createTutorSession, guardMcpTools, isProgressQuestion, isSelectedPassage, turnBlockTools,
+} from '../src/server/session.js';
 import { streamModel, turnsModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
 
@@ -681,4 +683,36 @@ describe('the produce-something note rides a teaching turn', () => {
     const msgs = await sent([{ type: 'data-command', data: { command: 'learn' } }], 'note-b');
     expect(msgs).not.toMatch(/end this turn on something the student PRODUCES/);
   }, 30_000);
+});
+
+/**
+ * A progress question is not a request to be taught. "How far through my current goal am I?" yields
+ * the tokens ["far","through","current","goal"] — none of them a subject, but non-empty, so the gap
+ * check searched, matched nothing, and unlocked research. A live run answered that question and
+ * wrote an unrelated page, `cuda-current-device`, matched off the word "current".
+ */
+describe('progress questions do not unlock research', () => {
+  const asks = [
+    'how far through my current goal am I, and what is next?',
+    'how am I doing?',
+    'what should I do next?',
+    'what did we cover last time?',
+    'where am I in this path?',
+    'how many pages have I got left?',
+  ];
+  it.each(asks)('%s is a session question', (t) => {
+    expect(isProgressQuestion(t)).toBe(true);
+  });
+
+  // Detected by SHAPE: the words themselves must stay available as topics, or the vault goes blind
+  // to real subjects that use them.
+  const subjects = [
+    'teach me about electric current',
+    'explain the CUDA current device',
+    'what is the next token prediction objective?',
+    'how far can gradients propagate through a deep network?',
+  ];
+  it.each(subjects)('%s is still a subject', (t) => {
+    expect(isProgressQuestion(t)).toBe(false);
+  });
 });
