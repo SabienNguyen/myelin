@@ -154,7 +154,13 @@ export function recentLapses(vault: string, days = 7): { slug: string; count: nu
     const { date, slug } = JSON.parse(line) as { date: string; slug: string };
     if (date >= cutoffStr) counts.set(slug, (counts.get(slug) ?? 0) + 1);
   }
-  return [...counts].map(([slug, count]) => ({ slug, count }));
+  // Worst-forgotten first. These arrive in file order otherwise, which is the order Anki happened
+  // to review them in — so a page lapsed twice could lead a page lapsed four times, and the tutor,
+  // reading the list top-down, picks up the milder problem. The count is the whole signal here;
+  // ordering by it costs nothing and makes the line read as a priority rather than a set.
+  return [...counts]
+    .map(([slug, count]) => ({ slug, count }))
+    .sort((a, b) => b.count - a.count || a.slug.localeCompare(b.slug));
 }
 
 /** Days since the last review Anki-side activity was pulled (via the sync cursor). Never synced -> Infinity. */

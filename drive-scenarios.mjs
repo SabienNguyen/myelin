@@ -165,6 +165,17 @@ const SCRIPTS = {
     '/advanced',
     'Teach me about gradient checkpointing.',
   ],
+  // Walks away from an open block and asks something unrelated. The block should not strand, and
+  // nothing should be recorded for work never done.
+  abandon: [
+    'Give me a graded exercise on Python name mangling.',
+    'actually forget that — what is a Python decorator?',
+  ],
+  // Anki lapses seeded for two pages: the session should NAME them as trouble and probe for the
+  // misconception behind the forgetting, not just reteach.
+  lapses: [
+    'What should I work on today?',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
