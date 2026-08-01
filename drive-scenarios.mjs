@@ -87,6 +87,17 @@ const SCRIPTS = {
     'Teach me the six Vietnamese tones and let me hear them.',
     'which two are hardest to tell apart?',
   ],
+  // quiz mode, never exercised. Should OPEN with a quiz block over recent pages, not teach.
+  quizmode: [
+    '!quiz',
+    'quiz me on what I have been learning',
+  ],
+  // A derivation with a numeric answer — math_scratchpad territory, and the one instrument that
+  // can mint applied-correctly outside code.
+  derive: [
+    'Teach me how to derive the gradient of the softmax cross-entropy loss.',
+    'ok give me a concrete one to compute',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
