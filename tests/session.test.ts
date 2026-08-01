@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatRequest } from '../src/server/llm/index.js';
 import { Engram } from '../src/server/mcp.js';
-import { createTutorSession, guardMcpTools } from '../src/server/session.js';
+import { createTutorSession, guardMcpTools, isSelectedPassage, turnBlockTools } from '../src/server/session.js';
 import { streamModel, turnsModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
 
@@ -623,5 +623,36 @@ describe('read-only MCP calls are cached within a turn', () => {
     await tools[1].execute!({ student: 'kid', slug: 'p', kind: 'exposed', note: 'n' });
     await tools[0].execute!({ student: 'kid' });
     expect(calls).toEqual(['state', 'record', 'state']);
+  });
+});
+
+/**
+ * Select-to-ask: the learner highlights a passage in the reader and asks about it. A live probe had
+ * the tutor answer "walk me through this passage" with nothing but open_source — re-opening the
+ * document they were already reading, with no explanation and no block. A prompt rule did not stop
+ * it, so the tool is withheld for the turn.
+ */
+describe('a selected passage does not get the source re-opened', () => {
+  it('recognises the reader\'s own message shape', () => {
+    expect(isSelectedPassage('From the source “More About PyTorch”:\n\n> text\n\nWalk me through this passage.')).toBe(true);
+    expect(isSelectedPassage('  From the source "X": > y')).toBe(true);
+    // Ordinary prose that merely mentions a source must not trip it.
+    expect(isSelectedPassage('what does the source say about tensors?')).toBe(false);
+    expect(isSelectedPassage('teach me from the source I added')).toBe(false);
+  });
+
+  it('withholds open_source on such a turn, keeping every teaching instrument', () => {
+    const names = turnBlockTools(false, [], true).map((t) => t.name);
+    expect(names).not.toContain('open_source');
+    expect(names).toContain('writing_draft');
+    expect(names).toContain('quick_check');
+  });
+
+  it('leaves an ordinary turn untouched', () => {
+    expect(turnBlockTools(false, [], false).map((t) => t.name)).toContain('open_source');
+  });
+
+  it('still withholds it on a grading turn that came from the reader', () => {
+    expect(turnBlockTools(true, [], true).map((t) => t.name)).not.toContain('open_source');
   });
 });

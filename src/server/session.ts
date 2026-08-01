@@ -242,13 +242,29 @@ export function availableBlocks(): BlockToolName[] {
   return [...BLOCK_TOOL_NAMES];
 }
 
+/** Did this message come from the reader's select-to-ask? SourceReader.sendPassage builds it, so
+ *  the shape is ours, not the learner's prose — which makes it safe to key behaviour off. */
+export function isSelectedPassage(text: string): boolean {
+  return /^From the source [“"]/.test(text.trim());
+}
+
 /** The turn's block toolset under structural rule 1a: a pure grading turn withholds every block
  *  except open_source (navigation is not staging work) — two live probes showed prompt wording
- *  alone does not stop the model staging a block over its own next-step offer. Exported for tests. */
-export function turnBlockTools(gradingOnly: boolean, patterns: string[] = []): LoopTool[] {
-  if (!gradingOnly) return blockTools(patterns);
+ *  alone does not stop the model staging a block over its own next-step offer. Exported for tests.
+ *
+ *  `readingSource` withholds open_source for the same reason, in the mirror case: when the learner
+ *  selected a passage IN the reader and asked about it, the document is already open on their
+ *  screen. A live probe had the tutor answer "walk me through this passage" with nothing but
+ *  open_source — re-opening what they were reading, no explanation, no block. A prompt rule did not
+ *  stop it (it sits 300 lines from the work); removing the tool does. */
+export function turnBlockTools(
+  gradingOnly: boolean, patterns: string[] = [], readingSource = false,
+): LoopTool[] {
+  const drop = (tools: LoopTool[]) =>
+    (readingSource ? tools.filter((t) => t.name !== 'open_source') : tools);
+  if (!gradingOnly) return drop(blockTools(patterns));
   const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
-  return blockTools(patterns).filter((t) => keep.has(t.name));
+  return drop(blockTools(patterns).filter((t) => keep.has(t.name)));
 }
 
 /** Frontend tools: no execute — the loop pauses on them (runLoop's external-tool halt); the
@@ -743,6 +759,10 @@ export function createTutorSession(
       signal,
       onError: turnError,
       execute: async (writer, runSignal) => {
+        // A passage the learner selected in the reader and asked about: the document is open and
+        // that text is on their screen. See turnBlockTools — open_source is withheld for the turn.
+        const readingSource = isSelectedPassage(lastUserText(messages));
+
         // 1. Grade fresh block outputs BEFORE the model sees them.
         const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
         for (const p of pending) {
@@ -876,7 +896,7 @@ export function createTutorSession(
           ...webTools.tools, ...ingestTools, ...generateTool,
           // Read per turn, not per boot: an exercise mined or generated mid-session becomes
           // stageable in the very next turn.
-          ...turnBlockTools(gradingOnly, patternChoices(cfg.vault)),
+          ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource),
         ];
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
@@ -923,6 +943,11 @@ export function createTutorSession(
           + 'with the sources you actually read in its `sources` frontmatter, BEFORE you record any '
           + 'evidence — evidence attaches to a page, so a topic with no page loses the student\'s '
           + 'work entirely. Write the page first, then grade, then record against that slug.',
+        ));
+        if (readingSource) trailing.push(userTurn(
+          'HARNESS: this came from the reader — the source is ALREADY open beside the conversation '
+          + 'and the quoted passage is on the student\'s screen. Do not re-open it (open_source is '
+          + 'withheld this turn). Explain the passage itself, then stage a block on it.',
         ));
         if (grades.length) trailing.push(userTurn(
           `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
