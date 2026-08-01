@@ -125,6 +125,12 @@ const SCRIPTS = {
     'quiz me on that',
     'save what we covered as a page I can come back to',
   ],
+  // A subject that IS a picture — label_diagram is the applied instrument for these, and the only
+  // way anatomy/circuits/music notation can mint applied-correctly.
+  visual: [
+    'Teach me the parts of a neuron and make me label them.',
+    'ok next',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',
