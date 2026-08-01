@@ -182,6 +182,11 @@ const SCRIPTS = {
     'I want to fix my misunderstanding about retain_graph. Test me on it.',
     'retain_graph keeps the graph alive for another backward pass; it costs memory and does not speed anything up.',
   ],
+  // Rule 13: a question about what is NEW must hit the live indices (arXiv/Crossref), not training
+  // memory — a model's cutoff cannot answer "what is state of the art".
+  frontier: [
+    'What are the most recent papers on mixture-of-experts routing? I want current work, not textbook material.',
+  ],
   // Asks across topics — should keep continuity rather than jumping to the global frontier.
   crosstopic: [
     'Teach me how autograd and CUDA streams interact.',

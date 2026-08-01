@@ -896,3 +896,62 @@ describe('the resolve-this note', () => {
       .not.toMatch(/still carries/);
   }, 30_000);
 });
+
+/**
+ * Evidence must never be lost to a missing page. A tutor that researched mixture-of-experts
+ * routing (a topic the vault did not cover), graded real work on it, and recorded against a slug
+ * it invented got "page not found" — and the learner's work vanished. write_page unlocks on a
+ * vault gap, but the gap check can miss, and when it does nothing catches the loss.
+ */
+describe('a missing page does not swallow earned evidence', () => {
+  const build = () => {
+    const calls: any[] = [];
+    let exists = false;
+    const raw = [
+      {
+        name: 'record_evidence',
+        description: 'record',
+        execute: async (a: any) => {
+          calls.push(['record', a.slug]);
+          if (exists) return { ok: true };
+          return { isError: true, content: [{ type: 'text', text: `page not found: ${a.slug}` }] };
+        },
+      },
+      {
+        name: 'write_page',
+        description: 'write',
+        execute: async (a: any) => { calls.push(['write', a.slug, a.status]); exists = true; return { ok: true }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', ['known-page'], [], undefined), calls };
+  };
+
+  it('stubs the page and retries, so the evidence lands', async () => {
+    const { tools, calls } = build();
+    const res: any = await tools[0].execute!({
+      student: 'kid', slug: 'mixture-of-experts-routing', kind: 'struggled', note: 'graded work',
+    });
+    expect(res.isError).toBeFalsy();
+    expect(calls.filter((c) => c[0] === 'write')).toEqual([['write', 'mixture-of-experts-routing', 'stub']]);
+    expect(calls.filter((c) => c[0] === 'record')).toHaveLength(2); // failed, then retried
+  });
+
+  it('leaves a successful record alone', async () => {
+    const calls: any[] = [];
+    const raw = [{ name: 'record_evidence', description: 'r', execute: async (a: any) => { calls.push(a.slug); return { ok: true }; } }] as any;
+    const tools = guardMcpTools(raw, 'kid', ['known-page'], [], undefined);
+    await tools[0].execute!({ student: 'kid', slug: 'known-page', kind: 'exposed', note: 'n' });
+    expect(calls).toHaveLength(1); // no retry, no stub
+  });
+
+  it('does not stub for an unrelated failure', async () => {
+    const calls: any[] = [];
+    const raw = [
+      { name: 'record_evidence', description: 'r', execute: async () => ({ isError: true, content: [{ type: 'text', text: 'engram is down' }] }) },
+      { name: 'write_page', description: 'w', execute: async (a: any) => { calls.push(a.slug); return { ok: true }; } },
+    ] as any;
+    const tools = guardMcpTools(raw, 'kid', [], [], undefined);
+    await tools[0].execute!({ student: 'kid', slug: 'x', kind: 'exposed', note: 'n' });
+    expect(calls).toHaveLength(0); // a transport failure is not a missing page
+  });
+});

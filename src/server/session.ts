@@ -201,6 +201,36 @@ export function guardMcpTools(
 
         let result = await t.execute!(clean);
 
+        // Evidence must never be lost to a missing page. A tutor that researched a topic the vault
+        // does not cover, graded real work on it, and then recorded against a slug it invented got
+        // "page not found" — and the learner's work vanished. write_page unlocks on a vault GAP,
+        // but the gap check can miss (a loosely-matching page reads as coverage), and when it does
+        // there is no way to create the page and nothing catches the loss.
+        //
+        // Same repair as create_path below: mint the page through Engram's own write_page and
+        // retry once. A stub is what vaultGap already treats as "not yet known", so the topic gets
+        // researched and written properly the next time the learner reaches it — and the evidence
+        // they earned survives in the meantime, which is the whole point of recording it.
+        if (t.name === 'record_evidence' && (result as any)?.isError) {
+          const text = (((result as any).content ?? []) as any[]).map((c) => c?.text ?? '').join(' ');
+          const slug = String((clean as { slug?: unknown })?.slug ?? '');
+          const writer = tools.find((x) => x.name === 'write_page');
+          if (/page not found/i.test(text) && slug && writer?.execute) {
+            const title = slug.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+            const wrote = await writer.execute({
+              slug,
+              title,
+              body: 'Reached in conversation before this page was written — it will be researched and filled in when the topic comes up again.',
+              status: 'stub',
+            }).catch(() => ({ isError: true }));
+            if (!(wrote as any)?.isError) {
+              if (!knownSlugs.includes(slug)) knownSlugs.push(slug);
+              console.error(`[record_evidence] stubbed missing page "${slug}" so the evidence could land`);
+              result = await t.execute!(clean);
+            }
+          }
+        }
+
         // create_path requires every stop to EXIST. A tutor that has just sketched a six-stop
         // syllabus and had it approved has written one page, so it could only build a one-stop
         // path — the learner reads six stops in the chat and sees 0/1 in the UI. Rather than change
