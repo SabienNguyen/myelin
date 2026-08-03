@@ -17,7 +17,8 @@ verifying a change or taking a screenshot.
 The e2e fixture config replaces every model with a scripted one, so nothing calls Anthropic:
 
 - `tests/e2e/e2e.config.json` — all five roles set to `"scripted"`, embeddings `fake`, student `e2e`,
-  a disposable fixture vault, port 4820.
+  a disposable fixture vault, port 4830. (Fixture ports deliberately avoid :4820/:4173 — on a dev
+  machine those may be the developer's own live instance, which the suite must never drive.)
 - `LW_MOCK_MODEL=tests/e2e/script.json` — the env hook in `src/server/models.ts` that swaps in
   `tests/e2e/scripted-model.cjs`.
 
@@ -93,10 +94,13 @@ once if it does not.
 ```bash
 LW_MOCK_MODEL=tests/e2e/script.json HARNESS_CONFIG=tests/e2e/e2e.config.json \
   npx tsx src/server/index.ts > /tmp/backend.log 2>&1 &
-npx vite preview --port 4173 --strictPort > /tmp/preview.log 2>&1 &
+HARNESS_API=http://localhost:4830 npx vite preview --port 4183 --strictPort > /tmp/preview.log 2>&1 &
 sleep 10
-curl -s localhost:4820/api/status   # {"student":"e2e","tutor":"scripted",...}
+curl -s localhost:4830/api/status   # {"student":"e2e","tutor":"scripted",...}
 ```
+
+Never point ad-hoc drives at :4820/:4173 — on a dev machine that can be the developer's own
+live instance with real student data.
 
 Then a throwaway script. **Put it inside the repo root**, not a temp directory — Node resolves
 `@playwright/test` from the script's own location, so a script in `/tmp` fails with
@@ -108,7 +112,7 @@ const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
 const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
 p.on('console', m => m.type() === 'error' && console.log('[console.error]', m.text()));
 p.on('pageerror', e => console.log('[pageerror]', e.message));
-await p.goto('http://localhost:4173/', { waitUntil: 'networkidle' });
+await p.goto('http://localhost:4183/', { waitUntil: 'networkidle' });
 await p.getByPlaceholder(/Ask your tutor/i).fill('hi');
 await p.keyboard.press('Enter');
 await p.waitForTimeout(6000);

@@ -1,4 +1,5 @@
-import { convert } from 'html-to-text';
+import { htmlToText } from './htmlText.js';
+import { fetchWithRetry, HttpStatusError } from './retry.js';
 import { z } from 'zod';
 import type { HarnessConfig } from './config.js';
 import type { LoopTool, ServerTool } from './llm/index.js';
@@ -65,29 +66,22 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
       parallel: true,
       execute: async ({ url }) => {
         try {
-          const res = await fetch(url, {
+          // Retried: a blip here used to cost the whole turn — the model saw a dead source and
+          // taught from memory instead. A 404/403 still fails immediately, because those are
+          // answers about the URL, not accidents (see retry.ts).
+          const res = await fetchWithRetry(url, {
             signal: AbortSignal.timeout(20_000),
             headers: { 'user-agent': 'myelin/1.0 (personal tutoring app)' },
-          });
-          if (!res.ok) return { error: `fetch failed: HTTP ${res.status}` };
+          }, { onRetry: (n, why) => console.error(`[read_url] retry ${n} for ${url}: ${why}`) });
           const html = await res.text();
-          const text = convert(html, {
-            wordwrap: false,
-            selectors: [
-              { selector: 'nav', format: 'skip' },
-              { selector: 'footer', format: 'skip' },
-              { selector: 'script', format: 'skip' },
-              { selector: 'style', format: 'skip' },
-              { selector: 'a', options: { ignoreHref: true } },
-              { selector: 'img', format: 'skip' },
-            ],
-          }).replace(/\n{3,}/g, '\n\n').trim();
+          const text = htmlToText(html);
           return {
             url,
             truncated: text.length > MAX_PAGE_CHARS,
             text: text.slice(0, MAX_PAGE_CHARS),
           };
         } catch (e: any) {
+          if (e instanceof HttpStatusError) return { error: `fetch failed: HTTP ${e.status}` };
           return { error: `fetch unavailable: ${e?.message ?? e}` };
         }
       },
@@ -117,14 +111,17 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
         try {
           const url = `${base}/search?format=json&q=${encodeURIComponent(query)}`
             + (category ? `&categories=${category}` : '');
-          const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
-          if (!res.ok) return { error: `search failed: HTTP ${res.status}` };
+          // A failed search reads to the model as "nothing exists on this", which is a worse
+          // lie than a slow answer — so it retries too.
+          const res = await fetchWithRetry(url, { signal: AbortSignal.timeout(15_000) },
+            { onRetry: (n, why) => console.error(`[web_search] retry ${n}: ${why}`) });
           const data = await res.json() as { results?: { url: string; title: string; content?: string }[] };
           return {
             results: (data.results ?? []).slice(0, MAX_RESULTS)
               .map((r) => ({ title: r.title, url: r.url, snippet: r.content ?? '' })),
           };
         } catch (e: any) {
+          if (e instanceof HttpStatusError) return { error: `search failed: HTTP ${e.status}` };
           return { error: `search unavailable: ${e?.message ?? e}` };
         }
       },

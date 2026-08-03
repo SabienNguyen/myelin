@@ -123,3 +123,50 @@ describe('DELETE /api/thread/:id', () => {
   });
 });
 
+
+/**
+ * The mode selector is gone: a request that sends no `mode` gets one derived from what the learner
+ * actually said plus the session plan. These assert the ROUTE seam — that the derived value is what
+ * respond() receives — since deriveMode's own mapping is covered in deriveMode.test.ts.
+ */
+describe('an absent mode is derived, not defaulted', () => {
+  const send = async (text: string, extra: Record<string, unknown> = {}) => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-derive-'));
+    const app = buildChatRoute({} as any, makeCfg(vault));
+    seenModes.length = 0;
+    await app.request('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        messages: [{ role: 'user', parts: [{ type: 'text', text }] }],
+        threadId: 't', ...extra,
+      }),
+    });
+    return seenModes[0];
+  };
+
+  it('routes an authoring ask to freeform', async () => {
+    expect(await send('build me a path for jazz harmony')).toBe('freeform');
+  });
+
+  it('routes "quiz me" to quiz', async () => {
+    expect(await send('quiz me on what I know')).toBe('quiz');
+  });
+
+  it('follows the plan when the learner asks for nothing in particular', async () => {
+    expect(await send('ok next', { planKinds: ['review', 'new'] })).toBe('review');
+    expect(await send('ok next', { planKinds: ['new'] })).toBe('learn');
+  });
+
+  it('treats an empty vault as freeform, which is what coldStartMode used to do', async () => {
+    expect(await send('teach me jazz harmony', { emptyVault: true })).toBe('freeform');
+  });
+
+  it('still honours an explicit mode, so anything that sends one is unaffected', async () => {
+    expect(await send('quiz me', { mode: 'learn' })).toBe('learn');
+  });
+
+  it('still lets a slash command override the derivation for its turn', async () => {
+    expect(await send('teach me tensors', { command: 'freeform' })).toBe('freeform');
+  });
+});

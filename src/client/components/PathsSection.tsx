@@ -7,6 +7,7 @@
 // stops claiming credit for something the learner has since lost.
 
 import { useEffect, useState } from 'react';
+import { Collapsible } from './Collapsible.js';
 import { panelBus } from '../lib/panelBus.js';
 import { getPaths, setGoal, type PathsPayload, type PathRow } from '../lib/api.js';
 
@@ -89,8 +90,7 @@ export function PathsSection({ visible = true }: { visible?: boolean }) {
   const goal = data.goal ?? null;
 
   return (
-    <section className="paths-section">
-      <h2>Paths</h2>
+    <Collapsible id="paths" className="paths-section" title="Paths">
       {paths.length === 0
         ? (
           <p className="empty">
@@ -110,6 +110,6 @@ export function PathsSection({ visible = true }: { visible?: boolean }) {
             ))}
           </ul>
         )}
-    </section>
+    </Collapsible>
   );
 }

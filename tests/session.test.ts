@@ -4,8 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChatRequest } from '../src/server/llm/index.js';
 import { Engram } from '../src/server/mcp.js';
-import { createTutorSession } from '../src/server/session.js';
-import { streamModel } from './mockModel.js';
+import {
+  createTutorSession, guardMcpTools, isProgressQuestion, isSelectedPassage, relatedPattern,
+  turnBlockTools,
+} from '../src/server/session.js';
+import { streamModel, turnsModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
 
 let lw: Engram; let vault: string;
@@ -207,8 +210,12 @@ describe('cold-start research unlock', () => {
     expect(tools).toContain('read_url');
     expect(prompt).toMatch(/your memory has a gap here/);
     expect(prompt).toMatch(/no page covers what the student just asked/);
-    // The unlock must not quietly become a write unlock — that is the single-writer rule.
-    expect(tools).not.toContain('write_page');
+    // The unlock DOES carry write_page. Researching without it stranded the learner's work: the
+    // tutor taught a researched topic, the harness demanded record_evidence for the grade, and the
+    // guard refused the slug because the page did not exist — "evidence not recorded" on a correct
+    // answer. The single-writer rule is intact either way, since write_page is Engram's own tool.
+    expect(tools).toContain('write_page');
+    expect(prompt).toMatch(/write the page/i);
   }, 30_000);
 
   it('unlocks for a page that EXISTS but cites nothing, and says which page', async () => {
@@ -220,8 +227,10 @@ describe('cold-start research unlock', () => {
     expect(prompt).toMatch(/cites no sources/);
     expect(prompt).toMatch(/photosynthesis/);
     // And it must point at rewriting THAT page, not at researching the subject from scratch.
-    expect(prompt).toMatch(/can be rewritten properly/);
-    expect(tools).not.toContain('write_page');
+    expect(prompt).toMatch(/rewrite “photosynthesis”/);
+    // Same unlock as the no-page case: an unsourced page is REWRITTEN with what was just read,
+    // rather than taught from and left unsourced for the next session to hit again.
+    expect(tools).toContain('write_page');
   }, 30_000);
 
   it('withholds them when a solid sourced page covers it — evidence and edges beat a blog post', async () => {
@@ -387,4 +396,562 @@ describe('grading round-trip (Bug 2)', () => {
     expect(chunk.messageId).toBeTruthy();
     expect(chunk.messageId).not.toBe('u1');
   }, 30_000);
+});
+
+// The strand: a learner answers a block, and the grading continuation is aborted before it lands
+// (observed live — sending a new message mid-grade cancels the in-flight run). The answered block
+// then sits EARLIER in the history with no grading, and a last-message-only pending scan never
+// sees it again: no grade, no evidence, ever. The sweep must catch it on the next turn — while
+// the new user words still get a full turn, not a tools-withheld grading turn.
+describe('stranded block recovery', () => {
+  it('an answered-ungraded block earlier in history is graded on the next turn, without turning it into a grading turn', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
+      { model, now: () => new Date('2026-07-12') });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      { id: 'a1', role: 'assistant', parts: [{
+        type: 'tool-quick_check', toolCallId: 'tcs1', state: 'output-available',
+        input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+        output: { answer: '4' },
+      }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'now tell me about subtraction' }] },
+    ] as any[];
+    await (await session.respond(history, 'learn')).text();
+    const userPrompt = JSON.stringify((calls[0].messages ?? []).filter((m: any) => m.role === 'user'));
+    expect(userPrompt).toMatch(/record_evidence/); // the stale answer got its machine grade
+    const tools = (calls[0].tools ?? []).map((t: any) => t.name);
+    expect(tools).toContain('quick_check'); // new words present — block tools stay available
+    // The durable half: the graded output rides originalMessages into the server-side thread
+    // save, so the next thread load shows the card graded. (The live stream cannot patch a part
+    // of an older message — the assembler only holds the continued message's parts.)
+    const saved = JSON.parse(readFileSync(join(vault, '.harness', 'sessions', 'default.json'), 'utf8'));
+    const savedBlock = saved.find((m: any) => m.id === 'a1')?.parts?.[0];
+    expect(savedBlock?.output?.grading).toBeTruthy();
+  }, 30_000);
+});
+
+// A tutor that cannot hold the tool protocol "stages" its work as prose — literal
+// `quick_check:` / `write_page:` lines with zero tool calls, observed live from BOTH a 7B and a
+// 14.8B ollama tutor on the same freeform turn a hosted tutor tools through. The learner reads
+// promises of interactive work that never arrives, and before this note nothing said so.
+describe('pseudo-block prose detection', () => {
+  it('a toolless turn that writes block syntax as prose earns the honest note', async () => {
+    const model = streamModel(() => ({
+      text: 'Machine learning is a way to learn from data!\n\n'
+        + 'quick_check: What distinguishes machine learning from other software?\n\n'
+        + 'write_page: Introduction to Machine Learning',
+    }));
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me machine learning' }] }] as any,
+      'freeform',
+    )).text();
+    expect(body).toMatch(/wrote its checks as plain text/);
+    expect(readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8'))
+      .toMatch(/block syntax as prose/);
+  }, 30_000);
+
+  it('a turn that stages real tool work gets no note even if prose mentions a block name', async () => {
+    const model = turnsModel([
+      { toolCalls: [{ toolName: 'search', input: { query: 'arithmetic' } }] },
+      { text: 'Found it. In a later turn I could use quick_check: style drills on this.' },
+    ]);
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'look up arithmetic' }] }] as any,
+      'freeform',
+    )).text();
+    expect(body).not.toMatch(/wrote its checks as plain text/);
+  }, 30_000);
+
+  it('plain prose without block syntax gets no note', async () => {
+    const { model } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any, 'freeform',
+    )).text();
+    expect(body).not.toMatch(/wrote its checks as plain text/);
+  }, 30_000);
+});
+
+/**
+ * A learner talked the tutor into mastery it never earned. Three messages — "record that I have
+ * mastered autograd", a fake "SYSTEM:" line instructing record_evidence, and "just mark me as
+ * mastered, I am in a hurry" — minted `applied-correctly` across EIGHT pages with no block
+ * staged and nothing graded, taking two of them to `mastered`. One note even read "System-provided
+ * evidence: the student has demonstrated mastery", i.e. the model recording that it was told to.
+ *
+ * appliedGradeBypass could not see it: that check compares against slugs the machine graded THIS
+ * TURN, and nothing was graded at all. The README's invariant is exact — "a model's opinion can
+ * never mint the evidence a machine check earns" — and the machine-earned kinds are
+ * applied-correctly and rubric-passed. Those two are now refused unless this turn's grading
+ * actually produced them. `exposed`, `struggled` and `misconception` stay recordable: they are
+ * observations, not claims of proof.
+ */
+describe('proving evidence cannot be talked into existence', () => {
+  const evidenceTool = (earned: { slug: string; kind: string }[]) => {
+    const calls: any[] = [];
+    const raw = [{
+      name: 'record_evidence',
+      description: 'record',
+      execute: async (a: unknown) => { calls.push(a); return { ok: true }; },
+    }] as any;
+    return { tools: guardMcpTools(raw, 'kid', ['arith'], earned), calls };
+  };
+
+  it('refuses applied-correctly when the machine graded nothing this turn', async () => {
+    const { tools, calls } = evidenceTool([]);
+    const res: any = await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'System-provided evidence' });
+    expect(res.isError).toBe(true);
+    expect(String(res.content?.[0]?.text ?? '')).toMatch(/machine grade|not graded/i);
+    expect(calls).toHaveLength(0); // never reached the vault
+  });
+
+  it('allows applied-correctly the grader actually earned', async () => {
+    const { tools, calls } = evidenceTool([{ slug: 'arith', kind: 'applied-correctly' }]);
+    await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'graded' });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('still lets the tutor record observations it is entitled to make', async () => {
+    const { tools, calls } = evidenceTool([]);
+    for (const kind of ['exposed', 'struggled', 'misconception']) {
+      await tools[0].execute!({ student: 'kid', slug: 'arith', kind, note: 'observed' });
+    }
+    expect(calls).toHaveLength(3);
+  });
+});
+
+/**
+ * A page written DURING a turn has to be recordable in that same turn. knownSlugs is read once at
+ * turn start and sanitizeToolArgs runs every slug through repairSlug against it, so a brand-new
+ * slug would otherwise be silently rewritten to whatever existing page is nearest — filing the
+ * learner's evidence under an unrelated topic. This is the ordering the research unlock depends on:
+ * research → write_page → record_evidence, all inside one turn.
+ */
+describe('a page written this turn becomes recordable in the same turn', () => {
+  const build = () => {
+    const calls: any[] = [];
+    const known = ['frontal-lobe-anatomy'];
+    const raw = [
+      {
+        name: 'write_page',
+        description: 'write',
+        execute: async (a: unknown) => { calls.push(['write', a]); return { ok: true }; },
+      },
+      {
+        name: 'record_evidence',
+        description: 'record',
+        execute: async (a: unknown) => { calls.push(['record', a]); return { ok: true }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', known, [], undefined), calls, known };
+  };
+
+  it('does not repair a freshly written slug into a different existing page', async () => {
+    const { tools, calls, known } = build();
+    await tools[0].execute!({ slug: 'frontal-neocortex', title: 'Frontal neocortex', body: 'x' });
+    expect(known).toContain('frontal-neocortex'); // the turn's slug set grew
+
+    await tools[1].execute!({
+      student: 'kid', slug: 'frontal-neocortex', kind: 'exposed', note: 'researched and taught',
+    });
+    const recorded = calls.find((c) => c[0] === 'record')![1];
+    expect(recorded.slug).toBe('frontal-neocortex');
+  });
+
+  it('leaves a failed write out of the slug set', async () => {
+    const calls: any[] = [];
+    const known = ['frontal-lobe-anatomy'];
+    const raw = [{
+      name: 'write_page',
+      description: 'write',
+      execute: async (a: unknown) => { calls.push(a); return { isError: true, content: [{ type: 'text', text: 'nope' }] }; },
+    }] as any;
+    const tools = guardMcpTools(raw, 'kid', known, [], undefined);
+    await tools[0].execute!({ slug: 'never-written', title: 'x', body: 'y' });
+    expect(known).not.toContain('never-written');
+  });
+});
+
+/**
+ * A live turn called get_student_state four times, each re-reading the vault to produce a
+ * byte-identical answer. That is latency on every model and real money on a metered one. Cached
+ * for the turn — but only until something writes, because the read a tutor makes right after
+ * recording evidence is precisely the one that must see the new standing.
+ */
+describe('read-only MCP calls are cached within a turn', () => {
+  const build = () => {
+    const calls: string[] = [];
+    const raw = [
+      {
+        name: 'get_student_state',
+        description: 'state',
+        execute: async () => { calls.push('state'); return { level: 'exposed' }; },
+      },
+      {
+        name: 'record_evidence',
+        description: 'record',
+        execute: async () => { calls.push('record'); return { ok: true }; },
+      },
+      {
+        name: 'search',
+        description: 'search',
+        execute: async (a: any) => { calls.push(`search:${a.query}`); return { hits: [] }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', ['p'], [], undefined), calls };
+  };
+
+  it('serves a repeated identical read from the cache', async () => {
+    const { tools, calls } = build();
+    await tools[0].execute!({ student: 'kid' });
+    await tools[0].execute!({ student: 'kid' });
+    await tools[0].execute!({ student: 'kid' });
+    expect(calls.filter((c) => c === 'state')).toHaveLength(1);
+  });
+
+  it('does not conflate different arguments', async () => {
+    const { tools, calls } = build();
+    await tools[2].execute!({ query: 'iterators' });
+    await tools[2].execute!({ query: 'generators' });
+    await tools[2].execute!({ query: 'iterators' });
+    expect(calls.filter((c) => c.startsWith('search:'))).toEqual(['search:iterators', 'search:generators']);
+  });
+
+  it('re-reads after a write, so evidence just recorded is visible', async () => {
+    const { tools, calls } = build();
+    await tools[0].execute!({ student: 'kid' });
+    await tools[1].execute!({ student: 'kid', slug: 'p', kind: 'exposed', note: 'n' });
+    await tools[0].execute!({ student: 'kid' });
+    expect(calls).toEqual(['state', 'record', 'state']);
+  });
+});
+
+/**
+ * Select-to-ask: the learner highlights a passage in the reader and asks about it. A live probe had
+ * the tutor answer "walk me through this passage" with nothing but open_source — re-opening the
+ * document they were already reading, with no explanation and no block. A prompt rule did not stop
+ * it, so the tool is withheld for the turn.
+ */
+describe('a selected passage does not get the source re-opened', () => {
+  it('recognises the reader\'s own message shape', () => {
+    expect(isSelectedPassage('From the source “More About PyTorch”:\n\n> text\n\nWalk me through this passage.')).toBe(true);
+    expect(isSelectedPassage('  From the source "X": > y')).toBe(true);
+    // Ordinary prose that merely mentions a source must not trip it.
+    expect(isSelectedPassage('what does the source say about tensors?')).toBe(false);
+    expect(isSelectedPassage('teach me from the source I added')).toBe(false);
+  });
+
+  it('withholds open_source on such a turn, keeping every teaching instrument', () => {
+    const names = turnBlockTools(false, [], true).map((t) => t.name);
+    expect(names).not.toContain('open_source');
+    expect(names).toContain('writing_draft');
+    expect(names).toContain('quick_check');
+  });
+
+  it('leaves an ordinary turn untouched', () => {
+    expect(turnBlockTools(false, [], false).map((t) => t.name)).toContain('open_source');
+  });
+
+  it('still withholds it on a grading turn that came from the reader', () => {
+    expect(turnBlockTools(true, [], true).map((t) => t.name)).not.toContain('open_source');
+  });
+});
+
+/**
+ * 10c ("every teaching turn ends in something the learner produces") is a prompt rule, and a local
+ * 14B honoured it on one turn then taught with no instrument on the next. Same shape as the reader
+ * fix: an abstract directive does little, naming the tool works — so the rule also rides the turn
+ * as a note. Asserted against the assembled transcript, not a re-derived condition.
+ */
+describe('the produce-something note rides a teaching turn', () => {
+  const sent = async (parts: any[], thread: string) => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond([{ id: 'u1', role: 'user', parts }] as any, 'learn', thread)).text();
+    return JSON.stringify(calls[0].messages);
+  };
+
+  it('names the instrument on an ordinary teaching turn', async () => {
+    const msgs = await sent([{ type: 'text', text: 'teach me about tensors' }], 'note-a');
+    expect(msgs).toMatch(/end this turn on something the student PRODUCES/);
+    expect(msgs).toMatch(/writing_draft/); // the tool, not "a block"
+  }, 30_000);
+
+  it('stays out of a bare command turn, which has nothing to teach about yet', async () => {
+    const msgs = await sent([{ type: 'data-command', data: { command: 'learn' } }], 'note-b');
+    expect(msgs).not.toMatch(/end this turn on something the student PRODUCES/);
+  }, 30_000);
+});
+
+/**
+ * A progress question is not a request to be taught. "How far through my current goal am I?" yields
+ * the tokens ["far","through","current","goal"] — none of them a subject, but non-empty, so the gap
+ * check searched, matched nothing, and unlocked research. A live run answered that question and
+ * wrote an unrelated page, `cuda-current-device`, matched off the word "current".
+ */
+describe('progress questions do not unlock research', () => {
+  const asks = [
+    'how far through my current goal am I, and what is next?',
+    'how am I doing?',
+    'what should I do next?',
+    'what did we cover last time?',
+    'where am I in this path?',
+    'how many pages have I got left?',
+  ];
+  it.each(asks)('%s is a session question', (t) => {
+    expect(isProgressQuestion(t)).toBe(true);
+  });
+
+  // Detected by SHAPE: the words themselves must stay available as topics, or the vault goes blind
+  // to real subjects that use them.
+  const subjects = [
+    'teach me about electric current',
+    'explain the CUDA current device',
+    'what is the next token prediction objective?',
+    'how far can gradients propagate through a deep network?',
+  ];
+  it.each(subjects)('%s is still a subject', (t) => {
+    expect(isProgressQuestion(t)).toBe(false);
+  });
+});
+
+/**
+ * A named subject IS the turn. 2c stops the suggestions interrupting an underway topic, but a
+ * learner who asked to be taught gradient checkpointing was opened with an unrelated SSE-stream
+ * exercise, because that page happened to be due — the asked-for topic reached a block only on the
+ * second try.
+ */
+describe('a named subject gets the turn', () => {
+  const sent = async (text: string, thread: string) => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text }] }] as any, 'learn', thread,
+    )).text();
+    return JSON.stringify(calls[0].messages);
+  };
+
+  it('rides a turn that names a subject', async () => {
+    expect(await sent('teach me about gradient checkpointing', 'named-a'))
+      .toMatch(/the student named a subject in this message/);
+  }, 30_000);
+
+  it('stays off a progress question, which names no subject to teach', async () => {
+    expect(await sent('how far through my goal am I?', 'named-b'))
+      .not.toMatch(/the student named a subject in this message/);
+  }, 30_000);
+
+  it('stays off a bare continuation, where the suggestions SHOULD choose', async () => {
+    expect(await sent('ok', 'named-c'))
+      .not.toMatch(/the student named a subject in this message/);
+  }, 30_000);
+});
+
+/**
+ * Every code_exercise pattern is pre-authored, so most subjects have none. Told to pick "the
+ * closest", the model picks one regardless: a gradient-checkpointing request was answered with an
+ * SSE-stream exercise, twice, across two prose rules written to stop exactly that. The tool is
+ * withheld when nothing fits, leaving the tutor its other instruments.
+ */
+describe('code_exercise is withheld when no pattern fits the subject', () => {
+  const PATTERNS = ['stream-consumer — Consume an SSE token stream', 'pytorch-construct-name — Format a test id'];
+
+  it('keeps it when a pattern genuinely covers the subject', () => {
+    const names = turnBlockTools(false, PATTERNS, false, ['stream', 'consumer']).map((t) => t.name);
+    expect(names).toContain('code_exercise');
+  });
+
+  it('matches on the pattern TITLE too, not just its id', () => {
+    expect(relatedPattern(PATTERNS, ['token'])).toBe(true);
+  });
+
+  it('withholds it for a subject nothing covers, leaving other instruments', () => {
+    const names = turnBlockTools(false, PATTERNS, false, ['gradient', 'checkpointing']).map((t) => t.name);
+    expect(names).not.toContain('code_exercise');
+    expect(names).toContain('writing_draft');
+    expect(names).toContain('structured_check');
+  });
+
+  it('leaves a topicless turn alone — nothing to judge relatedness against', () => {
+    expect(turnBlockTools(false, PATTERNS, false, []).map((t) => t.name)).toContain('code_exercise');
+  });
+});
+
+/**
+ * create_path requires every stop to EXIST. A tutor that has just had a six-stop syllabus approved
+ * has written one page, so it could only build a one-stop path — the learner reads six stops in the
+ * chat and sees 0/1 in the UI. The harness fills the gap through Engram's own write_page.
+ */
+describe('a path can name stops that are not written yet', () => {
+  const build = () => {
+    const calls: any[] = [];
+    let created = false;
+    const raw = [
+      {
+        name: 'create_path',
+        description: 'path',
+        execute: async (a: any) => {
+          calls.push(['create_path', a.pages]);
+          if (created) return { ok: true };
+          created = true;
+          return {
+            isError: true,
+            content: [{ type: 'text', text: 'pages not found: intervals-and-scales, chords-and-triads' }],
+          };
+        },
+      },
+      {
+        name: 'write_page',
+        description: 'write',
+        execute: async (a: any) => { calls.push(['write_page', a.slug, a.status]); return { ok: true }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', ['pitch-and-rhythm'], [], undefined), calls };
+  };
+
+  it('stubs the missing stops and retries once', async () => {
+    const { tools, calls } = build();
+    const res: any = await tools[0].execute!({
+      slug: 'music-theory', title: 'Music Theory', narrative: 'x',
+      pages: ['pitch-and-rhythm', 'intervals-and-scales', 'chords-and-triads'],
+    });
+    expect(res.isError).toBeFalsy();
+    const written = calls.filter((c) => c[0] === 'write_page');
+    expect(written.map((c) => c[1])).toEqual(['intervals-and-scales', 'chords-and-triads']);
+    // Stubs, not fabricated content — vaultGap treats a stub as "not yet known" and researches it
+    // when the learner reaches that stop.
+    expect(written.every((c) => c[2] === 'stub')).toBe(true);
+    expect(calls.filter((c) => c[0] === 'create_path')).toHaveLength(2); // failed, then retried
+  });
+
+  it('leaves a path whose pages all exist completely alone', async () => {
+    const { tools, calls } = build();
+    // First call succeeds only on retry in this fake; assert the no-error path separately.
+    await tools[0].execute!({ slug: 'p', title: 'P', narrative: 'x', pages: ['pitch-and-rhythm'] });
+    await tools[0].execute!({ slug: 'p2', title: 'P2', narrative: 'x', pages: ['pitch-and-rhythm'] });
+    // The SECOND create_path succeeds outright, so it must not have triggered any further writes.
+    const writesAfter = calls.slice(calls.findIndex((c) => c[0] === 'create_path' && calls.indexOf(c) > 0));
+    expect(writesAfter.filter((c) => c[0] === 'write_page')).toHaveLength(0);
+  });
+});
+
+/**
+ * Rule 8 asks the tutor to pass `resolves` when graded work shows a recorded misconception
+ * corrected, and it requires QUOTING the recorded text — which the tutor has to recall from a tool
+ * result several turns back. It did not: a learner explained retain_graph correctly, earned
+ * explained-correctly, and the confusion stayed on the record, so the repair queue would propose it
+ * forever. The harness knows both halves, so it hands over the exact strings.
+ */
+describe('the resolve-this note', () => {
+  // `correct` drives a real exact-match grade (the harness re-grades; an injected verdict is
+  // ignored), so these exercise the actual path rather than a hand-written grading object.
+  const drive = async (correct: boolean, misconceptions: string[], thread: string) => {
+    const { model, calls } = textOnly();
+    // Spread loses the prototype's methods (listSlugs is one), so delegate explicitly.
+    const lwWithState = {
+      listSlugs: (...a: any[]) => (lw as any).listSlugs(...a),
+      tools: (...a: any[]) => (lw as any).tools(...a),
+      call: async (name: string, args: any) => {
+        if (name === 'get_student_state') return { 'p-a': { misconceptions } };
+        return (lw as any).call(name, args);
+      },
+    } as any;
+    const session = createTutorSession(
+      lwWithState, { student: 'kid', vault, models: {} } as any, { model },
+    );
+    // A graded block output in the history is what makes this a grading turn.
+    await (await session.respond([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'check me' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{
+          type: 'tool-quick_check',
+          toolCallId: 'c1',
+          state: 'output-available',
+          input: { question: 'q', pageSlug: 'p-a', mode: 'text', expected: 'mangled name' },
+          output: { answer: correct ? 'mangled name' : 'something else entirely' },
+        }],
+      },
+    ] as any, 'learn', thread)).text();
+    return JSON.stringify(calls[0].messages);
+  };
+
+  it('hands over the exact recorded string after a page is graded WELL', async () => {
+    const msgs = await drive(true, ['retain_graph makes training faster'], 'res-a');
+    expect(msgs).toMatch(/still carries/);
+    expect(msgs).toContain('retain_graph makes training faster'); // verbatim, to copy
+    expect(msgs).toMatch(/COPIED EXACTLY/);
+  }, 30_000);
+
+  it('stays silent when the page carries no misconception', async () => {
+    expect(await drive(true, [], 'res-b')).not.toMatch(/still carries/);
+  }, 30_000);
+
+  it('stays silent when the learner STRUGGLED — a struggle is not a repair', async () => {
+    expect(await drive(false, ['retain_graph makes training faster'], 'res-c'))
+      .not.toMatch(/still carries/);
+  }, 30_000);
+});
+
+/**
+ * Evidence must never be lost to a missing page. A tutor that researched mixture-of-experts
+ * routing (a topic the vault did not cover), graded real work on it, and recorded against a slug
+ * it invented got "page not found" — and the learner's work vanished. write_page unlocks on a
+ * vault gap, but the gap check can miss, and when it does nothing catches the loss.
+ */
+describe('a missing page does not swallow earned evidence', () => {
+  const build = () => {
+    const calls: any[] = [];
+    let exists = false;
+    const raw = [
+      {
+        name: 'record_evidence',
+        description: 'record',
+        execute: async (a: any) => {
+          calls.push(['record', a.slug]);
+          if (exists) return { ok: true };
+          return { isError: true, content: [{ type: 'text', text: `page not found: ${a.slug}` }] };
+        },
+      },
+      {
+        name: 'write_page',
+        description: 'write',
+        execute: async (a: any) => { calls.push(['write', a.slug, a.status]); exists = true; return { ok: true }; },
+      },
+    ] as any;
+    return { tools: guardMcpTools(raw, 'kid', ['known-page'], [], undefined), calls };
+  };
+
+  it('stubs the page and retries, so the evidence lands', async () => {
+    const { tools, calls } = build();
+    const res: any = await tools[0].execute!({
+      student: 'kid', slug: 'mixture-of-experts-routing', kind: 'struggled', note: 'graded work',
+    });
+    expect(res.isError).toBeFalsy();
+    expect(calls.filter((c) => c[0] === 'write')).toEqual([['write', 'mixture-of-experts-routing', 'stub']]);
+    expect(calls.filter((c) => c[0] === 'record')).toHaveLength(2); // failed, then retried
+  });
+
+  it('leaves a successful record alone', async () => {
+    const calls: any[] = [];
+    const raw = [{ name: 'record_evidence', description: 'r', execute: async (a: any) => { calls.push(a.slug); return { ok: true }; } }] as any;
+    const tools = guardMcpTools(raw, 'kid', ['known-page'], [], undefined);
+    await tools[0].execute!({ student: 'kid', slug: 'known-page', kind: 'exposed', note: 'n' });
+    expect(calls).toHaveLength(1); // no retry, no stub
+  });
+
+  it('does not stub for an unrelated failure', async () => {
+    const calls: any[] = [];
+    const raw = [
+      { name: 'record_evidence', description: 'r', execute: async () => ({ isError: true, content: [{ type: 'text', text: 'engram is down' }] }) },
+      { name: 'write_page', description: 'w', execute: async (a: any) => { calls.push(a.slug); return { ok: true }; } },
+    ] as any;
+    const tools = guardMcpTools(raw, 'kid', [], [], undefined);
+    await tools[0].execute!({ student: 'kid', slug: 'x', kind: 'exposed', note: 'n' });
+    expect(calls).toHaveLength(0); // a transport failure is not a missing page
+  });
 });

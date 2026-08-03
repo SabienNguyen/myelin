@@ -5,12 +5,12 @@
 // thread.
 //
 // Answer-integrity invariant, mechanically enforced (not just prompt-worded): this route fetches
-// rung data ONLY via gapProxy.ts's fetchLadderPayload — the exact same fetch the GET /api/gap/
-// ladder passthrough route uses, which the-gap sidecar already answer-strips server-side. It then
-// maps the fetched rung down to helpPrompt.ts's `HelpRungContext`, a type that has no
-// `reference_answer` field at all, before ever calling buildHelpPrompt. There is no second,
-// unstripped endpoint this route could reach for instead, and no field on the prompt-builder's
-// input type to carry a reference answer even if one were mistakenly forwarded.
+// rung data ONLY via gapProxy.ts's fetchLadderPayload — the exact same stripped payload the GET
+// /api/gap/ladder route serves. It then maps the fetched rung down to helpPrompt.ts's
+// `HelpRungContext`, a type that has no `reference_answer` field at all, before ever calling
+// buildHelpPrompt. There is no second, unstripped source of rung data this route could reach for
+// instead, and no field on the prompt-builder's input type to carry a reference answer even if
+// one were mistakenly forwarded.
 import { Hono } from 'hono';
 import type { HarnessConfig } from './config.js';
 import { fetchLadderPayload } from './gapProxy.js';
@@ -80,7 +80,7 @@ export function buildGapHelpRoute(lw: Engram, cfg: HarnessConfig, deps: GapHelpD
     try {
       ladder = await fetchLadderPayload(cfg);
     } catch (e: any) {
-      return c.json({ error: `gap sidecar unavailable: ${e?.message ?? e}` }, 502);
+      return c.json({ error: `gap ladder unavailable: ${e?.message ?? e}` }, 502);
     }
 
     const matched = ladder.rungs.find((r) => r.template === rung);

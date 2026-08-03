@@ -17,6 +17,8 @@ import { chatModelFor } from './models.js';
 import type { Mode } from './prompt.js';
 import type { Stance } from '../shared/commands.js';
 import { saveThread } from './sessionStore.js';
+import { lastUserText } from './deriveMode.js';
+import { topicTokens } from './session.js';
 import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 
@@ -34,13 +36,16 @@ const HISTORY_LINE_CAP = 400;
 // How many find_analogies bridges ride into the prompt.
 const ANALOGY_CAP = 2;
 
-/** Find block-tool outputs in the tail of the incoming history (since the last user text turn).
- * Shared with session.ts's agentic respond — defined here because session.ts imports this module
- * and the reverse import would be circular. */
+/** Find answered-but-ungraded block outputs ANYWHERE in the incoming history. The common case is
+ * the tail (the client's auto-resubmit ends the history on the answered block), but a grading
+ * continuation aborted mid-stream — the learner sent a new message before the grade landed —
+ * leaves the answered block one or more messages back, and a last-message-only scan stranded it
+ * ungraded forever. The sweep is self-limiting: `!output.grading` stops matching the moment a
+ * turn grades it. Shared with session.ts's agentic respond — defined here because session.ts
+ * imports this module and the reverse import would be circular. */
 export function pendingBlockOutputs(messages: UIMessage[]) {
   const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
-  const last = messages[messages.length - 1];
-  for (const msg of [last]) {
+  for (const msg of messages) {
     if (msg?.role !== 'assistant') continue;
     for (const part of msg.parts as any[]) {
       const name = String(part.type).replace(/^tool-/, '') as BlockToolName;
@@ -70,7 +75,9 @@ export interface RailsItem {
   title: string;
   /** The student's effective level for the page — 'unseen' when nothing is known. */
   level: string;
-  reason: 'due' | 'lesson' | 'neighbor';
+  /** 'asked' — the learner named this subject in the message that opened the turn; it outranks
+   *  everything the frontier would have chosen. */
+  reason: 'due' | 'lesson' | 'neighbor' | 'asked';
 }
 
 /**
@@ -371,6 +378,29 @@ const STOP_OFFER = 'Stop here, or keep going? Say "go on" for another.';
 const EXHAUSTED = 'Nothing left to drill right now — everything due or suggested has been staged '
   + 'this session. Switch modes, or come back after some review has decayed.';
 
+/** The page the learner ASKED for this turn, if their message named a subject the vault covers.
+ *  Exported for the test: rails choosing its own subject regardless of the message is the failure
+ *  this exists to prevent, and it is worth pinning without standing up a whole session. */
+export async function askedForItem(
+  lw: Engram, student: string, asked: string, staged: ReadonlySet<string>,
+): Promise<RailsItem | null> {
+  const topic = topicTokens(asked);
+  if (topic.length === 0) return null;
+  const hits = await lw.call('search', { query: topic.join(' ') })
+    .then((r: any) => (Array.isArray(r?.results) ? r.results : Array.isArray(r) ? r : []))
+    .catch(() => []);
+  const best = hits.find((h: any) => h?.slug && !staged.has(h.slug));
+  if (!best) return null;
+  const page = await lw.call('read_page', { slug: best.slug })
+    .then((r: any) => r?.page).catch(() => null);
+  return {
+    slug: best.slug,
+    title: page?.meta?.title ?? best.slug,
+    level: best.level ?? 'unseen',
+    reason: 'asked',
+  };
+}
+
 export function createRailsSession(
   lw: Engram, cfg: HarnessConfig, opts: { model?: ChatModel } = {},
 ) {
@@ -379,7 +409,13 @@ export function createRailsSession(
   // session.ts's lastModeByThread; seedStaged() rebuilds it from the thread after a restart.
   const stagedByThread = new Map<string, Set<string>>();
 
-  async function planNext(staged: ReadonlySet<string>): Promise<RailsItem | null> {
+  async function planNext(staged: ReadonlySet<string>, asked = ''): Promise<RailsItem | null> {
+    // What the learner SAID outranks the frontier. Rails picked purely from working_set and
+    // next_lessons — it never read the message at all — so a learner asking about gradient
+    // accumulation was handed a quick_check on jazz-harmony path ordering, with nothing
+    // acknowledging the swap. Harness-driven does not have to mean deaf.
+    const asked_ = await askedForItem(lw, cfg.student, asked, staged);
+    if (asked_) return asked_;
     const [ws, nl] = await Promise.all([
       lw.call('working_set', { student: cfg.student }),
       lw.call('next_lessons', { student: cfg.student }),
@@ -439,7 +475,7 @@ export function createRailsSession(
         };
 
         const stageNext = async (w: UiStreamWriter): Promise<void> => {
-          const item = await planNext(staged);
+          const item = await planNext(staged, lastUserText(messages));
           if (!item) { say(EXHAUSTED); return; }
           staged.add(item.slug);
           const { page, analogies } = await assemble(item);
@@ -467,11 +503,21 @@ export function createRailsSession(
         // Resubmit: grade with the same path the agentic loop uses, round-trip the grading to the
         // already-rendered card, then record the evidence OURSELVES — rails changes WHO calls
         // record_evidence, never what is recorded (spec invariant).
+        // Same guard as session.ts's agentic respond: the round-trip chunk is only writable for
+        // parts of the message this stream continues. A swept stranded block (its grading
+        // continuation was aborted, a newer user message ends the history) has no part in the
+        // assembler — writing its toolCallId throws and kills the turn. Its grade still reaches
+        // the saved thread via the output mutation, and the evidence lands below either way.
+        const lastMsg = messages[messages.length - 1];
+        const continuable = new Set(lastMsg?.role === 'assistant'
+          ? (lastMsg.parts as any[]).map((part) => part.toolCallId).filter(Boolean) : []);
         const graded: { question: string; answer: string; grade: Grade }[] = [];
         for (const p of pending) {
           const grade = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
           p.output.grading = grade;
-          writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
+          if (continuable.has(p.toolCallId)) {
+            writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
+          }
           graded.push({
             question: String(p.input?.question ?? p.input?.prompt ?? ''),
             answer: String(p.output?.answer ?? ''),

@@ -1,6 +1,6 @@
 // Frontier research: the tutor's "what's newest on X" answered from live indices, never memory.
 import { describe, it, expect } from 'vitest';
-import { findCanonicalPapers, findRecentPapers, searchArxiv, searchCrossref } from '../src/server/frontierResearch.js';
+import { findCanonicalPapers, findRecentPapers, searchArxiv, searchCrossref, concernsTopic } from '../src/server/frontierResearch.js';
 
 const ARXIV_XML = `<?xml version="1.0"?><feed>
 <entry>
@@ -116,5 +116,48 @@ describe('findCanonicalPapers', () => {
     const { papers } = await findCanonicalPapers('kv cache', spy);
     expect(papers[0].citations).toBe(4182);
     expect(papers[1].citations).toBeUndefined();
+  });
+});
+
+/**
+ * arXiv's `all:"phrase"` does not match strictly and results are sorted by submission date, so the
+ * NEWEST loosely-matching paper wins over the most relevant one. Asked for recent work on
+ * mixture-of-experts ROUTING, the top hit was "The location-routing problem for UAV monitoring
+ * under time-varying noise constraints" — a real, recent paper about a different sense of one word.
+ */
+describe('frontier results are filtered to the topic', () => {
+  const T = 'mixture-of-experts routing';
+
+  it('rejects a paper sharing only one word', () => {
+    expect(concernsTopic({
+      title: 'The location-routing problem for UAV monitoring under time-varying noise constraints',
+      summary: 'We study vehicle routing for unmanned aerial monitoring under noise limits.',
+    }, T)).toBe(false);
+  });
+
+  it('keeps a paper that is genuinely about it', () => {
+    expect(concernsTopic({
+      title: 'Expert Choice Routing for Sparse Mixture-of-Experts Transformers',
+      summary: 'We revisit routing in mixture-of-experts layers.',
+    }, T)).toBe(true);
+  });
+
+  it('keeps one that abbreviates in the title but elaborates in the abstract', () => {
+    expect(concernsTopic({
+      title: 'MoE routing at scale',
+      summary: 'Routing tokens to experts in a mixture-of-experts model.',
+    }, T)).toBe(true);
+  });
+
+  it('never filters on short words alone', () => {
+    // "the of a" has nothing distinctive; everything passes rather than nothing.
+    expect(concernsTopic({ title: 'Anything at all', summary: '' }, 'the of a')).toBe(true);
+  });
+
+  it('does not filter a one-word topic, which cannot distinguish a sense', () => {
+    // "kv cache" reduces to the single distinctive word "cache"; demanding it literally would drop
+    // papers about the same thing phrased differently.
+    expect(concernsTopic({ title: 'Paged Attention Revisited', summary: '' }, 'kv cache')).toBe(true);
+    expect(concernsTopic({ title: 'Anything', summary: '' }, 'transformers')).toBe(true);
   });
 });

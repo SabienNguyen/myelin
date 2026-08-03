@@ -5,6 +5,7 @@
 // transcript paper, an article a compiled page. Ingesting stays a per-link choice: a directory can
 // carry hundreds of links, and hours of unasked-for conversion is not a favor.
 import { useEffect, useRef, useState } from 'react';
+import { Collapsible } from './Collapsible.js';
 
 export interface DirectoryLink { title: string; url: string; note?: string }
 export interface DirectorySection { title: string; links: DirectoryLink[] }
@@ -93,8 +94,7 @@ export function LinkDirectory({ visible = true, queuedUrls }: { visible?: boolea
   return (
     <>
       {dirs.map((dir) => (
-        <section key={dir.name} className="library-book link-directory">
-          <h2>{dir.name}</h2>
+        <Collapsible key={dir.name} id={`ld:${dir.name}`} className="library-book link-directory" title={dir.name}>
           <p className="ld-meta">
             link directory — {dir.total} links from {dir.file}
             {dir.omitted > 0 ? ` (${dir.omitted} more past the cap)` : ''} — add one to compile it into a page
@@ -127,7 +127,7 @@ export function LinkDirectory({ visible = true, queuedUrls }: { visible?: boolea
               </ul>
             </details>
           ))}
-        </section>
+        </Collapsible>
       ))}
     </>
   );

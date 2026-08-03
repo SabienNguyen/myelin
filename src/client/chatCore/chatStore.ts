@@ -20,7 +20,14 @@ export interface ChatStoreOptions {
   /** Resolved per REQUEST, not captured at construction: `mode` must track the topbar selector
    * (which changes without remounting the store), and `writeUp` is a one-shot flag armed just
    * before a single send — only that request should carry it. */
-  requestContext: () => { mode: string; writeUp: boolean };
+  requestContext: () => {
+    /** Empty string means "derive it" — see chatStore's send. */
+    mode: string;
+    writeUp: boolean;
+    /** Kinds in the current session plan, leading item first. */
+    planKinds?: string[];
+    emptyVault?: boolean;
+  };
   /** A mode slash command (/learn, /review, /quiz, /freeform) must flip the topbar selector too —
    * the server only overrides the ONE turn the command rides, and it is this callback that makes
    * the following turns keep the new mode (requestContext reads the selector per request). */
@@ -142,7 +149,7 @@ export class ChatStore {
     this.midRunOutputs.clear();
     const command = this.pendingCommand;
     this.pendingCommand = undefined; // one-shot, same lifetime rule as writeUp
-    const { mode, writeUp } = this.opts.requestContext();
+    const { mode, writeUp, planKinds, emptyVault } = this.opts.requestContext();
     // Clearing a previous turn's error re-clones the last message: assistant-ui's converter
     // caches per message reference and an explicit error status is sticky in that cache, so
     // without a fresh identity the error bubble would survive into the retry.
@@ -152,7 +159,13 @@ export class ChatStore {
     let finished: UIMessage[] | null = null;
     const result = await consumeChatStream({
       body: {
-        messages: this.state.messages, mode, threadId: this.opts.threadId, writeUp,
+        messages: this.state.messages, threadId: this.opts.threadId, writeUp,
+        // `mode` is OMITTED unless something explicitly set one. An absent mode is the signal for
+        // the server to derive it (deriveMode.ts) from what the learner just said plus the plan —
+        // the selector asked a human to answer a question the harness answers better.
+        ...(mode ? { mode } : {}),
+        ...(planKinds?.length ? { planKinds } : {}),
+        ...(emptyVault ? { emptyVault } : {}),
         ...(command !== undefined ? { command } : {}),
       },
       signal: controller.signal,

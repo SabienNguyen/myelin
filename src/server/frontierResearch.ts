@@ -86,6 +86,30 @@ export async function searchCrossref(
  * Both indices, merged newest-first, deduplicated by near-identical title (a preprint and its
  * published version are the same paper to a learner — the arXiv copy wins because it has a PDF).
  */
+/** Does this paper actually concern the topic asked about?
+ *
+ *  arXiv's `all:"phrase"` does not match strictly, and results are sorted by submission date — so
+ *  the NEWEST loosely-matching paper wins over the most relevant one. Asked for recent work on
+ *  mixture-of-experts ROUTING, the top hit was "The location-routing problem for UAV monitoring":
+ *  a real, recent paper about a different sense of one shared word.
+ *
+ *  Filtering on the topic's distinctive words costs nothing and is provider-agnostic, so it fixes
+ *  Crossref's looseness too. Deliberately lenient — a paper needs MOST of the distinctive words,
+ *  not all, because titles legitimately abbreviate ("MoE routing") and the abstract may carry the
+ *  rest. Short words are ignored: they are the ones that collide across fields.
+ */
+export function concernsTopic(paper: Pick<FrontierPaper, 'title' | 'summary'>, topic: string): boolean {
+  const words = [...new Set(topic.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 3))];
+  // Fewer than two distinctive words cannot distinguish a sense — "kv cache" reduces to "cache",
+  // and demanding that literal word would drop papers about the same thing that phrase it
+  // differently. The failure this guards against needs several words to detect: the UAV paper
+  // matched one of "mixture", "experts", "routing". With less to go on, trust the index.
+  if (words.length < 2) return true;
+  const hay = `${paper.title} ${paper.summary ?? ''}`.toLowerCase();
+  const hits = words.filter((w) => hay.includes(w)).length;
+  return hits * 2 >= words.length; // at least half the distinctive words
+}
+
 export async function findRecentPapers(
   topic: string, fetchImpl: typeof fetch = fetch,
 ): Promise<{ papers: FrontierPaper[]; sourceErrors: string[] }> {
@@ -102,9 +126,15 @@ export async function findRecentPapers(
     throw new Error(`no index reachable — ${sourceErrors.join('; ')}`);
   }
 
+  // Drop papers that merely share a word with the topic. If that leaves nothing, keep what the
+  // indices returned rather than reporting an empty frontier — a loose answer beats none, and the
+  // tutor presents these with their dates for the learner to judge.
+  const onTopic = all.filter((p) => concernsTopic(p, topic));
+  const kept = onTopic.length > 0 ? onTopic : all;
+
   const titleKey = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const seen = new Map<string, FrontierPaper>();
-  for (const p of all) {
+  for (const p of kept) {
     const k = titleKey(p.title);
     const prior = seen.get(k);
     if (!prior || (prior.source === 'Crossref' && p.source === 'arXiv')) seen.set(k, p);

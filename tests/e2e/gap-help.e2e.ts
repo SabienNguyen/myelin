@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 
 // Track A (docs/superpowers/plans/2026-07-21-coding-stage.md "A. In-IDE tutor help"): drives the
 // SAME dedicated backend+frontend pair (:4821/:4174) as gap-exercise.e2e.ts — see that file's top
-// comment and playwright.config.ts's webServer doc for why this pair is separate from the
-// prod-shaped :4820/:4173 pair (never touched here).
+// comment and playwright.config.ts's webServer doc for why this pair is separate from
+// tutor-loop.e2e.ts's :4830/:4183 pair (never touched here).
 //
 // The scripted model (tests/e2e/scripted-model.cjs) pops every call — chat turns and one-shot
 // generates alike — off ONE turn counter per script file. A real help call would consume a turn

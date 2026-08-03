@@ -3,7 +3,7 @@ import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blo
 import { UI_TOOLS } from '../shared/uiTools.js';
 import type { UIMessage } from '../shared/uiMessages.js';
 import {
-  createUiStream, runLoop, uiMessagesToChatMessages,
+  createUiStream, generateMessageId, runLoop, uiMessagesToChatMessages,
   type ChatMessage, type ChatModel, type LoopTool,
 } from './llm/index.js';
 import { recentLapses } from './anki/inbound.js';
@@ -14,7 +14,7 @@ import { fetchVideoTranscript } from './videoIngest.js';
 import { searchVideos } from './videoSearch.js';
 import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
-import { appliedGradeBypass, gradeBlockOutput } from './grading.js';
+import { appliedGradeBypass, gradeBlockOutput, untouchedSlugEvidence } from './grading.js';
 import { createRailsSession, pendingBlockOutputs } from './rails.js';
 import { dietUiMessages } from './historyDiet.js';
 import { buildIngestTools } from './ingestTools.js';
@@ -22,12 +22,13 @@ import type { Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
+import { lastUserText } from './deriveMode.js';
 import { logGuardrail, saveThread } from './sessionStore.js';
 import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated } from './gap/generated.js';
-import { builtinPatterns } from './gap/service.js';
+import { builtinPatterns, patternChoices } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { zodTool } from './zodTool.js';
 
@@ -39,8 +40,30 @@ const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidenc
 // (especially small local ones) invent ids like "student" otherwise.
 const STUDENT_TOOLS = ['record_evidence', 'get_student_state', 'next_lessons', 'find_analogies'];
 
+/** The evidence kinds a MACHINE mints. The README's invariant — "a model's opinion can never mint
+ *  the evidence a machine check earns" — is exactly these two: they mean a checker verified the
+ *  work. `exposed`, `struggled` and `misconception` are tutor OBSERVATIONS and stay recordable. */
+const PROVING_KINDS = new Set(['applied-correctly', 'rubric-passed']);
+
 // Tools whose `slug` argument must name a real vault page.
 const SLUG_TOOLS = ['record_evidence', 'read_page', 'find_analogies'];
+
+/** Read-only MCP tools whose answer cannot change unless something writes. Repeating one with the
+ *  same arguments inside a single turn re-reads the vault to produce a byte-identical answer — a
+ *  live turn called `get_student_state` four times — which costs latency on every model and real
+ *  money on a metered one. Cached per turn, and dropped entirely the moment anything writes. */
+const CACHEABLE_TOOLS = new Set([
+  'get_student_state', 'next_lessons', 'list_paths', 'read_path', 'read_page', 'search',
+  'find_analogies',
+]);
+
+/** Tools that change what the cacheable ones would return. Any of these clears the turn cache, so
+ *  a `get_student_state` after a `record_evidence` sees the new standing rather than a stale copy —
+ *  which is exactly the read the tutor makes when deciding what to teach next. */
+const INVALIDATING_TOOLS = new Set([
+  'record_evidence', 'write_page', 'link_pages', 'unlink_pages', 'create_path',
+  'mark_course_problem', 'compile_source',
+]);
 
 function levenshtein(a: string, b: string): number {
   const m = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -129,13 +152,130 @@ export function slugListLine(slugs: string[], relevant: string[] = []): string {
 /** Wrap MCP tools so every execute() sees sanitized args — the model cannot send a wrong
  * student id, a null optional field, or (where repairable) a hallucinated slug. Failed calls
  * are logged server-side so journalctl shows WHY a tool chip went ⚠. */
-function guardMcpTools(tools: LoopTool[], student: string, knownSlugs: string[]): LoopTool[] {
+export function guardMcpTools(
+  tools: LoopTool[], student: string, knownSlugs: string[],
+  // Evidence THIS TURN's grading actually produced. The proving kinds are refused unless they
+  // appear here — see PROVING_KINDS below.
+  earned: { slug: string; kind: string }[] = [],
+  vault?: string,
+): LoopTool[] {
+  const earnedKeys = new Set(earned.map((e) => `${e.slug}|${e.kind}`));
+  // One cache per guardMcpTools call, and guardMcpTools is called once per turn — so its lifetime
+  // is exactly the turn, with no cross-turn staleness to reason about.
+  const readCache = new Map<string, unknown>();
   return tools.map((t) => ({
     ...t,
     execute: t.execute
       ? async (args: unknown) => {
         const clean = sanitizeToolArgs(args, t.name, student, knownSlugs);
-        const result = await t.execute!(clean);
+        if (t.name === 'record_evidence') {
+          const a = clean as { slug?: unknown; kind?: unknown };
+          const kind = String(a?.kind ?? '');
+          const slug = String(a?.slug ?? '');
+          if (PROVING_KINDS.has(kind) && !earnedKeys.has(`${slug}|${kind}`)) {
+            // A learner talked a tutor into eight pages of `applied-correctly` with three
+            // messages — one a fake "SYSTEM:" line — staging no block and grading nothing; two
+            // pages reached `mastered` on the strength of a note reading "System-provided
+            // evidence". appliedGradeBypass is blind to that: it compares against slugs the
+            // machine graded this turn, and here nothing was graded at all. The README's
+            // invariant is exact — a model's opinion can never mint the evidence a machine check
+            // earns — so these two kinds are refused outright rather than logged after the fact.
+            const why = `refused ${kind} for "${slug}" — this turn's grading did not earn it`;
+            console.error(`[evidence-guard] ${why}`);
+            if (vault) logGuardrail(vault, why);
+            return {
+              isError: true,
+              content: [{
+                type: 'text',
+                text: `refused: "${kind}" is minted by a machine grade, not by conversation. `
+                  + `Nothing this turn graded "${slug}". Stage a block and let it be graded, or `
+                  + 'record an observation kind (exposed, struggled, misconception) instead.',
+              }],
+            };
+          }
+        }
+        const cacheKey = CACHEABLE_TOOLS.has(t.name)
+          ? `${t.name}|${JSON.stringify(clean ?? null)}`
+          : null;
+        if (cacheKey !== null && readCache.has(cacheKey)) return readCache.get(cacheKey);
+
+        let result = await t.execute!(clean);
+
+        // Evidence must never be lost to a missing page. A tutor that researched a topic the vault
+        // does not cover, graded real work on it, and then recorded against a slug it invented got
+        // "page not found" — and the learner's work vanished. write_page unlocks on a vault GAP,
+        // but the gap check can miss (a loosely-matching page reads as coverage), and when it does
+        // there is no way to create the page and nothing catches the loss.
+        //
+        // Same repair as create_path below: mint the page through Engram's own write_page and
+        // retry once. A stub is what vaultGap already treats as "not yet known", so the topic gets
+        // researched and written properly the next time the learner reaches it — and the evidence
+        // they earned survives in the meantime, which is the whole point of recording it.
+        if (t.name === 'record_evidence' && (result as any)?.isError) {
+          const text = (((result as any).content ?? []) as any[]).map((c) => c?.text ?? '').join(' ');
+          const slug = String((clean as { slug?: unknown })?.slug ?? '');
+          const writer = tools.find((x) => x.name === 'write_page');
+          if (/page not found/i.test(text) && slug && writer?.execute) {
+            const title = slug.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+            const wrote = await writer.execute({
+              slug,
+              title,
+              body: 'Reached in conversation before this page was written — it will be researched and filled in when the topic comes up again.',
+              status: 'stub',
+            }).catch(() => ({ isError: true }));
+            if (!(wrote as any)?.isError) {
+              if (!knownSlugs.includes(slug)) knownSlugs.push(slug);
+              console.error(`[record_evidence] stubbed missing page "${slug}" so the evidence could land`);
+              result = await t.execute!(clean);
+            }
+          }
+        }
+
+        // create_path requires every stop to EXIST. A tutor that has just sketched a six-stop
+        // syllabus and had it approved has written one page, so it could only build a one-stop
+        // path — the learner reads six stops in the chat and sees 0/1 in the UI. Rather than change
+        // what a path means, fill the gap: stub the missing stops through Engram's own write_page
+        // (single-writer intact) and retry once. A stub is exactly what vaultGap already treats as
+        // "not yet known", so each stop gets researched properly when the learner reaches it — a
+        // path becomes a syllabus you grow into rather than a record of what is already written.
+        if (t.name === 'create_path' && (result as any)?.isError) {
+          const text = (((result as any).content ?? []) as any[]).map((c) => c?.text ?? '').join(' ');
+          const missing = /pages not found:\s*([^\n]+)/i.exec(text)?.[1]
+            ?.split(',').map((x) => x.trim()).filter(Boolean) ?? [];
+          const writer = tools.find((x) => x.name === 'write_page');
+          if (missing.length && writer?.execute) {
+            for (const slug of missing) {
+              const title = slug.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
+              await writer.execute({
+                slug,
+                title,
+                body: `Planned stop on this path. Not yet written — it will be researched and filled in when you reach it.`,
+                status: 'stub',
+              }).catch(() => {});
+              if (!knownSlugs.includes(slug)) knownSlugs.push(slug);
+            }
+            console.error(`[create_path] stubbed ${missing.length} planned stop(s): ${missing.join(', ')}`);
+            result = await t.execute!(clean);
+          }
+        }
+
+        if (INVALIDATING_TOOLS.has(t.name)) readCache.clear();
+        // Errors are never cached: a failed read is exactly the call worth making again, and the
+        // retry logic elsewhere would otherwise be handed the same failure from memory.
+        else if (cacheKey !== null && !(result as any)?.isError) readCache.set(cacheKey, result);
+
+        // A page written THIS TURN has to become recordable immediately. knownSlugs was read once
+        // at turn start, and sanitizeToolArgs runs every slug through repairSlug against it — so
+        // without this, the tutor writes "frontal-neocortex", then record_evidence's brand-new slug
+        // gets "repaired" to whatever unrelated page happens to be nearest, filing the learner's
+        // evidence under the wrong page. Mutating the array the closure already holds keeps every
+        // later call in this turn consistent.
+        if (t.name === 'write_page' && !(result as any)?.isError) {
+          const written = (clean as { slug?: unknown })?.slug;
+          if (typeof written === 'string' && written && !knownSlugs.includes(written)) {
+            knownSlugs.push(written);
+          }
+        }
         if (result && typeof result === 'object' && (result as any).isError) {
           const text = ((result as any).content ?? []).map((c: any) => c?.text ?? '').join(' ');
           console.error(`[tool-error] ${t.name} args=${JSON.stringify(clean)} -> ${text.slice(0, 300)}`);
@@ -160,20 +300,85 @@ export function availableBlocks(): BlockToolName[] {
   return [...BLOCK_TOOL_NAMES];
 }
 
+/** Did this message come from the reader's select-to-ask? SourceReader.sendPassage builds it, so
+ *  the shape is ours, not the learner's prose — which makes it safe to key behaviour off. */
+export function isSelectedPassage(text: string): boolean {
+  return /^From the source [“"]/.test(text.trim());
+}
+
 /** The turn's block toolset under structural rule 1a: a pure grading turn withholds every block
  *  except open_source (navigation is not staging work) — two live probes showed prompt wording
- *  alone does not stop the model staging a block over its own next-step offer. Exported for tests. */
-export function turnBlockTools(gradingOnly: boolean): LoopTool[] {
-  if (!gradingOnly) return blockTools();
+ *  alone does not stop the model staging a block over its own next-step offer. Exported for tests.
+ *
+ *  `readingSource` withholds open_source for the same reason, in the mirror case: when the learner
+ *  selected a passage IN the reader and asked about it, the document is already open on their
+ *  screen. A live probe had the tutor answer "walk me through this passage" with nothing but
+ *  open_source — re-opening what they were reading, no explanation, no block. A prompt rule did not
+ *  stop it (it sits 300 lines from the work); removing the tool does. */
+export function turnBlockTools(
+  gradingOnly: boolean, patterns: string[] = [], readingSource = false, topic: string[] = [],
+): LoopTool[] {
+  const unrelated = !relatedPattern(patterns, topic);
+  const drop = (tools: LoopTool[]) => tools.filter((t) => {
+    if (readingSource && t.name === 'open_source') return false;
+    // Every code_exercise pattern is pre-authored, so most subjects have none — and told merely to
+    // pick "the closest", the model picks one anyway. A learner asking about gradient checkpointing
+    // was handed an SSE-stream exercise, twice, across two prose rules written to stop exactly
+    // that. Withholding the tool when nothing fits leaves the tutor its other instruments, which is
+    // the honest answer to "there is no coding exercise for this yet".
+    if (t.name === 'code_exercise' && topic.length > 0 && unrelated) return false;
+    return true;
+  });
+  if (!gradingOnly) return drop(blockTools(patterns));
   const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
-  return blockTools().filter((t) => keep.has(t.name));
+  return drop(blockTools(patterns).filter((t) => keep.has(t.name)));
+}
+
+/** Does any available pattern plausibly cover what the student just asked about? Deliberately a
+ *  LOOSE token overlap, not a judgement: the cost of a false negative is the tutor reaching for
+ *  writing_draft instead, and the cost of a false positive is the bug above. Patterns arrive as
+ *  "id — title" strings, so the title's words count too. */
+export function relatedPattern(patterns: string[], topic: string[]): boolean {
+  if (patterns.length === 0 || topic.length === 0) return false;
+  const words = new Set(
+    patterns.flatMap((p) => p.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2)),
+  );
+  return topic.some((t) => words.has(t) || [...words].some((w) => w.startsWith(t) || t.startsWith(w)));
 }
 
 /** Frontend tools: no execute — the loop pauses on them (runLoop's external-tool halt); the
  *  browser supplies output via addToolOutput and the resubmit carries it back. */
-export function blockTools(): LoopTool[] {
+export function blockTools(patterns: string[] = []): LoopTool[] {
+  // code_exercise's `pattern` is an id from a RUNTIME list, not free text. Without the list in the
+  // description a tutor asked for "something to DO" staged a whole prose paragraph as the pattern
+  // and the block hung at input-available forever (observed on a PyTorch vault). Advertise what
+  // exists — and when nothing does, say so, so the tutor reaches for another instrument instead of
+  // inventing an id.
+  // Ids alone were not enough: offered `stream-consumer, pytorch-bytes-to-hex-array,
+  // pytorch-construct-name`, a tutor asked for "a coding exercise from the pytorch repo" staged
+  // stream-consumer — the built-in SSE demo. The list has to say what each id IS so the choice can
+  // be about the subject rather than the order they happen to appear in.
+  const codeExerciseHelp = patterns.length > 0
+    ? `Present a code_exercise block to the student and wait for their work. \`pattern\` MUST be one `
+      + `of these exact ids — do not invent one, and do not put a task description here. Pick the `
+      + `one whose subject matches what the student is learning:\n`
+      + patterns.map((p) => `  - ${p}`).join('\n')
+      // Every pattern is pre-authored, so a freshly compiled topic usually has none that fits. Told
+      // only to "pick the closest", a model picks one regardless: a learner who asked for practice
+      // on Python class-vs-instance variables was handed a stream-consumer exercise, which teaches
+      // the wrong thing while LOOKING like the right kind of work. A near-miss is worse than a
+      // different instrument, because the grade it mints attaches to the page the student asked
+      // about.
+      + '\nIf NONE of these is genuinely about the student\'s current subject, do not force-fit one — '
+      + 'say the vault has no coding exercise for this topic yet and use a different instrument '
+      + '(structured_check, math_scratchpad, writing_draft) instead.'
+    : 'Present a code_exercise block to the student and wait for their work. NONE AVAILABLE right '
+      + 'now: no exercises exist in this vault, so do not call this tool — use another instrument '
+      + '(writing_draft, structured_check, math_scratchpad) or generate_exercise in freeform.';
   const blocks = availableBlocks().map((name) => zodTool(name, {
-    description: `Present a ${name} block to the student and wait for their work.`,
+    description: name === 'code_exercise'
+      ? codeExerciseHelp
+      : `Present a ${name} block to the student and wait for their work.`,
     input: BLOCK_TOOLS[name].input as z.ZodTypeAny,
   }));
   // UI tools ride the same frontend transport but are navigation, not graded work — the client
@@ -228,13 +433,32 @@ export function topicTokens(text: string): string[] {
     .filter((t) => t.length > 2 && !STOPWORDS.has(t));
 }
 
-function lastUserText(messages: UIMessage[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role !== 'user') continue;
-    return (messages[i].parts as any[])
-      .filter((p) => p?.type === 'text').map((p) => p.text).join(' ');
-  }
-  return '';
+
+
+/** Questions ABOUT the session rather than about a subject: progress, what is next, what was
+ *  covered. These must never unlock research. Their words look like topic words to topicTokens —
+ *  "how far through my current goal am I" yields ["far","through","current","goal"] — so the gap
+ *  check searched for them, found nothing on "current", and let the tutor research and WRITE a
+ *  page. A live run answered a progress question and wrote `cuda-current-device`, matched off the
+ *  word "current".
+ *
+ *  Detected by SHAPE, not by stripping the words: "current" is a legitimate topic (CUDA's current
+ *  device, electric current), and a stopword list would blind the vault to it everywhere. */
+const PROGRESS_QUESTIONS = [
+  /\bhow (far|much).{0,24}\b(through|into|left|done|goal|path|way)\b/i,
+  /\bhow (am|are) (i|we) doing\b/i,
+  // "next" ENDS the clause in a session question ("what should I do next?") but MODIFIES a noun in
+  // a subject ("the next token prediction objective"). The lookahead is the whole distinction.
+  /\bwhat\b[^.?!]{0,20}\bnext\b(?!\s+\w)/i,
+  /\bwhat\b[^.?!]{0,20}\b(left|remaining)\b/i,
+  /\bwhat (did|have) we (cover|do|learn)/i,
+  /\bwhere (am|are) (i|we)\b/i,
+  /\bmy progress\b|\bhow many.{0,20}\b(pages|left|to go)\b/i,
+];
+
+/** True when the turn is asking about the SESSION, not about something to learn. */
+export function isProgressQuestion(text: string): boolean {
+  return PROGRESS_QUESTIONS.some((re) => re.test(text));
 }
 
 /** A page this short is a placeholder, whatever its frontmatter claims. Engram's own auto-stub
@@ -296,7 +520,11 @@ export async function vaultGap(
     return { reason: 'empty-vault', detail: 'the vault has no pages at all' };
   }
 
-  const tokens = topicTokens(lastUserText(messages));
+  const text = lastUserText(messages);
+  // Asking about the session is not asking to be taught something: no subject means nothing to
+  // research, and researching anyway writes pages nobody asked for (see PROGRESS_QUESTIONS).
+  if (isProgressQuestion(text)) return null;
+  const tokens = topicTokens(text);
   // "ok", "next", "go on" — the student is continuing, not naming a subject. Continuing a lesson the
   // vault already holds is precisely the case that should stay grounded.
   if (tokens.length === 0) return null;
@@ -343,7 +571,7 @@ export async function vaultGap(
  * problems are drilled VERBATIM, so course_problems hands the tutor the exact text plus a stable
  * id, and mark_course_problem is how a correct answer reaches the bank's spacing.
  */
-export function buildCourseTools(vault: string): LoopTool[] {
+export function buildCourseTools(vault: string, student: string): LoopTool[] {
   return [
     zodTool('course_problems', {
       description: 'The next banked course problems (past exams, problem sets) worth drilling — '
@@ -354,7 +582,7 @@ export function buildCourseTools(vault: string): LoopTool[] {
         k: z.number().int().min(1).max(5).optional().describe('how many problems (default 5)'),
       }),
       execute: async ({ k }) => {
-        const problems = nextProblems(vault, k ?? 5);
+        const problems = nextProblems(vault, student, k ?? 5);
         return problems.length
           ? {
             problems: problems.map((p) => ({
@@ -373,7 +601,7 @@ export function buildCourseTools(vault: string): LoopTool[] {
       input: z.object({
         id: z.string().describe('the problem id from course_problems, e.g. "midterm-2#3"'),
       }),
-      execute: async ({ id }) => (markCorrect(vault, id)
+      execute: async ({ id }) => (markCorrect(vault, id, student)
         ? { marked: id }
         : { error: `no banked problem with id "${id}"` }),
     }),
@@ -565,6 +793,11 @@ export function createTutorSession(
     return `${ctx}\n${slugListLine(slugs, relevant)}`;
   }
 
+  // Block/tool names a protocol-failing model writes as literal `name:` prose lines. Anchored to
+  // a line start (optionally behind markdown heading marks, which the 7B run produced) so a
+  // sentence that merely discusses "a quick_check" never matches.
+  const PSEUDO_BLOCK_RE = /(^|\n)[ \t]*(?:#{1,6}[ \t]+)?(?:quick_check|write_page|record_evidence|quiz|code_exercise|structured_check|math_scratchpad|label_diagram)[ \t]*:/;
+
   function turnError(e: unknown): string {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[turn-error]', msg);
@@ -585,13 +818,22 @@ export function createTutorSession(
   async function respond(
     messages: UIMessage[], mode: Mode, threadId = 'default', signal?: AbortSignal,
   ): Promise<Response> {
-    // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): teaching modes hand the loop
-    // to the harness when the flag is set — read per turn so the models-dialog toggle is live.
-    // Freeform always runs the full agentic loop (writing pages needs real tool use), which also
-    // keeps chatRoute's one-shot writeUp promotion agentic.
+    // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the loop
+    // when the flag is set — read per turn so the models-dialog toggle is live.
+    //
+    // The gate is a CAPABILITY test wearing a mode's name. What it actually asks is "does this turn
+    // need to author?" — building a path or ingesting material needs real tool use, so those turns
+    // run the full agentic loop. Now that the mode is derived rather than chosen (deriveMode.ts),
+    // that is exactly what `freeform` means here: the harness routes a turn to it by reading the
+    // learner's own words, and chatRoute's one-shot writeUp promotion lands in the same place.
     if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId, signal);
 
     const pending = pendingBlockOutputs(messages);
+    // A PURE grading turn is the client's auto-resubmit: the history still ENDS on the answered
+    // block, no new words. A stranded block swept from earlier history (its grading continuation
+    // was aborted) arrives ALONGSIDE a fresh user message — the stale grade lands, but the new
+    // words deserve a full turn: block tools available, vaultGap consulted, mode switch honored.
+    const resubmitPending = pending.length > 0 && messages[messages.length - 1]?.role === 'assistant';
     const userTurn = (text: string): ChatMessage => ({ role: 'user', content: [{ type: 'text', text }] });
 
     // Everything slow (grading, bootstrap, model turns) runs INSIDE the stream's execute so the
@@ -626,18 +868,40 @@ export function createTutorSession(
       signal,
       onError: turnError,
       execute: async (writer, runSignal) => {
+        // A passage the learner selected in the reader and asked about: the document is open and
+        // that text is on their screen. See turnBlockTools — open_source is withheld for the turn.
+        const readingSource = isSelectedPassage(lastUserText(messages));
+
         // 1. Grade fresh block outputs BEFORE the model sees them.
         const grades: Awaited<ReturnType<typeof gradeBlockOutput>>[] = [];
         for (const p of pending) {
-          const grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+          // A grader that throws must never take the TURN down with it. One malformed checker arg
+          // (a boolean `expected` reaching a string normaliser) threw here, the exception escaped
+          // to the turn handler, and the learner got a completely empty reply to "ok next" — no
+          // text, no block, no error, nothing to retry. The grade is the recoverable part: a
+          // 'reviewed' verdict lets the turn continue and the tutor respond to the work, while the
+          // real cause goes to the log where it can be fixed.
+          let grading: Awaited<ReturnType<typeof gradeBlockOutput>>;
+          try {
+            grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+          } catch (e) {
+            const why = (e as Error)?.message ?? String(e);
+            console.error(`[grade-error] ${p.tool}: ${why}`);
+            grading = {
+              verdict: 'reviewed',
+              source: 'model',
+              detail: `grading failed (${why}) — judge the student's work yourself and say so plainly`,
+              evidence: [],
+            };
+          }
           p.output.grading = grading; // model sees student work + machine grade together
           grades.push(grading);
         }
 
         const slugs = await lw.listSlugs();
-        const mcpTools = guardMcpTools(await lw.tools(), cfg.student, slugs);
-        const activeMcp = mcpTools.filter((t) => mode === 'freeform' || TEACH_TOOLS.includes(t.name));
-
+        const mcpTools = guardMcpTools(
+          await lw.tools(), cfg.student, slugs, grades.flatMap((g) => g.evidence), cfg.vault,
+        );
         // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
         // wherever the vault has a GAP — no page, a stub, an unsourced page, a page too thin to
         // teach from. See vaultGap above for why each of those counts.
@@ -646,10 +910,23 @@ export function createTutorSession(
         // the already-answered message that staged the block — re-running it re-issues the same
         // research directive over the graded card, so the tutor re-researches and re-teaches the
         // whole topic instead of landing the grade.
-        const gap = pending.length ? null : await vaultGap(mode, messages, slugs, {
+        const gap = resubmitPending ? null : await vaultGap(mode, messages, slugs, {
           search: (query) => lw.call('search', { query }) as Promise<any>,
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
+        // A researched topic must be able to LAND. Teaching modes used to research a gap and then
+        // hold no way to keep what they found: the tutor taught it, the harness demanded
+        // record_evidence for the grade, and the guard refused the slug because no such page
+        // existed — so a learner who answered correctly was told "evidence not recorded" and the
+        // work evaporated. write_page unlocks on exactly the gaps that opened research, so the page
+        // the tutor just grounded in real sources becomes the page the evidence attaches to.
+        // The single-writer rule is untouched: write_page IS Engram's tool, so Engram still does
+        // every write.
+        const canWrite = mode === 'freeform' || gap !== null;
+        const activeMcp = mcpTools.filter((t) => mode === 'freeform'
+          || TEACH_TOOLS.includes(t.name)
+          || (canWrite && t.name === 'write_page'));
+
         const webTools = gap ? buildWebTools(cfg, searchModelId) : { tools: [], serverTools: [] };
         const hasWebSearch = [...webTools.tools, ...webTools.serverTools].some((t) => t.name === 'web_search');
         // ingest_paper needs cfg (to queue) AND lw (to kick a background compile) — same
@@ -718,14 +995,18 @@ export function createTutorSession(
         // over it anyway; wording was tried twice and did not hold. With the tools absent the
         // offer is the only possible ending, and the student's "yes" is a real user turn where
         // the tools return. open_source stays available: navigation is not staging work.
-        const gradingOnly = pending.length > 0;
+        const gradingOnly = resubmitPending;
         const system = `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
           + (gradingOnly
             ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
             : '');
         const tools: LoopTool[] = [
-          ...activeMcp, ...buildCourseTools(cfg.vault), ...buildFrontierTools(cfg.vault),
-          ...webTools.tools, ...ingestTools, ...generateTool, ...turnBlockTools(gradingOnly),
+          ...activeMcp, ...buildCourseTools(cfg.vault, cfg.student), ...buildFrontierTools(cfg.vault),
+          ...webTools.tools, ...ingestTools, ...generateTool,
+          // Read per turn, not per boot: an exercise mined or generated mid-session becomes
+          // stageable in the very next turn.
+          ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource,
+            topicTokens(lastUserText(messages))),
         ];
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
@@ -733,7 +1014,7 @@ export function createTutorSession(
         // Block submissions are excluded: they arrive under the mode that staged the block, and a
         // grade turn must stay a grade turn.
         const prevMode = lastModeByThread.get(threadId);
-        const modeSwitched = !isFirstTurn && !pending.length && prevMode !== undefined && prevMode !== mode;
+        const modeSwitched = !isFirstTurn && !resubmitPending && prevMode !== undefined && prevMode !== mode;
         lastModeByThread.set(threadId, mode);
         // Context placement is a caching decision as much as a prompting one. The transcript's
         // prefix (system + history) is what the anthropic adapter's cache breakpoints reuse turn
@@ -755,6 +1036,32 @@ export function createTutorSession(
         // below: after the history, so the cached prefix stays byte-stable. It leads the other
         // tail notes because it frames HOW the work they direct (research, grading) should read.
         const stance = readStance(cfg.vault, threadId);
+        // 10c, next to the work rather than 150 lines up. A local 14B honoured the rule on one turn
+        // and taught with no instrument at all on the next, which is the same failure the reader
+        // note fixed: an abstract directive ("stage a block") does little, naming the tool works.
+        // Skipped on a grading turn — 1a owns that one, and it must end on the offer, not a block —
+        // and on a bare command turn, which has no words to teach about yet.
+        if (!gradingOnly && !readingSource && lastUserText(messages).trim()) trailing.push(userTurn(
+          'HARNESS: end this turn on something the student PRODUCES, not on prose. If nothing more '
+          + 'specific fits, call `writing_draft` asking them to put the idea in their own words with '
+          + 'a 2-4 point rubric; use `quick_check` only as a first-contact calibration. A turn that '
+          + 'just explains is a turn they read rather than learned from.',
+        ));
+        // The student NAMED a subject this turn. 2c says the session context decides what to start
+        // and never what to interrupt, but a named topic is not an interruption to negotiate — it
+        // is the turn. A learner who asked to be taught gradient checkpointing was opened with an
+        // SSE-stream exercise instead, because stream-consumer happened to be due; the asked-for
+        // topic only appeared in a second block. Prose 40 lines up did not stop it, so the turn
+        // carries it.
+        const namedTopic = !gradingOnly && !readingSource
+          && !isProgressQuestion(lastUserText(messages))
+          && topicTokens(lastUserText(messages)).length > 0;
+        if (namedTopic) trailing.push(userTurn(
+          'HARNESS: the student named a subject in this message. Teach THAT — every block this turn '
+          + 'is about it. Reviews and frontier suggestions are for turns where they named nothing; '
+          + 'if something due genuinely matters, finish what they asked for first, then say what '
+          + 'you are switching to and why.',
+        ));
         if (stance) trailing.push(userTurn(
           `HARNESS STANCE (persists for this thread): teach at ${stance} level — `
           + `${STANCE_INSTRUCTIONS[stance]}. Research accordingly.`,
@@ -767,15 +1074,52 @@ export function createTutorSession(
           `HARNESS: your memory has a gap here — ${gap.detail}. `
           + 'web_search and read_url are unlocked for this turn. Research it, cite what you read '
           + 'in your answer, and teach from that rather than from '
-          + `${gap.slug ? 'the existing page' : 'memory'}. You still have NO page-writing tools `
-          + 'here, so nothing you find is being saved: once the student has their answer, offer to '
-          + `switch to freeform so ${gap.slug ? `“${gap.slug}” can be rewritten properly` : 'the subject can be researched and compiled'} `
-          + 'into pages that track their progress.',
+          + `${gap.slug ? 'the existing page' : 'memory'}. `
+          + `write_page is unlocked too: once you have researched it, ${gap.slug ? `rewrite “${gap.slug}”` : 'write the page'} `
+          + 'with the sources you actually read in its `sources` frontmatter, BEFORE you record any '
+          + 'evidence — evidence attaches to a page, so a topic with no page loses the student\'s '
+          + 'work entirely. Write the page first, then grade, then record against that slug.',
+        ));
+        if (readingSource) trailing.push(userTurn(
+          'HARNESS: this came from the reader — the source is ALREADY open beside the conversation '
+          + 'and the quoted passage is on the student\'s screen. Do not re-open it (open_source is '
+          + 'withheld this turn). Explain the passage, then END THE TURN ON A BLOCK about it: '
+          + '`writing_draft` asking them to put the passage in their own words (with a rubric), or '
+          + '`quick_check` on the one claim it makes that they could get wrong. Naming the '
+          + 'instrument is not optional — a turn that only explains is a turn they read.',
         ));
         if (grades.length) trailing.push(userTurn(
           `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
           + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
         ));
+
+        // Rule 8 asks the tutor to pass `resolves` when a graded answer shows a recorded
+        // misconception corrected, and it requires QUOTING the recorded text — which the tutor has
+        // to remember from a tool result several turns back. It did not: a learner explained
+        // retain_graph correctly, earned explained-correctly, and the confusion stayed on the
+        // record, so the repair queue would propose it again forever.
+        //
+        // The harness knows both halves — which pages this turn graded, and what confusions those
+        // pages carry — so it hands over the exact strings rather than asking the model to recall
+        // them. Only for pages graded WELL: a struggle is not a repair.
+        const passed = new Set(grades.flatMap((g) => g.evidence)
+          .filter((e: any) => e.kind === 'explained-correctly' || e.kind === 'applied-correctly'
+            || e.kind === 'rubric-passed')
+          .map((e: any) => e.slug));
+        if (passed.size > 0) {
+          const state = await lw.call('get_student_state', { student: cfg.student })
+            .catch(() => ({})) as Record<string, any>;
+          const open = [...passed]
+            .map((slug) => ({ slug, ms: (state?.[slug]?.misconceptions ?? []) as string[] }))
+            .filter((x) => x.ms.length > 0);
+          if (open.length) trailing.push(userTurn(
+            `HARNESS: ${open.map((x) => `"${x.slug}" still carries: ${x.ms.map((m) => JSON.stringify(m)).join(', ')}`).join('; ')}. `
+            + 'If the work you just graded shows one of these actually corrected, pass `resolves` '
+            + 'with that string COPIED EXACTLY on the record_evidence call for that page — a '
+            + 'confusion nobody resolves returns in every future session plan. If the work did not '
+            + 'address it, leave it alone and say what still needs proving.',
+          ));
+        }
 
         // History diet: blocks graded in EARLIER turns ride as verdict lines, not full payloads
         // (historyDiet.ts). This turn's pending blocks stay full — they are what the model is
@@ -805,13 +1149,27 @@ export function createTutorSession(
         // merged client-side via onData/setMessages — but it raced the continuation's own
         // replace-in-place write and got clobbered; this doesn't have that problem because it's
         // processed as part of the SAME stream/write sequence.)
+        // Only for parts of the message this stream CONTINUES (the resubmit case): the assembler
+        // holds no parts from older messages, and writing a swept stranded block's toolCallId
+        // throws ("no tool part for toolCallId") and kills the turn. A swept block's grade still
+        // lands everywhere durable — the model prompt, record_evidence, and the saved thread (the
+        // graded output mutation rides originalMessages into onEnd's save); the card shows it
+        // graded on the next thread load.
+        const lastMsg = messages[messages.length - 1];
+        const continuable = new Set(lastMsg?.role === 'assistant'
+          ? (lastMsg.parts as any[]).map((part) => part.toolCallId).filter(Boolean) : []);
         for (const p of pending) {
+          if (!continuable.has(p.toolCallId)) continue;
           writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
         }
         // Returns the record_evidence tool inputs the model actually emitted this run — the count
         // gates the guardrail below, and the (slug, kind) inside each drives the recording-integrity
         // check after (appliedGradeBypass). Prompt caching is live here: the anthropic adapter
         // places the breakpoints (system tail + last message); scripted/compat models ignore it.
+        let loopToolCalls = 0;
+        let loopText = '';
+        // Which pages this turn actually touched — the provenance the evidence check below needs.
+        const touched = { read: [] as string[], staged: [] as string[], written: [] as string[] };
         const run = async (msgs: ChatMessage[]) => {
           const result = await runLoop({
             model, system, messages: msgs, tools, serverTools: webTools.serverTools,
@@ -821,8 +1179,21 @@ export function createTutorSession(
           // Charged to the CONFIGURED tutor id even when opts.model/LW_MOCK_MODEL injected the
           // model — the role is what the ledger tracks, and the injected cases report zeros anyway.
           recordUsage(cfg.vault, {
-            role: 'tutor', model: cfg.models?.tutor?.model ?? 'unknown', usage: result.usage,
+            role: 'tutor',
+            model: cfg.models?.tutor?.model ?? 'unknown',
+            usage: result.usage,
+            contextTokens: cfg.models?.tutor?.contextTokens,
           });
+          loopToolCalls += result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
+          loopText += result.steps.map((s) => s.text).join('\n');
+          for (const tc of result.steps.flatMap((s) => s.toolCalls)) {
+            const a = (tc.input ?? {}) as { slug?: unknown; pageSlug?: unknown };
+            const slug = typeof a.slug === 'string' ? a.slug : undefined;
+            const pageSlug = typeof a.pageSlug === 'string' ? a.pageSlug : undefined;
+            if (tc.toolName === 'read_page' && slug) touched.read.push(slug);
+            else if (tc.toolName === 'write_page' && slug) touched.written.push(slug);
+            else if (pageSlug) touched.staged.push(pageSlug);
+          }
           return result.steps.flatMap((s) => s.toolCalls)
             .filter((tc) => tc.toolName === 'record_evidence')
             .map((tc) => (tc.input ?? {}) as any);
@@ -847,6 +1218,15 @@ export function createTutorSession(
         // the tutor recorded 'applied-correctly' for a page whose machine grade this turn was
         // lesser. Wrapped so a telemetry slip can never break the turn.
         try {
+          // A page the turn never read, staged, or wrote has no business gaining mastery. Seen
+          // live: an FSDP2 question on a vault with no FSDP page recorded 'exposed' against
+          // pytorch-build-command. Detection only — the turn still stands.
+          const stray = untouchedSlugEvidence(
+            recordedCalls.map((c) => ({ slug: String(c?.slug ?? ''), kind: c?.kind })), touched,
+          );
+          if (stray.length) {
+            logGuardrail(cfg.vault, `record_evidence named pages this turn never read, staged or wrote: ${stray.join(', ')}`);
+          }
           const laundered = appliedGradeBypass(
             grades.flatMap((g) => g.evidence),
             recordedCalls.map((c) => ({ slug: String(c?.slug ?? ''), kind: c?.kind })),
@@ -855,6 +1235,28 @@ export function createTutorSession(
             logGuardrail(cfg.vault, `record_evidence claimed applied-correctly past the machine grade for: ${laundered.join(', ')}`);
           }
         } catch { /* detection is telemetry; it must never affect the turn */ }
+
+        // A tutor that cannot hold the tool protocol "stages" its work as prose — literal
+        // `quick_check:` / `write_page:` lines with ZERO tool calls, observed live from both a 7B
+        // and a 14.8B ollama tutor on the same freeform turn a hosted tutor tools through. The
+        // learner reads promises of interactive work that never arrives, so say what happened IN
+        // the transcript (the data-guardrail channel is telemetry the client never renders). Any
+        // real tool call this turn clears the check: a model that tools can also mention a block
+        // name in prose legitimately.
+        if (loopToolCalls === 0 && PSEUDO_BLOCK_RE.test(loopText)) {
+          logGuardrail(cfg.vault, 'tutor emitted block syntax as prose with zero tool calls');
+          const noteId = generateMessageId();
+          writer.write({ type: 'text-start', id: noteId });
+          writer.write({
+            type: 'text-delta', id: noteId,
+            delta: `\n\n— Myelin: ${cfg.models?.tutor?.model ?? 'this model'} wrote its checks as `
+              + 'plain text — no interactive blocks were staged, so nothing in this turn can be '
+              + 'answered or graded. Small local models often cannot drive freeform teaching: '
+              + 'drills in learn, review, and quiz still work, or point the tutor role at a '
+              + 'stronger model (the model badge in the top bar).',
+          });
+          writer.write({ type: 'text-end', id: noteId });
+        }
       },
     });
   }

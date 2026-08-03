@@ -359,10 +359,34 @@ export function buildRestRoutes(
         title: `Problem ${p.n} from ${p.source}`, why: `from ${p.source}`,
       }));
 
-    // Rotate the queues; whichever still has items feeds the next slot. Review leads — the most
-    // urgent item should be the first thing in the sitting.
-    const queues = [review, fresh, course, misconception];
-    const plan: { kind: string; slug: string; why: string; title?: string }[] = [];
+    // BATCH due pages into ONE retrieval block when there are enough of them to swamp a sitting.
+    // This is the only thing `quiz` mode's framing sentence ("open with a quiz block covering
+    // recent pages") ever actually steered, and the per-page plan cannot express it.
+    //
+    // The floor is deliberately high. Three due pages is an ordinary review session, and batching
+    // those is a LOSS: individual review items each carry their own transfer directive (2a-i) and
+    // get spread by topic, where one quiz flattens them into multiple-choice and drops both. Only
+    // once probing every page one at a time would consume the whole sitting does a single quiz
+    // become the better instrument — and even then it takes a slice, not the queue.
+    const QUIZ_FLOOR = 5;
+    const QUIZ_BATCH = 4;
+    const batched = review.length >= QUIZ_FLOOR ? review.splice(0, QUIZ_BATCH) : [];
+    const quiz = batched.length
+      ? [{
+        kind: 'quiz' as const,
+        // The slug is the FIRST page's, so titles and evidence resolve; every covered page is
+        // named in `covers`, which the tutor reads to build the item list.
+        slug: batched[0].slug,
+        covers: batched.map((b) => b.slug),
+        why: `${batched.length} of your due pages, quizzed together: ${batched.map((b) => b.slug).join(', ')}`,
+        transfer: TRANSFER_REVIEW,
+      }]
+      : [];
+
+    // The quiz LEADS the review queue rather than replacing it: batching six due pages into one
+    // block must not silently drop the seventh, which splicing them out of `review` would do.
+    const queues: any[] = [[...quiz, ...review], fresh, course, misconception];
+    const plan: { kind: string; slug: string; why: string; title?: string; covers?: string[] }[] = [];
     for (let i = 0; plan.length < CAP && queues.some((q) => q.length > 0); i++) {
       const q = queues[i % queues.length];
       const next = q.shift();
@@ -639,9 +663,8 @@ export function buildRestRoutes(
       const backlog = !up && Number.isFinite(days) && days > cfg.schedule.ankiBacklogNudgeDays;
       extra.anki = up ? 'up' : backlog ? 'backlog' : 'down';
     }
-    // Unconditional: with no external sidecar configured, isGapUp reports the built-in
-    // sandbox — in-process, so up iff this server is.
-    extra.gap = (await isGapUp(cfg)) ? 'up' : 'down';
+    // Unconditional: code exercises run in-process (gap/service.ts), so this is always up.
+    extra.gap = (await isGapUp()) ? 'up' : 'down';
     return c.json({ ...status, ...extra });
   });
   return app;

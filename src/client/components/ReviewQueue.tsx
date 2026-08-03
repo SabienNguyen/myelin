@@ -8,6 +8,7 @@
 // records evidence).
 
 import { useEffect, useState } from 'react';
+import { Collapsible } from './Collapsible.js';
 import { useThreadRuntime } from '@assistant-ui/react';
 import { ClockCountdownIcon as Hourglass } from '@phosphor-icons/react';
 
@@ -42,8 +43,7 @@ export function ReviewQueue({ visible = true }: { visible?: boolean }) {
   if (!due || due.length === 0) return null;
 
   return (
-    <section className="review-queue">
-      <h3><Hourglass size={16} weight="duotone" /> Review</h3>
+    <Collapsible id="review" level={3} label="Review" className="review-queue" title={<><Hourglass size={16} weight="duotone" /> Review</>}>
       <p className="review-queue-lede">
         {due.some((d) => d.slipped)
           ? 'Some of what you earned has started to slip — a quick rep brings it back.'
@@ -69,6 +69,6 @@ export function ReviewQueue({ visible = true }: { visible?: boolean }) {
           </li>
         ))}
       </ul>
-    </section>
+    </Collapsible>
   );
 }

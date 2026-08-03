@@ -1,6 +1,10 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { htmlToText, htmlTitle } from './htmlText.js';
+import {
+  HttpStatusError, isRetryableError, isRetryableStatus, withRetry,
+} from './retry.js';
 
 /** Shared by the JSON-url ingest route (ingestRoutes.ts) and the ingest_paper tutor tool
  * (ingestTools.ts) — one place to change timeout/size/content-type policy for URL downloads. */
@@ -32,7 +36,13 @@ function extFromUrl(url: string): string | null {
   return m ? `.${m[1].toLowerCase()}` : null;
 }
 
-export interface DownloadedFile { path: string; contentType: string }
+export interface DownloadedFile {
+  path: string;
+  contentType: string;
+  /** The document's own title, when the source reports one (currently HTML's <title>). Lets the
+   *  ingest route name the book after the article instead of after its URL. */
+  title?: string;
+}
 
 /**
  * Downloads a URL to a temp file for ingestion. Follows redirects, times out at 60s, caps at
@@ -47,10 +57,48 @@ export async function downloadToTemp(
   const doFetch = opts.fetchImpl ?? fetch;
   const target = rewriteArxivUrl(url);
 
-  const res = await doFetch(target, { redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (!res.ok) throw new Error(`download failed: HTTP ${res.status} for ${target}`);
+  // Retried like the tutor's own fetches: a transient failure here used to kill an entire ingest,
+  // so a learner adding a book or an article lost the whole compile to one blip. A 404 or 403 still
+  // fails on the first try — that is an answer about the URL, not an accident (see retry.ts).
+  let res: Response;
+  try {
+    res = await withRetry(
+      async () => {
+        const r = await doFetch(target, { redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
+        if (!r.ok) throw new HttpStatusError(r.status, target);
+        return r;
+      },
+      (e) => (e instanceof HttpStatusError ? isRetryableStatus(e.status) : isRetryableError(e)),
+      { onRetry: (n, why) => console.error(`[download] retry ${n} for ${target}: ${why}`) },
+    );
+  } catch (e) {
+    if (e instanceof HttpStatusError) throw new Error(`download failed: HTTP ${e.status} for ${target}`);
+    throw e;
+  }
 
   const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+
+  // An ordinary web page is a first-class source. It used to be the one thing "Add material"
+  // refused outright — a learner could paste a PDF, an ePub, a repo or a YouTube link, but the
+  // documentation page or article a subject actually lives on came back "unsupported
+  // content-type text/html". The tutor could already READ that page (read_url) and cite it; it
+  // simply could not be KEPT. Extracting to markdown here puts it through the ordinary
+  // conversion pipeline, so a saved article behaves like every other source from this point on.
+  if (contentType === 'text/html' || contentType === 'application/xhtml+xml') {
+    const html = await res.text();
+    if (html.length > MAX_DOWNLOAD_BYTES) throw new Error(`download exceeds ${MAX_DOWNLOAD_BYTES} byte cap`);
+    const text = htmlToText(html);
+    if (!text) throw new Error(`no readable text found at ${target}`);
+    const title = htmlTitle(html);
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-dl-'));
+    const path = join(dir, 'page.md');
+    // The title becomes the document's H1 so the compiled book is named after the article rather
+    // than after a URL slug, and the source URL is recorded in the text itself — a page the
+    // learner reads later should say where it came from without a round-trip to the ledger.
+    writeFileSync(path, `# ${title ?? target}\n\nSource: ${target}\n\n${text}\n`);
+    return { path, contentType, title: title ?? undefined };
+  }
+
   const ext = EXT_BY_CONTENT_TYPE[contentType] ?? extFromUrl(target);
   if (!ext) throw new Error(`unsupported content-type "${contentType || 'unknown'}" for download from ${target}`);
 

@@ -11,7 +11,7 @@ import {
 import { downloadToTemp } from './download.js';
 import { findCanonicalPapers } from './frontierResearch.js';
 import { searchVideos } from './videoSearch.js';
-import { compileNext, readQueue, renameBook, startConversion } from './ingest.js';
+import { compileNext, ensureCompileDrain, readQueue, renameBook, startConversion } from './ingest.js';
 import { updateQueue } from './queueStore.js';
 import { ingestRepo, type IngestRepoDeps } from './ingestRepo.js';
 import { deleteLinkDirectory, readLinkDirectories } from './linkList.js';
@@ -101,6 +101,9 @@ export function buildIngestRoutes(
       // reload-safe 'converting' placeholder immediately.
       const result = startConversion(lw, cfg, downloaded.path, {
         converter: deps.converter, mode: body.mode ?? 'paper', model: deps.model, sourceUrl: body.url,
+        // An HTML source reports its own <title>; without it a saved article lands in the Library
+        // named "page" (the temp file) or after a URL slug that is often just an id.
+        ...(downloaded.title ? { title: downloaded.title } : {}),
         cleanupInputDir: dirname(downloaded.path),
         // A downloaded PDF carries no machine-readable byline this pipeline reads (the converted
         // text does, but only a model would be reading it — which is the claim side, not the
@@ -191,6 +194,40 @@ export function buildIngestRoutes(
     }
     await updateQueue(cfg.vault, (entries) => entries.filter((e) => e.chapter !== chapter));
     return c.json({ dismissed: chapter });
+  });
+
+  /**
+   * Ask a failed chapter to compile again. The source markdown never left `raw/uploads/`, so a
+   * failure whose CAUSE has since been fixed — a corrected model id, a provider quirk the adapter
+   * now handles — is one flip away from succeeding. Without this the only recovery was dismissing
+   * every failed row and re-ingesting the whole book; 54 chapters were once stranded that way by a
+   * single provider refusal.
+   *
+   * Only failed rows: retrying a `done` chapter would compile its pages a second time, and a
+   * pending/converting one is already owed work.
+   */
+  app.post('/api/ingest/entry/retry', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    const chapter = String(body?.chapter ?? '');
+    if (!chapter) return c.json({ error: 'chapter is required' }, 400);
+    const entry = readQueue(cfg.vault).find((e) => e.chapter === chapter);
+    if (!entry) return c.json({ error: 'no such ledger entry' }, 404);
+    if (entry.status !== 'error' && entry.status !== 'convert-error') {
+      return c.json({ error: `only failed rows can be retried — this one is ${entry.status}` }, 409);
+    }
+    // Targeted write inside the mutex (queueStore.ts's rule): re-find by chapter identity rather
+    // than writing back an array read before the await above.
+    await updateQueue(cfg.vault, (entries) => {
+      const live = entries.find((e) => e.chapter === chapter);
+      if (!live) return;
+      live.status = 'pending';
+      // The old failure must not ride along into the retry — a row showing last run's error while
+      // queued reads as "failed again" the moment the learner glances at it.
+      delete live.error;
+      delete live.phase;
+    });
+    ensureCompileDrain(lw, cfg);
+    return c.json({ retrying: chapter });
   });
 
   // B2c: "Add repo" ingestion — git URL or absolute local path. Name derivation/validation

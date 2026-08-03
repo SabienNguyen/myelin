@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Plan — Small-model engine + compile refit</title>
+<style>
+  :root {
+    --bg: #faf6ee; --panel: #fffdf8; --ink: #2b2620; --muted: #7a7062;
+    --border: #e4dccb; --accent: #4a6d8c; --accent-soft: #e8eef4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1d1a16; --panel: #26221d; --ink: #e8e2d6; --muted: #9c9284;
+      --border: #3a342b; --accent: #8fb0cc; --accent-soft: #2c3540;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15.5px/1.6 Georgia, serif; }
+  main { max-width: 52rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+  h1 { font-size: 1.6rem; line-height: 1.25; }
+  h2 { font-size: 1.05rem; margin-top: 2.2rem; padding-top: 1.1rem; border-top: 1px solid var(--border); }
+  h3 { font-size: 1.15rem; margin-top: 2.6rem; padding: 0.5rem 0.8rem; background: var(--accent-soft); border-radius: 8px; }
+  blockquote { margin: 1rem 0; padding: 0.6rem 1rem; background: var(--panel); border-left: 3px solid var(--accent); border-radius: 0 6px 6px 0; color: var(--muted); }
+  code { font: 0.82em/1.5 'JetBrains Mono', ui-monospace, monospace; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 0.06em 0.3em; }
+  pre { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.9rem 1.1rem; overflow-x: auto; }
+  pre code { border: none; background: none; padding: 0; }
+  input[type=checkbox] { accent-color: var(--accent); margin-right: 0.45em; }
+  li { margin: 0.35rem 0; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
+  strong { color: var(--ink); }
+</style>
+</head>
+<body>
+<main>
+<h1>Small-Model Engine + Compile Refit — Implementation Plan</h1>
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Extract the harness-drives/model-fills-slots pattern into <code>src/server/pipeline.ts</code> and refit the weak-model compile path onto it: diagnosed failures, parallel part distillation, and a Map-of-Content hub page per multi-part chapter.</p>
+<p><strong>Architecture:</strong> A pure orchestration module (fit math → classify failures → bounded-parallel map with retry ladder → consumer floor) with zero I/O of its own; compile (<code>src/server/ingest.ts</code>) becomes its first consumer. The agentic strong-model compile path is untouched and stays sequential (part N+1&#39;s link candidates need part N&#39;s pages); only the weak-model distillation path parallelizes.</p>
+<p><strong>Tech Stack:</strong> TypeScript (ESM), zod, vitest; existing seams: <code>generateStructured</code>, <code>chunkChapter</code>, <code>streamModel</code>/<code>textModel</code> fakes, <code>queueStore</code> ledger.</p>
+<p><strong>Spec:</strong> <code>docs/superpowers/specs/2026-07-31-small-model-pipeline-design.md</code> (§1, §2, §4, §7). Vote (<code>vote: n</code>) is deliberately deferred to the research plan — its first consumer.</p>
+<h2>Global Constraints</h2>
+<ul>
+<li>Engram stays the only writer of <code>pages/</code>: every page write goes through the citation-wrapped <code>write_page</code> execute.</li>
+<li>Failure classes are exactly <code>&#39;overflow&#39; | &#39;weak-output&#39; | &#39;transport&#39;</code>; transport always re-throws (queues must retry later).</li>
+<li>Ledger notes name the class: <code>part 3: verbatim (weak-output: …)</code> — &quot;fallback&quot; with no reason is a plan failure.</li>
+<li>No new dependencies. Run <code>npm run typecheck</code> and <code>npx vitest run &lt;file&gt;</code> per task; full <code>npx vitest run</code> before the final commit of each task.</li>
+<li>House style: comments explain failure modes, not lines (no-slop-code skill).</li>
+</ul>
+<hr>
+<h3>Task 1: pipeline.ts — budget math + failure classification</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>src/server/pipeline.ts</code></li>
+<li>Test: <code>tests/pipeline.test.ts</code></li>
+<li>Modify: <code>src/server/ingest.ts</code> (move <code>isTransportFailure</code> out, re-import)</li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: <code>LlmHttpError</code> from <code>./llm/index.js</code>.</p>
+</li>
+<li><p>Produces (later tasks + research plan rely on these exact names):</p>
+<ul>
+<li><code>type PipelineFailureClass = &#39;overflow&#39; | &#39;weak-output&#39; | &#39;transport&#39;</code></li>
+<li><code>budgetChars(contextTokens: number | undefined): number</code></li>
+<li><code>classifyFailure(e: unknown, promptChars: number, budget: number): PipelineFailureClass</code></li>
+<li><code>isTransportFailure(e: unknown): boolean</code> (moved verbatim from ingest.ts)</li>
+</ul>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the failing test</strong></p>
+</li>
+</ul>
+<pre><code class="language-ts">// tests/pipeline.test.ts
+import { describe, it, expect } from &#39;vitest&#39;;
+import { budgetChars, classifyFailure, isTransportFailure } from &#39;../src/server/pipeline.js&#39;;
+import { LlmHttpError } from &#39;../src/server/llm/index.js&#39;;
+
+describe(&#39;budgetChars&#39;, () =&gt; {
+  it(&#39;derives a char budget from contextTokens with scaffold headroom&#39;, () =&gt; {
+    // tokens*4 chars minus 8k scaffold reserve (system + schema + instructions)
+    expect(budgetChars(32_768)).toBe(32_768 * 4 - 8_000);
+  });
+  it(&#39;falls back to the proven CHAPTER_CHUNK_CHARS default when unset&#39;, () =&gt; {
+    expect(budgetChars(undefined)).toBe(24_000);
+  });
+  it(&#39;never returns less than 4k chars even for a tiny window&#39;, () =&gt; {
+    expect(budgetChars(1_000)).toBe(4_000);
+  });
+});
+
+describe(&#39;classifyFailure&#39;, () =&gt; {
+  it(&#39;transport: LlmHttpError and undici fetch-failed&#39;, () =&gt; {
+    expect(classifyFailure(new LlmHttpError(503, &#39;boom&#39;, &#39;x&#39;), 10, 100)).toBe(&#39;transport&#39;);
+    expect(classifyFailure(new TypeError(&#39;fetch failed&#39;), 10, 100)).toBe(&#39;transport&#39;);
+  });
+  it(&#39;overflow: the prompt did not fit the budget&#39;, () =&gt; {
+    expect(classifyFailure(new Error(&#39;schema rejected&#39;), 200, 100)).toBe(&#39;overflow&#39;);
+  });
+  it(&#39;weak-output: it fit, the model still failed&#39;, () =&gt; {
+    expect(classifyFailure(new Error(&#39;schema rejected&#39;), 50, 100)).toBe(&#39;weak-output&#39;);
+  });
+});
+</code></pre>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 2: Run it — must fail with &quot;Cannot find module &#39;../src/server/pipeline.js&#39;&quot;</strong></li>
+</ul>
+<p>Run: <code>npx vitest run tests/pipeline.test.ts</code></p>
+<ul>
+<li><input disabled="" type="checkbox"> <strong>Step 3: Implement</strong></li>
+</ul>
+<pre><code class="language-ts">// src/server/pipeline.ts
+// The small-model engine (spec 2026-07-31): the harness decides, the model fills one narrow
+// slot per call. Pure orchestration — no I/O of its own; consumers hand in the model calls.
+import { LlmHttpError } from &#39;./llm/index.js&#39;;
+
+export type PipelineFailureClass = &#39;overflow&#39; | &#39;weak-output&#39; | &#39;transport&#39;;
+
+/** Endpoint-unreachable/erroring — not model-too-weak. LlmHttpError covers every non-2xx the
+ * adapters surface (post-retry); undici&#39;s &quot;fetch failed&quot; TypeError is the connection-level face.
+ * (Moved verbatim from ingest.ts — one definition, two consumers.) */
+export function isTransportFailure(e: unknown): boolean {
+  if (e instanceof LlmHttpError) return true;
+  return e instanceof TypeError &amp;&amp; /fetch failed/i.test(e.message);
+}
+
+/** Chars a single call may spend on PAYLOAD. tokens*4 is the standard floor estimate; 8k chars
+ * are reserved for system + schema + instructions so the payload never truncates them out.
+ * No contextTokens configured → the 24k default CHAPTER_CHUNK_CHARS proved for two years. */
+export function budgetChars(contextTokens: number | undefined): number {
+  if (!contextTokens) return 24_000;
+  return Math.max(4_000, contextTokens * 4 - 8_000);
+}
+
+/** Why a piece failed, decided BEFORE any fallback runs — the remedies differ (split vs retry vs
+ * wait-and-requeue) and &quot;it fell back&quot; without a why is a bug per the spec. */
+export function classifyFailure(e: unknown, promptChars: number, budget: number): PipelineFailureClass {
+  if (isTransportFailure(e)) return &#39;transport&#39;;
+  if (promptChars &gt; budget) return &#39;overflow&#39;;
+  return &#39;weak-output&#39;;
+}
+</code></pre>
+<p>In <code>src/server/ingest.ts</code>: delete the local <code>isTransportFailure</code> (lines ~548-551) and its <code>LlmHttpError</code> import if now unused; add <code>import { isTransportFailure } from &#39;./pipeline.js&#39;;</code>.</p>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 4: Run tests — pipeline.test.ts green, then <code>npx vitest run tests/ingest 2&gt;/dev/null || npx vitest run</code> to prove the move broke nothing</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 5: Commit</strong> — <code>git add src/server/pipeline.ts tests/pipeline.test.ts src/server/ingest.ts &amp;&amp; git commit -m &quot;feat: pipeline engine — budget math and diagnosed failure classes&quot;</code></p>
+</li>
+</ul>
+<hr>
+<h3>Task 2: pipeline.ts — mapPieces (bounded-parallel map + retry ladder + floors + receipts)</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>src/server/pipeline.ts</code></li>
+<li>Test: <code>tests/pipeline.test.ts</code></li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Produces:</p>
+<pre><code class="language-ts">export interface PieceReceipt { piece: number; outcome: &#39;ok&#39; | &#39;floored&#39;; reason?: string; class?: PipelineFailureClass }
+export async function mapPieces&lt;T&gt;(opts: {
+  pieces: string[];
+  budget: number;
+  concurrency?: number;                       // default 4
+  attempt: (piece: string, rejection?: string) =&gt; Promise&lt;T&gt;;  // one model call; throw = failed
+  floor: (piece: string, cls: PipelineFailureClass, reason: string) =&gt; Promise&lt;T&gt;;
+}): Promise&lt;{ results: T[]; receipts: PieceReceipt[] }&gt;
+</code></pre>
+</li>
+<li><p>Ladder per piece: <code>attempt()</code> → on failure retry once with the rejection message → on second failure <code>classifyFailure</code> → transport re-throws (fails the whole map), otherwise <code>floor()</code> with class+reason. <code>results[i]</code> always corresponds to <code>pieces[i]</code>.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Write the failing tests</strong></p>
+</li>
+</ul>
+<pre><code class="language-ts">// append to tests/pipeline.test.ts
+import { mapPieces } from &#39;../src/server/pipeline.js&#39;;
+
+describe(&#39;mapPieces&#39;, () =&gt; {
+  it(&#39;runs pieces concurrently up to the cap, results in piece order&#39;, async () =&gt; {
+    let live = 0; let peak = 0;
+    const { results, receipts } = await mapPieces({
+      pieces: [&#39;a&#39;, &#39;b&#39;, &#39;c&#39;, &#39;d&#39;, &#39;e&#39;],
+      budget: 100,
+      concurrency: 2,
+      attempt: async (p) =&gt; {
+        live++; peak = Math.max(peak, live);
+        await new Promise((r) =&gt; setTimeout(r, 10));
+        live--;
+        return p.toUpperCase();
+      },
+      floor: async () =&gt; &#39;FLOOR&#39;,
+    });
+    expect(results).toEqual([&#39;A&#39;, &#39;B&#39;, &#39;C&#39;, &#39;D&#39;, &#39;E&#39;]);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(receipts.every((r) =&gt; r.outcome === &#39;ok&#39;)).toBe(true);
+  });
+
+  it(&#39;retries once with the rejection message, then floors with a diagnosed class&#39;, async () =&gt; {
+    const attempts: (string | undefined)[] = [];
+    const { results, receipts } = await mapPieces({
+      pieces: [&#39;x&#39;.repeat(10)],
+      budget: 100,
+      attempt: async (_p, rejection) =&gt; { attempts.push(rejection); throw new Error(&#39;schema rejected&#39;); },
+      floor: async (_p, cls, reason) =&gt; `floored:${cls}:${reason}`,
+    });
+    expect(attempts).toEqual([undefined, &#39;schema rejected&#39;]); // retry carried the why
+    expect(results[0]).toBe(&#39;floored:weak-output:schema rejected&#39;);
+    expect(receipts[0]).toMatchObject({ outcome: &#39;floored&#39;, class: &#39;weak-output&#39; });
+  });
+
+  it(&#39;an oversize piece floors as overflow&#39;, async () =&gt; {
+    const { receipts } = await mapPieces({
+      pieces: [&#39;y&#39;.repeat(500)],
+      budget: 100,
+      attempt: async () =&gt; { throw new Error(&#39;cut off&#39;); },
+      floor: async () =&gt; &#39;floored&#39;,
+    });
+    expect(receipts[0].class).toBe(&#39;overflow&#39;);
+  });
+
+  it(&#39;transport failure rejects the whole map — queues must retry later, not consume&#39;, async () =&gt; {
+    await expect(mapPieces({
+      pieces: [&#39;a&#39;],
+      budget: 100,
+      attempt: async () =&gt; { throw new TypeError(&#39;fetch failed&#39;); },
+      floor: async () =&gt; &#39;never&#39;,
+    })).rejects.toThrow(/fetch failed/);
+  });
+});
+</code></pre>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 2: Run — the four new tests fail (&quot;mapPieces is not a function&quot;)</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 3: Implement</strong></p>
+</li>
+</ul>
+<pre><code class="language-ts">// append to src/server/pipeline.ts
+export interface PieceReceipt {
+  piece: number;
+  outcome: &#39;ok&#39; | &#39;floored&#39;;
+  reason?: string;
+  class?: PipelineFailureClass;
+}
+
+/** The ladder, per piece: one attempt, one rejection-retry (the rails recipe), then the
+ * consumer&#39;s floor with a DIAGNOSED class. Transport rejects the whole map — a dead endpoint
+ * would floor every piece into fallback content during an outage, which is exactly the
+ * &quot;consumed the entry with undistilled content&quot; bug the old compile ladder guarded against. */
+export async function mapPieces&lt;T&gt;(opts: {
+  pieces: string[];
+  budget: number;
+  concurrency?: number;
+  attempt: (piece: string, rejection?: string) =&gt; Promise&lt;T&gt;;
+  floor: (piece: string, cls: PipelineFailureClass, reason: string) =&gt; Promise&lt;T&gt;;
+}): Promise&lt;{ results: T[]; receipts: PieceReceipt[] }&gt; {
+  const results: T[] = new Array(opts.pieces.length);
+  const receipts: PieceReceipt[] = new Array(opts.pieces.length);
+  let next = 0;
+  const worker = async (): Promise&lt;void&gt; =&gt; {
+    for (;;) {
+      const i = next++;
+      if (i &gt;= opts.pieces.length) return;
+      const piece = opts.pieces[i];
+      try {
+        results[i] = await opts.attempt(piece);
+        receipts[i] = { piece: i, outcome: &#39;ok&#39; };
+      } catch (first) {
+        if (isTransportFailure(first)) throw first;
+        const firstMsg = first instanceof Error ? first.message : String(first);
+        try {
+          results[i] = await opts.attempt(piece, firstMsg);
+          receipts[i] = { piece: i, outcome: &#39;ok&#39; };
+        } catch (second) {
+          if (isTransportFailure(second)) throw second;
+          const reason = (second instanceof Error ? second.message : String(second)).slice(0, 160);
+          const cls = classifyFailure(second, piece.length, opts.budget);
+          results[i] = await opts.floor(piece, cls, reason);
+          receipts[i] = { piece: i, outcome: &#39;floored&#39;, reason, class: cls };
+        }
+      }
+    }
+  };
+  const n = Math.max(1, Math.min(opts.concurrency ?? 4, opts.pieces.length));
+  await Promise.all(Array.from({ length: n }, worker));
+  return { results, receipts };
+}
+</code></pre>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 4: Run tests — green. Also <code>npm run typecheck</code>.</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 5: Commit</strong> — <code>git commit -am &quot;feat: pipeline mapPieces — bounded-parallel retry ladder with diagnosed floors&quot;</code></p>
+</li>
+</ul>
+<hr>
+<h3>Task 3: config — per-role contextTokens + concurrency knobs</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>src/server/config.ts</code> (the per-role model schema — find <code>rails</code> on the tutor role for the pattern)</li>
+<li>Test: <code>tests/config.test.ts</code> (follow existing config tests&#39; shape)</li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Produces: <code>cfg.models.&lt;role&gt;.contextTokens?: number</code>, <code>cfg.models.&lt;role&gt;.concurrency?: number</code> — read by compile refit (Task 4) as <code>budgetChars(cfg.models.compile.contextTokens)</code> and <code>cfg.models.compile.concurrency ?? 4</code>.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Failing test</strong> — extend the existing config parse test file:</p>
+</li>
+</ul>
+<pre><code class="language-ts">it(&#39;per-role contextTokens and concurrency parse and default to undefined&#39;, () =&gt; {
+  const cfg = loadConfigFrom({ models: { compile: { model: &#39;ollama:x&#39;, contextTokens: 32768, concurrency: 2 } } });
+  expect(cfg.models.compile.contextTokens).toBe(32768);
+  expect(cfg.models.compile.concurrency).toBe(2);
+  expect(cfg.models.tutor.contextTokens).toBeUndefined();
+});
+</code></pre>
+<p>(Adapt the construction call to the file&#39;s existing helper — the config tests already build partial configs; copy their pattern exactly.)</p>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 2: Run — fails (unknown key stripped or type error).</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 3: Implement</strong> — in the role schema object in <code>config.ts</code> add:</p>
+</li>
+</ul>
+<pre><code class="language-ts">// Both serve the small-model pipeline (spec 2026-07-31 §6): contextTokens caps what one call
+// may carry (budgetChars), concurrency caps the parallel map — VRAM respect, not a speed knob.
+contextTokens: z.number().int().positive().optional(),
+concurrency: z.number().int().positive().optional(),
+</code></pre>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 4: Run config tests + typecheck — green.</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 5: Commit</strong> — <code>git commit -am &quot;feat: per-role contextTokens and concurrency config knobs&quot;</code></p>
+</li>
+</ul>
+<hr>
+<h3>Task 4: compile refit — engine-driven parallel distillation</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>src/server/ingest.ts</code> (<code>compileOne</code> part loop ~707-763, <code>weakCompileFallback</code> ~590-634)</li>
+<li>Test: <code>tests/mineRepo.test.ts</code> untouched; compile behavior tests live in <code>tests/ingest*.test.ts</code> / wherever <code>compileOne</code> is currently pinned — extend that file (grep <code>compileOne(</code> in tests to find it).</li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: <code>mapPieces</code>, <code>budgetChars</code>, <code>classifyFailure</code> (Tasks 1-2); knobs (Task 3).</p>
+</li>
+<li><p>Produces: <code>weakCompileFallback</code> gains a <code>reason</code> in its return: <code>Promise&lt;{ how: &#39;distilled&#39; | &#39;verbatim&#39;; reason?: string }&gt;</code> — Task 5&#39;s ledger text relies on it.</p>
+</li>
+<li><p>Behavior contract:</p>
+<ol>
+<li>Part 1 always tries the agentic loop first (unchanged).</li>
+<li>If part 1 wrote pages agentically → remaining parts continue the SEQUENTIAL agentic loop, exactly as today (slug-refresh semantics preserved; strong models see zero change).</li>
+<li>If part 1 fell back → the remaining parts skip the doomed agentic attempts and run <code>mapPieces</code> distillation in parallel (<code>concurrency</code> knob), each piece through <code>weakCompileFallback</code>, floors included.</li>
+<li><code>chunkChapter(chapterMarkdown, Math.min(chunkChars, budgetChars(cfg.models.compile.contextTokens)))</code> — the fit check enters the split.</li>
+</ol>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Failing test</strong> — in the file that pins <code>compileOne</code> (find with <code>grep -rn &quot;compileOne&quot; tests/</code>):</p>
+</li>
+</ul>
+<pre><code class="language-ts">it(&#39;a weak model distills remaining parts in parallel after part 1 falls back&#39;, async () =&gt; {
+  // A 3-part chapter (force small chunkChars). The fake model NEVER calls write_page
+  // agentically (empty text turns) but answers every distillation with valid JSON.
+  const calls: { kind: string; at: number }[] = [];
+  let clock = 0;
+  const model = streamModel(async (req) =&gt; {
+    const prompt = JSON.stringify(req.messages);
+    if (prompt.includes(&#39;Distill this chapter part&#39;)) {
+      calls.push({ kind: &#39;distill&#39;, at: clock++ });
+      return { text: JSON.stringify({ title: `T${calls.length}`, body: &#39;A page body of enough words to be a page.&#39; }) };
+    }
+    calls.push({ kind: &#39;agentic&#39;, at: clock++ });
+    return { text: &#39;I cannot call tools.&#39; };
+  });
+  const entry = mkQueueEntry(/* 3-part chapter fixture, copy the file&#39;s existing helper */);
+  const result = await compileOne(lw, cfgWith({ compile: { model: &#39;ollama:weak&#39;, concurrency: 3 } }), model, entry, 500);
+  expect(result).toBe(&#39;compiled&#39;);
+  // Exactly ONE agentic attempt (part 1) — parts 2..n skipped the doomed loop.
+  expect(calls.filter((c) =&gt; c.kind === &#39;agentic&#39;)).toHaveLength(1);
+  // All three parts produced pages (distilled), verifiable via lw.listSlugs().
+  expect((await lw.listSlugs()).filter((s) =&gt; s.startsWith(&#39;t&#39;))).toHaveLength(3);
+});
+</code></pre>
+<p>(Adapt fixture helpers to the test file&#39;s own; the assertions above are the contract.)</p>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 2: Run — fails: today every part attempts agentically (3 agentic calls).</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 3: Implement</strong> — inside <code>compileOne</code>, restructure the part loop:</p>
+</li>
+</ul>
+<pre><code class="language-ts">const budget = Math.min(chunkChars, budgetChars(cfg.models?.compile?.contextTokens));
+const chunks = chunkChapter(chapterMarkdown, budget);
+// ... citation wrapper unchanged ...
+let agenticAlive = true; // flips off the moment a part proves the model can&#39;t drive tools
+for (let i = 0; i &lt; chunks.length &amp;&amp; agenticAlive; i++) {
+  // existing sequential agentic body, EXCEPT: where today it calls `await fallback()` /
+  // `await fallback(msg)`, it now sets `agenticAlive = false` and breaks, remembering i.
+}
+if (!agenticAlive) {
+  // Parts i..end: harness-driven parallel distillation. Slugs snapshot once — distillation
+  // never links, so the per-part refresh the agentic loop needs does not apply here.
+  const slugs = new Set(await lw.listSlugs());
+  const rest = chunks.slice(firstFallbackPart);
+  const { receipts } = await mapPieces({
+    pieces: rest,
+    budget,
+    concurrency: cfg.models?.compile?.concurrency ?? 4,
+    attempt: async (piece, rejection) =&gt; distillPart(piece, rejection, /* existing distillOnce+write path */),
+    floor: async (piece, cls, reason) =&gt; writeVerbatim(piece, cls, reason), // Task 5 wires the label
+  });
+  receipts.forEach((r, k) =&gt; {
+    const n = firstFallbackPart + k + 1;
+    if (r.outcome === &#39;ok&#39;) { wroteAny = true; partNotes.push(`part ${n}: distilled`); }
+    else { wroteAny = true; partNotes.push(`part ${n}: verbatim (${r.class}: ${r.reason})`); }
+  });
+}
+</code></pre>
+<p>Refactor <code>weakCompileFallback</code> into the two halves this needs (<code>distillPart</code> = distill+write with one retry handled by mapPieces — so REMOVE its internal second <code>distillOnce</code> try; the engine owns the retry now; <code>writeVerbatim</code> = the floor write, taking <code>cls</code>/<code>reason</code> for the label). Keep transport re-throws intact.</p>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 4: Run the compile test file + full <code>npx vitest run</code> — the old sequential-ladder tests will need their expectations updated to the new notes format; update them in the same commit (they are pinning the ladder this task deliberately changes).</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 5: Commit</strong> — <code>git commit -am &quot;feat: compile rides the pipeline engine — parallel distillation after first fallback&quot;</code></p>
+</li>
+</ul>
+<hr>
+<h3>Task 5: diagnosed ledger notes + verbatim label</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>src/server/ingest.ts</code> (verbatim page banner + partNotes text — mostly done structurally in Task 4; this task pins wording)</li>
+<li>Test: same compile test file</li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Ledger phase/notes format (Plan 2 and the library UI read these strings):</p>
+<ul>
+<li>distilled part: <code>part 3: distilled</code></li>
+<li>floored part: <code>part 3: verbatim (weak-output: schema rejected twice)</code></li>
+<li>verbatim page banner first line: <code>&gt; Compiled verbatim (weak-output): the compile model could not distill this part…</code></li>
+</ul>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Failing test</strong></p>
+</li>
+</ul>
+<pre><code class="language-ts">it(&#39;a verbatim part names its diagnosed class in the ledger note and the page banner&#39;, async () =&gt; {
+  const model = streamModel(async () =&gt; ({ text: &#39;not json at all&#39; })); // distill always rejects
+  const entry = mkQueueEntry(/* 1-part chapter */);
+  await compileOne(lw, cfgWith({ compile: { model: &#39;ollama:weak&#39; } }), model, entry, 500);
+  const q = readQueue(vault).find((e) =&gt; e.chapter === entry.chapter);
+  expect(q?.phase ?? q?.error ?? &#39;&#39;).toMatch(/verbatim \(weak-output:/);
+  const page = await lw.call(&#39;read_page&#39;, { slug: /* the verbatim slug */ });
+  expect(page.page.body).toMatch(/^&gt; Compiled verbatim \(weak-output\):/);
+});
+</code></pre>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 2: Run — fails on the old unlabeled wording.</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 3: Implement</strong> — thread <code>cls</code> into the banner and notes (Task 4 left the seams).</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 4: Run file + full suite — green.</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 5: Commit</strong> — <code>git commit -am &quot;feat: verbatim compile floors carry their diagnosed reason&quot;</code></p>
+</li>
+</ul>
+<hr>
+<h3>Task 6: MOC merge — one hub page per multi-part chapter</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>src/server/ingest.ts</code> (end of <code>compileOne</code>, after the part loop, before the <code>!wroteAny</code> check)</li>
+<li>Test: same compile test file</li>
+</ul>
+<p><strong>Interfaces:</strong></p>
+<ul>
+<li><p>Consumes: <code>writtenSlugs</code> (already collected in order by the citation wrapper), <code>generateStructured</code>, <code>lw.call(&#39;link_pages&#39;, { src, dst, type: &#39;deepens&#39; })</code>.</p>
+</li>
+<li><p>Behavior: when a chapter wrote <strong>more than one</strong> page, write a hub page:</p>
+<ul>
+<li>slug <code>${slugify(entry.book)}-ch-${chapterN}-moc</code> (freshSlug collision rule applies)</li>
+<li>title <code>${entry.title} — map of content</code></li>
+<li>body: model-written 2-3 sentence chapter overview (one <code>generateStructured</code> call, schema <code>{ overview: z.string().min(1) }</code>), floor = empty overview; then a deterministic ordered list: <code>- [[slug]]</code> per written page, reading order.</li>
+<li><code>status: &#39;draft&#39;</code>, sources: the chapter citation (rides the wrapper automatically).</li>
+<li>After writing: <code>link_pages</code> each part → MOC with type <code>deepens</code> (parts go deeper than the hub).</li>
+<li>Single-page chapters: no MOC, no calls — nothing to map.</li>
+</ul>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Failing test</strong></p>
+</li>
+</ul>
+<pre><code class="language-ts">it(&#39;a multi-part chapter gets a MOC hub linking every part in order, parts deepen it&#39;, async () =&gt; {
+  const model = streamModel(async (req) =&gt; {
+    const p = JSON.stringify(req.messages);
+    if (p.includes(&#39;Distill this chapter part&#39;)) return { text: JSON.stringify({ title: `Part ${++n}`, body: &#39;Body words.&#39; }) };
+    if (p.includes(&#39;chapter overview&#39;)) return { text: JSON.stringify({ overview: &#39;What this chapter covers.&#39; }) };
+    return { text: &#39;no tools&#39; };
+  });
+  let n = 0;
+  const entry = mkQueueEntry(/* 3-part chapter */);
+  await compileOne(lw, cfgWith({ compile: { model: &#39;ollama:weak&#39; } }), model, entry, 500);
+  const moc = await lw.call(&#39;read_page&#39;, { slug: expect.stringMatching(/-moc$/) /* fetch via listSlugs find */ });
+  expect(moc.page.body).toMatch(/What this chapter covers/);
+  expect(moc.page.body.match(/\[\[part-\d/g)).toHaveLength(3);         // ordered [[links]]
+  const part1 = await lw.call(&#39;read_page&#39;, { slug: &#39;part-1&#39; });
+  expect(part1.page.meta.deepens).toContain(/* the moc slug */);        // graph edge landed
+});
+</code></pre>
+<p>(Resolve the MOC slug via <code>(await lw.listSlugs()).find((s) =&gt; s.endsWith(&#39;-moc&#39;))</code> — exact code in the test file.)</p>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 2: Run — fails (no MOC written today).</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 3: Implement</strong> — after the part loop in <code>compileOne</code>:</p>
+</li>
+</ul>
+<pre><code class="language-ts">// The MOC (Obsidian map-of-content): the chapter&#39;s one hub, linking every page it produced in
+// reading order. Deterministic list + one small overview call with an empty-string floor — the
+// hub must exist even when the model can&#39;t write prose. Single-page chapters skip it: a map of
+// one place is noise.
+if (writtenSlugs.length &gt; 1 &amp;&amp; writePage) {
+  let overview = &#39;&#39;;
+  try {
+    const { object, usage } = await generateStructured({
+      model,
+      prompt: `Write a 2-3 sentence chapter overview for &quot;${entry.title}&quot; of &quot;${entry.book}&quot;, `
+        + `covering these pages: ${writtenSlugs.join(&#39;, &#39;)}. Plain prose, no links, no headings.`,
+      schema: z.object({ overview: z.string().min(1) }),
+      schemaName: &#39;chapter_overview&#39;,
+    });
+    recordUsage(cfg.vault, { role: &#39;compile&#39;, model: cfg.models?.compile?.model ?? &#39;unknown&#39;, usage });
+    overview = object.overview;
+  } catch (e) {
+    if (isTransportFailure(e)) throw e;
+    // weak-output floor: the list below IS the map; prose was garnish.
+  }
+  const mocSlug = freshSlug(`${entry.book} ch ${chapterN} moc`, new Set(await lw.listSlugs()));
+  await writePage({
+    slug: mocSlug,
+    title: `${entry.title} — map of content`,
+    body: `${overview ? `${overview}\n\n` : &#39;&#39;}${writtenSlugs.map((s) =&gt; `- [[${s}]]`).join(&#39;\n&#39;)}`,
+    status: &#39;draft&#39;,
+  });
+  for (const s of writtenSlugs.filter((s) =&gt; s !== mocSlug)) {
+    await lw.call(&#39;link_pages&#39;, { src: s, dst: mocSlug, type: &#39;deepens&#39; });
+  }
+}
+</code></pre>
+<ul>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 4: Run file + full suite + <code>npm run typecheck</code> — green.</strong></p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 5: Commit</strong> — <code>git commit -am &quot;feat: multi-part chapters compile to a map-of-content hub&quot;</code></p>
+</li>
+</ul>
+<hr>
+<h3>Task 7: end-to-end proof — weak-model CI ladder + live check</h3>
+<p><strong>Files:</strong></p>
+<ul>
+<li><p>Modify (if wording drifted): <code>tests/llm/weakModel.integration.test.ts</code></p>
+</li>
+<li><p>No new code.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 1: Run the weak-model integration suite</strong> — <code>npx vitest run tests/llm</code> — it drives the REAL wire against the deliberately broken fake (<code>weak-model-server.mjs</code>), including reject-rf. Fix any pinned ladder wording the refit changed; behavior invariants (never a learner-facing error; transport retries) must hold unchanged.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 2: Full verify</strong> — <code>npm run typecheck &amp;&amp; npx vitest run &amp;&amp; npx playwright test --reporter=list</code> — all green.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 3: Live smoke (browser-verify skill)</strong> — scratch stack on a small ollama model, ingest a 3-section markdown file, watch the ledger reach <code>done</code>, confirm part pages + <code>-moc</code> page in the library, MOC links clickable. Screenshot.</p>
+</li>
+<li><p><input disabled="" type="checkbox"> 
+<strong>Step 4: Commit any test-wording fixes</strong> — <code>git commit -am &quot;test: pin the engine-era compile ladder wording&quot;</code></p>
+</li>
+</ul>
+<hr>
+<h2>Self-review (done at write time)</h2>
+<ul>
+<li><strong>Spec coverage:</strong> §1 fit math (T1), split (existing <code>chunkChapter</code> reused, budget-fed — T4), parallel map (T2/T4), retry (T2), diagnosed classes (T1/T5), merge (T6), floor labeling (T5); §2 MOC + untouched agentic path (T4/T6); §4 sources ride the citation wrapper unchanged (T4 note); §7 offline tests (T1-T6), weak-model CI (T7). Vote deferred to Plan 2 — recorded in header.</li>
+<li><strong>Placeholders:</strong> fixture helpers are referenced by pattern (&quot;copy the file&#39;s existing helper&quot;) because the exact helper names live in a test file the implementer greps in Task 4 Step 1 — the assertions are complete.</li>
+<li><strong>Type consistency:</strong> <code>mapPieces</code>/<code>budgetChars</code>/<code>classifyFailure</code>/<code>PieceReceipt</code> names identical across tasks; <code>weakCompileFallback</code>&#39;s split into <code>distillPart</code>/<code>writeVerbatim</code> named consistently in T4/T5.</li>
+</ul>
+
+</main>
+</body>
+</html>

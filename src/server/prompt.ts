@@ -74,12 +74,12 @@ vocabulary — it changes HOW you teach, never what counts as evidence.`] : []),
     lines.push(a.mode === 'freeform'
       ? 'COLD START: the vault has no pages yet. Research the subject the student names, then write '
         + 'its first pages (write_page) and a curated path (create_path) before teaching.'
-      : `COLD START: the vault has no pages yet. ${a.mode.toUpperCase()} mode gives you web `
-        + 'research (the vault cannot ground anything, so it is unlocked) but NO page-writing or '
-        + 'ingest tools — so you can answer what the student asks, from sources you cite, and you '
-        + 'cannot yet build the curriculum or record evidence against it. Answer the question, then '
-        + 'ask them to switch to freeform mode (or add a book) so the subject gets compiled into '
-        + 'pages that track their progress.');
+      : `COLD START: the vault has no pages yet. ${a.mode.toUpperCase()} mode unlocks web research `
+        + 'AND write_page whenever the vault cannot ground the topic — which, with an empty vault, '
+        + 'is always. So: research what the student asks, write the page with the sources you '
+        + 'actually read, and record evidence against that page. What you still do NOT have here is '
+        + 'ingest or create_path — building a whole curriculum or a curated syllabus is freeform '
+        + 'work, so once the subject has legs, offer to switch to freeform (or add a book).');
   }
 
   return lines.join('\n');

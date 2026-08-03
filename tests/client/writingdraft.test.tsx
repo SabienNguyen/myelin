@@ -67,6 +67,27 @@ describe('revise round', () => {
     expect(String(appendSpy.mock.calls[0][0])).toContain('round 2');
   });
 
+  it('carries every criterion verbatim, because "same rubric" alone did not hold', () => {
+    // A live revision round graded against a REWRITTEN rubric: round 1's "Correctly identifies that
+    // a name beginning with two underscores…" came back as "States the triggering syntax and the
+    // dunder exception accurately". The model was asked for the "same rubric" and had to recall it
+    // from several turns back. Now the criteria travel in the message.
+    appendSpy.mockClear();
+    const rubric = ['cites a primary source', 'addresses one counterargument'];
+    render(<WritingDraftInner args={{ prompt: 'Argue X', round: 1, pageSlug: 'thesis', rubric }}
+      result={{ draft: 'draft text', grading: { verdict: 'reviewed', detail: '', rubric: [
+        { criterion: rubric[0], pass: false, note: 'none cited' },
+        { criterion: rubric[1], pass: true, note: '' }] } }}
+      addResult={vi.fn()} />);
+    // This file does not clean up between renders, so earlier cards are still mounted — click the
+    // one this test just rendered.
+    const buttons = screen.getAllByRole('button', { name: /revise this draft/i });
+    fireEvent.click(buttons[buttons.length - 1]);
+    const msg = String(appendSpy.mock.calls[0][0]);
+    for (const r of rubric) expect(msg).toContain(r); // both, including the one that PASSED
+    expect(msg).toMatch(/word for word/i);
+  });
+
   it('a full pass offers no revise button', () => {
     const { container } = render(<WritingDraftInner args={{ prompt: 'Argue X', round: 1, pageSlug: 'thesis', rubric: ['cites a source'] }}
       result={{ draft: 'draft text', grading: { verdict: 'reviewed', detail: '', rubric: [

@@ -6,6 +6,7 @@
 // tightest countdown) is kept as DOM order so keyboard traversal goes most-urgent-first.
 
 import { useEffect, useState, type CSSProperties } from 'react';
+import { Collapsible } from './Collapsible.js';
 import { panelBus } from '../lib/panelBus.js';
 
 interface HorizonPage {
@@ -39,7 +40,7 @@ export function DecayHorizon({ visible = true }: { visible?: boolean }) {
   if (ticks.length < 2) return null;
 
   return (
-    <section className="decay-horizon" aria-label="Decay horizon">
+    <Collapsible id="decay" className="decay-horizon" title="Decay horizon">
       <div className="horizon-rail">
         {ticks.map((p) => {
           const label = p.slipped
@@ -66,6 +67,6 @@ export function DecayHorizon({ visible = true }: { visible?: boolean }) {
         <span>now</span>
         <span>{WINDOW_DAYS}d</span>
       </div>
-    </section>
+    </Collapsible>
   );
 }

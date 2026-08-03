@@ -287,7 +287,10 @@ describe('POST /api/setup/models/pull — choose a model, we install it', () => 
     },
   });
 
-  it('proxies Ollama /api/pull with {name,stream} and relays its NDJSON body verbatim', async () => {
+  // The pull is a SERVER-owned background job, not a proxied stream: a learner who closes the
+  // dialog (or navigates, or reloads) mid-download must not lose gigabytes of progress. POST
+  // starts the job and returns at once; GET /api/setup/models/pulls reports progress until done.
+  it('starts a background job and reports its progress via GET /pulls until done', async () => {
     process.env.OLLAMA_BASE_URL = 'http://ollama.test/v1';
     const body = ndjson([
       { status: 'pulling manifest' },
@@ -304,12 +307,90 @@ describe('POST /api/setup/models/pull — choose a model, we install it', () => 
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ model: 'qwen3:8b' }),
     });
-    expect(res.status).toBe(200);
-    expect(res.headers.get('content-type')).toBe('application/x-ndjson');
-    const text = await res.text();
-    expect(text).toContain('"status":"downloading"');
-    expect(text).toContain('"completed":40');
-    expect(text.trim().split('\n')).toHaveLength(3); // passed through line-for-line
+    expect(res.status).toBe(202);
+    expect(await res.json()).toMatchObject({ started: true });
+    await vi.waitFor(async () => {
+      const jobs = await (await app.request('/api/setup/models/pulls')).json() as any;
+      expect(jobs['qwen3:8b']).toMatchObject({ done: true, error: null, status: 'success' });
+    });
+  });
+
+  it('a second POST for an in-flight model attaches instead of starting a second ollama pull', async () => {
+    process.env.OLLAMA_BASE_URL = 'http://ollama.test/v1';
+    let release!: () => void;
+    const held = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"status":"downloading","total":10,"completed":1}\n'));
+        release = () => { controller.enqueue(new TextEncoder().encode('{"status":"success"}\n')); controller.close(); };
+      },
+    });
+    const probeFetch = vi.fn(async () => ({ ok: true, body: held, status: 200 }));
+    const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
+    const post = () => app.request('/api/setup/models/pull', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'qwen3:8b' }),
+    });
+    expect((await post()).status).toBe(202);
+    const second = await post();
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ started: false });
+    expect(probeFetch).toHaveBeenCalledTimes(1); // one download, however many watchers
+    release();
+    await vi.waitFor(async () => {
+      const jobs = await (await app.request('/api/setup/models/pulls')).json() as any;
+      expect(jobs['qwen3:8b'].done).toBe(true);
+    });
+  });
+
+  it('reassembles a JSON line split across two network chunks', async () => {
+    process.env.OLLAMA_BASE_URL = 'http://ollama.test/v1';
+    const body = new ReadableStream<Uint8Array>({
+      start(c) {
+        const e = new TextEncoder();
+        c.enqueue(e.encode('{"status":"downl'));
+        c.enqueue(e.encode('oading","total":10,"completed":10}\n{"status":"success"}\n'));
+        c.close();
+      },
+    });
+    const app = buildSetupRoutes(cfgWith(plainModels()), {
+      probeFetch: (async () => ({ ok: true, status: 200, body })) as unknown as typeof fetch,
+    });
+    await app.request('/api/setup/models/pull', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'split:1b' }),
+    });
+    await vi.waitFor(async () => {
+      const jobs = await (await app.request('/api/setup/models/pulls')).json() as any;
+      expect(jobs['split:1b']).toMatchObject({ done: true, error: null, status: 'success' });
+    });
+  });
+
+  it("a mid-stream {error} line lands as the job's error, and a retry starts fresh", async () => {
+    process.env.OLLAMA_BASE_URL = 'http://ollama.test/v1';
+    let call = 0;
+    const probeFetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      body: ndjson(call++ === 0
+        ? [{ status: 'pulling manifest' }, { error: 'pull model manifest: file does not exist' }]
+        : [{ status: 'success' }]),
+    }));
+    const app = buildSetupRoutes(cfgWith(plainModels()), { probeFetch: probeFetch as unknown as typeof fetch });
+    const post = () => app.request('/api/setup/models/pull', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'nope:1b' }),
+    });
+    await post();
+    await vi.waitFor(async () => {
+      const jobs = await (await app.request('/api/setup/models/pulls')).json() as any;
+      expect(jobs['nope:1b'].error).toMatch(/does not exist/);
+      expect(jobs['nope:1b'].done).toBe(true);
+    });
+    // A finished-with-error job must not block trying again.
+    expect((await post()).status).toBe(202);
+    await vi.waitFor(async () => {
+      const jobs = await (await app.request('/api/setup/models/pulls')).json() as any;
+      expect(jobs['nope:1b']).toMatchObject({ done: true, error: null });
+    });
   });
 
   it('a missing model name is a 400', async () => {

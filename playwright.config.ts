@@ -43,7 +43,7 @@ export default defineConfig({
   // contention. One worker keeps the whole e2e run strictly sequential.
   workers: 1,
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: 'http://localhost:4183',
     // Escape hatch for sandboxes/CI images that ship a PINNED Chromium build under
     // PLAYWRIGHT_BROWSERS_PATH which doesn't match the build this @playwright/test version wants
     // (e.g. a 1194 image against playwright 1.61.1, which looks for 1228 and dies with
@@ -71,17 +71,22 @@ export default defineConfig({
       // (tests/e2e/fake-bin/yt-dlp) — captions with no network, same observable surface.
       command:
         'PATH="$PWD/tests/e2e/fake-bin:$PATH" LW_MOCK_MODEL=tests/e2e/script.json HARNESS_CONFIG=tests/e2e/e2e.config.json npx tsx src/server/index.ts',
-      port: 4820,
+      port: 4830,
       reuseExistingServer: !process.env.CI,
       timeout: 60_000,
       env: backendEnv,
     },
     {
-      // Build then serve the SPA; vite.config.ts's server.proxy is inherited by `vite preview`
-      // (preview.proxy falls back to server.proxy — see node_modules/vite/dist/node/chunks/node.js),
-      // so /api/* already reaches the harness server on :4820 with no extra config.
-      command: 'npx vite build && npx vite preview --port 4173 --strictPort',
-      port: 4173,
+      // Build then serve the SPA. HARNESS_API repoints the built SPA's /api proxy at the :4830
+      // fixture backend above — NOT vite.config.ts's :4820 default, which is where a developer's
+      // own live instance sits. This pair once rode the prod-shaped :4820/:4173 ports with
+      // reuseExistingServer on, and on a machine running the real app the suite silently drove
+      // that live instance (real student, real models) instead of the fixture — three specs
+      // "failed" against a mid-lesson UI. Every pair now has fixture-only ports.
+      command:
+        'HARNESS_API=http://localhost:4830 sh -c "npx vite build '
+        + '&& npx vite preview --port 4183 --strictPort"',
+      port: 4183,
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },

@@ -184,13 +184,19 @@ export class LlmHttpError extends Error {
   /** Worth retrying: timeout, conflict, rate limit, and every server error — the >= 500 band
    * covers Anthropic's 529 overloaded. */
   readonly retryable: boolean;
+  /** How long the PROVIDER says to wait, in ms, when it says so. A rate limit is the one failure
+   *  that reports its own cure — "try again in 6.826s" — and guessing instead of reading it is why
+   *  a 429 could still exhaust the retries: blind 2s+4s backoff totals 6s against a limit that
+   *  wanted 6.8s, so every attempt landed early and the turn died with no output at all. */
+  readonly retryAfterMs?: number;
 
-  constructor(provider: string, status: number, message: string) {
+  constructor(provider: string, status: number, message: string, retryAfterMs?: number) {
     super(message);
     this.name = 'LlmHttpError';
     this.provider = provider;
     this.status = status;
     this.retryable = status === 408 || status === 409 || status === 429 || status >= 500;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -203,5 +209,24 @@ export async function errorFromResponse(provider: string, res: Response): Promis
     const parsed = JSON.parse(text) as { error?: { message?: string } };
     if (parsed?.error?.message) message = parsed.error.message;
   } catch { /* non-JSON error body: keep the status-line message */ }
-  return new LlmHttpError(provider, res.status, message);
+  return new LlmHttpError(provider, res.status, message, retryAfterMs(res, message));
+}
+
+/** The provider's own stated wait: the standard `retry-after` header (seconds, or an HTTP date),
+ *  falling back to the seconds OpenAI embeds in the rate-limit message itself
+ *  ("Please try again in 6.826s") — which is often present when the header is not. */
+export function retryAfterMs(res: Response, message: string): number | undefined {
+  const header = res.headers?.get?.('retry-after');
+  if (header) {
+    const secs = Number(header);
+    if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+    const when = Date.parse(header);
+    if (Number.isFinite(when)) return Math.max(0, when - Date.now());
+  }
+  const m = /try again in ([\d.]+)\s*(ms|s)\b/i.exec(message);
+  if (m) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n)) return m[2].toLowerCase() === 'ms' ? n : n * 1000;
+  }
+  return undefined;
 }

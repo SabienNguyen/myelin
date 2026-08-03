@@ -4,6 +4,7 @@ import { COMMANDS, MODE_COMMANDS, isCommand, isStance } from '../shared/commands
 import type { HarnessConfig } from './config.js';
 import type { Engram } from './mcp.js';
 import { createTutorSession } from './session.js';
+import { deriveMode, lastUserText } from './deriveMode.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { clearStance, setStance } from './stanceStore.js';
 import { MODES, type Mode } from './prompt.js';
@@ -15,6 +16,11 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   app.post('/api/chat', async (c) => {
     const body = await c.req.json() as {
       messages: UIMessage[]; mode?: Mode; threadId?: string; writeUp?: boolean; command?: string;
+      /** Kinds in the current session plan, leading item first — lets the harness derive the mode
+       *  when the client sends none. */
+      planKinds?: string[];
+      /** True when the vault holds nothing real to teach from. */
+      emptyVault?: boolean;
     };
     // Slash commands arrive structured, validated against the one shared list — an unknown name
     // is a client bug (the menu only offers known commands), so fail loud and name the valid set
@@ -25,7 +31,19 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
       }, 400);
     }
     const command = body.command;
-    const mode: Mode = MODES.includes(body.mode as Mode) ? (body.mode as Mode) : 'learn';
+    // The client no longer has to send a mode. When it does not, the harness derives one from what
+    // the learner actually said plus the session plan — the selector was asking a human to answer a
+    // question the system is better placed to answer, and three separate mechanisms had already
+    // grown up to route around it (coldStartMode, writeIntent's one-shot promotion, and the mode
+    // slash commands). An explicit body.mode still wins, so nothing that sends one changes
+    // behaviour; see deriveMode.ts.
+    const mode: Mode = MODES.includes(body.mode as Mode)
+      ? (body.mode as Mode)
+      : deriveMode({
+        text: lastUserText(body.messages ?? []),
+        planKinds: Array.isArray(body.planKinds) ? body.planKinds : [],
+        emptyVault: body.emptyVault === true,
+      });
     // A mode command overrides the selector for THIS turn only server-side; the client flips its
     // own selector on send, so the following turns carry the new mode in body.mode as usual.
     const commandMode = command !== undefined && (MODE_COMMANDS as readonly string[]).includes(command)

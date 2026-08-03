@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appliedGradeBypass, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
+import { rejectedValues, appliedGradeBypass, untouchedSlugEvidence, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
 import { textModel } from './mockModel.js';
 
 describe('mathEquivalent (numeric sampling)', () => {
@@ -793,5 +793,135 @@ describe('appliedGradeBypass — the recording-integrity detector', () => {
       [{ slug: 'x', kind: 'struggled' }],
       [applied('x'), applied('x')],
     )).toEqual(['x']);
+  });
+});
+
+/**
+ * Evidence must land on a page the turn actually touched. Observed live: a learner asked about
+ * PyTorch FSDP2, the vault had no FSDP page, and the tutor — required to name a REAL slug and
+ * shown only a shortlist of the 273-page vault — recorded `exposed` against
+ * `pytorch-build-command`, noted "Explained FSDP2 sharding strategy axes". The mastery graph then
+ * claims a page the learner never met, which is the one thing this system exists not to do.
+ * repairSlug is innocent here (it leaves fsdp-shaped guesses alone); the tutor simply picked a
+ * real-but-unrelated slug. Detection only, like appliedGradeBypass: flag, log, never block.
+ */
+describe('untouchedSlugEvidence', () => {
+  it('flags evidence on a page the turn never read, staged, or wrote', () => {
+    expect(untouchedSlugEvidence(
+      [{ slug: 'pytorch-build-command', kind: 'exposed' }],
+      { read: ['autograd'], staged: [], written: [] },
+    )).toEqual(['pytorch-build-command']);
+  });
+
+  it('accepts evidence on a page the turn read, staged a block on, or just wrote', () => {
+    const touched = { read: ['autograd'], staged: ['retain-graph'], written: ['fsdp2-sharding'] };
+    expect(untouchedSlugEvidence([{ slug: 'autograd', kind: 'exposed' }], touched)).toEqual([]);
+    expect(untouchedSlugEvidence([{ slug: 'retain-graph', kind: 'struggled' }], touched)).toEqual([]);
+    // Writing the page first is the CORRECT freeform path for a topic the vault lacks.
+    expect(untouchedSlugEvidence([{ slug: 'fsdp2-sharding', kind: 'exposed' }], touched)).toEqual([]);
+  });
+
+  it('reports each offending slug once', () => {
+    expect(untouchedSlugEvidence(
+      [{ slug: 'x', kind: 'exposed' }, { slug: 'x', kind: 'struggled' }],
+      { read: [], staged: [], written: [] },
+    )).toEqual(['x']);
+  });
+});
+
+/**
+ * The pattern checker's `expected` is typed string | boolean | number — models legitimately send
+ * `expected: true` for a yes/no probe, and rejecting those turned working blocks into error cards.
+ * Comparing a boolean through a string normaliser threw "s.trim is not a function", which killed
+ * the whole TURN: an empty reply to "ok next", with no indication anything had gone wrong.
+ */
+describe('pattern checker accepts every shape its schema allows', () => {
+  const grade = (expected: unknown, answer: string) => gradeStructured(
+    { kind: 'pattern', expected } as any,
+    [answer],
+  );
+
+  it('grades a boolean expected without throwing', () => {
+    expect(() => grade(true, 'True')).not.toThrow();
+    expect(grade(true, 'True').allCorrect).toBe(true);
+    expect(grade(true, 'False').allCorrect).toBe(false);
+  });
+
+  it('grades a numeric expected without throwing', () => {
+    expect(grade(42, '42').allCorrect).toBe(true);
+    expect(grade(42, '43').allCorrect).toBe(false);
+  });
+
+  it('still grades strings as before', () => {
+    expect(grade('requires_grad', ' Requires_Grad ').allCorrect).toBe(true);
+  });
+
+  it('reports the expected value in the detail rather than [object Object]', () => {
+    expect(grade(true, 'no').detail).toMatch(/expected "true"/);
+  });
+});
+
+/**
+ * Nothing submitted cannot demonstrate knowledge. A four-item quiz submitted entirely EMPTY came
+ * back 4/4 CORRECT and minted evidence on four separate pages — the grader model was asked to judge
+ * empty strings and obliged. The quiz path's own guard only covered a MALFORMED submission; one
+ * carrying entries whose `answer` is "" looked well-formed and went straight to the model.
+ */
+describe('a blank submission is never graded correct', () => {
+  const cfg = { vault: '/tmp', student: 'kid', models: {} } as any;
+  // If any of these reach the model, the stub makes them CORRECT — so a passing test proves the
+  // guard fired before the model was ever consulted.
+  const yesMan = { model: { generateText: async () => ({ text: 'CORRECT — looks right', usage: {} }) } } as any;
+
+  it('marks an all-empty quiz incorrect, and struggles every page', async () => {
+    const input = {
+      title: 'q',
+      items: [
+        { id: 'a', type: 'short', prompt: 'Explain A', pageSlug: 'page-a' },
+        { id: 'b', type: 'short', prompt: 'Explain B', pageSlug: 'page-b' },
+      ],
+    };
+    const out = { answers: [{ id: 'a', answer: '' }, { id: 'b', answer: '   ' }] };
+    const g = await gradeBlockOutput('quiz', input as any, out as any, cfg, yesMan);
+    expect(g.verdict).toBe('incorrect');
+    expect(g.detail).toBe('0/2');
+    expect(g.evidence.every((e: any) => e.kind === 'struggled')).toBe(true);
+    expect(g.evidence.map((e: any) => e.slug).sort()).toEqual(['page-a', 'page-b']);
+  });
+
+  it('marks an empty writing_draft incorrect without consulting the rubric judge', async () => {
+    const g = await gradeBlockOutput(
+      'writing_draft',
+      { prompt: 'Argue X', pageSlug: 'essay', rubric: ['cites a source', 'has a thesis'] } as any,
+      { draft: '   ' } as any, cfg, yesMan,
+    );
+    expect(g.verdict).toBe('incorrect');
+    expect(g.evidence[0].kind).toBe('struggled');
+  });
+});
+
+/**
+ * Zod reports which options were expected and where, but never what actually arrived — so a live
+ * annotation failure ("expected one of strong|wordy|vague|structure|grammar") left nothing in the
+ * log to act on. No way to tell whether the model wanted a sensible sixth category or emitted
+ * noise, and therefore no way to decide whether the schema is too narrow.
+ */
+describe('a rejected structured value is named in the log', () => {
+  it('extracts the received value and its path', async () => {
+    const { z } = await import('zod');
+    const schema = z.object({ annotations: z.array(z.object({ category: z.enum(['strong', 'wordy']) })) });
+    const bad = schema.safeParse({ annotations: [{ category: 'strong' }, { category: 'nitpick' }] });
+    expect(bad.success).toBe(false);
+    const out = rejectedValues(bad.error);
+    // Either the value or nothing — but when zod carries it, it must reach the log.
+    if (out) {
+      expect(out).toContain('nitpick');
+      expect(out).toContain('annotations.1.category');
+    }
+  });
+
+  it('says nothing for a non-zod failure', () => {
+    expect(rejectedValues(new Error('network died'))).toBe('');
+    expect(rejectedValues(undefined)).toBe('');
   });
 });

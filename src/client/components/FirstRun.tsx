@@ -40,6 +40,18 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
       .catch(() => setState(null));
   }, []);
 
+  // Ollama tags already on disk. Discovery is keyless — the gate blocks model CALLS, not the tag
+  // probe — and without it the on-ramp offered a multi-GB "Get" for a model the person already
+  // had. Best-effort: on failure every row just says Get, and a Get of an installed tag is a
+  // fast verify, not a re-download.
+  const [installedLocal, setInstalledLocal] = useState<string[]>([]);
+  useEffect(() => {
+    fetch('/api/setup/models')
+      .then((r) => r.json())
+      .then((d) => setInstalledLocal((d?.available?.ollama ?? []) as string[]))
+      .catch(() => {});
+  }, []);
+
   async function saveKey() {
     setBusy(true);
     setError(null);
@@ -202,7 +214,7 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
               re-reads /api/setup — with nothing on the Anthropic route the gate lifts itself. */}
           <p className="firstrun-getter-lede">Don’t have a model yet? Pick one and we’ll install it:</p>
           <LocalModelGetter
-            installed={[]}
+            installed={installedLocal}
             busy={busy}
             onConfigured={(id) => saveAllRolesTo(`ollama:${id}`, { rails: true })}
           />

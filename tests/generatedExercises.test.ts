@@ -98,12 +98,15 @@ describe('the verification gates', () => {
 });
 
 describe('generate -> review -> serve', () => {
-  it('a generated exercise lands PENDING, and pending is NOT served', async () => {
+  // Was: "lands PENDING, and pending is NOT served". The review gate was removed by decision on
+  // 2026-07-31 — the five gates are the correctness check, and holding a PROVEN exercise behind a
+  // human click made the feature invisible: code_exercise stages only from approvedGenerated, so
+  // exercises mined from a real repo could not be taught until someone opened the Library.
+  it('a gate-passing generated exercise is approved on arrival and served immediately', async () => {
     const ex = await generateExercise(vault, 'ndjson-parser', 'parse ndjson', { generate: stubModel(NDJSON) });
-    expect(ex.status).toBe('pending');
     expect(ex.verification.ok).toBe(true);
-    expect(builtinPatterns(vault)).not.toContain('ndjson-parser');
-    expect(approvedGenerated(vault)).toHaveLength(0);
+    expect(ex.status).toBe('approved');
+    expect(approvedGenerated(vault).map((e) => e.pattern)).toEqual(['ndjson-parser']);
   });
 
   it('a generation that fails the gates is auto-rejected with the gate named', async () => {
@@ -151,17 +154,20 @@ describe('generate -> review -> serve', () => {
     const app = buildBuiltinGapRoutes({ vault });
     const body = await (await app.request('/api/gap/generated')).json();
     expect(body.exercises).toHaveLength(1);
-    expect(body.exercises[0].status).toBe('pending');
+    expect(body.exercises[0].status).toBe('approved');
     expect(body.exercises[0].verification.gates.length).toBe(5);
   });
 
-  it('the pattern list includes approved generated exercises — Practice reads this', async () => {
+  it('the pattern list includes verified generated exercises — Practice reads this', async () => {
     await generateExercise(vault, 'ndjson-parser', '', { generate: stubModel(NDJSON) });
     const app = buildBuiltinGapRoutes({ vault });
-    // Pending: not listed.
+    // Verified on arrival, so it is listed straight away — no human step in between.
     let body = await (await app.request('/api/gap/patterns')).json();
+    expect(body.patterns.map((p: any) => p.pattern)).toEqual(['stream-consumer', 'ndjson-parser']);
+    // Rejecting it from the Library takes it back out — the gate now removes rather than admits.
+    setGeneratedStatus(vault, 'ndjson-parser', 'rejected');
+    body = await (await app.request('/api/gap/patterns')).json();
     expect(body.patterns.map((p: any) => p.pattern)).toEqual(['stream-consumer']);
-    // Approved: listed after the builtin.
     setGeneratedStatus(vault, 'ndjson-parser', 'approved');
     body = await (await app.request('/api/gap/patterns')).json();
     expect(body.patterns.map((p: any) => p.pattern)).toEqual(['stream-consumer', 'ndjson-parser']);

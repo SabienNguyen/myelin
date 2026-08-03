@@ -55,9 +55,18 @@ interface WireChunk {
  * rejected round-trip on every structured generation instead of once per endpoint. */
 const responseFormatRejected = new Set<string>();
 
-/** Test seam: forget rejected endpoints, so one fake server can exercise both paths. */
+/** Endpoint+model pairs that refuse function tools unless reasoning is explicitly off. Same
+ *  module-level reasoning as responseFormatRejected above: models.ts builds a fresh adapter per
+ *  call, so instance state would re-learn — and re-pay the doomed round-trip — every single turn.
+ *  On a tutor loop that is a wasted request before every answer. */
+const reasoningNoneRequired = new Set<string>();
+const quirkKey = (baseUrl: string, modelId: string) => `${baseUrl}|${modelId}`;
+
+/** Test seam: forget everything learned about endpoints, so one fake server can exercise both
+ *  the naive and the learned path. Clears every quirk memory in this module. */
 export function resetResponseFormatMemory(): void {
   responseFormatRejected.clear();
+  reasoningNoneRequired.clear();
 }
 
 /** A rejection OF response_format, as opposed to a call that failed for its own reasons: the
@@ -191,7 +200,37 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   return body;
 }
 
-function post(opts: OpenAICompatModelOptions, body: Json, signal?: AbortSignal): Promise<Response> {
+/**
+ * The one refusal this wire answers by itself.
+ *
+ * GPT-5.6 (Sol/Terra/Luna) rejects function tools on /chat/completions while reasoning is on, and
+ * says exactly how to proceed: "To use function tools, use /v1/responses or set reasoning_effort
+ * to 'none'". Since the endpoint hands us the remedy, apply it — a live compile lost every chapter
+ * of an ingest to this, and no amount of model strength would have helped.
+ *
+ * Deliberately narrow: status 400 AND both phrases. Any other 400 propagates untouched, so no
+ * other provider's request shape changes because of this.
+ */
+function isReasoningToolsConflict(e: unknown): boolean {
+  return e instanceof LlmHttpError && e.status === 400
+    && /reasoning_effort/i.test(e.message) && /function tools?/i.test(e.message);
+}
+
+async function post(opts: OpenAICompatModelOptions, body: Json, signal?: AbortSignal): Promise<Response> {
+  const key = quirkKey(opts.baseUrl, opts.modelId);
+  const withNone = () => ({ ...(body as object), reasoning_effort: 'none' } as Json);
+  // Already learned: skip straight to the shape this endpoint accepts.
+  if (reasoningNoneRequired.has(key)) return postOnce(opts, withNone(), signal);
+  try {
+    return await postOnce(opts, body, signal);
+  } catch (e) {
+    if (!isReasoningToolsConflict(e) || (body as any).reasoning_effort === 'none') throw e;
+    reasoningNoneRequired.add(key);
+    return postOnce(opts, withNone(), signal);
+  }
+}
+
+function postOnce(opts: OpenAICompatModelOptions, body: Json, signal?: AbortSignal): Promise<Response> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return withRetries(async () => {
     // Per-attempt controller so the header timeout can be cleared once headers arrive — a plain

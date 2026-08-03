@@ -20,6 +20,11 @@ import { SpeakerSlashIcon as SpeakerSlash } from '@phosphor-icons/react/dist/csr
  *  "vi-VN"), preferring an exact tag when several exist. Exported for the unit test, which drives
  *  it with a plain array instead of the live voice list. */
 export function pickVoice<T extends { lang: string }>(voices: T[], lang: string): T | null {
+  // A model-staged block can arrive without `lang` even though the schema requires it — nothing
+  // validated agentic block args before they reached the client, and the unguarded dereference
+  // here white-screened the page ("Cannot read properties of undefined"). No tag means no voice,
+  // which is exactly the no-matching-voice path the caller already handles.
+  if (!lang) return null;
   const want = lang.toLowerCase();
   const primary = want.split('-')[0];
   const matches = voices.filter((v) => {

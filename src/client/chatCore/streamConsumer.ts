@@ -11,9 +11,15 @@ import type { UIMessage } from '../../shared/uiMessages.js';
  * id/trigger/tools/system — all ignored server-side, dropped here. */
 export interface ChatRequestBody {
   messages: UIMessage[];
-  mode: string;
+  /** Absent means "derive it" — the server picks the mode from the learner's words and the plan
+   *  (deriveMode.ts). Present only when something explicitly chose one. */
+  mode?: string;
   threadId: string;
   writeUp: boolean;
+  /** Kinds in the current session plan, leading item first — an input to that derivation. */
+  planKinds?: string[];
+  /** True when the vault holds nothing real to teach from. */
+  emptyVault?: boolean;
   /** Structured slash command for THIS turn only (shared/commands.ts) — absent on ordinary
    * sends and on resubmits, so a block answer can never replay the command that staged it. */
   command?: string;

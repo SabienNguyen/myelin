@@ -192,13 +192,21 @@ export function WritingDraftInner({ args, result, addResult }: {
         {/* A failed criterion is an OPEN loop, and the card should offer to close it: one click
             asks the tutor for a revision round. The tutor reissues writing_draft with round+1,
             the SAME rubric, and priorDraft carrying this text (prompt rule 11b) — so the learner
-            edits their own words against the same contract instead of retyping from memory. */}
+            edits their own words against the same contract instead of retyping from memory.
+            The criteria travel IN the message, verbatim. Saying "same rubric" and leaving the model
+            to recall it from several turns back produced a round 2 graded against a rewritten
+            contract — round 1's "Correctly identifies that a name beginning with two underscores…"
+            became "States the triggering syntax and the dunder exception accurately". Moving the
+            goalposts mid-revision is exactly what 11b exists to prevent. */}
         {grading?.rubric?.some((r: any) => !r.pass) && (
           <button
             type="button"
             className="revise-btn"
             onClick={() => threadRuntime.append(
-              `Set me up to revise this draft — round ${(args.round ?? 1) + 1}, same rubric, starting from what I wrote.`,
+              `Set me up to revise this draft — round ${(args.round ?? 1) + 1}, starting from what I wrote.\n\n`
+              + 'Reissue writing_draft with EXACTLY these rubric criteria, word for word — do not '
+              + 'reword, merge, or add any:\n'
+              + (args.rubric ?? []).map((r: string) => `- ${r}`).join('\n'),
             )}
           >
             Revise this draft

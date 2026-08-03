@@ -7,6 +7,7 @@ import { DecayHorizon } from './DecayHorizon.js';
 import { ReviewQueue } from './ReviewQueue.js';
 import { PathsSection } from './PathsSection.js';
 import { CoursePractice } from './CoursePractice.js';
+import { Collapsible } from './Collapsible.js';
 import { LinkDirectory } from './LinkDirectory.js';
 
 type Entry = {
@@ -93,8 +94,13 @@ function RepoIngestRow({ entry }: { entry: Entry }) {
   );
 }
 
-/** Inline-editable book heading: pencil → input; Enter/blur saves (PATCH), Escape cancels. */
-function BookTitle({ book, onRenamed }: { book: string; onRenamed: () => void }) {
+/** A book's foldable block, with an inline-editable heading: pencil → input; Enter/blur saves
+ *  (PATCH), Escape cancels. Editing state lives HERE rather than in a heading component because
+ *  the fold's header renders the name inside its toggle <button> — a rename control nested in
+ *  that button would be invalid HTML and its click would never land, so the two need one owner. */
+function BookSection({ book, onRenamed, children }: {
+  book: string; onRenamed: () => void; children: React.ReactNode;
+}) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(book);
 
@@ -113,6 +119,7 @@ function BookTitle({ book, onRenamed }: { book: string; onRenamed: () => void })
 
   if (editing) {
     return (
+      <section className="library-book">
       <input
         className="book-rename"
         value={value}
@@ -125,19 +132,24 @@ function BookTitle({ book, onRenamed }: { book: string; onRenamed: () => void })
           if (e.key === 'Escape') { setValue(book); setEditing(false); }
         }}
       />
+      {children}
+      </section>
     );
   }
   return (
-    // h2, not h3: book names and Paths are the Library's TOP-level sections, and with no h1/h2
-    // rendered before them an h3 was the document's first heading — the one axe violation the
-    // whole app produced (heading-order).
-    <h2>
-      {book}
-      <button type="button" className="ghost-btn rename-btn" aria-label={`Rename ${book}`}
-        onClick={() => { setValue(book); setEditing(true); }}>
-        <PencilSimple size={13} weight="duotone" />
-      </button>
-    </h2>
+    <Collapsible
+      id={`book:${book}`}
+      className="library-book"
+      title={book}
+      actions={(
+        <button type="button" className="ghost-btn rename-btn" aria-label={`Rename ${book}`}
+          onClick={() => { setValue(book); setEditing(true); }}>
+          <PencilSimple size={13} weight="duotone" />
+        </button>
+      )}
+    >
+      {children}
+    </Collapsible>
   );
 }
 
@@ -285,8 +297,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
       </div>
       <LinkDirectory visible={visible} queuedUrls={queuedUrls} />
       {books.map((book) => (
-        <section key={book} className="library-book">
-          <BookTitle book={book} onRenamed={() => setRefresh((r) => r + 1)} />
+        <BookSection key={book} book={book} onRenamed={() => setRefresh((r) => r + 1)}>
           <Byline source={sources.find((s) => s.book === book)} />
           <ul>
             {queue.filter((e) => e.book === book).map((e) => (
@@ -302,6 +313,24 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
                 {/* Terminal rows are history the learner has read — dismissable, so a failed
                     ingest from weeks ago stops haunting the Library. The server refuses
                     non-terminal rows, so this renders only where the request can succeed. */}
+                {/* Retry before dismiss: a failed row's source is still on disk, so when the
+                    CAUSE has been fixed the useful verb is "try again", not "forget this". */}
+                {(e.status === 'error' || e.status === 'convert-error') && (
+                  <button
+                    type="button"
+                    className="q-retry"
+                    aria-label={`retry ${e.title}`}
+                    title="compile this chapter again"
+                    onClick={async () => {
+                      await fetch('/api/ingest/entry/retry', {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ chapter: e.chapter }),
+                      });
+                      setRefresh((r) => r + 1);
+                    }}
+                  >retry</button>
+                )}
                 {(e.status === 'error' || e.status === 'convert-error' || (e.status === 'done' && e.mode === 'repo')) && (
                   <button
                     type="button"
@@ -321,7 +350,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
               </li>
             ))}
           </ul>
-        </section>
+        </BookSection>
       ))}
       <CoursePractice visible={visible} />
       <PracticePanel visible={visible} />

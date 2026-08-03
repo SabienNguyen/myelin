@@ -26,6 +26,14 @@ export function modelLabel(id: string): { name: string; how: string } {
   if (id.startsWith('ollama:')) {
     return { name: id.slice('ollama:'.length), how: 'local model via Ollama' };
   }
+  // The openai: route needed its own branch, not the Anthropic fallthrough: the badge exists to
+  // answer "which model, and whose bill", and it was naming the wrong vendor for every
+  // OpenAI-compatible model. The id is shown verbatim too — `pretty()` title-cases and rewrites
+  // trailing digits for `claude-sonnet-5`, which turned `openai:gpt-5.6-luna` into
+  // `Openai:gpt-5.6-luna`, an id that exists nowhere.
+  if (id.startsWith('openai:')) {
+    return { name: id.slice('openai:'.length), how: 'OpenAI-compatible endpoint' };
+  }
   return { name: pretty(id), how: 'Anthropic API' };
 }
 
@@ -164,7 +172,11 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
   );
 }
 
-const ROLE_ORDER = ['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile'] as const;
+// quiz_gen is deliberately absent. It is a configurable role nothing ever calls — quiz blocks are
+// staged by the TUTOR as a block tool, there is no separate quiz model — so offering it here asked
+// the learner to choose a model that could not affect anything, and reserved a usage row that never
+// filled. The config key is kept (config.ts) so existing settings still load.
+const ROLE_ORDER = ['tutor', 'grader', 'card_gen', 'compile'] as const;
 type RoleName = typeof ROLE_ORDER[number];
 const URL_FIELDS = [
   { key: 'OLLAMA_BASE_URL', label: 'ollama base url', placeholder: 'http://localhost:11434/v1' },
@@ -207,7 +219,7 @@ export function discoveredModelIds(available: Available): string[] {
 
 /** The roles the local preset repoints. compile stays put: it writes the vault, so it keeps the
  * strongest model configured. */
-const PRESET_ROLES = ['tutor', 'grader', 'quiz_gen', 'card_gen'] as const;
+const PRESET_ROLES = ['tutor', 'grader', 'card_gen'] as const;
 
 type UsageTotals = { in: number; out: number; cacheRead: number; cacheWrite: number; calls: number };
 type UsageSummary = { today: Record<string, UsageTotals> };
@@ -223,13 +235,15 @@ export function fmtTokens(n: number): string {
   return String(n);
 }
 
-/** One dialog line per role with any spend today. Cache share is per role — cacheRead over all
- * input (fresh + cached), the same split /api/usage reports overall. */
+/** One dialog line per role with any spend today. Cache traffic rides as the raw read/write
+ * figures (the numbers a bill is made of) rather than the derived share it once showed — the
+ * share is computable from these, not the other way round. Suffix only when there IS cache
+ * traffic: a local model with none keeps its short line. */
 export function usageLine(role: string, t: UsageTotals): string {
-  const cached = t.cacheRead > 0
-    ? ` · ${Math.round((t.cacheRead / (t.in + t.cacheRead)) * 100)}% cached`
+  const cache = t.cacheRead > 0 || t.cacheWrite > 0
+    ? ` · cache ${fmtTokens(t.cacheRead)} read / ${fmtTokens(t.cacheWrite)} write`
     : '';
-  return `${role} ${fmtTokens(t.in)} in / ${fmtTokens(t.out)} out${cached}`;
+  return `${role} ${fmtTokens(t.in)} in / ${fmtTokens(t.out)} out${cache}`;
 }
 
 /**
@@ -470,13 +484,13 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                 </span>
               </span>
               <span className="models-hint">
-                sets tutor, grader, quiz_gen, card_gen to it and turns rails on. compile stays put —
+                sets tutor, grader, card_gen to it and turns rails on. compile stays put —
                 compile writes the vault, keep it on the strongest model you have. save still applies.
               </span>
             </>
           )}
           <span className="models-hint">
-            tutor and compile want the strongest model; grader, quiz_gen, card_gen run fine on a
+            tutor and compile want the strongest model; grader and card_gen run fine on a
             cheap or local one
           </span>
           <span className="models-group">provider endpoints</span>

@@ -1,0 +1,163 @@
+import { describe, it, expect } from 'vitest';
+import { budgetChars, classifyFailure, isTransportFailure } from '../src/server/pipeline.js';
+import { LlmHttpError } from '../src/server/llm/index.js';
+
+describe('budgetChars', () => {
+  it('derives a char budget from contextTokens with scaffold headroom', () => {
+    // tokens*4 chars minus 8k scaffold reserve (system + schema + instructions)
+    expect(budgetChars(32_768)).toBe(32_768 * 4 - 8_000);
+  });
+  it('falls back to the proven CHAPTER_CHUNK_CHARS default when unset', () => {
+    expect(budgetChars(undefined)).toBe(24_000);
+  });
+  it('never returns less than 4k chars even for a tiny window', () => {
+    expect(budgetChars(1_000)).toBe(4_000);
+  });
+});
+
+describe('classifyFailure', () => {
+  it('transport: RETRYABLE LlmHttpError and undici fetch-failed', () => {
+    expect(classifyFailure(new LlmHttpError('ollama', 503, 'boom'), 10, 100)).toBe('transport');
+    expect(classifyFailure(new TypeError('fetch failed'), 10, 100)).toBe('transport');
+  });
+
+  // A permanent 4xx is the endpoint saying "this request is wrong", not "come back later".
+  // Treating it as transport made compile fail the entry and requeue it forever — observed live
+  // against gpt-5.6-luna, whose 400 for "function tools ... not supported in /v1/chat/completions"
+  // requeued every chapter into an identical failure instead of falling back to distillation
+  // (which uses response_format and would have succeeded).
+  it('a NON-retryable http error is not transport — it must reach the fallback ladder', () => {
+    const badRequest = new LlmHttpError('openai-compat', 400, 'function tools are not supported');
+    expect(isTransportFailure(badRequest)).toBe(false);
+    expect(classifyFailure(badRequest, 10, 100)).toBe('weak-output');
+  });
+
+  it('rate limits and server errors stay transport — those DO recover on retry', () => {
+    for (const status of [408, 409, 429, 500, 529]) {
+      expect(isTransportFailure(new LlmHttpError('p', status, 'x'))).toBe(true);
+    }
+  });
+  it('overflow: the prompt did not fit the budget', () => {
+    expect(classifyFailure(new Error('schema rejected'), 200, 100)).toBe('overflow');
+  });
+  it('weak-output: it fit, the model still failed', () => {
+    expect(classifyFailure(new Error('schema rejected'), 50, 100)).toBe('weak-output');
+  });
+});
+
+import { mapPieces } from '../src/server/pipeline.js';
+
+describe('mapPieces', () => {
+  it('runs pieces concurrently up to the cap, results in piece order', async () => {
+    let live = 0; let peak = 0;
+    const { results, receipts } = await mapPieces({
+      pieces: ['a', 'b', 'c', 'd', 'e'],
+      budget: 100,
+      concurrency: 2,
+      attempt: async (p) => {
+        live++; peak = Math.max(peak, live);
+        await new Promise((r) => setTimeout(r, 10));
+        live--;
+        return p.toUpperCase();
+      },
+      floor: async () => 'FLOOR',
+    });
+    expect(results).toEqual(['A', 'B', 'C', 'D', 'E']);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(receipts.every((r) => r.outcome === 'ok')).toBe(true);
+  });
+
+  it('retries once with the rejection message, then floors with a diagnosed class', async () => {
+    const attempts: (string | undefined)[] = [];
+    const { results, receipts } = await mapPieces({
+      pieces: ['x'.repeat(10)],
+      budget: 100,
+      attempt: async (_p, rejection) => { attempts.push(rejection); throw new Error('schema rejected'); },
+      floor: async (_p, cls, reason) => `floored:${cls}:${reason}`,
+    });
+    expect(attempts).toEqual([undefined, 'schema rejected']); // retry carried the why
+    expect(results[0]).toBe('floored:weak-output:schema rejected');
+    expect(receipts[0]).toMatchObject({ outcome: 'floored', class: 'weak-output' });
+  });
+
+  it('an oversize piece floors as overflow', async () => {
+    const { receipts } = await mapPieces({
+      pieces: ['y'.repeat(500)],
+      budget: 100,
+      attempt: async () => { throw new Error('cut off'); },
+      floor: async () => 'floored',
+    });
+    expect(receipts[0].class).toBe('overflow');
+  });
+
+  it('transport failure rejects the whole map — queues must retry later, not consume', async () => {
+    await expect(mapPieces({
+      pieces: ['a'],
+      budget: 100,
+      attempt: async () => { throw new TypeError('fetch failed'); },
+      floor: async () => 'never',
+    })).rejects.toThrow(/fetch failed/);
+  });
+
+  it('hands attempt/floor the piece\'s own index — not something the caller must re-derive', async () => {
+    const seenIndices: number[] = [];
+    await mapPieces({
+      pieces: ['a', 'b', 'c'],
+      budget: 100,
+      concurrency: 1,
+      attempt: async (_p, _rejection, i) => { seenIndices.push(i); return 'ok'; },
+      floor: async () => 'never',
+    });
+    expect(seenIndices).toEqual([0, 1, 2]);
+  });
+
+  it('a transport failure stops the worker from claiming any piece after it — a single-worker regression pin', async () => {
+    // concurrency: 1 makes this deterministic without timing games: one worker processes pieces in
+    // order, and a transport throw must end its loop rather than moving on to the next piece.
+    const attemptedPieces: string[] = [];
+    await expect(mapPieces({
+      pieces: ['a', 'b', 'c'],
+      budget: 100,
+      concurrency: 1,
+      attempt: async (p) => {
+        attemptedPieces.push(p);
+        if (p === 'a') throw new TypeError('fetch failed');
+        return p;
+      },
+      floor: async () => 'never',
+    })).rejects.toThrow(/fetch failed/);
+    expect(attemptedPieces).toEqual(['a']);
+  });
+
+  it('a transport failure stops SIBLING workers from claiming a fresh piece — the vault-corruption regression', async () => {
+    // Three pieces, concurrency 3: all three are claimed synchronously before any await (mapPieces'
+    // `next++` bump), so 'a', 'b', and 'c' all start "in flight" together. 'a' fails immediately
+    // (transport); 'b' and 'c' are held open on a gate so the test controls exactly when they
+    // finish — after they do, a worker becomes free and (pre-fix) would have claimed a 4th piece.
+    // Asserted on a call counter, not on wall-clock timing.
+    const attemptedPieces: string[] = [];
+    let releaseSlow: () => void = () => {};
+    const slowGate = new Promise<void>((resolve) => { releaseSlow = resolve; });
+
+    const runningMap = mapPieces({
+      pieces: ['a', 'b', 'c', 'd', 'e'],
+      budget: 100,
+      concurrency: 3,
+      attempt: async (p) => {
+        attemptedPieces.push(p);
+        if (p === 'a') throw new TypeError('fetch failed');
+        if (p === 'b' || p === 'c') await slowGate; // held open past 'a's failure
+        return p;
+      },
+      floor: async () => 'never',
+    });
+
+    await expect(runningMap).rejects.toThrow(/fetch failed/);
+    // 'a' has already failed and set the abort flag; 'b' and 'c' are still gated. Release them now
+    // and give their workers a turn to loop back — a pre-fix worker would claim 'd' here.
+    releaseSlow();
+    await new Promise((r) => { setTimeout(r, 20); });
+
+    expect(attemptedPieces.sort()).toEqual(['a', 'b', 'c']);
+  });
+});

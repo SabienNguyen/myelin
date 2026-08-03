@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { withRetries, anthropicModel, LlmHttpError } from '../../src/server/llm/index.js';
+import { errorFromResponse } from '../../src/server/llm/types.js';
+import { MAX_RETRY_WAIT_MS } from '../../src/server/llm/retry.js';
 
 const NO_DELAY = { delayMs: () => 0 };
 
@@ -86,5 +88,55 @@ describe('adapter wiring', () => {
     } finally {
       server.close();
     }
+  });
+});
+
+/**
+ * A rate limit is the one failure that reports its own cure. Blind 2s+4s backoff against a limit
+ * that asked for 6.8s meant every attempt landed early and the turn died with no output at all —
+ * the learner saw an empty reply to "keep going".
+ */
+describe('provider-stated retry delays', () => {
+  const rateLimited = (msg: string, headers: Record<string, string> = {}) => ({
+    ok: false,
+    status: 429,
+    headers: new Headers(headers),
+    text: async () => JSON.stringify({ error: { message: msg } }),
+  }) as unknown as Response;
+
+  it('reads the seconds OpenAI embeds in the message when no header is present', async () => {
+    const e = await errorFromResponse('openai', rateLimited('Rate limit reached. Please try again in 6.826s.'));
+    expect(e.status).toBe(429);
+    expect(e.retryable).toBe(true);
+    expect(e.retryAfterMs).toBeCloseTo(6826, 0);
+  });
+
+  it('prefers the retry-after header', async () => {
+    const e = await errorFromResponse('openai', rateLimited('slow down', { 'retry-after': '12' }));
+    expect(e.retryAfterMs).toBe(12_000);
+  });
+
+  it('leaves retryAfterMs undefined when the provider says nothing', async () => {
+    const e = await errorFromResponse('openai', rateLimited('too many requests'));
+    expect(e.retryAfterMs).toBeUndefined();
+  });
+
+  it('recovers from a rate limit once the stated wait is honoured', async () => {
+    let n = 0;
+    const fn = async () => {
+      n += 1;
+      // 1ms stated delay: the point under test is that a 429 carrying its own delay RECOVERS,
+      // not that the wall clock advanced.
+      if (n < 3) throw new LlmHttpError('openai', 429, 'try again in 0.001s', 1);
+      return 'ok';
+    };
+    await expect(withRetries(fn, { delayMs: () => 0 })).resolves.toBe('ok');
+    expect(n).toBe(3);
+  });
+
+  it('caps a provider-stated wait so a turn cannot be parked indefinitely', async () => {
+    const e = new LlmHttpError('openai', 429, 'try again in 600s', 600_000);
+    expect(e.retryAfterMs).toBe(600_000);
+    expect(MAX_RETRY_WAIT_MS).toBeLessThanOrEqual(30_000);
   });
 });

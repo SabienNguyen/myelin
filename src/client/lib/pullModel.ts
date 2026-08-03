@@ -1,7 +1,8 @@
-// Client side of the "choose a model, we install it" flow: POST the model to the pull proxy and
-// read Ollama's newline-delimited JSON progress back, calling onProgress per line. Resolves when
-// the stream ends clean, rejects on a terminal {error} line or a transport failure — so a caller
-// can `await pullOllamaModel(...)` and then configure the roles, sure the model is on disk.
+// Client side of the "choose a model, we install it" flow. The download itself is a SERVER-owned
+// background job (POST starts it, the server drains Ollama's stream detached from any request), so
+// closing the dialog or navigating away costs nothing: this module only starts jobs and WATCHES
+// them, polling GET /api/setup/models/pulls for progress. `activePulls` is how a freshly-mounted
+// surface finds a download it (or a previous surface) started earlier and re-attaches.
 
 /** Why a pull couldn't connect, straight from the proxy. The caller renders a different next step
  *  for each — install, start, or check the network — so this stays a tag, not prose. */
@@ -33,10 +34,60 @@ export interface PullProgress {
   percent: number | null;
 }
 
+/** The server's job snapshot (setupRoutes.ts PullJob). */
+export interface PullJobState extends PullProgress {
+  error: string | null;
+  done: boolean;
+}
+
+interface WatchOpts {
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+  /** Poll cadence. The first read is immediate, so a finished job resolves without waiting. */
+  pollMs?: number;
+}
+
+/** Every pull the server knows about, finished ones included. Empty on any failure — a surface
+ *  that cannot ask simply shows no bars, which is the truthful degraded state. */
+export async function activePulls(fetchImpl: typeof fetch = fetch): Promise<Record<string, PullJobState>> {
+  try {
+    const res = await fetchImpl('/api/setup/models/pulls');
+    if (!res.ok) return {};
+    return await res.json() as Record<string, PullJobState>;
+  } catch {
+    return {};
+  }
+}
+
+/** Watch a running job to completion. Resolves when the job reports done; rejects on the job's
+ *  own error. An aborted signal stops the WATCHING only — the server keeps downloading — and
+ *  resolves quietly, because an unmounted surface has nobody left to tell. */
+export async function watchPull(
+  model: string,
+  onProgress: (p: PullProgress) => void,
+  opts: WatchOpts = {},
+): Promise<void> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const pollMs = opts.pollMs ?? 1000;
+  for (;;) {
+    if (opts.signal?.aborted) return;
+    const jobs = await activePulls(doFetch);
+    const job = jobs[model];
+    if (job) {
+      if (job.error) throw new Error(job.error);
+      onProgress({ status: job.status ?? '', percent: job.percent ?? null });
+      if (job.done) return;
+    }
+    await new Promise((r) => { setTimeout(r, pollMs); });
+  }
+}
+
+/** Start (or attach to — the server dedupes per model) a background pull, then watch it down.
+ *  Resolves when the model is on disk, so a caller can `await` and then configure the roles. */
 export async function pullOllamaModel(
   model: string,
   onProgress: (p: PullProgress) => void,
-  opts: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+  opts: WatchOpts = {},
 ): Promise<void> {
   const doFetch = opts.fetchImpl ?? fetch;
   const res = await doFetch('/api/setup/models/pull', {
@@ -45,8 +96,7 @@ export async function pullOllamaModel(
     body: JSON.stringify({ model }),
     signal: opts.signal,
   });
-  if (!res.ok || !res.body) {
-    // The proxy reports Ollama-unreachable and bad-request as JSON, not a stream.
+  if (!res.ok) {
     const err = await res.json().catch(() => ({})) as {
       error?: string; reason?: PullFailureReason; ollama?: { install?: OllamaInstallHint };
     };
@@ -56,31 +106,5 @@ export async function pullOllamaModel(
     if (err.reason) throw new PullConnectionError(message, err.reason, err.ollama?.install);
     throw new Error(message);
   }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    // NDJSON: one JSON object per line. A partial trailing line stays in buf for the next chunk.
-    let nl: number;
-    while ((nl = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, nl).trim();
-      buf = buf.slice(nl + 1);
-      if (!line) continue;
-      let msg: { status?: string; error?: string; total?: number; completed?: number };
-      try {
-        msg = JSON.parse(line);
-      } catch {
-        continue; // a malformed fragment is skipped, not fatal — the next line resyncs
-      }
-      // Ollama reports a failed pull as a mid-stream {error} line (bad model name, disk full).
-      if (msg.error) throw new Error(msg.error);
-      const percent = typeof msg.total === 'number' && msg.total > 0
-        ? Math.min(100, Math.round(((msg.completed ?? 0) / msg.total) * 100))
-        : null;
-      onProgress({ status: msg.status ?? '', percent });
-    }
-  }
+  await watchPull(model, onProgress, opts);
 }

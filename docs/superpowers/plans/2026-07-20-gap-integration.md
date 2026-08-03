@@ -1,3 +1,8 @@
+> Historical: the external the-gap sidecar this plan integrates against was removed (branch
+> small-model-engine, 2026-07-31) — its mere presence on a developer's machine was silently
+> changing repo-ingest behaviour. Code exercises and repo mining now run entirely in-process
+> (`src/server/gap/`). The rest of this document is kept as-written for history.
+
 # Gap→Harness integration plan (tasks I1–I3)
 
 Goal: the Engram harness (localhost:4173) is the ONE place to interact with the whole

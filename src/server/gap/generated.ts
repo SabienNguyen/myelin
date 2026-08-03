@@ -417,8 +417,10 @@ export async function generateExercise(
   ex.verification = await verifyExercise(ex);
   // Failed gates are stored too — a rejected exercise with its failing gate named is how the
   // compile step stays debuggable. It is auto-rejected, not left pending, so nobody wastes a
-  // review on something the machine already refused.
-  if (!ex.verification.ok) ex.status = 'rejected';
+  // review on something the machine already refused. A PASSING one is auto-approved for the
+  // mirror-image reason (see mineRepo's note): the gates are the correctness check, and leaving
+  // it pending only hid it from code_exercise until someone visited the Library.
+  ex.status = ex.verification.ok ? 'approved' : 'rejected';
   saveGenerated(vault, ex);
   return ex;
 }

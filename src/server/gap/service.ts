@@ -1,13 +1,14 @@
 // The built-in coding sandbox: /api/gap/ladder and /api/gap/run served from THIS process, with
 // code execution in a killable child (runner.ts).
 //
-// This exists because the external the-gap sidecar is a separate service, absent by default — and
-// for most of this app's life that meant a fresh install had no way to run code at all. The
-// harness now ships one exercise and the machinery to grade it, so `code_exercise` works out of
-// the box; a configured `gap.url` still routes to the full external sidecar instead (mined
-// artifacts, more patterns), taking precedence over this (index.ts decides).
+// This exists because an early design routed code exercises through a separate external the-gap
+// service, absent by default — for most of this app's life that meant a fresh install had no way
+// to run code at all. The harness now ships one exercise and the machinery to grade it, so
+// `code_exercise` works out of the box; the external sidecar option was later removed outright
+// (docs/superpowers/plans/2026-07-20-gap-integration.md's header note) — this is the only sandbox
+// there is now.
 //
-// Same wire contract as the sidecar (the Pinned Contract in
+// Same wire contract the sidecar once had (the Pinned Contract in
 // docs/superpowers/plans/2026-07-20-gap-integration.md), same answer-integrity invariant:
 // reference_answer is stripped for every non-worked_example rung before serialization, and there
 // is no second, unstripped endpoint.
@@ -84,6 +85,14 @@ const DEFAULT_PATTERN = 'stream-consumer';
 export function builtinPatterns(vault?: string): string[] {
   const generated = vault ? approvedGenerated(vault).map((e) => e.pattern) : [];
   return [...Object.keys(EXERCISES), ...generated];
+}
+
+/** `id — title` for every stageable exercise. The tutor picks a pattern from a list, so the list
+ *  has to say what each one IS: given bare ids, a tutor asked for a PyTorch exercise staged the
+ *  built-in SSE demo. Titles make that choice about the subject. */
+export function patternChoices(vault?: string): string[] {
+  const generated = vault ? approvedGenerated(vault).map((e) => `${e.pattern} — ${e.title}`) : [];
+  return [...Object.keys(EXERCISES).map((p) => `${p} — built-in demo ladder`), ...generated];
 }
 
 /** An approved generated exercise, lifted into the same shape the hand-built registry uses: one

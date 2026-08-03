@@ -721,3 +721,61 @@ describe('openai-compat <tool_call> tag parsing (hermes)', () => {
     expect(events.some((e) => e.type === 'tool-call')).toBe(false);
   });
 });
+
+// GPT-5.6 refuses function tools on /chat/completions while reasoning is on, and its 400 names
+// the remedy: "set reasoning_effort to 'none'". Applying what the endpoint asked for beats making
+// every learner discover it — but only for this exact refusal, so no other provider's request
+// shape changes.
+describe('openai-compat reasoning/tools conflict', () => {
+  const TOOL = [{ name: 'write_page', description: 'w', parameters: { type: 'object', properties: {} } }];
+  const refusal = json(400, {
+    error: {
+      message: "Function tools with reasoning_effort are not supported for gpt-5.6-luna in "
+        + "/v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+    },
+  });
+
+  it("retries once with reasoning_effort 'none' and succeeds", async () => {
+    let call = 0;
+    respond = (res) => { call += 1; (call === 1 ? refusal : okText)(res); };
+    const out = await model().generate({ messages: USER_Q, tools: TOOL as any });
+    expect(out.text).toBe('ok');
+    expect(captured).toHaveLength(2);
+    expect(captured[0].body.reasoning_effort).toBeUndefined();   // first attempt unchanged
+    expect(captured[1].body.reasoning_effort).toBe('none');      // remedy applied
+    expect(captured[1].body.tools).toBeTruthy();                 // tools kept — that was the point
+  });
+
+  it('does not retry a 400 that is about something else', async () => {
+    respond = json(400, { error: { message: 'unknown model' } });
+    await expect(model().generate({ messages: USER_Q, tools: TOOL as any })).rejects.toThrow(/unknown model/);
+    expect(captured).toHaveLength(1);
+  });
+});
+
+// The retry above must be paid ONCE per endpoint+model, not per call. Without a memory, every
+// tool-using turn opens with a request guaranteed to 400 — the same mistake the response_format
+// memory exists to avoid, and a doubling of latency on the exact path a tutor uses most.
+describe('openai-compat remembers the reasoning/tools conflict', () => {
+  const TOOL = [{ name: 'write_page', description: 'w', parameters: { type: 'object', properties: {} } }];
+  const refusal = json(400, {
+    error: {
+      message: "Function tools with reasoning_effort are not supported for gpt-5.6-luna in "
+        + "/v1/chat/completions. To use function tools, use /v1/responses or set reasoning_effort to 'none'.",
+    },
+  });
+
+  it('learns once, then sends reasoning_effort upfront on later calls', async () => {
+    let call = 0;
+    respond = (res) => { call += 1; (call === 1 ? refusal : okText)(res); };
+    const m = model();
+    await m.generate({ messages: USER_Q, tools: TOOL as any });
+    await m.generate({ messages: USER_Q, tools: TOOL as any });
+    await m.generate({ messages: USER_Q, tools: TOOL as any });
+    // 2 requests for the first call (learn), 1 each for the rest — not 6.
+    expect(captured).toHaveLength(4);
+    expect(captured[1].body.reasoning_effort).toBe('none');
+    expect(captured[2].body.reasoning_effort).toBe('none'); // remembered, no wasted 400
+    expect(captured[3].body.reasoning_effort).toBe('none');
+  });
+});

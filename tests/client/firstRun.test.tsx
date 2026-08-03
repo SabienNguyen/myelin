@@ -5,7 +5,7 @@
 // the models endpoint and lifts the gate off the re-read setup state; the compat fields appear
 // only once an openai: id makes them relevant.
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react';
 import { FirstRun } from '../../src/client/components/FirstRun.js';
 
 const blockedState = {
@@ -15,11 +15,14 @@ const blockedState = {
   blocked: true,
 };
 
-function stubFetch(modelsPut: { ok: boolean; body?: object } = { ok: true }) {
+function stubFetch(modelsPut: { ok: boolean; body?: object } = { ok: true }, modelsGet: object = {}) {
   let setupReads = 0;
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const u = String(url);
-    if (u.endsWith('/api/setup/models')) return { ok: modelsPut.ok, json: async () => modelsPut.body ?? {} };
+    if (u.endsWith('/api/setup/models')) {
+      if (init?.method === 'PUT') return { ok: modelsPut.ok, json: async () => modelsPut.body ?? {} };
+      return { ok: true, json: async () => modelsGet };
+    }
     if (u.endsWith('/api/setup')) {
       // First read blocks; the read AFTER a successful local save comes back unblocked, the way
       // the server's needsApiKey computes it once no role routes through Anthropic.
@@ -79,6 +82,18 @@ describe('FirstRun — two ways through the gate', () => {
       OPENAI_COMPAT_BASE_URL: 'https://openrouter.ai/api/v1',
       OPENAI_COMPAT_API_KEY: 'or-key',
     });
+  });
+
+  it('a recommended model already on disk offers "use it", not a re-download', async () => {
+    // The card once hardcoded installed={[]}, so someone who already had a curated model pulled
+    // was offered a multi-GB "Get" for bytes on their disk. Discovery is keyless — the gate
+    // blocks model CALLS, not the tag probe — so the on-ramp can know and say "use it".
+    stubFetch({ ok: true }, { available: { ollama: ['mistral:7b'] } });
+    render(<FirstRun><p>the app</p></FirstRun>);
+    await screen.findByText('Ready when you are');
+    const row = (await screen.findByText('Mistral 7B')).closest('.local-getter-row') as HTMLElement;
+    await waitFor(() => expect(within(row).getByRole('button', { name: 'use it' })).toBeTruthy());
+    expect(within(row).queryByText(/download/)).toBeNull();
   });
 
   it('a rejected local save surfaces the server message and keeps the gate up', async () => {

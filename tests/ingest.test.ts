@@ -346,9 +346,220 @@ describe('compileNext', () => {
     expect(entry?.status).toBe('done');
     const slug = 'krebs-cycle'; // slugified chapter title — the floor names the page after the source
     const page = readFileSync(join(vault, 'pages', `${slug}.md`), 'utf8');
-    expect(page).toContain('Compiled verbatim');
+    expect(page).toContain('Compiled verbatim (weak-output)');
     expect(page).toContain('Eight steps oxidize acetyl-CoA'); // the source text IS the page
     expect(page).toContain('Verbatim Floor Book'); // citation still mechanical
+  }, 30_000);
+
+  it('a floored part\'s diagnosed reason lands in the queue entry\'s phase, not just the page banner', async () => {
+    await ingestBook(cfg, '/uploads/Phase Ledger Book.pdf', {
+      converter: async () => ({ markdown: '# Phase Chapter\nThis part always fails distillation.' }),
+    });
+    const { model } = textModel('No JSON from me, just narration.');
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    const entry = readQueue(vault).find((e) => e.book === 'Phase Ledger Book');
+    expect(entry?.status).toBe('done');
+    // The page banner names the class too, but that's a separate write — this asserts the ledger
+    // itself carries it, which is what the queue UI and any future automation actually reads.
+    expect(entry?.phase).toMatch(/^part 1: verbatim \(weak-output: .+\)$/);
+  }, 30_000);
+
+  it('a verbatim part names its diagnosed class in the page banner', async () => {
+    await ingestBook(cfg, '/uploads/Verbatim Diagnostic Book.pdf', {
+      converter: async () => ({ markdown: '# Distill Failure\nThis part always fails distillation.' }),
+    });
+    // textModel's generate() throws, so the ladder lands on the verbatim floor; text mode returns
+    // no tool calls, so the agentic loop decides weak output early and switches to harness distillation.
+    const { model } = textModel('No JSON from me, just narration.');
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    const entry = readQueue(vault).find((e) => e.book === 'Verbatim Diagnostic Book');
+    expect(entry?.status).toBe('done');
+    const slug = 'distill-failure';
+    const page = readFileSync(join(vault, 'pages', `${slug}.md`), 'utf8');
+    // Page banner should contain the diagnosed failure class.
+    expect(page).toMatch(/^> Compiled verbatim \(weak-output\):/m);
+    expect(page).toContain('This part always fails distillation'); // source text still present
+  }, 30_000);
+
+  it('a weak model distills the remaining parts in PARALLEL once part 1 proves it cannot drive tools', async () => {
+    // A second H1 chapter (trivial, untouched by this test) so splitChapters treats "Cell Biology"
+    // as ONE chapter with three H2 subsections, rather than splitting on H2 into three chapters —
+    // chunkChapter, not ingestBook, is what must produce the three parts here.
+    const THREE_PART_CHAPTER = [
+      '# Cell Biology',
+      '## Mitochondria',
+      'A'.repeat(200),
+      '## Ribosomes',
+      'B'.repeat(200),
+      '## Golgi Apparatus',
+      'C'.repeat(200),
+      '# Appendix',
+      'Nothing under compile test here.',
+    ].join('\n');
+    await ingestBook(cfg, '/uploads/Parallel Distill Book.pdf', {
+      converter: async () => ({ markdown: THREE_PART_CHAPTER }),
+    });
+
+    // One fake plays both halves of the ladder, same trick as the single-part fallback tests: text
+    // (no tool calls) for the agentic pass, forced-schema JSON for every distillation call. The
+    // reply function keys off prompt content, not call order, precisely because this task's point
+    // is that the distillation calls no longer arrive in a fixed sequential order. It also compiles
+    // the trivial Appendix chapter (so this shared vault's queue never leaks a pending entry to a
+    // later test) — kept out of the counts below by filtering on "Cell Biology".
+    let distillCalls = 0;
+    const { model, prompts } = textModel((prompt) => {
+      if (prompt.includes('Distill this chapter part')) {
+        if (!prompt.includes('Cell Biology')) return JSON.stringify({ title: 'Appendix Distilled', body: 'Nothing under compile test here, distilled.' });
+        distillCalls++;
+        return JSON.stringify({
+          title: `Distilled Part ${distillCalls}`,
+          body: 'A page body of enough words to be a page, distilled from the source chapter part.',
+        });
+      }
+      return 'I cannot call tools, sorry — here is a summary instead.';
+    });
+
+    const localCfg: HarnessConfig = { ...cfg, models: { compile: { concurrency: 3 } } } as HarnessConfig;
+    const summary = await compileNext(lw, localCfg, 2, { model, chunkChars: 320 });
+    expect(summary).toEqual({ compiled: 2, failed: 0 });
+
+    // Exactly one agentic attempt on "Cell Biology": part 1 tried and fell back; parts 2 and 3
+    // skipped the doomed agentic round-trip entirely instead of narrating twice more.
+    const agenticPrompts = prompts.filter((p) => p.includes('You are compiling one textbook chapter') && p.includes('Cell Biology'));
+    expect(agenticPrompts).toHaveLength(1);
+
+    // All three parts distilled — including part 1, whose agentic attempt produced no page and so
+    // is redistilled by the harness alongside parts 2 and 3, not left half-handled.
+    expect(distillCalls).toBe(3);
+    const slugs = await lw.listSlugs();
+    expect(slugs.filter((s) => s.startsWith('distilled-part-'))).toHaveLength(3);
+
+    const entry = readQueue(vault).find((e) => e.book === 'Parallel Distill Book');
+    expect(entry?.status).toBe('done');
+  }, 30_000);
+
+  it('a multi-part chapter gets a MOC hub linking every part in reading order, parts deepen it', async () => {
+    // A second, trivial H1 chapter — same trick as the parallel-distill test above: with only ONE
+    // H1, splitChapters treats the H2s as three separate chapters instead of one three-part
+    // chapter, which is not what this test is exercising.
+    const MOC_CHAPTER = [
+      '# Thermodynamics',
+      '## First Law',
+      'A'.repeat(200),
+      '## Second Law',
+      'B'.repeat(200),
+      '## Third Law',
+      'C'.repeat(200),
+      '# Appendix',
+      'Nothing under compile test here.',
+    ].join('\n');
+    await ingestBook(cfg, '/uploads/MOC Book.pdf', {
+      converter: async () => ({ markdown: MOC_CHAPTER }),
+    });
+
+    // Same two-role fake as the parallel-distill test, plus a third role for the MOC's chapter
+    // overview call — all three are forced-schema generateStructured calls, so textModel's JSON
+    // branch serves every one of them. Also compiles the trivial Appendix chapter (kept out of the
+    // counts below by filtering on "MOC Book" / the -moc suffix).
+    let distillCalls = 0;
+    const { model } = textModel((prompt) => {
+      if (prompt.includes('chapter overview')) return JSON.stringify({ overview: 'What this chapter covers.' });
+      if (prompt.includes('Distill this chapter part')) {
+        if (!prompt.includes('Thermodynamics')) return JSON.stringify({ title: 'Appendix Distilled', body: 'Nothing under compile test here, distilled.' });
+        distillCalls++;
+        return JSON.stringify({
+          title: `Thermo Part ${distillCalls}`,
+          body: 'A page body of enough words to be a page, distilled from the source chapter part.',
+        });
+      }
+      return 'I cannot call tools, sorry — here is a summary instead.';
+    });
+
+    // concurrency: 1 — this test cares about the MOC's reading order, which mapPieces's own
+    // dispatch order under real concurrency is deliberately allowed to reorder (see the parallel-
+    // distill test above); pinning to 1 keeps the assertion about the MOC feature, not the pool.
+    const localCfg: HarnessConfig = { ...cfg, models: { compile: { concurrency: 1 } } } as HarnessConfig;
+    const summary = await compileNext(lw, localCfg, 2, { model, chunkChars: 320 });
+    expect(summary).toEqual({ compiled: 2, failed: 0 });
+    expect(distillCalls).toBe(3);
+
+    const slugs = await lw.listSlugs();
+    const mocSlug = slugs.find((s) => s.endsWith('-moc'));
+    expect(mocSlug).toBeDefined();
+    const mocPage = readFileSync(join(vault, 'pages', `${mocSlug}.md`), 'utf8');
+    expect(mocPage).toContain('What this chapter covers.');
+
+    const partSlugs = ['thermo-part-1', 'thermo-part-2', 'thermo-part-3'];
+    const links = [...mocPage.matchAll(/\[\[([\w-]+)\]\]/g)].map((m) => m[1]);
+    expect(links).toEqual(partSlugs); // deterministic list, reading order
+
+    for (const s of partSlugs) {
+      const { page } = await lw.call('read_page', { slug: s });
+      expect(page.meta.deepens).toContain(mocSlug); // graph edge: part deepens the hub
+    }
+  }, 30_000);
+
+  it('a single-page chapter writes no MOC and makes no overview call', async () => {
+    await ingestBook(cfg, '/uploads/Single Page Book.pdf', {
+      converter: async () => ({ markdown: '# One Page Chapter\nJust one concept here.' }),
+    });
+    const prompts: string[] = [];
+    let step = 0;
+    const model = streamModel((req) => {
+      prompts.push(JSON.stringify(req.messages));
+      if (step++ === 0) {
+        return {
+          toolCalls: [{
+            toolName: 'write_page',
+            input: {
+              slug: 'one-page-chapter', title: 'One Page Chapter',
+              body: 'Just one concept here, explained in full.', status: 'draft',
+            },
+          }],
+        };
+      }
+      return { text: 'done' };
+    });
+
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    expect(prompts.some((p) => p.includes('chapter overview'))).toBe(false); // no overview call made
+
+    // No MOC for THIS chapter's one page — checked by absence, not by scanning the whole shared
+    // vault (which by now also carries the multi-part test's own MOC page above).
+    expect(existsSync(join(vault, 'pages', 'single-page-book-ch-1-moc.md'))).toBe(false);
+  }, 30_000);
+
+  it('a multi-page chapter compiled agentically gets no MOC — the hub is weak-path-only', async () => {
+    // A strong model driving write_page itself, multiple pages, no narration anywhere — the
+    // agentic path never proves itself weak, so agenticAlive stays true for the whole chapter and
+    // the MOC block (gated on !agenticAlive) must not run at all.
+    await ingestBook(cfg, '/uploads/Agentic MOC Book.pdf', {
+      converter: async () => ({ markdown: '# Agentic Chapter\nTwo concepts worth two pages.' }),
+    });
+    const prompts: string[] = [];
+    const model = streamModel((req) => {
+      prompts.push(JSON.stringify(req.messages));
+      if (sawToolResult(req)) return { text: 'done' };
+      return {
+        toolCalls: [
+          { toolName: 'write_page', input: { slug: 'agentic-page-one', title: 'Agentic Page One', body: 'First concept, in full.', status: 'draft' } },
+          { toolName: 'write_page', input: { slug: 'agentic-page-two', title: 'Agentic Page Two', body: 'Second concept, in full.', status: 'draft' } },
+        ],
+      };
+    });
+
+    const summary = await compileNext(lw, cfg, 1, { model });
+    expect(summary).toEqual({ compiled: 1, failed: 0 });
+    expect(prompts.some((p) => p.includes('chapter overview'))).toBe(false); // no overview call made
+
+    expect(existsSync(join(vault, 'pages', 'agentic-moc-book-ch-1-moc.md'))).toBe(false);
+    // Scoped to this book's own slug prefix — the shared vault also carries the earlier weak-path
+    // test's own (legitimate) MOC page.
+    const slugs = await lw.listSlugs();
+    expect(slugs.some((s) => s.startsWith('agentic-moc-book') && s.endsWith('-moc'))).toBe(false);
   }, 30_000);
 
   describe('concurrency', () => {
@@ -671,13 +882,16 @@ describe('the source spine — compile records the book\'s own order', async () 
   ].join('\n');
 
   /** A fake Engram whose write_page just succeeds — the spine is collected in the harness's
-   * wrapper, above whatever engram does with the page. */
+   * wrapper, above whatever engram does with the page. `call` only needs to answer link_pages for
+   * the weak-path tests below, whose fallback compile gets a MOC hub; the agentic tests never
+   * reach it, since the MOC is now weak-path-only. */
   const fakeLw = () => ({
     listSlugs: async () => [],
     tools: async () => [{
       name: 'write_page', description: 'w', inputSchema: { type: 'object' },
       execute: async () => ({ ok: true }),
     }],
+    call: async () => ({ ok: true }),
   }) as any;
 
   const promptOf = (req: any) => req.messages
@@ -718,13 +932,15 @@ describe('the source spine — compile records the book\'s own order', async () 
         chapter: 'raw/uploads/spine-book/ch-01-photosynthesis-basics.md',
         chapterOrdinal: 1,
         title: 'Photosynthesis Basics',
+        // Agentic compile (the model calls write_page itself): no MOC — the hub is a weak-path
+        // compensation, and the spec promises the agentic path is untouched by it.
         pages: ['light-reactions', 'calvin-cycle'],
       },
       {
         chapter: 'raw/uploads/spine-book/ch-02-cellular-respiration.md',
         chapterOrdinal: 2,
         title: 'Cellular Respiration',
-        pages: ['glycolysis'],
+        pages: ['glycolysis'], // one page: no MOC, a map of one place is noise
       },
     ]);
   });
@@ -763,6 +979,8 @@ describe('the source spine — compile records the book\'s own order', async () 
 
     const spine = sourceFor(vault, 'Recompiled Book')?.spine;
     expect(spine).toHaveLength(1); // chapter 2 was never compiled; chapter 1 has ONE slice
+    // Both passes are agentic, so neither gets a MOC. The slice is replaced whole with the second
+    // pass's two pages, not appended alongside the first pass's single page.
     expect(spine?.[0].pages).toEqual(['second-pass-page', 'and-another']);
   });
 
@@ -778,5 +996,36 @@ describe('the source spine — compile records the book\'s own order', async () 
 
     expect(await compileNext(fakeLw(), cfg, 1, { model })).toEqual({ compiled: 1, failed: 0 });
     expect(sourceFor(vault, 'Attention Is All You Need')?.spine).toBeUndefined();
+  });
+});
+
+/**
+ * The URL a document came from must survive onto the real chapter rows. It is set on the
+ * 'converting' placeholder, which the post-conversion rows REPLACE — so when it was not carried
+ * across, every URL-sourced ingest (arXiv PDF, YouTube transcript, web article) compiled pages
+ * whose `sources` read "book — title" instead of the address. For a web source that link back is
+ * the whole of its provenance.
+ */
+describe('sourceUrl survives conversion', () => {
+  it('lands on the paper-mode chapter row, so compiled pages cite the URL', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-srcurl-'));
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    const file = join(vault, 'article.md');
+    writeFileSync(file, '# An Article\n\n' + 'Real prose about a topic. '.repeat(60) + '\n');
+
+    const done = new Promise<void>((resolve) => {
+      startConversion({} as any, { vault } as any, file, {
+        mode: 'paper',
+        title: 'An Article',
+        sourceUrl: 'https://example.com/an-article',
+        converter: async () => ({ markdown: readFileSync(file, 'utf8') }),
+        onComplete: () => resolve(),
+      } as any);
+    });
+    await done;
+
+    const row = readQueue(vault).find((e: any) => String(e.chapter).endsWith('paper.md'));
+    expect(row).toBeTruthy();
+    expect((row as any).sourceUrl).toBe('https://example.com/an-article');
   });
 });

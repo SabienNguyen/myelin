@@ -144,7 +144,11 @@ function AskTutorBridge() {
   return null;
 }
 
-interface PlanItem { kind: string; slug: string; title: string; why: string; transfer?: string }
+interface PlanItem {
+  kind: string; slug: string; title: string; why: string; transfer?: string;
+  /** For a `quiz` item: every page the one block should cover. */
+  covers?: string[];
+}
 
 /**
  * "Start today's session" — the interleaved plan (/api/session-plan) as the empty thread's primary
@@ -157,16 +161,28 @@ function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
   const composer = useComposerRuntime();
   if (plan.length === 0) return null;
 
-  const KIND_LABEL: Record<string, string> = { review: 'review', new: 'new', misconception: 'fix', course: 'course' };
+  const KIND_LABEL: Record<string, string> = {
+    review: 'review', new: 'new', misconception: 'fix', course: 'course', quiz: 'quiz',
+  };
   const start = () => {
     // The transfer directive rides on the item's own line (review/fix items carry it), so the
     // constraint is in front of the tutor exactly where it works that row — not left to a rule
     // several screens up in the system prompt.
-    const lines = plan.map((p, i) =>
-      `${i + 1}. [${p.kind}] "${p.slug}" — ${p.why}${p.transfer ? ` — ${p.transfer}` : ''}`).join('\n');
+    const lines = plan.map((p, i) => {
+      // A quiz item covers SEVERAL pages in one block, so the row has to name all of them —
+      // otherwise the tutor quizzes the first slug and the batching is lost.
+      // The instruction rides the ROW. As a trailing note after six numbered items it lost to the
+      // header's "one item at a time" — the tutor read a 4-page quiz row and staged a single-page
+      // structured_check. The row now says what it is before it says what it covers.
+      const what = p.covers?.length
+        ? `ONE quiz block with ${p.covers.length} items, one per page: ${p.covers.map((c) => `"${c}"`).join(', ')}`
+        : `"${p.slug}"`;
+      return `${i + 1}. [${p.kind}] ${what} — ${p.why}${p.transfer ? ` — ${p.transfer}` : ''}`;
+    }).join('\n');
     composer.setText(
       `Run today's session, in this order, one item at a time:\n${lines}\n`
-      + 'For reviews and misconceptions, probe or set an exercise before any reteaching; for new items, teach then check.',
+      + 'For reviews and misconceptions, probe or set an exercise before any reteaching; for new items, teach then check. '
+      + 'A [quiz] row is a single quiz covering every page it names — the row itself says so.',
     );
     composer.send();
   };

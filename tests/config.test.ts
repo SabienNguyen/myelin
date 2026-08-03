@@ -118,16 +118,13 @@ describe('loadConfig', () => {
     writeFileSync(p, JSON.stringify({ ...valid, autoCompile: false }));
     expect(loadConfig(p).autoCompile).toBe(false);
   });
-  it('gap sidecar config is optional; absent by default', () => {
+  it('per-role contextTokens and concurrency parse and default to undefined', () => {
     const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
     const p = join(dir, 'harness.config.json');
-    writeFileSync(p, JSON.stringify(valid));
-    expect(loadConfig(p).gap).toBeUndefined();
-  });
-  it('accepts a gap.url when present', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
-    const p = join(dir, 'harness.config.json');
-    writeFileSync(p, JSON.stringify({ ...valid, gap: { url: 'http://localhost:4930' } }));
-    expect(loadConfig(p).gap).toEqual({ url: 'http://localhost:4930' });
+    writeFileSync(p, JSON.stringify({ ...valid, models: { ...valid.models, compile: { model: 'ollama:x', contextTokens: 32768, concurrency: 2 } } }));
+    const cfg = loadConfig(p);
+    expect(cfg.models.compile.contextTokens).toBe(32768);
+    expect(cfg.models.compile.concurrency).toBe(2);
+    expect(cfg.models.tutor.contextTokens).toBeUndefined();
   });
 });

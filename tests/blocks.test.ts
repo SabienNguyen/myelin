@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES } from '../src/shared/blocks.js';
+import { blockTools } from '../src/server/session.js';
 
 describe('block schemas', () => {
   // Was "the five v1 kinds". structured_check is the sixth: the generic applied block, added so
@@ -104,5 +105,65 @@ describe('slugListLine — slug grounding capped for scale', () => {
   it('past the cap with nothing relevant yet, says so instead of inlining nothing silently', () => {
     const slugs = Array.from({ length: 200 }, (_, i) => `p${i}`);
     expect(slugListLine(slugs, [])).toContain('(none yet)');
+  });
+});
+
+/**
+ * The tutor was never told which code_exercise patterns exist. Observed live on a PyTorch vault:
+ * asked for something to DO, it staged `code_exercise` with `pattern` set to a whole prose
+ * paragraph ("Write a short PyTorch program that defines x = torch.tensor..."), because the tool
+ * description said only "Present a code_exercise block". There is no such pattern, so the block
+ * hung at input-available forever. A tool whose valid inputs are a runtime list must carry that
+ * list, or the model will invent one.
+ */
+describe('code_exercise advertises the patterns that actually exist', () => {
+  it('names the available patterns in its description', () => {
+    const t = blockTools(['stream-consumer', 'pytorch-construct-name'])
+      .find((x) => x.name === 'code_exercise')!;
+    expect(t.description).toContain('stream-consumer');
+    expect(t.description).toContain('pytorch-construct-name');
+  });
+
+  it('says so when there are none, so the tutor does not stage an impossible block', () => {
+    const t = blockTools([]).find((x) => x.name === 'code_exercise')!;
+    expect(t.description).toMatch(/no .*exercises|none available/i);
+  });
+
+  it('other blocks keep their plain description', () => {
+    const t = blockTools(['stream-consumer']).find((x) => x.name === 'quick_check')!;
+    expect(t.description).not.toContain('stream-consumer');
+  });
+});
+
+/**
+ * Luna writes true/false checks as `{ kind: 'pattern', expected: false }` — a BOOLEAN. The schema
+ * demanded a string, and the grader had always coerced it happily (a live run graded one, verdict
+ * "incorrect", detail `expected "false"`). Once the wire started validating block args, that
+ * working block became an error card — a regression my own change introduced, caught by re-running
+ * a real lesson. A pattern answer is compared as text, so accepting a boolean or number and
+ * normalising to string keeps the schema honest about what actually works.
+ */
+describe('pattern checker accepts the shapes models really send', () => {
+  const parse = (expected: unknown) => BLOCK_TOOLS.structured_check.input.safeParse({
+    prompt: 'True or false: retain_graph is a speed optimisation.',
+    pageSlug: 'retain-graph',
+    checker: { kind: 'pattern', expected },
+  });
+
+  // The value is NOT rewritten here — the grader compares it as text, which is why a boolean
+  // expected graded correctly before validation existed. The schema only has to stop calling a
+  // working block malformed.
+  it('accepts a boolean, as models actually send for true/false checks', () => {
+    expect(parse(false).success).toBe(true);
+  });
+
+  it('accepts a number', () => {
+    expect(parse(42).success).toBe(true);
+  });
+
+  it('still accepts a plain string', () => {
+    const r = parse('mitochondria');
+    expect(r.success).toBe(true);
+    expect((r as any).data.checker.expected).toBe('mitochondria');
   });
 });

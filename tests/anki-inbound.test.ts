@@ -150,3 +150,24 @@ describe('syncInbound', () => {
     expect(result).toEqual({ recorded: 0 });
   });
 });
+
+/**
+ * Lapses arrive in the order Anki happened to review them. The tutor reads the injected line
+ * top-down, so a page lapsed twice could lead one lapsed four times and the milder problem gets
+ * picked up first — seen live, with a 2-lapse page chosen over a 4-lapse one.
+ */
+describe('lapses are ordered worst-first', () => {
+  it('sorts by count, then by slug for a stable tie', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-lapse-order-'));
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    const today = new Date().toISOString().slice(0, 10);
+    const rows = [
+      ...Array(2).fill({ date: today, slug: 'mild' }),
+      ...Array(4).fill({ date: today, slug: 'worst' }),
+      ...Array(2).fill({ date: today, slug: 'also-mild' }),
+    ];
+    writeFileSync(join(vault, '.harness', 'anki-lapses.jsonl'),
+      rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    expect(recentLapses(vault).map((l) => l.slug)).toEqual(['worst', 'also-mild', 'mild']);
+  });
+});

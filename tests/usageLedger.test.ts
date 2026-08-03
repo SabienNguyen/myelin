@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { recordUsage, readUsage } from '../src/server/usageLedger.js';
+import { recordUsage, readUsage, overContext } from '../src/server/usageLedger.js';
 
 const freshVault = () => mkdtempSync(join(tmpdir(), 'lwh-usage-'));
 const usage = (inTok: number, out: number, cacheRead = 0, cacheWrite = 0) => ({
@@ -93,5 +93,28 @@ describe('readUsage', () => {
 
   it('empty summary when no ledger exists yet', () => {
     expect(readUsage(freshVault())).toEqual({ today: {}, week: {}, cacheHitShare: null });
+  });
+});
+
+/**
+ * A twelve-turn session on a local 32k model sat around 11k input per turn — the history diet doing
+ * its job — and then one research turn sent 53,716. Ollama does not error on that; it truncates to
+ * fit, silently, and answers from whatever survived. The learner sees a worse answer with nothing
+ * to explain it.
+ */
+describe('over-context detection', () => {
+  it('fires when a call exceeds the configured window', () => {
+    expect(overContext(53_716, 32_768)).toBe(true);
+  });
+
+  it('stays quiet within the window, and at the boundary', () => {
+    expect(overContext(11_096, 32_768)).toBe(false);
+    expect(overContext(32_768, 32_768)).toBe(false);
+  });
+
+  it('says nothing when either number is unknown — most roles configure no window', () => {
+    expect(overContext(53_716, undefined)).toBe(false);
+    expect(overContext(undefined, 32_768)).toBe(false);
+    expect(overContext(0, 32_768)).toBe(false);
   });
 });

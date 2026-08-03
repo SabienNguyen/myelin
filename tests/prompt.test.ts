@@ -91,8 +91,11 @@ describe('prompt assembly', () => {
     const ctx = buildBootstrapContext({ ...base, mode: 'learn', emptyVault: true });
     expect(ctx).toMatch(/COLD START/);
     expect(ctx).toMatch(/web research/);
-    expect(ctx).toMatch(/LEARN mode gives you web research/);
-    expect(ctx).toMatch(/NO page-writing or\s+ingest tools/);
+    expect(ctx).toMatch(/LEARN mode unlocks web research/);
+    // Writing IS available on a cold start now — an empty vault can ground nothing, so the tutor
+    // researches and writes the page it teaches from, and evidence has somewhere to land.
+    expect(ctx).toMatch(/write_page/);
+    expect(ctx).toMatch(/do NOT have here is\s+ingest or create_path/);
     expect(ctx).toMatch(/switch to freeform/);
   });
   it('cold start in freeform tells it to research and build instead', () => {

@@ -443,9 +443,15 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     return { allCorrect: v.ok, anyCorrect: v.ok, detail: v.detail };
   }
 
-  // pattern
-  const ok = normKey(clean[0] ?? '') === normKey(checker.expected);
-  return { allCorrect: ok, anyCorrect: ok, detail: ok ? 'exact match' : `expected "${checker.expected}"` };
+  // pattern. `expected` is typed string | boolean | number: the schema was widened because models
+  // legitimately send `expected: true` for a yes/no probe ("what does x.requires_grad evaluate
+  // to?"), and rejecting those turned working blocks into error cards. The checker has to accept
+  // the same shapes the schema does — comparing a boolean through a string normaliser threw
+  // "s.trim is not a function", which killed the whole TURN, not just the grade: the learner saw an
+  // empty reply to "ok next" with no indication anything had gone wrong.
+  const expected = String(checker.expected ?? '');
+  const ok = normKey(clean[0] ?? '') === normKey(expected);
+  return { allCorrect: ok, anyCorrect: ok, detail: ok ? 'exact match' : `expected "${expected}"` };
 }
 
 /**
@@ -864,6 +870,17 @@ export async function gradeBlockOutput(
     };
   }
 
+  // An empty draft is not judged, for the same reason an empty quiz answer is not: a model asked
+  // whether nothing satisfies four criteria is being invited to be agreeable, and the quiz path
+  // showed exactly where that leads (a blank submission graded 4/4). Junk text still goes to the
+  // grader — that is a real answer, and grading it honestly is the grader's job.
+  if (tool === 'writing_draft' && !String(result?.draft ?? '').trim()) {
+    return {
+      verdict: 'incorrect', source: 'model', detail: 'no draft was submitted',
+      evidence: [ev(input.pageSlug, 'struggled', 'writing_draft: nothing submitted', 'model')],
+    };
+  }
+
   // writing_draft with an explicit rubric — the judged-work path for essay subjects. The grader
   // marks each stated criterion pass/fail; passing ALL of them mints 'rubric-passed', the third
   // positive evidence kind (engram caps it at practicing and decays it on its own shorter
@@ -940,7 +957,14 @@ export async function gradeBlockOutput(
     if (annRes.status === 'fulfilled') {
       annotations = annRes.value;
     } else {
-      console.error(`writing_draft: rubric judged, but annotation grading failed: ${(annRes.reason as Error)?.message ?? annRes.reason}`);
+      // Name the VALUE the model reached for, not just the enum it missed. Zod's message lists the
+      // options and the path but never what arrived, so a live failure — an annotation category
+      // outside strong/wordy/vague/structure/grammar — left nothing in the log to act on: no way to
+      // tell whether the model wanted a sensible sixth category or emitted noise.
+      console.error(
+        `writing_draft: rubric judged, but annotation grading failed: ${(annRes.reason as Error)?.message ?? annRes.reason}`
+        + `${rejectedValues(annRes.reason)}`,
+      );
       annMiss = '; annotations unavailable';
     }
     return {
@@ -983,6 +1007,18 @@ async function annotateDraft(
   return object;
 }
 
+/** The values a zod failure actually received, pulled off the issue list. Zod reports the expected
+ *  options and the path but not what arrived, which is the one thing needed to decide whether the
+ *  schema is too narrow or the model is wrong. Returns '' when the shape is anything else. */
+export function rejectedValues(reason: unknown): string {
+  const issues = (reason as any)?.issues;
+  if (!Array.isArray(issues)) return '';
+  const got = issues
+    .map((i: any) => (i?.received !== undefined ? `${(i.path ?? []).join('.')}=${JSON.stringify(i.received)}` : null))
+    .filter(Boolean);
+  return got.length ? ` — received ${got.join(', ')}` : '';
+}
+
 /** Suffix a quick_check confidence marker onto a grade's evidence notes. gradeOpenAnswer is shared
  * with quiz items (which carry no confidence), so the suffix is applied by the one caller that has
  * it rather than threaded through as a parameter every other caller would pass as ''. */
@@ -1005,6 +1041,18 @@ async function gradeOpenAnswer(
   question: string, answer: string, slug: string, cfg: HarnessConfig, deps: GradingDeps = {},
   expected?: string,
 ): Promise<Grade> {
+  // A BLANK answer never reaches the model. Nothing submitted cannot demonstrate knowledge, and
+  // asking a grader to judge an empty string invites exactly what it produced live: a four-item
+  // quiz submitted entirely empty came back 4/4 CORRECT and minted evidence on four separate
+  // pages. The quiz path's own guard only covered a MALFORMED submission — one carrying entries
+  // whose `answer` is "" looked well-formed and went straight through. Central, because
+  // quick_check and quiz both land here.
+  if (!answer || !answer.trim()) {
+    return {
+      verdict: 'incorrect', source: 'model', detail: 'no answer was submitted',
+      evidence: [ev(slug, 'struggled', `open answer: ${question}`, 'model')],
+    };
+  }
   // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
   // model, never copied into the evidence note.
   const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
@@ -1017,4 +1065,31 @@ async function gradeOpenAnswer(
     // the rest of the file only half-followed was originally right.
     evidence: [ev(slug, ok ? 'applied-correctly' : 'struggled', `open answer: ${question}`, 'model')],
   };
+}
+
+/**
+ * Evidence recorded against a page this turn never touched.
+ *
+ * A learner asked about PyTorch FSDP2 on a vault with no FSDP page. The tutor must name a REAL
+ * slug (the prompt lists them, capped to a shortlist on a large vault), so it named a real but
+ * unrelated one — `pytorch-build-command` — and the student's record gained a page they had never
+ * met, noted "Explained FSDP2 sharding strategy axes". A mastery graph that invents pages is the
+ * exact failure this system exists to prevent, and slug repair cannot catch it: the slug IS valid,
+ * it is just about something else.
+ *
+ * The honest signal is provenance, not similarity: legitimate evidence is about a page the turn
+ * READ, STAGED a block on, or WROTE. (Writing the page first is the correct freeform answer to a
+ * topic the vault lacks.) DETECTION ONLY, like appliedGradeBypass — this flags for the guardrail
+ * log so a human can see it; it never blocks a turn.
+ */
+export function untouchedSlugEvidence(
+  recorded: { slug: string; kind: EvidenceKind }[],
+  touched: { read: string[]; staged: string[]; written: string[] },
+): string[] {
+  const seen = new Set([...touched.read, ...touched.staged, ...touched.written]);
+  const flagged: string[] = [];
+  for (const r of recorded) {
+    if (r.slug && !seen.has(r.slug) && !flagged.includes(r.slug)) flagged.push(r.slug);
+  }
+  return flagged;
 }

@@ -5,7 +5,10 @@
 import { LlmHttpError } from './types.js';
 
 export interface RetryOptions {
-  /** Attempts AFTER the first. Default 2 (the SDK's default). */
+  /** Attempts AFTER the first. Default 2 (the SDK's default). Deliberately NOT raised to paper
+   *  over rate limits: more blind attempts also means a genuinely-down provider takes longer to
+   *  report itself. The fix for 429 is waiting the RIGHT amount (retryAfterMs below), not more
+   *  often. */
   retries?: number;
   /** Delay before retry n (0-based). Default 2s, 4s. Injectable so tests run in milliseconds. */
   delayMs?: (attempt: number) => number;
@@ -15,6 +18,9 @@ export interface RetryOptions {
 }
 
 const defaultDelay = (attempt: number) => 2000 * 2 ** attempt;
+
+/** Ceiling on a provider-stated wait. Past this, failing is kinder than a turn that looks hung. */
+export const MAX_RETRY_WAIT_MS = 30_000;
 
 function isRetryable(e: unknown): boolean {
   if (e instanceof LlmHttpError) return e.retryable;
@@ -46,7 +52,16 @@ export async function withRetries<T>(fn: () => Promise<T>, opts: RetryOptions = 
     } catch (e) {
       // An aborted attempt is not a transient failure, whatever error shape the abort surfaced as.
       if (attempt >= retries || !isRetryable(e) || opts.signal?.aborted) throw e;
-      await abortableSleep(delayMs(attempt), opts.signal);
+      // A rate limit reports its own cure ("try again in 6.826s"). Honour it — but never sleep
+      // less than the backoff we would have used anyway, and cap it so a provider cannot park a
+      // learner's turn for a minute. Guessing instead of reading this is what let a 429 exhaust
+      // its retries: 2s+4s of blind backoff against a limit that wanted 6.8s.
+      const stated = e instanceof LlmHttpError ? e.retryAfterMs : undefined;
+      const backoff = delayMs(attempt);
+      const wait = stated === undefined
+        ? backoff
+        : Math.min(Math.max(stated + 250, backoff), MAX_RETRY_WAIT_MS);
+      await abortableSleep(wait, opts.signal);
     }
   }
 }

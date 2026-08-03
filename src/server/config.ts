@@ -24,6 +24,10 @@ const roleSchema = z.object({
   model: z.string(),
   effort: z.enum(['low', 'medium', 'high']).optional(),
   sampler: samplerSchema,
+  // Both serve the small-model pipeline (spec 2026-07-31 §6): contextTokens caps what one call
+  // may carry (budgetChars), concurrency caps the parallel map — VRAM respect, not a speed knob.
+  contextTokens: z.number().int().positive().optional(),
+  concurrency: z.number().int().positive().optional(),
 });
 
 // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the teaching
@@ -146,6 +150,9 @@ const configSchema = z.object({
     // spend that is the user's call, not a default. Override any role in harness.config.json.
     tutor: tutorRoleSchema.default({ model: 'claude-sonnet-5' }),
     grader: roleSchema.default({ model: 'claude-haiku-4-5' }),
+    // Retained so existing settings files still load, but nothing calls it: quiz blocks are staged
+    // by the tutor as a block tool, and there is no separate quiz model. Not offered in the model
+    // picker for that reason — a setting that cannot change behaviour should not ask to be set.
     quiz_gen: roleSchema.default({ model: 'claude-sonnet-5' }),
     card_gen: roleSchema.default({ model: 'claude-haiku-4-5' }),
     compile: roleSchema.default({ model: 'claude-sonnet-5' }),
@@ -166,10 +173,6 @@ const configSchema = z.object({
   // tutor, which cannot use a provider-executed tool. Absent -> a local tutor has read_url but no
   // search, and instruction 13 tells it to mark what it writes as unverified.
   search: z.object({ searxng: z.string() }).optional(),
-  // Optional EXTERNAL the-gap sidecar for code_exercise blocks. Absent -> the built-in sandbox
-  // (src/server/gap/) serves /api/gap/* from this process, so code exercises work out of the box;
-  // set a url to route to the full sidecar instead (mined artifacts, more patterns).
-  gap: z.object({ url: z.string() }).optional(),
   schedule: z.object({
     digestHour: z.number().int().min(0).max(23).default(9),
     quietHours: z.tuple([z.number(), z.number()]).default([22, 8]),

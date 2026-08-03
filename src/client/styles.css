@@ -2525,7 +2525,22 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* Dismiss on terminal ledger rows — quiet until hovered, never louder than the row it removes.
    Anchored to the row's top-right corner: repo rows contain block children, so an inline ✕
    wrapped onto its own line below the text (caught in the audit screenshot). */
-.library-book li { position: relative; padding-right: 1.8rem; }
+/* Wider gutter than dismiss alone needed: a failed row carries retry AND dismiss, and at 1.8rem
+   the two overlapped the title text. */
+.library-book li { position: relative; padding-right: 5rem; }
+/* Retry sits immediately left of dismiss, same quiet-until-hovered treatment — but it reads in
+   the accent, not --bad: it starts work rather than removing it. */
+.q-retry {
+  position: absolute;
+  top: 0.1rem;
+  right: 1.7rem;
+  padding: 0 0.45em;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  background: transparent;
+  border-color: transparent;
+}
+.q-retry:hover { color: var(--accent); border-color: var(--border); background: var(--bg-panel); }
 .q-dismiss {
   position: absolute;
   top: 0.1rem;
@@ -2616,6 +2631,10 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   display: flex; flex-direction: column; gap: 0.25rem; min-width: 16rem;
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); padding: 0.5rem;
+  /* One row per student: the list grows without bound, and past the viewport the tail (the
+     new-student input included) was unreachable — same trap .models-panel had. Cap and scroll. */
+  max-height: calc(100vh - 5rem);
+  overflow-y: auto;
 }
 .student-menu button { text-align: left; }
 .student-menu button.on { color: var(--text-muted); cursor: default; }
@@ -2631,6 +2650,13 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   display: flex; flex-direction: column; gap: 0.4rem; width: 24rem;
   background: var(--bg-panel); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); padding: 0.6rem;
+  /* The panel outgrew short windows once the getter, preset, and endpoint groups stacked up —
+     with no cap the tail (save included) rendered below the viewport, and the app's fixed
+     layout gives the page itself nothing to scroll. Half the viewport, per request: tall
+     enough for the role rows, short enough that the conversation stays readable behind it;
+     the panel scrolls to the rest. */
+  max-height: 50vh;
+  overflow-y: auto;
 }
 .models-row { display: grid; grid-template-columns: 8rem 1fr; gap: 0 0.4rem; align-items: center; }
 .models-row label { font-size: 0.78rem; color: var(--text-muted); }
@@ -2716,3 +2742,27 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 /* `lit`, not `on` — the house `.block button.on` selected-answer pill would swallow it. */
 .cite-link.lit { text-decoration-style: solid; }
+
+/* --- Collapsible sections (Library + Pages) ------------------------------------------------ */
+/* The header row is a flex line so section-level controls (rename) sit beside the toggle rather
+   than inside it — a button inside a button never receives its click. */
+.collapsible-head { display: flex; align-items: center; gap: 0.25rem; }
+.collapsible-toggle {
+  flex: 1; display: flex; align-items: center; gap: 0.4rem;
+  background: none; border: 0; padding: 0.5rem 0; margin: 0;
+  font: inherit; color: inherit; text-align: left; cursor: pointer;
+}
+.collapsible-toggle:hover .collapsible-title { color: var(--accent); }
+/* The caret is the whole affordance, so it must read as rotating rather than swapping glyphs. */
+.collapsible-caret { flex: none; transition: transform 120ms ease; opacity: 0.55; }
+.collapsible[aria-hidden] { display: block; }
+.collapsible-toggle[aria-expanded="true"] .collapsible-caret { transform: rotate(90deg); }
+.collapsible-title {
+  font-family: var(--font-serif); font-size: 1rem; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 0.35rem;
+}
+/* A folded section keeps its rule so the stack still reads as a list of parts, not a gap. */
+.collapsible.is-collapsed { border-bottom: 1px solid var(--border); }
+/* These sections previously supplied their own heading margins; the toggle row now owns the
+   spacing, so drop the doubled gap the old h2/h3 rules leave behind. */
+.collapsible .collapsible-body > :first-child { margin-top: 0; }

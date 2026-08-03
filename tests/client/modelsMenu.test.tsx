@@ -58,10 +58,14 @@ async function openPopover() {
 }
 
 describe('ModelsMenu — the tutor badge opens the model configuration dialog', () => {
-  it('renders all five roles with their effective ids, off a shared datalist', async () => {
+  it('renders every CALLABLE role with its effective id, off a shared datalist', async () => {
+    // quiz_gen is deliberately not among them: nothing calls it (quiz blocks are staged by the
+    // tutor as a block tool), so offering it asked the learner to pick a model that could not
+    // change anything. The config key still exists for compatibility.
     stubFetch();
     await openPopover();
-    for (const role of ['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile']) {
+    expect(screen.queryByLabelText('quiz_gen')).toBeNull();
+    for (const role of ['tutor', 'grader', 'card_gen', 'compile']) {
       const input = await screen.findByLabelText(role) as HTMLInputElement;
       expect(input.getAttribute('list')).toBe('model-id-list');
     }
@@ -109,19 +113,21 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
     expect(input.value).toBe('');
   });
 
-  it('shows a dense usage line per role with spend today, cache share included', async () => {
+  it('shows a dense usage line per role with spend today, cache reads and writes included', async () => {
     const totals = (t: object) => ({ cacheRead: 0, cacheWrite: 0, calls: 1, ...t });
     stubFetch(modelsState(), modelsState(), {
       today: {
-        tutor: totals({ in: 11_000, out: 2_130, cacheRead: 33_000 }), // 33k of 44k input cached
+        tutor: totals({ in: 11_000, out: 2_130, cacheRead: 33_000, cacheWrite: 4_200 }),
         help: totals({ in: 950, out: 80 }),
       },
       week: {}, cacheHitShare: 0.75,
     });
     await openPopover();
     await screen.findByText('usage today');
-    screen.getByText('tutor 11k in / 2.1k out · 75% cached');
-    screen.getByText('help 950 in / 80 out'); // no cache reads → no cached suffix
+    // The raw figures, not just a derived share: cache reads and writes are the numbers a bill
+    // (or a local cache's effectiveness) is actually made of.
+    screen.getByText('tutor 11k in / 2.1k out · cache 33k read / 4.2k write');
+    screen.getByText('help 950 in / 80 out'); // no cache traffic → no cache suffix
   });
 
   it('an empty ledger renders no usage section at all', async () => {
@@ -168,13 +174,13 @@ describe('ModelsMenu — live discovery', () => {
     expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('claude-sonnet-5');
   });
 
-  it('the local preset sets the four teaching roles, checks rails, and leaves compile alone', async () => {
+  it('the local preset sets the teaching roles, checks rails, and leaves compile alone', async () => {
     stubFetch(discovered());
     await openPopover();
     await screen.findByText('installed locally:');
     fireEvent.change(screen.getByLabelText('local preset'), { target: { value: 'llama3.1:8b' } });
     fireEvent.click(screen.getByRole('button', { name: 'apply' }));
-    for (const r of ['tutor', 'grader', 'quiz_gen', 'card_gen']) {
+    for (const r of ['tutor', 'grader', 'card_gen']) {
       expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:llama3.1:8b');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5');
@@ -236,19 +242,18 @@ describe('ModelsMenu — live discovery', () => {
   // (takeState) reset the roles straight back to the saved claude defaults — the preset silently
   // vanished. The refresh must run BEFORE the preset is applied.
   it('the local getter pulls a model, then repoints the teaching roles at it with rails on', async () => {
-    // Discovery flips from "nothing installed" to "qwen3:8b installed" once the pull streams done.
+    // Discovery flips from "nothing installed" to "qwen3:8b installed" once the job lands. The
+    // pull is a server-side background job now: POST accepts, GET /pulls reports it done.
     let pulled = false;
-    const pullStream = () => new ReadableStream<Uint8Array>({
-      start(c) {
-        const e = new TextEncoder();
-        c.enqueue(e.encode('{"status":"downloading","total":10,"completed":10}\n'));
-        c.enqueue(e.encode('{"status":"success"}\n'));
-        c.close();
-      },
-    });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const u = String(url);
-      if (u.endsWith('/api/setup/models/pull')) { pulled = true; return { ok: true, status: 200, body: pullStream() }; }
+      if (u.endsWith('/api/setup/models/pulls')) {
+        return {
+          ok: true,
+          json: async () => (pulled ? { 'qwen3:8b': { status: 'success', percent: null, error: null, done: true } } : {}),
+        };
+      }
+      if (u.endsWith('/api/setup/models/pull')) { pulled = true; return { ok: true, status: 202, json: async () => ({ started: true }) }; }
       if (u.endsWith('/api/status')) return { ok: true, json: async () => ({ student: 'e2e', tutor: 'claude-sonnet-5' }) };
       if (u.endsWith('/api/setup/models')) {
         return { ok: true, json: async () => modelsState({}, {}, pulled ? { ollama: ['qwen3:8b'] } : {}) };
@@ -265,7 +270,7 @@ describe('ModelsMenu — live discovery', () => {
     await screen.findByText(/qwen3:8b ready/);
     // THE assertion the clobber bug failed: the roles are the pulled model, rails on — not the
     // claude defaults the /api/setup/models refresh returns.
-    for (const r of ['tutor', 'grader', 'quiz_gen', 'card_gen']) {
+    for (const r of ['tutor', 'grader', 'card_gen']) {
       expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:qwen3:8b');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5'); // preset leaves compile

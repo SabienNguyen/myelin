@@ -67,8 +67,8 @@ export const BUILTIN_PATTERN_SLUGS: ReadonlySet<string> = new Set(PATTERN_PAGES.
  * if) that slug doesn't already exist. Never overwrites — a page that has grown past the stub
  * (the tutor filled it in, or it earned a 'draft'/'solid' status some other way) is left alone,
  * so re-running this on every boot is safe and cheap (one `listSlugs()` glob plus zero or more
- * `write_page` calls). No gate on cfg.gap any more: the built-in sandbox (gap/service.ts) means
- * there is ALWAYS at least the stream-consumer ladder to seed a page for. */
+ * `write_page` calls). No config gate: the built-in sandbox (gap/service.ts) is the only sandbox
+ * there is, so there is ALWAYS at least the stream-consumer ladder to seed a page for. */
 /** One stub page per course-bank source, so drilled problems have somewhere for evidence to
  *  land. The live-model sitting exposed the gap: a blank answer on a banked problem produced no
  *  `struggled` trace anywhere, because the bank is not a page and record_evidence needs one.

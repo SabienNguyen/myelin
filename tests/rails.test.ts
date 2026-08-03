@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   fallbackQuickCheck, firstHeadingOrLine, generateRailsQuickCheck, generateRailsFeedback,
-  nextRailsSeq, pickRailsItem, railsHistoryLines, trimToBudget,
+  askedForItem, nextRailsSeq, pickRailsItem, railsHistoryLines, trimToBudget,
   RAILS_PAGE_BUDGET, type WorkingSetMember,
 } from '../src/server/rails.js';
 import { textModel } from './mockModel.js';
@@ -187,5 +187,47 @@ describe('rails ids and fallback seeds', () => {
     expect(firstHeadingOrLine('---\n\n# Heading here\nbody')).toBe('Heading here');
     expect(firstHeadingOrLine('plain opening line\nmore')).toBe('plain opening line');
     expect(fallbackQuickCheck('Empty Page', '').expected).toBe('Empty Page');
+  });
+});
+
+/**
+ * Rails picked its page from working_set and next_lessons alone — it never read the learner's
+ * message. Asked about gradient accumulation, it staged a quick_check on jazz-harmony path
+ * ordering, with nothing acknowledging the swap. Harness-driven does not have to mean deaf.
+ */
+describe('rails honours a named subject', () => {
+  const lw = (hits: any[]) => ({
+    call: async (name: string, args: any) => {
+      if (name === 'search') return { results: hits };
+      if (name === 'read_page') return { page: { meta: { title: `T:${args.slug}` } } };
+      return {};
+    },
+  }) as any;
+
+  it('returns the page the learner asked about', async () => {
+    const item = await askedForItem(
+      lw([{ slug: 'gradient-accumulation', level: 'exposed' }]),
+      'kid', 'explain gradient accumulation to me', new Set(),
+    );
+    expect(item?.slug).toBe('gradient-accumulation');
+    expect(item?.reason).toBe('asked');
+    expect(item?.title).toBe('T:gradient-accumulation');
+  });
+
+  it('yields to the frontier when the message names no subject', async () => {
+    expect(await askedForItem(lw([{ slug: 'x' }]), 'kid', 'ok next', new Set())).toBeNull();
+    expect(await askedForItem(lw([{ slug: 'x' }]), 'kid', '', new Set())).toBeNull();
+  });
+
+  it('does not restage something this session already covered', async () => {
+    const item = await askedForItem(
+      lw([{ slug: 'gradient-accumulation' }]),
+      'kid', 'gradient accumulation again', new Set(['gradient-accumulation']),
+    );
+    expect(item).toBeNull();
+  });
+
+  it('yields to the frontier when the vault has nothing on it', async () => {
+    expect(await askedForItem(lw([]), 'kid', 'teach me about quantum chromodynamics', new Set())).toBeNull();
   });
 });

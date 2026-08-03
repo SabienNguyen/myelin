@@ -80,6 +80,8 @@ export function withErrorPlaceholder(messages: UIMessage[], error: string | unde
 
 export interface ChatCoreRuntimeOptions {
   mode: string;
+  /** A fact about the vault, not a setting: nothing real to teach from. */
+  emptyVault?: boolean;
   threadId: string;
   initialMessages: UIMessage[];
   /** How a mode slash command reaches the topbar selector (App's setMode) — see
@@ -106,15 +108,19 @@ export function useChatStore(): ChatStore {
  * plus the backing store (for ChatStoreContext — see above). The caller remounts per threadId
  * (App's key), so the store is created once per thread; `mode` rides a ref so each request reads
  * the CURRENT topbar selection. */
-export function useChatCoreRuntime({ mode, threadId, initialMessages, onModeCommand }: ChatCoreRuntimeOptions): { runtime: AssistantRuntime; store: ChatStore } {
+export function useChatCoreRuntime({ mode, emptyVault, threadId, initialMessages, onModeCommand }: ChatCoreRuntimeOptions): { runtime: AssistantRuntime; store: ChatStore } {
   const modeRef = useRef(mode);
   modeRef.current = mode;
+  const emptyVaultRef = useRef(emptyVault);
+  emptyVaultRef.current = emptyVault;
   const onModeCommandRef = useRef(onModeCommand);
   onModeCommandRef.current = onModeCommand;
   const [store] = useState(() => new ChatStore({
     threadId,
     initialMessages,
-    requestContext: () => ({ mode: modeRef.current, writeUp: consumeWriteIntent() }),
+    requestContext: () => ({
+      mode: modeRef.current, writeUp: consumeWriteIntent(), emptyVault: emptyVaultRef.current,
+    }),
     onModeCommand: (m) => onModeCommandRef.current?.(m),
   }));
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);

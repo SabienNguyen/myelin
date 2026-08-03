@@ -32,6 +32,16 @@ describe('modelLabel', () => {
     expect(modelLabel('claude-haiku-4-5')).toEqual({ name: 'Haiku 4.5', how: 'Anthropic API' });
   });
 
+  // The badge said "via Anthropic API" over an openai: id, and ran it through the claude-* pretty
+  // printer — a live badge read "Openai:gpt-5.6-luna", an id that exists nowhere, billed to the
+  // wrong vendor. Naming the wrong vendor is the one thing this badge must never do.
+  it('names the OpenAI-compatible route, and shows its id verbatim', () => {
+    expect(modelLabel('openai:gpt-5.6-luna'))
+      .toEqual({ name: 'gpt-5.6-luna', how: 'OpenAI-compatible endpoint' });
+    expect(modelLabel('openai:deepseek/deepseek-chat'))
+      .toEqual({ name: 'deepseek/deepseek-chat', how: 'OpenAI-compatible endpoint' });
+  });
+
   it('leaves a local model name as its author wrote it', () => {
     // An Ollama tag is chosen by the person running it; prettifying it would only make it wrong.
     expect(modelLabel('ollama:qwen2.5-coder:14B'))
