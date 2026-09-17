@@ -71,13 +71,16 @@ jobs:
         run: npm ci
         working-directory: engram
 
-      - name: Unit and integration suite
-        if: steps.gate.outcome == 'success'
-        run: npx vitest run
-
+      # Before the unit suite, not just before e2e: tests/chatReload.test.ts drives a real Chromium
+      # from inside vitest (a reload is only a reload in a browser), so installing it afterwards
+      # failed that one test with "Executable doesn't exist" while everything else passed.
       - name: Install Playwright Chromium
         if: steps.gate.outcome == 'success'
         run: npx playwright install --with-deps chromium
+
+      - name: Unit and integration suite
+        if: steps.gate.outcome == 'success'
+        run: npx vitest run
 
       - name: End-to-end suite
         if: steps.gate.outcome == 'success'
