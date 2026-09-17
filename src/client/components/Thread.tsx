@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useThread, useThreadRuntime } from '@assistant-ui/react';
-import { FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, XIcon as X } from '@phosphor-icons/react';
+import { ArrowUpIcon as ArrowUp, FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, XIcon as X } from '@phosphor-icons/react';
 import type { FileUIPart } from '../../shared/uiMessages.js';
 import { useChatStore } from '../chatCore/index.js';
 import { CommandEditor, type CommandEditorHandle } from './CommandEditor.js';
@@ -348,7 +348,9 @@ function Composer() {
         <CommandEditor handleRef={editorRef} onEnter={doSubmit} onEmptyChange={setEditorEmpty} />
         {/* Not ComposerPrimitive.Send: its disabled state reads assistant-ui's canSend, which
             knows nothing of the local editor or files and would stay disabled on both. */}
-        <button type="submit" disabled={editorEmpty && files.length === 0}>Send</button>
+        <button type="submit" className="composer-send" aria-label="Send" disabled={editorEmpty && files.length === 0}>
+          <ArrowUp size={16} weight="bold" aria-hidden="true" />
+        </button>
       </div>
     </ComposerPrimitive.Root>
   );

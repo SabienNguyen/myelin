@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { SymbolInput } from '../SymbolInput.js';
 import { useThreadRuntime } from '@assistant-ui/react';
 import { PenNibIcon as PenNib } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
@@ -244,7 +245,7 @@ export function WritingDraftInner({ args, result, addResult }: {
       )}
       {/* Labelled for a screen reader: the prompt (BlockProse) and rubric sit above but aren't tied
           to the field, so without this it announced as a blank, purposeless text area. */}
-      <textarea aria-label="your draft" value={draft} onChange={(e) => setDraft(e.target.value)} />
+      <SymbolInput multiline aria-label="your draft" value={draft} onChange={(e) => setDraft(e.target.value)} />
       <HarperReview lints={lints} onApply={applyLint} />
       {/* The mechanical-issue count rides into the result so grading can weigh the draft's mechanics
           on a machine signal, not the model's read of them. */}

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { ChatStoreContext } from '../chatCore/index.js';
+import { StageSummary } from './StageSummary.js';
 import { getGraph } from '../lib/api.js';
 import { panelBus, type PanelTab } from '../lib/panelBus.js';
 import { parseHash, serializeHash } from '../lib/urlState.js';
@@ -14,6 +16,14 @@ import { useTablistKeys } from '../lib/tablist.js';
 const DUE_POLL_MS = 5 * 60_000;
 
 export function SidePanel() {
+  // Optional on purpose: SidePanel can mount outside the chat runtime (standalone panel tests),
+  // and the stage summary is a nicety — no store means no summary, never a crash.
+  const store = useContext(ChatStoreContext);
+  const chat = useSyncExternalStore(
+    store?.subscribe ?? (() => () => {}),
+    store?.getState ?? (() => null),
+  );
+  const messages = chat?.messages ?? [];
   const onTabKeys = useTablistKeys();
   const [tab, setTab] = useState<PanelTab>(() => parseHash(location.hash).tab);
   const [pageSlug, setPageSlug] = useState<string | null>(() => parseHash(location.hash).pageSlug);
@@ -127,7 +137,17 @@ export function SidePanel() {
           </button>
         ))}
       </nav>
-      <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage" />
+      <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
+        <section className="stage-empty">
+          <h2>Your workspace</h2>
+          <p>Exercises and feedback appear here as you learn.</p>
+          <div className="stage-empty-actions">
+            <button type="button" onClick={() => panelBus.setTab('library')}>Browse library</button>
+            <button type="button" onClick={() => panelBus.setTab('graph')}>Explore knowledge graph</button>
+          </div>
+        </section>
+        <StageSummary messages={messages} isRunning={chat?.isRunning ?? false} onRetry={(id) => store?.retryGrading(id)} />
+      </div>
       <div hidden={tab !== 'graph'} id="panel-graph" className="tab-body" role="tabpanel" aria-labelledby="tab-graph"><GraphPanel visible={tab === 'graph'} /></div>
       <div hidden={tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page">
         {source

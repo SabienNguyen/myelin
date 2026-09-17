@@ -272,6 +272,19 @@ describe('GraphPanel — loading state', () => {
     await screen.findByText(/open a page to focus the graph/i);
   });
 
+  it('gives a sparse graph a readable topic list and a working page action', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ nodes: graphNodes }) })));
+    const opened: string[] = [];
+    const unsub = panelBus.subscribe((e) => { if (e.type === 'openPage') opened.push(e.slug); });
+    render(<GraphPanel visible />);
+    const link = await screen.findByRole('button', { name: 'Open Topic A' });
+    expect(screen.getByRole('region', { name: 'Topics in this view' }).textContent).toContain('unseen');
+    expect(screen.getByText(/No connections in this view yet/)).toBeTruthy();
+    fireEvent.click(link);
+    expect(opened).toEqual(['a']);
+    unsub();
+  });
+
   it('does not re-show the loading placeholder on subsequent poll refreshes', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ nodes: graphNodes }) })));

@@ -41,6 +41,6 @@ test('an escaped-SVG diagram with coincident pins and a duplicate label complete
 
   // Graded done card: all three correct, and the scripted tutor's follow-up turn rendered.
   await expect(page.locator('.block.done .graded-tag')).toBeVisible();
-  await expect(page.getByText('3/3 regions labelled correctly')).toBeVisible();
+  await expect(page.getByLabel('Conversation transcript').getByText('3/3 regions labelled correctly')).toBeVisible();
   await expect(page.getByText('All three placed — the cycle is yours.', { exact: true })).toBeVisible();
 });

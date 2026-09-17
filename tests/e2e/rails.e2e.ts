@@ -33,12 +33,16 @@ test('rails: plan → staged quick_check → answer → harness-recorded evidenc
 
   const followUp = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.getByRole('button', { name: 'slope at a point' }).click();
-  await expect(page.getByText('You: slope at a point')).toBeVisible();
+  await expect(page.getByLabel('Conversation transcript').getByText('You: slope at a point')).toBeVisible();
   await followUp;
+  // Continuity is deliberate: one transcript answer plus one read-only Stage summary.
+  await expect(page.getByLabel('Conversation transcript').getByText('You: slope at a point')).toHaveCount(1);
+  await expect(page.getByRole('region', { name: 'Latest exercise' }).getByText('You: slope at a point')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Your workspace' })).toBeHidden();
 
   // The grading round-trip reached the card, and the scripted feedback plus the harness's own
   // stop-offer line rendered (rails-script.json's turn 2 says next: 'stop-offer').
-  await expect(page.locator('.verdict.correct')).toBeVisible();
+  await expect(page.getByLabel('Conversation transcript').locator('.verdict.correct')).toBeVisible();
   await expect(page.getByText('You picked "slope at a point" — the machine grade agrees.', { exact: true }).last()).toBeVisible();
   await expect(page.getByText('Stop here, or keep going? Say "go on" for another.', { exact: true }).last()).toBeVisible();
 
@@ -56,5 +60,5 @@ test('rails: plan → staged quick_check → answer → harness-recorded evidenc
   // The saved thread survives a reload — createUiStream's onEnd + the client PUT both persist it.
   await page.reload();
   await expect(page.getByText('What does a derivative measure?').first()).toBeVisible();
-  await expect(page.locator('.verdict.correct')).toBeVisible();
+  await expect(page.getByLabel('Conversation transcript').locator('.verdict.correct')).toBeVisible();
 });

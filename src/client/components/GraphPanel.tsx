@@ -390,6 +390,12 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     const usableW = Math.max(1, vw - FIT_PAD_PX * 2 - sideMaxPx * 2);
     const usableH = Math.max(1, vh - FIT_PAD_PX * 2 - rMaxPx * 2 - FIT_LABEL_PX);
     let scale = Math.min(FIT_MAX_SCALE, usableW / bw, usableH / bh);
+    // Never MAGNIFY while the simulation is still hot: early ticks bunch every node near the
+    // origin, so the centre bounding box is a pixel or two wide and this scale would blow the
+    // graph up to FIT_MAX_SCALE of overlapping blobs. The `end.fit` handler below re-fits once
+    // positions are real, and that is the right moment to decide how much to magnify. Shrinking
+    // is always safe — a spread-out graph at a cold alpha is already near its final layout.
+    if (scale > 1 && (simRef.current?.alpha() ?? 0) > 0.3) scale = 1;
     if (scale < 1) {
       // Below scale 1 the labels ride the world transform (the label render clamps its
       // counter-scale at 1), so their allowance belongs to the CONTENT box, not the viewport.
@@ -891,6 +897,17 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           </g>
         </svg>
       </div>
+      )}
+      {!loading && !loadError && sub.nodes.length > 0 && sub.nodes.length <= 3 && (
+        <section className="graph-topic-list" aria-label="Topics in this view">
+          <h3>Topics in this view</h3>
+          {sub.edges.length === 0 && <p>No connections in this view yet. Open a topic to read its notes.</p>}
+          <ul>{sub.nodes.map((n) => <li key={n.slug}>
+            <button type="button" aria-label={`Open ${n.title}`} onClick={() => panelBus.openPage(n.slug)}>
+              <span>{n.title}</span><span className="graph-topic-standing">{n.effective}{n.slipped ? ' · due for review' : ''}</span>
+            </button>
+          </li>)}</ul>
+        </section>
       )}
       {/* Also gated on loadError: a mastery legend under an error message is a key to a graph that
           is not there. */}

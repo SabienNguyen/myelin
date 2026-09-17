@@ -35,6 +35,18 @@ async function mount(over: { onEnter?: () => void; onEmptyChange?: (empty: boole
 }
 
 describe('CommandEditor', () => {
+  it('inserts a clicked lambda over selected text and serializes it without LaTeX', async () => {
+    const { handle, getByRole } = await mount();
+    act(() => {
+      handle().editor.commands.insertContent('L = rate W');
+      handle().editor.commands.setTextSelection({ from: 5, to: 9 });
+    });
+    fireEvent.click(getByRole('button', { name: 'Math symbols' }));
+    fireEvent.click(getByRole('button', { name: 'λ — lambda' }));
+    expect(handle().serialize()).toEqual({ text: 'L = λ W' });
+    act(() => { handle().editor.commands.undo(); });
+    expect(handle().serialize()).toEqual({ text: 'L = rate W' });
+  });
   it('chip + text serializes to the { command, text } payload; text-only stays command-free', async () => {
     const { handle } = await mount();
     act(() => {

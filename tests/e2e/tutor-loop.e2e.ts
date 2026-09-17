@@ -47,7 +47,7 @@ test('full loop: bootstrap → quick_check → answer → auto-resubmit → evid
   // its own — no manual request construction.
   const followUp = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.getByRole('button', { name: 'slope at a point' }).click();
-  await expect(page.getByText('You: slope at a point')).toBeVisible();
+  await expect(page.getByLabel('Conversation transcript').getByText('You: slope at a point')).toBeVisible();
   await followUp;
 
   // (a) Turn-2 text from the harness's graded follow-up turn appears in the DOM — and exactly
@@ -62,7 +62,7 @@ test('full loop: bootstrap → quick_check → answer → auto-resubmit → evid
 
   // (c) QuickCheck renders the graded verdict it received back over the tool-output-available
   // chunk (Bug 2 fix) — confirms the round-trip actually reached the component, not just the log.
-  await expect(page.locator('.verdict.correct')).toBeVisible();
+  await expect(page.getByLabel('Conversation transcript').locator('.verdict.correct')).toBeVisible();
 
   // Give the client a moment to decide whether to auto-resubmit again — it must not: the
   // follow-up assistant message's new step has a record_evidence part (server-side MCP tool) and

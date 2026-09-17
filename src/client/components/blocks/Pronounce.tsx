@@ -74,6 +74,17 @@ export function Pronounce({ args, result, addResult }: {
   // updaters, and updaters must be pure).
   const submitted = useRef(false);
 
+  // The live stream, tracked outside the recorder so it can be stopped from three places that
+  // don't otherwise share a reference: MediaRecorder construction/start throwing, and unmount.
+  // rec.onstop already stopped it on the happy path; a throw between getUserMedia and that
+  // listener being live left the mic indicator on with nothing left to ever call .stop().
+  const activeStream = useRef<MediaStream | null>(null);
+
+  useEffect(() => () => {
+    if (recorder.current && recorder.current.state !== 'inactive') recorder.current.stop();
+    activeStream.current?.getTracks().forEach((t) => t.stop());
+  }, []);
+
   if (result) {
     return (
       <div className="block pronounce done">
@@ -105,13 +116,18 @@ export function Pronounce({ args, result, addResult }: {
 
   const start = async () => {
     setError(null);
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch { setError('Microphone unavailable — check the browser\'s mic permission.'); return; }
+    activeStream.current = stream;
+    try {
       const chunks: Blob[] = [];
       const rec = new MediaRecorder(stream);
       rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop());
+        activeStream.current = null;
         try {
           const { samples, sampleRate } = await decodeMono(new Blob(chunks));
           const { grade, contour } = gradePronunciation(samples, sampleRate, args.tone, system);
@@ -133,7 +149,13 @@ export function Pronounce({ args, result, addResult }: {
       recorder.current = rec;
       rec.start();
       setRecording(true);
-    } catch { setError('Microphone unavailable — check the browser\'s mic permission.'); }
+    } catch {
+      // MediaRecorder construction or start() threw before onstop could ever run — stop the
+      // tracks here instead of leaving the mic held open with no listener left to release it.
+      stream.getTracks().forEach((t) => t.stop());
+      activeStream.current = null;
+      setError('Microphone unavailable — check the browser\'s mic permission.');
+    }
   };
 
   const stop = () => { recorder.current?.stop(); setRecording(false); };

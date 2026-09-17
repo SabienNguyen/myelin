@@ -8,6 +8,7 @@
 import { useState } from 'react';
 import { RulerIcon as Ruler } from '@phosphor-icons/react/dist/csr/Ruler';
 import { BlockProse } from '../BlockProse.js';
+import { SymbolInput } from '../SymbolInput.js';
 import { prettyAnswer } from '../../lib/answerDisplay.js';
 import { parseNotes, playNotes } from '../../lib/audio.js';
 import { panelBus } from '../../lib/panelBus.js';
@@ -153,7 +154,7 @@ export function StructuredCheckInner({ args, addResult }: {
 
       {isSingle && (
         <div className="structured-single">
-          <input
+          <SymbolInput
             aria-label={checker.kind === 'numeric' ? 'numeric answer' : 'answer'}
             inputMode={checker.kind === 'numeric' ? 'decimal' : 'text'}
             placeholder={checker.kind === 'unit' ? 'value with unit — e.g. 20 m/s'
@@ -209,7 +210,7 @@ export function StructuredCheckInner({ args, addResult }: {
       {(checker.kind === 'set' || checker.kind === 'sequence') && (
         <>
           <p className="structured-list-label">{listLabel}</p>
-          <textarea
+          <SymbolInput multiline
             aria-label={listLabel}
             rows={4}
             value={lines}

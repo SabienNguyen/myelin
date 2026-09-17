@@ -1,80 +1,55 @@
+/* Neutral workspace. Dark by default; respect an explicit light OS preference. */
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   line-height: 1.6;
   font-size: 15px;
-
-  --bg: #f5f2ea;
-  --bg-panel: #fdfbf6;
-  --bg-inset: #ebe6da;
-  --text: #26241f;
-  /* Was #7d7668 — only 4.03:1 on --bg and 3.62:1 on --bg-inset, under WCAG AA (4.5:1) for the
-     normal-size text this token actually carries (.empty, .graph-subtitle, notes, labels).
-     #6b6456 is the smallest darkening that clears AA on all three surfaces: 5.24 / 5.67 / 4.71. */
-  --text-muted: #6b6456;
-  --border: #ddd5c5;
-  --accent: #3b5b8c;
-  --accent-soft: #e7ecf4;
-  --accent-text: #fdfbf6;
-  /* The three semantic tokens below are the graded-verdict signal (correct / incorrect / partial),
-     so their contrast is a correctness concern, not a taste one. The binding surface is NOT --bg
-     but --bg-inset: .ide-test-console is inset and hosts .test-result-status in --good/--bad, so
-     the per-test pass/fail of a code exercise is read against the darkest light surface. Values
-     below clear AA (4.5:1) on inset / bg / panel respectively — good 4.84/5.39/5.83,
-     bad 4.75/5.28/5.72, warn 4.64/5.16/5.58. Previously good 4.41 and bad 4.44 on inset (under AA)
-     and warn #a87b2f at 3.04. See the dark block — these three had NO dark counterpart at all. */
-  --good: #356e4a;
-  --bad: #a2493b;
-  --warn: #845f1e;
-  /* Graph mastery scale. Previously four raw hexes literal in lib/graphLayout.ts AND duplicated
-     inline in GraphPanel's legend swatches — two copies, free to drift, and no dark counterpart.
-     Tokenised here as the single source: graphLayout resolves them via getComputedStyle (it draws
-     to SVG and needs strings), the legend uses var(). Deliberately NOT --good/--warn/--accent:
-     these encode a four-step ordinal scale, not pass/fail, and reusing the verdict tokens would
-     conflate "mastered" with "correct". */
-  --mastery-unseen: #8a8578;
-  --mastery-exposed: #9a7420;
-  --mastery-practicing: #3f6ea8;
-  --mastery-mastered: #2f7a55;
+  --bg: #101116;
+  --bg-panel: #17191f;
+  --bg-inset: #21242c;
+  --text: #edeef2;
+  --text-muted: #a5a9b6;
+  --border: #3a3e4a;
+  --accent: #93b4f7;
+  --accent-soft: #1f2a44;
+  --accent-text: #11131a;
+  --good: #85cba0;
+  --bad: #f09c95;
+  --warn: #e5c17e;
+  --mastery-unseen: #a6a9b0;
+  --mastery-exposed: #e5c17e;
+  --mastery-practicing: #8ebbee;
+  --mastery-mastered: #85cba0;
+  /* Three steps, nested surfaces step down: canvas/composer/popovers > cards and bubbles > controls. */
   --radius: 10px;
-  --radius-sm: 6px;
-  --shadow: 0 1px 2px rgba(38, 30, 15, 0.05);
-  --font-serif: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
-  --font-prose: 'Newsreader Variable', Georgia, serif;
-  /* P2 (editor polish): bundled locally via @fontsource/jetbrains-mono (main.tsx) — no CDN. Falls
-     back to the existing system mono stack if the webfont hasn't loaded yet. */
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --radius-sm: 7px;
+  --radius-shell: 14px;
+  --shadow: none;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Compatibility alias for existing headings, not a second type system. */
+  --font-serif: var(--font-mono);
+  --font-prose: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
+@media (prefers-color-scheme: light) {
   :root {
-    --bg: #1d1b16;
-    --bg-panel: #24221c;
-    --bg-inset: #2c2a22;
-    --text: #e7e1d2;
-    /* Was #948d7b — 4.35 on --bg-inset, under AA for .test-results-empty inside the inset test
-       console. #9b9483 clears it at 4.76 / 5.70 / 5.27 (inset / bg / panel). */
-    --text-muted: #9b9483;
-    --border: #3b382d;
-    --accent: #93aed4;
-    --accent-soft: #2b3547;
-    --accent-text: #1d1b16;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
-    /* These three were MISSING here, so the light-mode values leaked into dark and the graded
-       verdict — the single most important signal in the UI — rendered below WCAG AA on a dark
-       ground: good 3.13 on --bg / 2.90 on --bg-panel, bad 3.11 / 2.88 (both under even the 3:1
-       non-text floor). Lightened counterparts, verified on bg / panel / inset respectively:
-       good 6.62 / 6.11 / 5.53 · bad 6.14 / 5.67 / 5.13 · warn 6.72 / 6.21 / 5.61. Hue is
-       preserved — these are the same three hues lifted, not new colours. */
-    --good: #6fae86;
-    --bad: #d4867a;
-    --warn: #c99a4a;
-    /* Lifted for the dark canvas — the light values are mid-tone and survived here, but they were
-       never *chosen* for dark, they simply leaked. These are tuned against --bg-inset. */
-    --mastery-unseen: #9e9787;
-    --mastery-exposed: #d9ad57;
-    --mastery-practicing: #7ba5db;
-    --mastery-mastered: #6cba8d;
+    color-scheme: light;
+    --bg: #eeeef7;
+    --bg-panel: #ffffff;
+    --bg-inset: #e4e5f0;
+    --text: #1f2128;
+    --text-muted: #565a68;
+    --border: #c9cbd8;
+    --accent: #2b55c4;
+    --accent-soft: #e3e9fb;
+    --accent-text: #ffffff;
+    --good: #27613f;
+    --bad: #9b3632;
+    --warn: #765319;
+    --mastery-unseen: #626873;
+    --mastery-exposed: #906619;
+    --mastery-practicing: #366caa;
+    --mastery-mastered: #27613f;
   }
 }
 
@@ -129,10 +104,11 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   display: flex;
   align-items: center;
   gap: 0.45rem;
-  font-family: var(--font-serif);
-  font-weight: 550;
-  font-size: 1.15rem;
-  letter-spacing: 0.01em;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   margin: 0;
   margin-right: auto;
 }
@@ -193,7 +169,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   align-items: center;
   gap: 0.35em;
   padding: 0.15rem 0.65rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg-inset);
   color: var(--text-muted);
@@ -305,7 +281,7 @@ button.badge:hover { color: var(--text); }
 .msg.user {
   background: var(--accent-soft);
   border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
-  border-radius: var(--radius) var(--radius) 4px var(--radius);
+  border-radius: var(--radius);
   padding: 0.6rem 0.95rem;
   margin-left: 18%;
   width: fit-content;
@@ -354,13 +330,43 @@ button.badge:hover { color: var(--text); }
   border-top: 1px solid var(--border);
   background: var(--bg-panel);
 }
-.composer-row { display: flex; gap: 0.6rem; align-items: center; }
-.composer textarea, .composer input { flex: 1; border-radius: 999px; padding: 0.55rem 1.1rem; }
+.composer-row {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: .5rem;
+  padding: .65rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.composer-row > .composer-editor { display: contents; }
+.composer-row > .composer-editor > div:not(.symbol-keyboard):not(.slash-menu) { grid-column: 1 / -1; grid-row: 1; }
+.composer-row > .composer-editor > .symbol-keyboard { grid-column: 2; grid-row: 2; margin: 0; }
+.composer-row > .composer-attach { grid-column: 1; grid-row: 2; }
+.composer-row > button[type="submit"] { grid-column: 3; grid-row: 2; }
+.composer-row .tiptap { border-color: transparent; padding: .6rem; min-height: 3.5rem; }
+.composer-row .symbol-panel {
+  position: absolute;
+  bottom: calc(100% + .5rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  background: var(--bg-panel);
+  border-radius: 10px;
+}
+.composer-row .slash-menu { bottom: calc(100% + .5rem); }
+.composer textarea, .composer input { flex: 1; border-radius: var(--radius-sm); padding: 0.55rem 1.1rem; }
 .composer button {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 0.45rem 1.3rem;
   font-weight: 600;
 }
@@ -416,7 +422,7 @@ button.badge:hover { color: var(--text); }
 .composer-editor .tiptap {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 0.55rem 1.1rem;
   max-height: 8.5rem;
   overflow-y: auto;
@@ -437,7 +443,7 @@ button.badge:hover { color: var(--text); }
   align-items: center;
   margin-right: 0.35rem;
   padding: 0.05rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 0.85em;
@@ -491,7 +497,7 @@ button.badge:hover { color: var(--text); }
   align-items: center;
   margin-right: 0.4rem;
   padding: 0.05rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   color: var(--accent);
   font-size: 0.78rem;
@@ -512,7 +518,7 @@ button.badge:hover { color: var(--text); }
   align-items: center;
   gap: 0.3rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-panel);
   padding: 0.1rem 0.6rem;
   font-size: 0.8rem;
@@ -588,6 +594,9 @@ button.badge:hover { color: var(--text); }
 .verdict.correct, .verdict.reviewed { color: var(--good); }
 .verdict.partial { color: var(--warn); }
 .verdict.incorrect { color: var(--bad); }
+/* A parse failure is not a grade: the learner's answer simply could not be read. Neutral ink,
+   not the red of a wrong answer — red here would assert the work was judged and failed. */
+.verdict.ungraded { color: var(--text-muted); }
 
 .quick-check form { display: flex; gap: 0.6rem; margin-top: 0.55rem; align-items: center; }
 .quick-check form input { flex: 1; }
@@ -598,7 +607,7 @@ button.badge:hover { color: var(--text); }
 .confidence { display: flex; gap: 0.3rem; align-items: center; margin: 0.35rem 0 0.1rem; }
 .confidence-chip {
   border: 1px solid var(--border); background: transparent; color: var(--text-muted);
-  border-radius: 999px; padding: 0.1rem 0.55rem; font-size: 0.78rem;
+  border-radius: var(--radius-sm); padding: 0.1rem 0.55rem; font-size: 0.78rem;
 }
 .confidence-chip:hover { background: var(--accent-soft); border-color: var(--accent); }
 .confidence-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
@@ -642,7 +651,7 @@ math-field:focus-within { outline: 2px solid var(--accent); outline-offset: -1px
 /* progress — the honest motivation card at the top of the Library (ProgressCard.tsx). */
 .progress-card {
   margin: 0 0 1rem; padding: 0.7rem 0.9rem;
-  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel);
 }
 .progress-title {
   margin: 0 0 0.4rem; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
@@ -734,7 +743,7 @@ math-field:focus-within { outline: 2px solid var(--accent); outline-offset: -1px
 .harper-problem { color: var(--text-muted); font-style: italic; }
 .harper-apply {
   flex: none; border: 1px solid var(--accent); background: transparent; color: var(--accent);
-  border-radius: 999px; padding: 0.1rem 0.55rem; font-size: 0.78rem; cursor: pointer;
+  border-radius: var(--radius-sm); padding: 0.1rem 0.55rem; font-size: 0.78rem; cursor: pointer;
 }
 .harper-apply:hover { background: var(--accent-soft); }
 
@@ -826,7 +835,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .pronounce-controls { display: flex; gap: 0.6rem; margin-bottom: 0.7rem; }
 .pronounce-hear, .pronounce-rec {
   display: inline-flex; align-items: center; gap: 0.4rem;
-  padding: 0.45rem 0.9rem; border-radius: 8px; cursor: pointer;
+  padding: 0.45rem 0.9rem; border-radius: var(--radius); cursor: pointer;
   font-family: var(--font-prose); font-size: 0.95rem; font-weight: 600;
   border: 1px solid var(--border); background: var(--bg-panel); color: var(--text);
 }
@@ -860,7 +869,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   gap: 0.3rem;
   padding: 0.25rem 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-muted);
   font-family: system-ui, sans-serif;
@@ -879,7 +888,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   gap: 0.45rem;
   padding: 0.4rem 0.85rem;
   border: 1px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-prose);
@@ -902,7 +911,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   margin: 0.15rem 0.4rem 0.15rem 0;
   padding: 0.28rem 0.7rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-panel);
   color: var(--text);
   font-family: var(--font-prose);
@@ -959,19 +968,34 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 
 .tab-body { flex: 1; overflow: auto; padding: 1.1rem 1.25rem; }
 
-#stage-root:empty::after {
-  content: "Nothing on stage yet — exercises land here when your tutor sends them: quizzes, math work, science checks, diagrams, drafts, code.";
-  display: block;
-  margin-top: 30%;
-  text-align: center;
-  color: var(--text-muted);
-  font-style: italic;
-  padding: 0 2rem;
-}
+.stage-summary .stage-math-work { margin-block: 1.25rem; }
+.stage-math-work h4 { margin: 1.5rem 0 .65rem; font-family: var(--font-prose); font-size: .8rem; font-weight: 600; color: var(--text-muted); }
+.stage-math-work .stage-problem { padding-block: .5rem; font-size: 1.2rem; }
+.stage-math-work ol { margin: 0; padding-left: 1.75rem; }
+.stage-math-work li { padding: .5rem .25rem; }
+.stage-math-work li::marker { color: var(--text-muted); font-size: .8rem; }
+.stage-math-work .stage-final { padding: .85rem; background: var(--bg-inset); border-radius: var(--radius); }
+.stage-math-work .stage-problem, .stage-math-work .stage-final, .stage-math-work li { overflow-x: auto; }
+.stage-empty { max-width: 24rem; margin: clamp(2rem, 12vh, 8rem) auto 2rem; padding: 1rem; }
+.stage-empty h2 { font-family: var(--font-prose); font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
+.stage-empty p { color: var(--text-muted); font-size: .9rem; margin: 0 0 1.25rem; }
+.stage-empty-actions { display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
+.stage-empty-actions button { text-align: left; font-size: .85rem; min-height: 44px; border-color: transparent; background: transparent; padding: .4rem 0; }
+.stage-empty-actions button:hover { color: var(--accent); }
+/* Portalled exercises and retained feedback displace the empty state without remounting them. */
+#stage-root:has(> :not(.stage-empty)) > .stage-empty { display: none; }
 
 .mark-ok { color: var(--good); font-weight: 700; }
 .mark-bad { color: var(--bad); font-weight: 700; }
 
+.graph-panel:has(.graph-topic-list) .graph-canvas { flex: 0 1 260px; min-height: 160px; }
+.graph-topic-list { flex: none; padding: .85rem 0; border-top: 1px solid var(--border); }
+.graph-topic-list h3 { margin: 0 0 .5rem; font-family: var(--font-prose); font-size: .9rem; }
+.graph-topic-list p { margin: 0 0 .65rem; font-size: .8rem; color: var(--text-muted); }
+.graph-topic-list ul { list-style: none; margin: 0; padding: 0; }
+.graph-topic-list button { width: 100%; min-height: 44px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; text-align: left; background: transparent; border-color: transparent; padding: .6rem; }
+.graph-topic-list button:hover { background: var(--bg-inset); }
+.graph-topic-standing { color: var(--text-muted); font-size: .8rem; }
 .graph-panel {
   display: flex;
   flex-direction: column;
@@ -1191,30 +1215,11 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
    and --text-muted clears AA but not AAA. A reader who has asked the OS for more contrast is
    exactly the reader those trades were made against, so for them the paper hairline gives way. */
 @media (prefers-contrast: more) {
-  :root {
-    --text-muted: #4a4438;  /* 8.9:1 on --bg, up from 5.8:1 — clears AAA */
-    /* Solved against ALL THREE surfaces, not just --bg: an inset panel is where the old
-       value was weakest (1.17:1), and a border that clears 3:1 on the page but not inside a
-       card has not actually fixed anything. bg 3.39 / panel 3.67 / inset 3.05. */
-    --border: #8a8276;
-    --accent: #24406b;      /* 9.4:1 on --bg, up from 6.1:1 */
-    --good: #245537;
-    --bad: #8a3527;
-    --warn: #634614;
-  }
-  /* The hairline is decorative at 1px; at this contrast it should read as a real division. */
-  .page-chip, .graph-edge { opacity: 1; }
-  .graph-edge-deepens { opacity: 0.8; }
+  :root { --text-muted: #d9dce1; --border: #858a94; }
+  .page-chip, .graph-edge, .graph-edge-deepens { opacity: 1; }
 }
-@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
-  :root {
-    --text-muted: #c3bcab;  /* 9.6:1 on dark --bg */
-    --border: #7a7266;  /* bg 3.63 / panel 3.35 / inset 3.03 */
-    --accent: #9dc0f0;
-    --good: #93c9a6;
-    --bad: #e5a89e;
-    --warn: #dcb76e;
-  }
+@media (prefers-contrast: more) and (prefers-color-scheme: light) {
+  :root { --text-muted: #33373e; --border: #777d87; }
 }
 
 .wiki-link {
@@ -1605,7 +1610,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   letter-spacing: 0.05em;
   text-transform: uppercase;
   padding: 0.1rem 0.4rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   border: 1px solid var(--border);
 }
@@ -1704,7 +1709,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   text-transform: none;
   font-style: italic;
   padding: 0.1rem 0.4rem;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   color: var(--text-muted);
   border: 1px solid var(--border);
 }
@@ -1957,7 +1962,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .path-meter {
   height: 4px;
   margin: 0.4rem 0;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--bg-inset);
   overflow: hidden;
 }
@@ -2147,7 +2152,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   padding: 1.7rem 1.8rem;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
 }
 .firstrun-mark {
   display: flex;
@@ -2187,7 +2192,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   background: var(--bg-inset);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .firstrun-card button {
   display: inline-flex;
@@ -2200,7 +2205,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: var(--text);
   background: var(--bg-inset);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .firstrun-card button.firstrun-primary {
@@ -2280,7 +2285,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: #26241f;
   background: #fdfbf6;
   border: 1.5px dashed #3b5b8c;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   cursor: pointer;
 }
@@ -2295,7 +2300,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: var(--text);
   background: var(--bg-inset);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .label-chip.is-selected { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
@@ -2308,7 +2313,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: var(--accent-text);
   background: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .label-diagram-submit:disabled { opacity: 0.5; cursor: default; }
@@ -2362,7 +2367,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .predict-verdict { margin: 0; font-size: 0.9rem; }
 .predict-ok { color: var(--good, #3c6e47); }
@@ -2375,7 +2380,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   color: var(--accent-text);
   background: var(--accent);
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .predict-check:disabled { opacity: 0.5; cursor: default; }
@@ -2397,7 +2402,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   letter-spacing: 0.03em;
   color: var(--text-muted);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   vertical-align: middle;
 }
 
@@ -2477,7 +2482,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   display: inline-block;
   margin-left: 0.45em;
   padding: 0 0.45em;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--warn);
   color: var(--bg-panel);
   font-size: 0.72rem;
@@ -2502,7 +2507,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   display: inline-block;
   margin-right: 0.5em;
   padding: 0 0.5em;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   font-size: 0.72rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -2683,7 +2688,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .local-getter { display: flex; flex-direction: column; gap: 0.35rem; }
 .local-getter-row {
   display: flex; align-items: center; justify-content: space-between; gap: 0.6rem;
-  padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.3rem 0.5rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
 }
 .local-getter-info { display: flex; flex-direction: column; min-width: 0; }
 .local-getter-name { font-size: 0.85rem; font-weight: 600; }
@@ -2703,7 +2708,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
    than --bad, so it reads as the next step instead of a failure. */
 .local-getter-blocked {
   margin-top: 0.4rem; padding: 0.6rem 0.7rem;
-  border: 1px solid var(--border); border-radius: 6px; background: var(--bg-inset);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-inset);
 }
 .local-getter-blocked-lead { font-size: 0.82rem; margin: 0; font-weight: 600; }
 .local-getter-blocked-body { font-size: 0.76rem; color: var(--text-muted); margin: 0.35rem 0 0; }
@@ -2730,6 +2735,28 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .page-standing-repaired li { color: var(--text-muted); font-size: 0.85rem; }
 
 /* Unit glyph row: four quiet taps under the input, not a toolbar. */
+.symbol-input { flex: 1; min-width: 0; }
+.symbol-input > input, .symbol-input > textarea { width: 100%; box-sizing: border-box; }
+.symbol-keyboard { margin-top: .35rem; text-align: left; }
+.symbol-toggle { font-size: .75rem; color: var(--text-muted); }
+.symbol-panel { margin-top: .4rem; padding: .55rem; background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.symbol-panel p { margin: 0 0 .4rem; color: var(--text-muted); font-size: .75rem; }
+.symbol-keys { display: flex; flex-wrap: wrap; gap: .25rem; max-height: 12rem; overflow-y: auto; }
+.symbol-keys button { min-width: 2.75rem; min-height: 2.75rem; padding: .25rem; font-size: 1.1rem; }
+.symbol-keys button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.composer .symbol-keyboard button {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+  font-weight: 400;
+  padding: .35rem .6rem;
+}
+.composer .symbol-keyboard button:hover { background: var(--bg-inset); color: var(--text); filter: none; }
+.composer .symbol-keys button { color: var(--text); border-color: var(--border); min-width: 2.75rem; }
+.composer-row .composer-editor .tiptap { border: 0; padding: .6rem; border-radius: 5px; }
+.composer .composer-row .composer-attach { border-color: transparent; }
+.composer .composer-row > button[type="submit"] { border-radius: 6px; padding: .4rem .8rem; }
+.composer .composer-row .symbol-panel { background: var(--bg-panel); border-radius: 10px; }
 .unit-glyphs { display: flex; gap: 0.3rem; margin: 0.25rem 0 0; }
 .unit-glyphs button { font-size: 0.85rem; padding: 0.1rem 0.55rem; min-width: 2rem; }
 
@@ -2766,3 +2793,132 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 /* These sections previously supplied their own heading margins; the toggle row now owns the
    spacing, so drop the doubled gap the old h2/h3 rules leave behind. */
 .collapsible .collapsible-body > :first-child { margin-top: 0; }
+
+/* Workspace chrome: compact rails around readable learning content. */
+.topbar { min-height: 54px; padding: 0.65rem 1.1rem; }
+.topbar .badge, .tabs button, .models-group, .graded-tag, .graph-mode-toggle button {
+  font-family: var(--font-prose);
+  font-size: 0.75rem;
+  letter-spacing: 0.025em;
+}
+.tabs button { text-transform: capitalize; letter-spacing: 0; font-size: .85rem; }
+.models-group { text-transform: uppercase; letter-spacing: 0.07em; }
+.thread-viewport { padding: 2rem clamp(1rem, 3vw, 3rem); }
+.msg { line-height: 1.75; }
+.msg.user { background: var(--bg-inset); border-color: var(--border); }
+.composer { border-top: 0; background: transparent; padding-bottom: 1.25rem; }
+.thread-empty h2 { font-family: var(--font-prose); font-weight: 550; letter-spacing: -.025em; }
+.thread-empty-examples button { text-align: left; border-left: 2px solid var(--border); }
+.thread-empty-examples button:hover { border-left-color: var(--accent); }
+
+.graph-canvas { border: 1px solid var(--border); background: var(--bg); }
+.graph-node:hover circle { filter: brightness(1.12); }
+.graph-node text { paint-order: stroke fill; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.models-chips { max-height: 10rem; overflow-y: auto; }
+.models-chip { overflow-wrap: anywhere; text-align: left; }
+@media (max-width: 640px) {
+  .topbar { gap: 0.45rem; padding: 0.5rem 0.7rem; }
+  .thread-viewport { padding: 1rem; }
+}
+
+
+/* ── Shell: tinted ground + inset canvas ───────────────────────────────────────────────────────
+   The window is the tinted ground (--bg) and the working area is ONE raised, rounded canvas inset
+   from its edge; the top bar sits on the ground, not on the canvas. Layout and surface only — no
+   new colors, and --radius-shell rounds exactly the canvas, the composer card and its popover, so
+   controls keep the sharp 2px corner. */
+.topbar { border-bottom: 0; background: transparent; }
+.workspace {
+  margin: 0 0.6rem 0.6rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-shell);
+  overflow: hidden; /* children are square; the canvas corner is what clips them */
+}
+/* Popovers float over the rounded canvas, so they take its corner rather than the control corner. */
+.history-panel, .models-panel, .student-menu, .add-material-panel { border-radius: var(--radius-shell); }
+.side-panel, .tabs { background: transparent; }
+.side-panel { border-left: 1px solid var(--border); }
+.thread { border-right: 0; }
+
+/* Composer: one card, the focus ring on the CARD rather than a second box inside it. */
+.composer { max-width: 47.5rem; width: 100%; margin: 0 auto; }
+.composer-row { border-radius: var(--radius-shell); transition: border-color 0.12s, box-shadow 0.12s; }
+.composer-row:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer-row .tiptap:focus-visible { outline: none; } /* the card above carries the ring */
+.composer .composer-row > button.composer-send {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border-radius: 50%;
+  justify-self: end;
+}
+/* An empty conversation has nothing to scroll, so the composer comes up to meet the prompt
+   instead of sitting a screen away from it. */
+.thread:has(.thread-empty) .thread-viewport { flex: 0 1 auto; margin-top: auto; padding-bottom: 0; }
+.thread:has(.thread-empty) .thread-empty { padding-bottom: 1.25rem; }
+.thread:has(.thread-empty) .composer { margin-bottom: auto; }
+
+@media (max-width: 900px) {
+  .workspace { margin: 0 0.4rem 0.4rem; }
+  .side-panel { border-left: 0; }
+}
+
+/* ── Fewer boxes ───────────────────────────────────────────────────────────────────────────────
+   A border is for a thing you type into or press. Everything else separates by fill or by space:
+   a box inside a box inside the canvas read as a form, not a lesson. */
+.msg.user { border: 0; padding: 0.55rem 0.95rem; }
+.block, .block.done { border-color: transparent; background: color-mix(in srgb, var(--bg-inset) 50%, var(--bg-panel)); }
+/* On the stage the tab body IS the container, so a block there is just its content. Consecutive
+   blocks (a summary above a new exercise) are told apart by a rule, not by two more boxes. */
+.tab-body .block { background: transparent; padding: 0; margin: 0 0 1.5rem; border-radius: 0; }
+.tab-body .block + .block { border-top: 1px solid var(--border); padding-top: 1.5rem; }
+.tab-body .block .graded-tag { position: static; float: right; }
+.block.chip, .block.chip:hover { border: 0; background: var(--accent-soft); }
+.block.chip:hover { filter: brightness(1.06); }
+.rubric-upfront { padding: 0.75rem 1rem; border-radius: var(--radius); }
+.block .symbol-toggle { border-color: transparent; background: transparent; padding-inline: 0; }
+.block .symbol-toggle:hover { background: transparent; color: var(--text); }
+.badge { border-color: transparent; border-radius: 999px; }
+.session-plan { border-color: transparent; background: color-mix(in srgb, var(--bg-inset) 50%, var(--bg-panel)); }
+
+/* ── One set of edges ──────────────────────────────────────────────────────────────────────────
+   The transcript sits on the composer card's 45rem measure, so prose, blocks, the user's bubbles
+   and the card all share a left and a right edge. The top bar ends where the canvas ends, and the
+   tab underline starts where the stage content starts. */
+/* The transcript scrolls and the composer does not, so a scrollbar would push the two measures
+   apart by its own width. The gutter is reserved on BOTH sides at a width this file sets (--sbw),
+   which makes it a number the padding can subtract instead of a platform surprise. */
+.thread-viewport {
+  --sbw: 10px;
+  scrollbar-gutter: stable both-edges;
+  padding-inline: max(clamp(1rem, 3vw, 3rem), calc((100% - 45rem) / 2 - var(--sbw)));
+}
+/* Firefox only. In Chromium (and so Electron) setting scrollbar-width switches the ::-webkit
+   rules below OFF, and with them the known width the padding depends on. */
+@supports not selector(::-webkit-scrollbar) {
+  .thread-viewport { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+}
+.thread-viewport::-webkit-scrollbar { width: var(--sbw); }
+.thread-viewport::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; border: 3px solid var(--bg-panel); }
+.msg.assistant { margin-right: 0; }
+.composer { max-width: none; padding-inline: max(calc(clamp(1rem, 3vw, 3rem) + 10px), calc((100% - 45rem) / 2)); }
+.topbar { padding-inline: 0.6rem; }
+.topbar h1 { padding-left: 0.3rem; }
+.tabs { padding-inline: 1.25rem; }
+@media (max-width: 900px) { .topbar { padding-inline: 0.4rem; } }
+
+/* ── Cluster sandbox strip ─────────────────────────────────────────────────────────────────────
+   Sits above a cluster exercise's editor. The command is the content; everything else is quiet. */
+.cluster-sandbox { margin: 0 0 0.75rem; padding: 0.75rem 1rem; background: var(--bg-inset); border-radius: var(--radius); }
+.cluster-sandbox-lede { margin: 0 0 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+.cluster-sandbox-row { display: flex; gap: 0.5rem; align-items: stretch; flex-wrap: wrap; }
+.cluster-sandbox-command {
+  flex: 1 1 18rem; min-width: 0; padding: 0.45rem 0.65rem; white-space: pre-wrap; overflow-wrap: anywhere;
+  font-family: var(--font-mono); font-size: 0.78rem; user-select: all;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.cluster-sandbox-row button { font-size: 0.8rem; white-space: nowrap; }
+.cluster-sandbox-note { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
