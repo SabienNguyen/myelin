@@ -49,6 +49,11 @@ export const getGraph = () => getJson<any>('/api/graph', 'the concept graph');
 // Subject includes the slug so the panel needs no prefix of its own — see PagePanel.
 export const getPage = (slug: string) => getJson<any>(`/api/page/${slug}`, `“${slug}”`);
 export const getStatus = () => getJson<any>('/api/status', 'the harness status');
+// The chat store's saved turns for one thread. Runtime.tsx used to fetch this with a bare
+// `fetch().then(r => r.json()).catch(() => setInitial([]))`, which folded "the server is down"
+// and "this thread is empty" into the same silent empty transcript — a learner reopening a
+// conversation with real history saw a blank chat and no sign anything had gone wrong.
+export const getThread = (threadId: string) => getJson<any[]>(`/api/thread/${threadId}`, 'this conversation');
 
 // Honest progress (restRoutes.ts /api/progress): what you know now by decayed level, positive
 // graded evidence earned in the last 7 days, and how many pages are slipping (a review opportunity).

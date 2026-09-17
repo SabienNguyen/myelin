@@ -8,10 +8,12 @@ import { deriveMode, lastUserText } from './deriveMode.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { clearStance, setStance } from './stanceStore.js';
 import { MODES, type Mode } from './prompt.js';
+import { detachedResponse } from './detachedResponse.js';
 
 export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
   const { respond } = createTutorSession(lw, cfg);
+  const runs = new Map<string, AbortController>();
 
   app.post('/api/chat', async (c) => {
     const body = await c.req.json() as {
@@ -57,23 +59,75 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     const baseMode = commandMode ?? mode;
     const effectiveMode: Mode = writeUp && baseMode !== 'freeform' ? 'freeform' : baseMode;
     const threadId = body.threadId ?? 'default';
+    // The thread id becomes a file name below (sessionStore's assertThreadId, stanceStore has no
+    // such check of its own) — reject a bad one BEFORE setStance so a doomed turn never leaves a
+    // stance file behind under an id that saveThread would then refuse.
+    try {
+      loadThread(cfg.vault, threadId);
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
+    if (runs.has(threadId)) return c.json({ error: 'This thread already has a running turn.' }, 409);
     // A stance command persists BEFORE the turn runs, so session.ts's tail note already carries
     // the new stance on this very turn — a bare "/beginner" with no text still runs a turn, and
     // the tutor answers it already teaching at the new level.
     if (isStance(command)) setStance(cfg.vault, threadId, command);
     saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
-    // The request's own signal: the runtime fires it when the client disconnects (tab closed,
-    // send superseded), and respond threads it down to the in-flight provider request.
-    return respond(body.messages, effectiveMode, threadId, c.req.raw.signal);
+    // A page reload only drops delivery; the server still completes and persists the turn.
+    const controller = new AbortController();
+    runs.set(threadId, controller);
+    try {
+      return detachedResponse(await respond(body.messages, effectiveMode, threadId, controller.signal),
+        () => { runs.delete(threadId); });
+    } catch (error) {
+      runs.delete(threadId);
+      throw error;
+    }
+  });
+  app.get('/api/thread/:id/run', (c) => {
+    try {
+      const messages = loadThread(cfg.vault, c.req.param('id'));
+      return c.json({ running: runs.has(c.req.param('id')), messages });
+    } catch (error: any) {
+      return c.json({ error: error?.message ?? String(error) }, 400);
+    }
+  });
+  app.post('/api/thread/:id/stop', (c) => {
+    try {
+      loadThread(cfg.vault, c.req.param('id'));
+      runs.get(c.req.param('id'))?.abort();
+      return c.json({ ok: true });
+    } catch (error: any) {
+      return c.json({ error: error?.message ?? String(error) }, 400);
+    }
   });
   app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
-  app.get('/api/thread/:id', (c) => c.json(loadThread(cfg.vault, c.req.param('id'))));
+  // loadThread/saveThread/deleteThread throw on a threadId that fails sessionStore's filename
+  // allowlist (assertThreadId) — a real client bug (nothing legitimate sends one), but it must
+  // read as a 400 naming the problem, not a bare 500 with no message.
+  app.get('/api/thread/:id', (c) => {
+    try {
+      return c.json(loadThread(cfg.vault, c.req.param('id')));
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
+  });
   app.put('/api/thread/:id', async (c) => {
-    saveThread(cfg.vault, c.req.param('id'), await c.req.json());
+    if (runs.has(c.req.param('id'))) return c.json({ error: 'A turn is still running.' }, 409);
+    try {
+      saveThread(cfg.vault, c.req.param('id'), await c.req.json());
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
     return c.json({ ok: true });
   });
   app.delete('/api/thread/:id', (c) => {
-    deleteThread(cfg.vault, c.req.param('id'));
+    if (runs.has(c.req.param('id'))) return c.json({ error: 'Stop the running turn before deleting this thread.' }, 409);
+    try {
+      deleteThread(cfg.vault, c.req.param('id'));
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
     clearStance(cfg.vault, c.req.param('id'));
     return c.body(null, 204);
   });

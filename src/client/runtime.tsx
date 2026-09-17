@@ -4,6 +4,7 @@ import type { UIMessage } from '../shared/uiMessages.js';
 import { dedupeById } from '../shared/messages.js';
 import { ChatStoreContext, useChatCoreRuntime } from './chatCore/index.js';
 import { toolkit } from './toolkit.js';
+import { getThread } from './lib/api.js';
 
 /** Load the persisted thread once, then mount the chat with it — the server's chatRoute only
  * persists the REQUEST side; the assistant's turns are saved by the chat store's onFinish PUT.
@@ -11,11 +12,19 @@ import { toolkit } from './toolkit.js';
  * every conversation switch so `initial` is always re-fetched for the right thread. */
 export function Runtime({ mode, emptyVault = false, threadId = 'default', onSetMode, children }: PropsWithChildren<{ mode: string; emptyVault?: boolean; threadId?: string; onSetMode?: (mode: string) => void }>) {
   const [initial, setInitial] = useState<UIMessage[] | null>(null);
+  // A load failure used to fall back to `[]` — a genuinely empty thread and "the server could not
+  // be reached" rendered identically, so reopening a conversation with real history on a flaky
+  // connection looked like the history was gone. Distinguish them: an error renders its own state
+  // instead of mounting a blank transcript that invites typing into a chat nothing will save.
+  const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
-    fetch(`/api/thread/${threadId}`).then((r) => r.json())
+    setLoadError(null);
+    setInitial(null);
+    getThread(threadId)
       .then((msgs) => setInitial(Array.isArray(msgs) ? (dedupeById(msgs) as UIMessage[]) : []))
-      .catch(() => setInitial([]));
+      .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
   }, [threadId]);
+  if (loadError) return <p className="panel-error" role="status">{loadError}</p>;
   if (initial === null) return null; // one settled frame while the thread restores
   return <RuntimeInner mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={onSetMode} initial={initial}>{children}</RuntimeInner>;
 }

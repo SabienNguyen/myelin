@@ -2,7 +2,7 @@
 // useExternalStoreRuntime / ExternalStoreAdapter / ThreadMessageLike, re-exported from
 // @assistant-ui/core). The adapter's job is shape translation only; all chat behavior lives in
 // the store.
-import { createContext, useCallback, useContext, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   useExternalStoreRuntime,
   type AppendMessage, type AssistantRuntime, type ThreadMessageLike,
@@ -123,6 +123,11 @@ export function useChatCoreRuntime({ mode, emptyVault, threadId, initialMessages
     }),
     onModeCommand: (m) => onModeCommandRef.current?.(m),
   }));
+  useEffect(() => {
+    const controller = new AbortController();
+    void store.recover(controller.signal);
+    return () => controller.abort(); // disconnect recovery, not the server's running turn
+  }, [store]);
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const messages = useMemo(
     () => withErrorPlaceholder(state.messages, state.error),
