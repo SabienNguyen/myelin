@@ -1,12 +1,13 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import cron from 'node-cron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configSource, loadConfig } from './config.js';
 import { applyCredentials, credentialsPath } from './credentials.js';
 import { applySettings } from './settings.js';
 import { buildSetupRoutes, needsApiKey } from './setupRoutes.js';
+import { modelRouteFor } from './models.js';
 import { buildStaticRoutes } from './staticRoutes.js';
 import { Engram } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
@@ -19,8 +20,12 @@ import { seedPatternPages } from './seedPatternPages.js';
 import { startScheduler } from './scheduler.js';
 import { AnkiClient } from './anki/client.js';
 import { syncInbound, backlogDays } from './anki/inbound.js';
+import { ankiOutboundTick } from './anki/outbound.js';
 import { ensureCompileDrain, sweepInterruptedConversions } from './ingest.js';
 import { sendNotification } from './notify.js';
+import { atomicWrite } from './atomicWrite.js';
+import { localOnly } from './localOnly.js';
+import type { HarnessConfig } from './config.js';
 
 const cfg = loadConfig();
 // Config merge order: defaults < harness.config.json (both inside loadConfig) < settings.json —
@@ -59,6 +64,12 @@ function preflight(): void {
   if (roles.length && !process.env.ANTHROPIC_API_KEY) {
     console.error(`\nNo ANTHROPIC_API_KEY. These roles need one: ${roles.join(', ')}.\n`
       + `Enter it in the app (it saves to ${credentialsPath()}) or export it before starting.\n`);
+  }
+  const routed = Object.entries(cfg.models).filter(([, r]) => modelRouteFor(r.model) === 'openrouter').map(([role]) => role);
+  if (routed.length && !process.env.OPENROUTER_API_KEY) {
+    console.error(`\nNo OPENROUTER_API_KEY. These roles need one: ${routed.join(', ')}.\n`
+      + 'A free key from https://openrouter.ai/settings/keys is enough. Enter it in the app or '
+      + 'export it before starting.\n');
   }
 }
 
@@ -101,12 +112,18 @@ function loadNotifyLedger(): Record<string, true> {
   }
 }
 function saveNotifyLedger(ledger: Record<string, true>): void {
-  mkdirSync(join(cfg.vault, '.harness'), { recursive: true });
-  writeFileSync(notifyLedgerPath, JSON.stringify(ledger));
+  atomicWrite(notifyLedgerPath, JSON.stringify(ledger));
 }
 
-async function ankiTick(): Promise<void> {
+// Exported so a test can drive it with fake lw/anki/cfg instead of importing this whole boot
+// script (which spawns Engram and binds a port as a side effect of module load).
+export async function runAnkiTick(lw: Engram, anki: AnkiClient, cfg: HarnessConfig): Promise<void> {
   await syncInbound(lw, anki, cfg).catch(console.error);
+  // `syncOutbound` had no production caller for months (H8 in the audit): nothing ever called it,
+  // so `anki-map.json` was never written and the "two-way" sync never pushed a card. Both halves
+  // go through `withAnkiLedger` internally, so calling this right after inbound resolves — same
+  // tick, same mutex — is safe ordering, not a race.
+  await ankiOutboundTick(lw, anki, cfg).catch(console.error);
   const up = await anki.isUp();
   if (up || backlogDays(cfg.vault) <= cfg.schedule.ankiBacklogNudgeDays) return;
   const key = `anki|backlog|${isoWeekKey(new Date())}`;
@@ -119,10 +136,12 @@ async function ankiTick(): Promise<void> {
   }
 }
 
-cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => ankiTick(), { noOverlap: true });
-ankiTick().catch(console.error); // once at boot
+cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => runAnkiTick(lw, anki, cfg), { noOverlap: true });
+runAnkiTick(lw, anki, cfg).catch(console.error); // once at boot
 
 const app = new Hono();
+// First, so nothing below is reachable from another site's page — see localOnly.ts.
+app.use('*', localOnly());
 // `tutor` is deliberately NOT in this snapshot — restRoutes reads it from cfg per request, so the
 // status badge always names what the app is actually using.
 app.route('/', buildRestRoutes(lw, cfg, {
@@ -145,7 +164,11 @@ app.route('/', buildSetupRoutes(cfg));
 // route above. Absent in dev (Vite owns the client then) — see staticRoutes.ts.
 const staticFiles = buildStaticRoutes();
 if (staticFiles.found) app.route('/', staticFiles.app);
-serve({ fetch: app.fetch, port: cfg.port });
+// Loopback only. This app has no auth and /api/gap/run executes arbitrary code the model
+// generates — binding 0.0.0.0 (the @hono/node-server default) put that RCE on every interface,
+// reachable from anything else on the LAN or a shared network. Never widen this without adding
+// auth first.
+serve({ fetch: app.fetch, port: cfg.port, hostname: '127.0.0.1' });
 console.log(staticFiles.found
-  ? `Myelin is running — open http://localhost:${cfg.port}`
-  : `myelin API on :${cfg.port} (no built client; run \`npm run dev:client\`)`);
+  ? `Myelin is running — open http://127.0.0.1:${cfg.port}`
+  : `myelin API on 127.0.0.1:${cfg.port} (no built client; run \`npm run dev:client\`)`);

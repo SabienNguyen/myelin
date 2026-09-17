@@ -1,8 +1,10 @@
 import { htmlToText } from './htmlText.js';
-import { fetchWithRetry, HttpStatusError } from './retry.js';
+import { fetchWithRetry, HttpStatusError, isRetryableError, isRetryableStatus, withRetry } from './retry.js';
+import { assertPublicUrl, UrlRefusedError } from './urlGuard.js';
 import { z } from 'zod';
 import type { HarnessConfig } from './config.js';
 import type { LoopTool, ServerTool } from './llm/index.js';
+import { modelRouteFor } from './models.js';
 import { zodTool } from './zodTool.js';
 
 const MAX_PAGE_CHARS = 9_000;
@@ -11,18 +13,54 @@ const MAX_RESULTS = 6;
  *  (instruction 13 asks for at least two), low enough that a confused turn cannot spend the
  *  session searching. */
 const MAX_SEARCHES_PER_TURN = 8;
+const MAX_REDIRECTS = 5;
 
-/** Which search backend a model route can actually use.
- *
- *  `web_search_20260209` is a PROVIDER-EXECUTED tool: Anthropic runs the search on their side and
+/** Injected so the suite can read its own 127.0.0.1 fixture server; production always gets
+ *  `assertPublicUrl`. */
+export interface WebToolDeps {
+  guard?: (url: string) => Promise<void>;
+}
+
+/** `read_url`'s fetch. Redirects are followed by hand so the guard sees EVERY hop: with
+ *  `redirect: 'follow'` a public page answering `302 Location: http://127.0.0.1:4820/...` lands
+ *  on loopback after the only check already passed. */
+async function fetchPublicPage(url: string, guard: (url: string) => Promise<void>): Promise<Response> {
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await guard(current);
+    const target = current;
+    // Retried: a blip here used to cost the whole turn — the model saw a dead source and taught
+    // from memory instead. A 404/403 still fails immediately, because those are answers about
+    // the URL, not accidents (see retry.ts).
+    const res = await withRetry(
+      async () => {
+        const r = await fetch(target, {
+          redirect: 'manual',
+          signal: AbortSignal.timeout(20_000),
+          headers: { 'user-agent': 'myelin/1.0 (personal tutoring app)' },
+        });
+        if (!r.ok && !(r.status >= 300 && r.status < 400)) throw new HttpStatusError(r.status, target);
+        return r;
+      },
+      (e) => (e instanceof HttpStatusError ? isRetryableStatus(e.status) : isRetryableError(e)),
+      { onRetry: (n, why) => console.error(`[read_url] retry ${n} for ${target}: ${why}`) },
+    );
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!location) return res;
+    current = new URL(location, target).toString();
+  }
+  throw new Error(`more than ${MAX_REDIRECTS} redirects`);
+}
+
+/** `web_search_20260209` is a PROVIDER-EXECUTED tool: Anthropic runs the search on their side and
  *  the results never pass through this process. That makes it free of local infrastructure — the
  *  API key the tutor already needs is the whole setup — but it also means it only exists on an
- *  Anthropic-routed model. An `ollama:` tutor gets nothing back from it. */
-function isAnthropicRouted(modelId: string | undefined): boolean {
-  if (!modelId) return false;
-  // Mirrors models.ts's routing: `ollama:` goes to the OpenAI-compatible provider, anything else
-  // is an Anthropic model id.
-  return !modelId.startsWith('ollama:');
+ *  Anthropic-routed model. An `ollama:` or `openai:` tutor gets nothing back from it: an
+ *  `openai:` route is still an OpenAI-compatible wire (see openaiCompat.ts), which has no concept
+ *  of a provider-executed Anthropic tool and drops it silently, so declaring it there would be a
+ *  no-op that also lies to the learner about search working. */
+function usesProviderSearch(modelId: string | undefined): boolean {
+  return modelId !== undefined && modelRouteFor(modelId) === 'anthropic';
 }
 
 /** Loop-executed tools plus provider-executed ones, carried separately because they travel
@@ -41,8 +79,8 @@ export interface WebTools {
  *      the tutor runs on an Anthropic-routed model. Nothing to install, nothing to host — which is
  *      the point: research used to require a self-hosted SearXNG, so out of the box the tutor
  *      could only teach from model memory and from files the learner supplied by hand.
- *   2. **A configured SearXNG** (`search.searxng`), which is what a local `ollama:` tutor can use,
- *      since a provider-executed tool has no meaning off Anthropic's servers.
+ *   2. **A configured SearXNG** (`search.searxng`), which is what an `ollama:` or `openai:`
+ *      tutor can use, since a provider-executed tool has no meaning off Anthropic's servers.
  *
  * `read_url` is deliberately UNGATED. It needs no infrastructure at all, and a learner who names a
  * specific URL should be readable regardless of which search backend exists.
@@ -54,7 +92,8 @@ export interface WebTools {
  * The single-writer rule holds either way: findings only reach the vault when the tutor calls
  * write_page with source URLs.
  */
-export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
+export function buildWebTools(cfg: HarnessConfig, modelId?: string, deps: WebToolDeps = {}): WebTools {
+  const guard = deps.guard ?? assertPublicUrl;
   const tools: LoopTool[] = [
     zodTool('read_url', {
       description: 'Fetch a web page and return its readable text (truncated). Use on the most '
@@ -66,13 +105,7 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
       parallel: true,
       execute: async ({ url }) => {
         try {
-          // Retried: a blip here used to cost the whole turn — the model saw a dead source and
-          // taught from memory instead. A 404/403 still fails immediately, because those are
-          // answers about the URL, not accidents (see retry.ts).
-          const res = await fetchWithRetry(url, {
-            signal: AbortSignal.timeout(20_000),
-            headers: { 'user-agent': 'myelin/1.0 (personal tutoring app)' },
-          }, { onRetry: (n, why) => console.error(`[read_url] retry ${n} for ${url}: ${why}`) });
+          const res = await fetchPublicPage(url, guard);
           const html = await res.text();
           const text = htmlToText(html);
           return {
@@ -82,13 +115,14 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
           };
         } catch (e: any) {
           if (e instanceof HttpStatusError) return { error: `fetch failed: HTTP ${e.status}` };
+          if (e instanceof UrlRefusedError) return { error: `refused: ${e.message}` };
           return { error: `fetch unavailable: ${e?.message ?? e}` };
         }
       },
     }),
   ];
 
-  if (isAnthropicRouted(modelId)) {
+  if (usesProviderSearch(modelId)) {
     // Pinned deliberately: web_search_20250305 is the older basic variant; _20260209 is the one
     // with dynamic filtering, and it is what the model actually behaves well with.
     return {
@@ -129,9 +163,9 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string): WebTools {
     return { tools, serverTools: [] };
   }
 
-  // No search backend at all — a local model with no SearXNG. read_url still ships, and
-  // instruction 13 tells the tutor to mark pages as unverified model knowledge when it cannot
-  // search. Registering a web_search that always errors would be worse: the model would keep
-  // retrying a tool that cannot ever work.
+  // No search backend at all — an ollama:/openai: model with no SearXNG configured. read_url
+  // still ships, and instruction 13 tells the tutor to mark pages as unverified model knowledge
+  // when it cannot search. Registering a web_search that always errors would be worse: the model
+  // would keep retrying a tool that cannot ever work.
   return { tools, serverTools: [] };
 }
