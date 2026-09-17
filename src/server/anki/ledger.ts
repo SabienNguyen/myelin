@@ -43,7 +43,7 @@ export function noteEntries(ledger: AnkiLedger): [string, AnkiLedgerEntry][] {
   return Object.entries(ledger).filter(([k]) => k !== '_cursor') as [string, AnkiLedgerEntry][];
 }
 
-function writeAnkiLedger(vault: string, ledger: AnkiLedger): void {
+export function writeAnkiLedger(vault: string, ledger: AnkiLedger): void {
   atomicWrite(ledgerPath(vault), JSON.stringify(ledger, null, 2));
 }
 

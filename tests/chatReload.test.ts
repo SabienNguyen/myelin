@@ -88,6 +88,33 @@ describe('chat survives a page reload', () => {
     }
   }, 30_000);
 
+  // Turns now outlive their connection, so the client's own abort no longer ends one. A send
+  // during a running turn used to get a bare 409: the client reported "unreachable", hid Stop
+  // because it believed nothing was running, and the thread refused everything until the orphaned
+  // turn finished on its own.
+  it('a second send supersedes the running turn instead of being refused', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'myelin-supersede-'));
+    const app = buildChatRoute({} as any, { vault, student: 'kid' } as any);
+    const post = (text: string) => app.request('/api/chat', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ threadId: 'supersede', messages: [{ id: text, role: 'user', parts: [{ type: 'text', text }] }] }),
+    });
+    const first = await post('first question');
+    const firstSignal = probe.signal!;
+    const releaseFirst = probe.release;
+    const second = post('second question'); // aborts the first and waits for it to end
+    await vi.waitFor(() => expect(firstSignal.aborted).toBe(true));
+    releaseFirst(); // the stubbed turn only notices the abort once its wait is released
+    const secondResponse = await second;
+    expect(secondResponse.status).toBe(200);
+    const done = new Promise<void>((resolve) => { probe.complete = resolve; });
+    await vi.waitFor(() => expect(probe.signal).not.toBe(firstSignal));
+    probe.release();
+    await done;
+    await Promise.all([first.text(), secondResponse.text()]);
+    expect(await (await app.request('/api/thread/supersede/run')).json()).toMatchObject({ running: false });
+  });
+
   it('explicit Stop aborts the producer, unlike a disconnect', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'myelin-stop-'));
     const app = buildChatRoute({} as any, { vault, student: 'kid' } as any);
@@ -143,5 +170,37 @@ describe('chat survives a page reload', () => {
     expect(restored.filter(m => m.role === 'assistant')).toHaveLength(1);
     const text = restored.flatMap(m => m.parts).filter(p => p.type === 'text').map(p => p.text).join('');
     expect(text).toContain('First half. Final half.');
+  });
+});
+
+describe('detachedResponse idle watchdog', () => {
+  // Closing the tab used to be what ended a turn whose provider stream had stalled; detached,
+  // nothing did, and the thread answered 409 until the server restarted.
+  it('ends a stream that has gone silent, calls onIdle, and still fires onEnd exactly once', async () => {
+    const { detachedResponse } = await import('../src/server/detachedResponse.js');
+    const silent = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('first chunk')); /* then nothing, ever */ },
+    });
+    let ends = 0; let idles = 0;
+    const out = detachedResponse(new Response(silent), () => { ends += 1; }, { ms: 40, onIdle: () => { idles += 1; } });
+    expect(await out.text()).toBe('first chunk');
+    expect(idles).toBe(1);
+    expect(ends).toBe(1);
+  });
+
+  it('a stream that keeps talking is never cut, however long it runs', async () => {
+    const { detachedResponse } = await import('../src/server/detachedResponse.js');
+    let n = 0;
+    const chatty = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        await new Promise((r) => { setTimeout(r, 25); });
+        n += 1;
+        if (n > 6) controller.close(); else controller.enqueue(new TextEncoder().encode(`${n},`));
+      },
+    });
+    let idles = 0;
+    const out = detachedResponse(new Response(chatty), () => {}, { ms: 60, onIdle: () => { idles += 1; } });
+    expect(await out.text()).toBe('1,2,3,4,5,6,');
+    expect(idles).toBe(0);
   });
 });

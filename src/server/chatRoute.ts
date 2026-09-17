@@ -13,7 +13,14 @@ import { detachedResponse } from './detachedResponse.js';
 export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
   const { respond } = createTutorSession(lw, cfg);
-  const runs = new Map<string, AbortController>();
+  // `done` settles when the turn has fully ended (its thread saved, its entry removed), so a
+  // superseding send can wait for that rather than race the old turn's final save.
+  const runs = new Map<string, { controller: AbortController; done: Promise<void>; lastUserId?: string }>();
+  // Generous on purpose: a turn is silent while a tool runs, and the slowest tool (building the
+  // kind cluster, then an exercise's rollout gate) takes minutes. This is for a stream that will
+  // never speak again, not one that is slow.
+  const IDLE_MS = 10 * 60_000;
+  const SUPERSEDE_WAIT_MS = 10_000;
 
   app.post('/api/chat', async (c) => {
     const body = await c.req.json() as {
@@ -67,7 +74,29 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     } catch (e: any) {
       return c.json({ error: e?.message ?? String(e) }, 400);
     }
-    if (runs.has(threadId)) return c.json({ error: 'This thread already has a running turn.' }, 409);
+    // A send while a turn is running SUPERSEDES it, as it did before turns outlived their
+    // connection: then, the client's abort closed the socket and that ended the old turn. Now the
+    // old turn survives a disconnect by design, so the server ends it. Refusing instead (a bare
+    // 409) stranded the learner: the client showed "unreachable", hid Stop because it no longer
+    // thought anything was running, and the thread refused every send until the orphan finished.
+    //
+    // A DUPLICATE is still refused: the same last user message (a double-fired request, a retry
+    // racing a reload) must not kill the healthy turn that is already answering it.
+    const lastUserId = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.id;
+    const running = runs.get(threadId);
+    if (running && (lastUserId === undefined || lastUserId === running.lastUserId)) {
+      return c.json({ error: 'This thread already has a running turn.' }, 409);
+    }
+    if (running) {
+      running.controller.abort();
+      const ended = await Promise.race([
+        running.done.then(() => true),
+        new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), SUPERSEDE_WAIT_MS); }),
+      ]);
+      if (!ended) {
+        return c.json({ error: 'The previous turn is still shutting down — try again in a moment.' }, 409);
+      }
+    }
     // A stance command persists BEFORE the turn runs, so session.ts's tail note already carries
     // the new stance on this very turn — a bare "/beginner" with no text still runs a turn, and
     // the tutor answers it already teaching at the new level.
@@ -75,12 +104,16 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
     // A page reload only drops delivery; the server still completes and persists the turn.
     const controller = new AbortController();
-    runs.set(threadId, controller);
+    let finish!: () => void;
+    const entry = { controller, lastUserId, done: new Promise<void>((resolve) => { finish = resolve; }) };
+    runs.set(threadId, entry);
+    // Only this turn's own entry: a superseding turn may already have registered under the id.
+    const end = () => { if (runs.get(threadId) === entry) runs.delete(threadId); finish(); };
     try {
       return detachedResponse(await respond(body.messages, effectiveMode, threadId, controller.signal),
-        () => { runs.delete(threadId); });
+        end, { ms: IDLE_MS, onIdle: () => controller.abort() });
     } catch (error) {
-      runs.delete(threadId);
+      end();
       throw error;
     }
   });
@@ -95,7 +128,7 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   app.post('/api/thread/:id/stop', (c) => {
     try {
       loadThread(cfg.vault, c.req.param('id'));
-      runs.get(c.req.param('id'))?.abort();
+      runs.get(c.req.param('id'))?.controller.abort();
       return c.json({ ok: true });
     } catch (error: any) {
       return c.json({ error: error?.message ?? String(error) }, 400);

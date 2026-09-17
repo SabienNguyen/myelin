@@ -6,7 +6,7 @@ import type { Engram } from '../mcp.js';
 import { chatModelFor } from '../models.js';
 import { recordUsage } from '../usageLedger.js';
 import type { AnkiClient } from './client.js';
-import { noteEntries, withAnkiLedger } from './ledger.js';
+import { noteEntries, withAnkiLedger, writeAnkiLedger } from './ledger.js';
 
 export type GenerateCards = (
   slug: string,
@@ -152,9 +152,12 @@ export async function syncOutbound(
             ledger[String(noteId)] = { slug, hash };
             result.pushed++;
           }
-          // No per-push disk write here any more (withAnkiLedger writes once, on return): the
-          // mutex now holds for the whole run, so a competing writer can no longer interleave and
-          // there is nothing left for a mid-loop flush to protect against.
+          // Flushed after EVERY push, while the mutex is held. The mutex stops another writer
+          // interleaving; it does nothing for the process dying, and this run makes one model call
+          // per page, so it lasts minutes. A note added to Anki with no ledger row is orphaned for
+          // good: the next tick's addNote throws "duplicate" for it, the page counts as failed on
+          // every tick after, and inbound never credits its reviews.
+          writeAnkiLedger(cfg.vault, ledger);
         }
       } catch (e) {
         // Cards already pushed for this page stay pushed IN THE LEDGER OBJECT (still written at

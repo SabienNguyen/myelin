@@ -211,13 +211,23 @@ function normKey(s: string): string {
   return s.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').toLowerCase();
 }
 
-/** Whatever trails the leading number in a free-text answer — "20 km/s" -> "km/s", "9.81" -> "".
- *  Used to hand the unit checker the unit ALONE, not the whole answer string, so equivalence can
- *  be judged by real unit algebra (unitsEquivalent) rather than a substring match on the answer. */
+/** The unit a learner typed beside their number — "20 km/s" -> "km/s", "9.81" -> "". Handed to
+ *  the unit checker ALONE so equivalence is judged by unit algebra (unitsEquivalent), not by a
+ *  substring match on the whole answer.
+ *
+ *  It must find the number wherever extractAnswerNumber would: that function accepts "v = 20 m/s"
+ *  and "The speed is 20 m/s", so a version of this anchored to a LEADING number read those as
+ *  having no unit at all and marked a right answer wrong. The number is the first numeric token not
+ *  glued to a letter or a caret (so the 1 in "m s^-1" and the 2 in "x2" are not it); what follows
+ *  loses LaTeX spacing, a trailing parenthetical and sentence punctuation. */
 function trailingUnit(s: string): string {
   const cleaned = normalizeSciNotation(s.trim().replace(/,(?=\d{3}\b)/g, ''));
-  const m = cleaned.match(/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*/);
-  return m ? cleaned.slice(m[0].length).trim() : '';
+  const m = /(?<![\w^.])[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?/.exec(cleaned);
+  if (!m) return '';
+  return cleaned.slice(m.index + m[0].length)
+    .replace(/^(?:\s|\\[,;: !]|~)+/, '')
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .replace(/[\s.,;!?]+$/, '');
 }
 
 /** Leading number out of free text, tolerating a trailing unit and thousands separators:
@@ -778,7 +788,9 @@ export async function gradeBlockOutput(
   // without a single lucky attempt counting as mastery.
   if (tool === 'pronounce') {
     const passes = Number(result.passes ?? 0);
-    const required = Number(result.required ?? input.requiredPasses ?? 3);
+    // The bar is the one the SERVER set when it staged the block. `result.required` is the client
+    // echoing it back, and a report of `required: 0, passes: 0, applied: true` cleared its own bar.
+    const required = Math.max(1, Number(input.requiredPasses ?? result.required ?? 3));
     // `result.applied` is the client's own opinion, not proof — trust it only when the pass count
     // it reports actually clears the required bar. A client that sends `applied: true` alongside
     // `passes: 0` (e.g. a stale or malformed report) must not mint applied-correctly on the claim
@@ -1104,20 +1116,22 @@ async function gradeOpenAnswer(
     role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage,
     contextTokens: cfg.models?.grader?.contextTokens,
   });
-  // A strict token match, not `/^CORRECT/i`: that matched "Correct answer: ... the student said
-  // the opposite" as a pass, because the prefix alone doesn't say the token was the grader's
-  // actual verdict rather than the first word of some other sentence. Strip leading whitespace and
-  // markdown emphasis the grader sometimes wraps its verdict in (**CORRECT**, _INCORRECT_), then
-  // require the bare token followed by punctuation or end of line — "Correct answer: X" fails that
-  // (the word "answer" follows, not punctuation), while "**CORRECT** — fine" passes.
-  const stripped = text.trim().replace(/^[\s*_#]+/, '');
-  const match = stripped.match(/^(CORRECT|INCORRECT)[*_]*(?:\s*[-—:.,]|\s*$)/i);
+  // The verdict is the reply's FIRST WORD, as a whole word — not `/^CORRECT/i`, which read
+  // "Correct answer: buffer. However, the student said the opposite" as a pass. So the one shape
+  // refused is the token opening a noun phrase about the answer key. What follows is otherwise
+  // free: the prompt asks for "CORRECT or INCORRECT followed by a one-line reason", and graders
+  // put that reason after a space, a newline, a dash, a colon, "!" or "(" about equally. An earlier
+  // version of this check demanded punctuation after the token and so failed the commonest shape
+  // of all — "CORRECT The student identifies…" — recording a right answer as `struggled`.
+  // Leading whitespace and markdown emphasis (**CORRECT**, _INCORRECT_, "# CORRECT") are stripped.
+  const stripped = text.trim().replace(/^[\s*_#>]+/, '');
+  const match = stripped.match(/^(CORRECT|INCORRECT)(?![A-Za-z0-9])(?![*_]*\s+(?:answers?|responses?|solutions?|options?|choices?|values?|results?)\b)/i);
   if (!match) {
+    // A reply we could not read says nothing about the learner. Grading it `incorrect` minted
+    // `struggled` on the strength of a formatting miss; `ungraded` records nothing and leaves the
+    // tutor to judge, the same call the vector checker makes for an answer it cannot parse.
     console.error(`gradeOpenAnswer: grader reply unparseable: ${text.slice(0, 200)}`);
-    return {
-      verdict: 'incorrect', source: 'model', detail: 'grader reply unparseable',
-      evidence: [ev(slug, 'struggled', `open answer: ${question}`, 'model')],
-    };
+    return { verdict: 'ungraded', source: 'model', detail: 'grader reply unparseable', evidence: [] };
   }
   const ok = match[1].toUpperCase() === 'CORRECT';
   return {

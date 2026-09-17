@@ -63,7 +63,13 @@ export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise
       signal: opts.signal,
     });
     if (!res.ok || res.body === null) {
-      opts.onError(`The tutor is unreachable right now (HTTP ${res.status}).`);
+      // A 4xx is the server REACHED and refusing, with a reason in the body (an unknown command, a
+      // bad thread id, a turn still shutting down). "Unreachable" sent the learner to check a
+      // connection that was fine.
+      const reason = res.status >= 400 && res.status < 500
+        ? await res.json().then((d: { error?: unknown }) => (typeof d?.error === 'string' ? d.error : null)).catch(() => null)
+        : null;
+      opts.onError(reason ?? `The tutor is unreachable right now (HTTP ${res.status}).`);
       return 'done';
     }
 

@@ -195,6 +195,20 @@ describe('structured_check checkers (mechanical, any subject)', () => {
   // Audit 2026-08-30 H6: the unit field used to compare normalised STRINGS with `.includes()`,
   // which let "20 km/s" satisfy an expected "m/s" — the string "km/s" literally contains "m/s".
   // Real unit algebra (mathjs) instead: only the SAME unit at the SAME scale can satisfy it.
+  // The unit must be found wherever the VALUE is found. The value reader accepts "v = 20 m/s" and
+  // a sentence; a unit reader anchored to a leading number saw no unit in those and marked a right
+  // answer "value matches but the unit should be m/s".
+  it.each(['20 m/s', 'v = 20 m/s', 'The speed is 20 m/s', '≈ 20 m/s', '~20 m/s', '20 m/s.', '20 m/s (approx)', '20 \\, m/s', '20 m s^-1'])(
+    'numeric: reads the unit out of %j', async (answer) => {
+      const g = await grade({ kind: 'numeric', expected: 20, tolerance: 0.5, unit: 'm/s' }, [answer]);
+      expect(g.verdict).toBe('correct');
+    });
+
+  it.each(['v = 20 km/s', 'The speed is 20 km/s.', '20'])('numeric: still refuses %j for m/s', async (answer) => {
+    const g = await grade({ kind: 'numeric', expected: 20, tolerance: 0.5, unit: 'm/s' }, [answer]);
+    expect(g.verdict).not.toBe('correct');
+  });
+
   it('numeric: a differently-scaled unit fails, even though its name contains the expected unit', async () => {
     const mps = { kind: 'numeric', expected: 20, tolerance: 0.5, unit: 'm/s' };
     const wrongScale = await grade(mps, ['20 km/s']);
@@ -468,6 +482,19 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(g.evidence[0].kind).not.toBe('applied-correctly');
     expect(g.evidence[0]).toMatchObject({ kind: 'struggled' });
   });
+  // `result.required` is the client echoing the bar back. Read first, a report that lowered its
+  // own bar to zero cleared it with no attempts at all.
+  it('pronounce: the bar is the one the server staged, not the one the client reports', async () => {
+    const g = await gradeBlockOutput('pronounce',
+      { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'vietnamese-tones', requiredPasses: 3 },
+      { passes: 0, required: 0, applied: true, attempts: 0 }, cfg);
+    expect(g.evidence[0].kind).not.toBe('applied-correctly');
+    const one = await gradeBlockOutput('pronounce',
+      { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'vietnamese-tones', requiredPasses: 3 },
+      { passes: 1, required: 1, applied: true, attempts: 1 }, cfg);
+    expect(one.evidence[0].kind).not.toBe('applied-correctly');
+  });
+
   it('pronounce: some clean but short of required -> exposed, never applied-correctly', async () => {
     const g = await gradeBlockOutput('pronounce',
       { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'vietnamese-tones', requiredPasses: 3 },
@@ -631,9 +658,54 @@ describe('open-answer grader reply parsing (strict CORRECT/INCORRECT token)', ()
     const reply = 'Correct answer: buffer. However, the student said the opposite, which is wrong.';
     const { model } = textModel(reply);
     const g = await gradeBlockOutput('quick_check', input, { answer: 'the opposite' }, cfg, { model });
-    expect(g.verdict).not.toBe('correct');
+    expect(g.verdict).toBe('ungraded');
     expect(g.detail).toBe('grader reply unparseable');
+    // A reply the harness could not read is not evidence that the LEARNER was wrong.
+    expect(g.evidence).toEqual([]);
+  });
+
+  // The prompt asks for the token "followed by a one-line reason" and says nothing of punctuation.
+  // A version of this parser that required a dash or colon after the token marked every one of
+  // these right answers `struggled` — and every fixture in this file used the "CORRECT — …" form,
+  // so nothing noticed.
+  it.each([
+    'CORRECT The student correctly identifies the buffer.',
+    'CORRECT\nThe student names the buffer.',
+    'Correct\n\nreason on its own line',
+    'CORRECT! Well done',
+    'CORRECT (names the buffer)',
+    'Correct – en dash reason',
+    'Correct; and concisely',
+    'CORRECT',
+    '_Correct_ - yes',
+    '> **CORRECT**: quoted',
+  ])('reads %j as correct', async (reply) => {
+    const { model } = textModel(reply);
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'a buffer' }, cfg, { model });
+    expect(g.verdict).toBe('correct');
+  });
+
+  it.each([
+    'INCORRECT The student describes a queue.',
+    'Incorrect\nnot a buffer',
+    '**INCORRECT** — no',
+  ])('reads %j as incorrect, never as the CORRECT it contains', async (reply) => {
+    const { model } = textModel(reply);
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'a queue' }, cfg, { model });
+    expect(g.verdict).toBe('incorrect');
     expect(g.evidence[0].kind).toBe('struggled');
+  });
+
+  it.each([
+    'Correctly identified, but the reasoning is off',
+    'The answer is CORRECT',
+    'Correct response would be: buffer',
+    'I cannot grade this.',
+  ])('refuses to guess a verdict from %j', async (reply) => {
+    const { model } = textModel(reply);
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'x' }, cfg, { model });
+    expect(g.verdict).toBe('ungraded');
+    expect(g.evidence).toEqual([]);
   });
 });
 
