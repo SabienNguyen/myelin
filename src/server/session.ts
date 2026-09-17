@@ -348,6 +348,10 @@ export function turnBlockTools(
  *  still ride the turn. */
 const LANGUAGE_SUBJECT = /\b(vietnamese|mandarin|chinese|cantonese|japanese|korean|spanish|french|german|italian|portuguese|russian|arabic|hindi|thai|pronounc\w*|pinyin|telex|tones?|vocab\w*|conjugat\w*|language)\b/i;
 
+const SPEECH_TOOLS = ['pronounce', 'speak'];
+const VIDEO_TOOLS = ['find_video', 'video_transcript', 'watch_video'];
+const LITERATURE_TOOLS = ['find_recent_papers', 'find_canonical_sources', 'paper_references'];
+
 const ASKS_FOR_VIDEO = /\b(videos?|watch|youtube|lectures?|clip)\b/i;
 const ASKS_FOR_LITERATURE = /\b(new|newest|recent|latest|state.of.the.art|sota|frontier|papers?|research|literature|canonical|citations?|references?|sources?|reading list|what should i read|who should i read)\b/i;
 
@@ -361,16 +365,38 @@ const ASKS_FOR_LITERATURE = /\b(new|newest|recent|latest|state.of.the.art|sota|f
  *  always offered. */
 export function toolFitsTurn(name: string, t: {
   language: boolean; research: boolean; hasSources: boolean; hasVideoSources: boolean; lastUserText: string;
+  /** Tool names already called in this thread. A family that has been used stays on offer: the
+   *  request that opened it ("find me a video") is one turn, the follow-up ("the second one") names
+   *  nothing, and a model that sees its own earlier call will repeat it — straight into
+   *  "unknown tool" if the schema has gone. */
+  used: ReadonlySet<string>;
 }): boolean {
-  if (name === 'pronounce' || name === 'speak') return t.language;
-  if (name === 'find_video' || name === 'video_transcript' || name === 'watch_video') {
-    return t.research || t.hasVideoSources || ASKS_FOR_VIDEO.test(t.lastUserText);
-  }
-  if (name === 'find_recent_papers' || name === 'find_canonical_sources') {
-    return t.research || ASKS_FOR_LITERATURE.test(t.lastUserText);
-  }
-  if (name === 'paper_references') return t.hasSources;
-  return true;
+  const family = [SPEECH_TOOLS, VIDEO_TOOLS, LITERATURE_TOOLS].find((f) => f.includes(name));
+  if (!family) return true;
+  if (family.some((n) => t.used.has(n))) return true;
+  if (family === SPEECH_TOOLS) return t.language;
+  if (family === VIDEO_TOOLS) return t.research || t.hasVideoSources || ASKS_FOR_VIDEO.test(t.lastUserText);
+  if (name === 'paper_references') return t.hasSources || t.research;
+  return t.research || ASKS_FOR_LITERATURE.test(t.lastUserText);
+}
+
+/** Tool names this thread's assistant turns have already called. */
+export function toolsUsed(messages: UIMessage[]): Set<string> {
+  return new Set(messages.filter((m) => m.role === 'assistant')
+    .flatMap((m) => (m.parts as any[]).map((p) => String(p?.type ?? '')))
+    .filter((type) => type.startsWith('tool-')).map((type) => type.slice('tool-'.length)));
+}
+
+/** Is this a language lesson? Three signals, any one enough, because the student often never
+ *  types the language's English name: they click a suggested lesson, or write IN the language
+ *  ("Xin chào, hôm nay mình học gì?"). So: what they typed, the vault's own page ids (a vault with
+ *  `vietnamese-tones` in it is a language vault), and whether the thread has already used a
+ *  speech tool. A false positive costs ~750 tokens; a miss cost the learner the ability to hear
+ *  the word. */
+export function isLanguageSubject(messages: UIMessage[], slugs: string[]): boolean {
+  if (LANGUAGE_SUBJECT.test(studentText(messages))) return true;
+  if (slugs.some((s) => LANGUAGE_SUBJECT.test(s.replace(/-/g, ' ')))) return true;
+  return SPEECH_TOOLS.some((n) => toolsUsed(messages).has(n));
 }
 
 /** Everything the student has typed in this thread, as one string. */
@@ -383,7 +409,7 @@ function studentText(messages: UIMessage[]): string {
  *  things a tool list cannot say. Pure, so each definition is pinned by a test. */
 export function turnFacts(a: {
   tools: string[]; mode: string; messages: UIMessage[]; emptyVault: boolean; bankSize: number;
-  sources: { origin?: { kind?: string } }[]; readingSource: boolean;
+  sources: { origin?: { kind?: string } }[]; readingSource: boolean; slugs?: string[];
 }): TurnFacts {
   const tools = new Set(a.tools);
   const said = a.messages.filter((m) => m.role === 'user')
@@ -397,7 +423,7 @@ export function turnFacts(a: {
   if (a.emptyVault) facts.add('emptyVault');
   if (a.sources.length > 0 || a.readingSource) facts.add('sources');
   if (a.sources.some((s) => s.origin?.kind === 'video')) facts.add('videoSources');
-  if (said.some((t) => LANGUAGE_SUBJECT.test(t))) facts.add('language');
+  if (isLanguageSubject(a.messages, a.slugs ?? [])) facts.add('language');
   // Research is possible when the turn can search, read, or write what it found.
   if (['web_search', 'read_url', 'write_page'].some((t) => tools.has(t))) facts.add('research');
   return { tools, facts };
@@ -699,7 +725,7 @@ export function buildFrontierTools(
         + 'work) for the NEWEST papers on a topic, sorted by date. Use this whenever the student '
         + 'asks what is new, recent, state-of-the-art, or frontier in any field — your training '
         + 'knowledge has a cutoff and this tool does not. Present results with their dates and '
-        + 'offer to ingest any of them (ingest_url with the pdfUrl) as course pages.',
+        + 'offer to ingest any of them (ingest_paper with the pdfUrl) as course pages.',
       input: z.object({
         topic: z.string().describe('the research topic, e.g. "KV cache compression"'),
       }),
@@ -719,7 +745,7 @@ export function buildFrontierTools(
       description: 'The references of an INGESTED paper or book chapter, parsed from the source '
         + 'itself — citation chasing. Use when the student wants to go deeper than the current '
         + 'paper: present the actionable ones (those with a url) as next reads and offer '
-        + 'ingest_url (pdfUrl when present, else url). Entries without an id are listed for '
+        + 'ingest_paper (pdfUrl when present, else url). Entries without an id are listed for '
         + 'manual searching — say so.',
       input: z.object({
         title: z.string().describe('the source title as the Library shows it'),
@@ -1091,7 +1117,8 @@ export function createTutorSession(
           ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource,
             topicTokens(lastUserText(messages)), generateTool.length > 0),
         ].filter((tool) => toolFitsTurn(tool.name, {
-          language: LANGUAGE_SUBJECT.test(studentText(messages)),
+          language: isLanguageSubject(messages, slugs),
+          used: toolsUsed(messages),
           research: gap !== null || mode === 'freeform',
           hasSources: sources.length > 0,
           hasVideoSources: sources.some((s) => s.origin?.kind === 'video'),
@@ -1100,7 +1127,7 @@ export function createTutorSession(
         const system = `${buildInstructions(turnFacts({
           tools: [...tools, ...webTools.serverTools].map((t) => t.name), mode, messages,
           emptyVault: slugs.length === 0, bankSize: readBank(cfg.vault).length,
-          sources, readingSource,
+          sources, readingSource, slugs,
         }))}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
           + (gradingOnly
             ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'

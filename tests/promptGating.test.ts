@@ -88,6 +88,8 @@ describe('each gate, both ways', () => {
     ['2a plan', 'execute it as one', turn(TEACH, ['plan']), turn(TEACH, ['review'])],
     ['2a-i transfer on review', 'change the surface', turn(TEACH, ['review']), turn(TEACH)],
     ['2a-i transfer in a plan', 'change the surface', turn(TEACH, ['plan']), turn(TEACH)],
+    // Learn mode re-proves due pages too (rule 2), so any turn that can stage a probe carries it.
+    ['2a-i transfer when staging', 'change the surface', turn(['quick_check']), turn(TEACH)],
     ['2b course bank', 'drilled VERBATIM', turn(TEACH, ['courseBank']), turn(TEACH)],
     ['10b instrument', 'Match the instrument to the work', turn(['quick_check']), turn(TEACH)],
     ['10c produce', 'ends in something the learner produces', turn(['quick_check']), turn(TEACH)],
@@ -152,7 +154,7 @@ describe('turnFacts', () => {
 });
 
 describe('toolFitsTurn — subject-specific schemas ride only the turns that can use them', () => {
-  const plain = { language: false, research: false, hasSources: false, hasVideoSources: false, lastUserText: 'teach me the chain rule' };
+  const plain = { language: false, research: false, hasSources: false, hasVideoSources: false, lastUserText: 'teach me the chain rule', used: new Set<string>() };
   const fits = (name: string, over: Partial<typeof plain> = {}) => session.toolFitsTurn(name, { ...plain, ...over });
 
   it('a calculus turn carries no pronunciation, video or literature tools', () => {
@@ -185,5 +187,47 @@ describe('toolFitsTurn — subject-specific schemas ride only the turns that can
     expect(fits('find_canonical_sources', { lastUserText: 'what should I read first?' })).toBe(true);
     expect(fits('find_recent_papers', { research: true })).toBe(true);
     expect(fits('paper_references', { hasSources: true })).toBe(true);
+  });
+});
+
+// Found in review: the request that opens a gate is one turn; the follow-up names nothing.
+describe('a tool family stays on offer once the thread has used it', () => {
+  const quiet = { language: false, research: false, hasSources: false, hasVideoSources: false, used: new Set<string>() };
+  const assistant = (...tools: string[]) => ({ id: 'a', role: 'assistant', parts: tools.map((t) => ({ type: `tool-${t}` })) }) as any;
+
+  it.each(['the second one please', 'play it', 'yes, pull its transcript'])(
+    'after find_video ran, %j can still stage the snippet', (followUp) => {
+      const used = session.toolsUsed([assistant('find_video')]);
+      for (const name of ['watch_video', 'video_transcript', 'find_video']) {
+        expect(session.toolFitsTurn(name, { ...quiet, used, lastUserText: followUp }), name).toBe(true);
+      }
+      expect(session.toolFitsTurn('watch_video', { ...quiet, lastUserText: followUp })).toBe(false);
+    });
+
+  it('"find more like that one" keeps the literature tools after a paper search', () => {
+    const used = session.toolsUsed([assistant('find_recent_papers')]);
+    expect(session.toolFitsTurn('find_recent_papers', { ...quiet, used, lastUserText: 'find more like that one' })).toBe(true);
+  });
+
+  it('using one family does not open the others', () => {
+    const used = session.toolsUsed([assistant('find_video')]);
+    expect(session.toolFitsTurn('pronounce', { ...quiet, used, lastUserText: 'ok' })).toBe(false);
+  });
+});
+
+describe('isLanguageSubject — the student rarely types the language\'s English name', () => {
+  const user = (text: string) => ({ id: 'u', role: 'user', parts: [{ type: 'text', text }] }) as any;
+  it('a student writing IN the language, on a vault that has its pages', () => {
+    expect(session.isLanguageSubject([user('Xin chào, hôm nay mình học gì?')], ['vietnamese-tones', 'vietnamese-greetings'])).toBe(true);
+  });
+  it('a student who only clicked through a lesson, on that vault', () => {
+    expect(session.isLanguageSubject([user("let's continue with lesson 3")], ['mandarin-tone-pairs'])).toBe(true);
+  });
+  it('a thread that has already spoken a word', () => {
+    const spoke = { id: 'a', role: 'assistant', parts: [{ type: 'tool-speak' }] } as any;
+    expect(session.isLanguageSubject([user('how do I say thank you?'), spoke], [])).toBe(true);
+  });
+  it('a calculus thread on a calculus vault is not one', () => {
+    expect(session.isLanguageSubject([user('teach me the chain rule')], ['derivatives', 'chain-rule', 'limits'])).toBe(false);
   });
 });
