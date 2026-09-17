@@ -51,6 +51,24 @@ export function isPrivateAddress(ip: string): boolean {
  *  invites a retry, and no retry will make a loopback address public. */
 export class UrlRefusedError extends Error {}
 
+/** Follow redirects by hand so `guard` sees EVERY hop. With `redirect: 'follow'` a public page
+ *  answering `302 Location: http://127.0.0.1:4820/...` lands on loopback after the only check has
+ *  already passed. `hop` makes ONE request with `redirect: 'manual'`; retry policy stays with the
+ *  caller, since read_url and downloads retry differently. */
+export async function fetchGuarded(
+  url: string, guard: (url: string) => Promise<void>, hop: (url: string) => Promise<Response>, maxRedirects = 5,
+): Promise<Response> {
+  let current = url;
+  for (let n = 0; n <= maxRedirects; n++) {
+    await guard(current);
+    const res = await hop(current);
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!location) return res;
+    current = new URL(location, current).toString();
+  }
+  throw new Error(`more than ${maxRedirects} redirects`);
+}
+
 export type ResolveHost = (hostname: string) => Promise<string[]>;
 
 const resolveAll: ResolveHost = async (hostname) =>

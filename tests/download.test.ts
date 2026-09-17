@@ -3,6 +3,10 @@ import { createServer, type Server } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { downloadToTemp, rewriteArxivUrl, MAX_DOWNLOAD_BYTES } from '../src/server/download.js';
 
+// The fixture server is on 127.0.0.1 and the stubbed fetches never touch the network; the
+// production guard (which resolves DNS) is pinned by the tests at the bottom of this file.
+const LOCAL = { guard: async () => {} };
+
 let server: Server;
 let base: string;
 let lastRequestPath = '';
@@ -50,23 +54,23 @@ describe('rewriteArxivUrl (pure)', () => {
 
 describe('downloadToTemp', () => {
   it('downloads bytes and infers extension from content-type (pdf)', async () => {
-    const file = await downloadToTemp(`${base}/paper.pdf`);
+    const file = await downloadToTemp(`${base}/paper.pdf`, LOCAL);
     expect(file.path.endsWith('.pdf')).toBe(true);
     expect(file.contentType).toBe('application/pdf');
     expect(readFileSync(file.path, 'utf8')).toContain('PDF-1.4 fixture bytes');
   });
 
   it('downloads bytes and infers extension from content-type (epub)', async () => {
-    const file = await downloadToTemp(`${base}/paper.epub`);
+    const file = await downloadToTemp(`${base}/paper.epub`, LOCAL);
     expect(file.path.endsWith('.epub')).toBe(true);
   });
 
   it('rejects an unsupported content-type with a thrown, descriptive error', async () => {
-    await expect(downloadToTemp(`${base}/notapaper`)).rejects.toThrow(/content-type/i);
+    await expect(downloadToTemp(`${base}/notapaper`, LOCAL)).rejects.toThrow(/content-type/i);
   });
 
   it('rejects a 404 with a thrown, descriptive error', async () => {
-    await expect(downloadToTemp(`${base}/missing`)).rejects.toThrow(/404/);
+    await expect(downloadToTemp(`${base}/missing`, LOCAL)).rejects.toThrow(/404/);
   });
 
   it('exposes a 50MB cap', () => {
@@ -85,7 +89,7 @@ describe('downloadToTemp', () => {
       const path = new URL(url).pathname;
       return fetch(`${base}${path}`, init as any);
     };
-    await downloadToTemp('https://arxiv.org/abs/2401.12345', { fetchImpl });
+    await downloadToTemp('https://arxiv.org/abs/2401.12345', { fetchImpl, ...LOCAL });
     expect(seen[0]).toBe('https://arxiv.org/pdf/2401.12345');
     expect(lastRequestPath).toBe('/pdf/2401.12345');
   });
@@ -109,6 +113,7 @@ describe('HTML sources', () => {
       <h1>Part 1: Key Concepts</h1><p>The main characters of RL are the agent and the environment.</p>
       <footer>copyright 2026</footer></body></html>`;
     const out = await downloadToTemp('https://example.com/rl_intro.html', {
+      ...LOCAL,
       fetchImpl: (async () => htmlResponse(html)) as unknown as typeof fetch,
     });
     expect(out.title).toBe('Spinning Up: RL Intro');
@@ -123,6 +128,7 @@ describe('HTML sources', () => {
   it('refuses a page with no readable text rather than compiling an empty book', async () => {
     const empty = '<html><head><title>x</title></head><body><nav>menu</nav></body></html>';
     await expect(downloadToTemp('https://example.com/empty', {
+      ...LOCAL,
       fetchImpl: (async () => htmlResponse(empty)) as unknown as typeof fetch,
     })).rejects.toThrow(/no readable text/);
   });
@@ -143,6 +149,7 @@ describe('doc-site chrome extraction', () => {
         <p>Classes provide a means of bundling data and functionality together.</p></div>
       </body></html>`;
     const out = await downloadToTemp('https://docs.python.org/3/tutorial/classes.html', {
+      ...LOCAL,
       fetchImpl: (async () => ({
         ok: true,
         headers: new Headers({ 'content-type': 'text/html' }),
@@ -165,6 +172,7 @@ describe('download retries', () => {
   it('recovers from a 503 and returns the document', async () => {
     let n = 0;
     const file = await downloadToTemp('https://example.com/paper.pdf', {
+      ...LOCAL,
       fetchImpl: (async () => {
         n += 1;
         if (n < 2) return { ok: false, status: 503, headers: new Headers() } as Response;
@@ -182,11 +190,30 @@ describe('download retries', () => {
   it('does not retry a 404', async () => {
     let n = 0;
     await expect(downloadToTemp('https://example.com/gone.pdf', {
+      ...LOCAL,
       fetchImpl: (async () => {
         n += 1;
         return { ok: false, status: 404, headers: new Headers() } as Response;
       }) as unknown as typeof fetch,
     })).rejects.toThrow(/404/);
     expect(n).toBe(1);
+  });
+});
+
+describe('downloadToTemp — a model-supplied URL stays off this machine', () => {
+  it('refuses a loopback address before any request is made', async () => {
+    const fetchImpl = (async () => { throw new Error('must not be fetched'); }) as unknown as typeof fetch;
+    await expect(downloadToTemp('http://127.0.0.1:4820/api/status', { fetchImpl })).rejects.toThrow(/private or loopback/);
+  });
+
+  it('refuses a public URL that redirects to loopback', async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (input: string) => {
+      seen.push(String(input));
+      return new Response(null, { status: 302, headers: { location: 'http://127.0.0.1:8080/admin' } });
+    }) as unknown as typeof fetch;
+    const guard = async (u: string) => { if (u.includes('127.0.0.1')) throw new Error('127.0.0.1 is a private or loopback address'); };
+    await expect(downloadToTemp('https://example.com/paper.pdf', { fetchImpl, guard })).rejects.toThrow(/private or loopback/);
+    expect(seen).toEqual(['https://example.com/paper.pdf']);
   });
 });

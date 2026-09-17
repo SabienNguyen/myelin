@@ -13,6 +13,7 @@
 // has practice clusters of their own, and model-written setup must never land in one.
 
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { loadAll } from 'js-yaml';
@@ -72,6 +73,12 @@ export async function clusterStatus(exec: Exec = realExec): Promise<{ available:
 const ready = new Map<string, Promise<void>>();
 export function resetClusterMemo(): void { ready.clear(); }
 
+/** Drop a remembered "the cluster is up". Success is memoised so a second exercise costs nothing,
+ *  but it goes stale: Docker restarting the node moves the API server's port, and `kind delete
+ *  cluster` removes it outright. Callers forget on any failed run, so the next one re-checks and
+ *  re-exports the kubeconfig instead of failing identically until the server restarts. */
+export function forgetCluster(deps: ClusterDeps): void { ready.delete(deps.kubeconfig); }
+
 export function ensureCluster(deps: ClusterDeps): Promise<void> {
   const existing = ready.get(deps.kubeconfig);
   if (existing) return existing;
@@ -80,11 +87,16 @@ export function ensureCluster(deps: ClusterDeps): Promise<void> {
     mkdirSync(dirname(deps.kubeconfig), { recursive: true });
     const list = await exec('kind', ['get', 'clusters'], { timeoutMs: 20_000 });
     if (list.code !== 0) throw new Error(`could not list kind clusters: ${list.stderr.trim()}`);
+    const sweep = () => kubectl(deps, ['delete', 'namespace', '-l', `${VERIFY_LABEL}=true`, '--wait=false'], { timeoutMs: 30_000 })
+      .then((out) => { if (out.code !== 0) console.error(`[cluster] could not sweep old verify namespaces: ${out.stderr.trim()}`); });
     if (list.stdout.split('\n').map((l) => l.trim()).includes(CLUSTER_NAME)) {
       // Already built (an earlier run, or before a restart). The kubeconfig file may be gone or
       // stale — the API server's port changes when Docker restarts the node — so rewrite it.
       const exp = await exec('kind', ['export', 'kubeconfig', '--name', CLUSTER_NAME, '--kubeconfig', deps.kubeconfig], { timeoutMs: 30_000 });
       if (exp.code !== 0) throw new Error(`could not read the ${CLUSTER_NAME} cluster's kubeconfig: ${exp.stderr.trim()}`);
+      // A server that died mid-verification left its throwaway namespaces (and whatever crash-looping
+      // pods the setup made) running. This runs once per process, before it has made any of its own.
+      await sweep();
       return;
     }
     console.log(`[cluster] creating the ${CLUSTER_NAME} kind cluster — once; every later exercise reuses it`);
@@ -102,7 +114,9 @@ export function ensureCluster(deps: ClusterDeps): Promise<void> {
 // list has never heard of is refused rather than guessed at.
 const NAMESPACED_KINDS = new Set([
   'Pod', 'Deployment', 'StatefulSet', 'DaemonSet', 'ReplicaSet', 'Job', 'CronJob',
-  'Service', 'Endpoints', 'Ingress', 'NetworkPolicy',
+  // No NetworkPolicy: policies are ADDITIVE, so a model-written "allow all egress" in the setup
+  // would silently undo the sandbox's own egress guardrail (see GUARDRAILS below).
+  'Service', 'Endpoints', 'Ingress',
   'ConfigMap', 'Secret', 'ServiceAccount', 'Role', 'RoleBinding',
   'PersistentVolumeClaim', 'HorizontalPodAutoscaler', 'PodDisruptionBudget', 'ResourceQuota', 'LimitRange',
 ]);
@@ -140,17 +154,82 @@ export function sessionNamespace(pattern: string): string {
   return `mx-${slug}`.slice(0, 63).replace(/-+$/, '');
 }
 
-export async function namespaceExists(deps: ClusterDeps, ns: string): Promise<boolean> {
-  return (await kubectl(deps, ['get', 'namespace', ns, '-o', 'name'], { timeoutMs: 20_000 })).code === 0;
+const VERIFY_LABEL = 'myelin.dev/verify';
+const SETUP_ANNOTATION = 'myelin.dev/setup-sha';
+export const setupHash = (setupYaml: string) => createHash('sha256').update(setupYaml).digest('hex').slice(0, 16);
+
+/** null when the namespace does not exist; otherwise the hash of the setup it was built from ('' if
+ *  it carries none). The session namespace is named after the pattern alone, so a pattern that is
+ *  deleted and regenerated with a DIFFERENT setup would otherwise inherit the old one's objects
+ *  and grade the learner against a situation the task no longer describes. */
+export async function namespaceSetup(deps: ClusterDeps, ns: string): Promise<string | null> {
+  const got = await kubectl(deps, ['get', 'namespace', ns, '-o', 'json'], { timeoutMs: 20_000 });
+  if (got.code !== 0) return null;
+  try {
+    return String(JSON.parse(got.stdout)?.metadata?.annotations?.[SETUP_ANNOTATION] ?? '');
+  } catch {
+    return ''; // it exists, but built from what is unknown — the caller rebuilds it
+  }
 }
 
-export async function openNamespace(deps: ClusterDeps, ns: string, setupYaml: string): Promise<void> {
+// What every sandbox namespace gets besides the exercise. baseline pod security stops a pod
+// reaching the HOST; these stop it reaching the learner's NETWORK and resources. The images are
+// model-chosen and start with no human looking at them, and a kind pod's egress goes out through
+// the Docker bridge to the LAN and the internet. Egress is cut to the namespace itself plus
+// cluster DNS (image pulls are the node's, not the pod's, so they are unaffected); a LimitRange
+// gives every container a ceiling without requiring exercises to declare one; the quota caps a
+// `replicas: 500`. Measured on kind v0.31: DNS and pod-to-Service by name work, the internet does
+// not — but only from a few seconds AFTER a pod starts, which is how long the CNI takes to program
+// the policy (a request made in a container's first instant got out). It narrows what a bad image
+// can do; it is not a seal. A cluster whose CNI does not enforce NetworkPolicy ignores the object.
+const GUARDRAILS = `apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: myelin-egress
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: {}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: myelin-limits
+spec:
+  limits:
+    - type: Container
+      default: { cpu: 250m, memory: 256Mi }
+      defaultRequest: { cpu: 25m, memory: 32Mi }
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: myelin-quota
+spec:
+  hard:
+    pods: "20"
+`;
+
+export async function openNamespace(deps: ClusterDeps, ns: string, setupYaml: string, verify = false): Promise<void> {
   // baseline pod security: a kind node is a privileged container on the host, so a pod that is
   // privileged or mounts hostPath is one step from the learner's machine. Setup is model-written.
   const manifest = `apiVersion: v1\nkind: Namespace\nmetadata:\n  name: ${ns}\n  labels:\n`
-    + `    pod-security.kubernetes.io/enforce: baseline\n    app.kubernetes.io/managed-by: ${CLUSTER_NAME}\n`;
+    + `    pod-security.kubernetes.io/enforce: baseline\n    app.kubernetes.io/managed-by: ${CLUSTER_NAME}\n`
+    + (verify ? `    ${VERIFY_LABEL}: "true"\n` : '')
+    + `  annotations:\n    ${SETUP_ANNOTATION}: "${setupHash(setupYaml)}"\n`;
   const made = await kubectl(deps, ['apply', '-f', '-'], { stdin: manifest, timeoutMs: 30_000 });
   if (made.code !== 0) throw new Error(`could not create namespace ${ns}: ${made.stderr.trim()}`);
+  const rails = await kubectl(deps, ['apply', '-n', ns, '-f', '-'], { stdin: GUARDRAILS, timeoutMs: 30_000 });
+  if (rails.code !== 0) throw new Error(`could not apply the sandbox guardrails to ${ns}: ${rails.stderr.trim()}`);
   await applyInto(deps, ns, setupYaml);
 }
 
@@ -176,12 +255,22 @@ export async function deleteNamespace(deps: ClusterDeps, ns: string, wait = fals
 
 const POLL_MS = 2_000;
 
+/** `kind/name`, and nothing a command line could read as something else. `target` is
+ *  model-written and becomes a kubectl ARGUMENT: execFile rules out a shell, not a flag, and
+ *  "--filename=http://127.0.0.1/x" or "-f/etc/passwd" in that position makes kubectl fetch a URL
+ *  or read a local file. A bare kind ("nodes") or "namespace/kube-system" would read cluster scope. */
+const SAFE_TARGET = /^[a-z][a-z0-9.]*\/[a-z0-9][a-z0-9.-]*$/;
+const CLUSTER_SCOPED_TARGET = /^(namespaces?|ns|nodes?|no|persistentvolumes?|pv|clusterroles?|clusterrolebindings?|storageclass(es)?|sc|customresourcedefinitions?|crds?)\//;
+export const isSafeTarget = (target: string) => SAFE_TARGET.test(target) && !CLUSTER_SCOPED_TARGET.test(target);
+
 /** Grade live state. Each distinct target is read once per pass; the pass repeats until everything
  *  holds or `timeoutMs` runs out, because a rollout is not instant and a correct fix must not grade
  *  as wrong for its first few seconds. `timeoutMs: 0` is a single look. */
 export async function checkCluster(
   deps: ClusterDeps, ns: string, assertions: ClusterAssertion[], timeoutMs: number,
 ): Promise<RunnerResult> {
+  const unsafe = assertions.find((a) => !isSafeTarget(a.target));
+  if (unsafe) return { pass: false, results: [], syntaxError: `assertion target "${unsafe.target}" is not a namespaced kind/name` };
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => { setTimeout(r, ms); }));
   const now = deps.now ?? Date.now;
   const deadline = now() + timeoutMs;
@@ -218,7 +307,7 @@ export async function withScratchNamespace<T>(
   const ns = `mx-verify-${Math.random().toString(36).slice(2, 10)}`;
   await ensureCluster(deps);
   try {
-    await openNamespace(deps, ns, setupYaml);
+    await openNamespace(deps, ns, setupYaml, true);
     return await fn(ns);
   } finally {
     await deleteNamespace(deps, ns);

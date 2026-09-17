@@ -285,6 +285,24 @@ describe('generateExercise — cluster family', () => {
 // ── the routes a learner's session goes through ───────────────────────────────────────────────
 import { buildBuiltinGapRoutes } from '../src/server/gap/service.js';
 
+/** A fake API server's memory of namespaces: which exist, and the setup hash each was built from. */
+function namespaceAware(inner: Exec): Exec {
+  const built = new Map<string, string>();
+  return async (cmd, args, opts) => {
+    const named = args[args.indexOf('namespace') + 1];
+    if (args.includes('get') && args.includes('namespace')) {
+      return built.has(named)
+        ? { code: 0, stderr: '', stdout: JSON.stringify({ metadata: { annotations: { 'myelin.dev/setup-sha': built.get(named) } } }) }
+        : { code: 1, stdout: '', stderr: 'NotFound' };
+    }
+    if (args.includes('apply') && opts?.stdin?.includes('kind: Namespace')) {
+      built.set(/name: (\S+)/.exec(opts.stdin)![1], /setup-sha: "(\w+)"/.exec(opts.stdin)![1]);
+    }
+    if (args.includes('delete') && args.includes('namespace')) built.delete(named);
+    return inner(cmd, args, opts);
+  };
+}
+
 describe('cluster exercise routes', () => {
   async function served() {
     resetClusterMemo();
@@ -292,14 +310,8 @@ describe('cluster exercise routes', () => {
     const cluster = fakeCluster();
     await generateExercise(vault, 'cka-unready-pods', '', { generate: async () => authored(), cluster: cluster.deps }, 'cluster');
     cluster.calls.length = 0; // only the learner's traffic from here on
-    const existing = new Set<string>();
     const inner = cluster.deps.exec;
-    const exec: Exec = async (cmd, args, opts) => {
-      if (args.includes('namespace') && args.includes('get')) return { code: existing.has(args[args.indexOf('namespace') + 1]) ? 0 : 1, stdout: '', stderr: '' };
-      if (args.includes('apply') && opts?.stdin?.includes('kind: Namespace')) existing.add(/name: (\S+)/.exec(opts.stdin)![1]);
-      if (args.includes('delete')) existing.delete(args[args.indexOf('namespace') + 1]);
-      return inner(cmd, args, opts);
-    };
+    const exec = namespaceAware(inner);
     const app = buildBuiltinGapRoutes({ vault, cluster: { ...cluster.deps, exec } });
     const post = (path: string, body: object) => app.request(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     return { app, post, calls: cluster.calls, vault };
@@ -381,13 +393,8 @@ describe('the check on open does not wait for a rollout nobody started', () => {
     const vault = mkdtempSync(join(tmpdir(), 'mx-cluster-open-'));
     const cluster = fakeCluster();
     await generateExercise(vault, 'cka-unready-pods', '', { generate: async () => authored(), cluster: cluster.deps }, 'cluster');
-    const existing = new Set<string>();
     let slept = 0;
-    const exec: Exec = async (cmd, args, opts) => {
-      if (args.includes('namespace') && args.includes('get')) return { code: existing.has(args[args.indexOf('namespace') + 1]) ? 0 : 1, stdout: '', stderr: '' };
-      if (args.includes('apply') && opts?.stdin?.includes('kind: Namespace')) existing.add(/name: (\S+)/.exec(opts.stdin)![1]);
-      return cluster.deps.exec(cmd, args, opts);
-    };
+    const exec = namespaceAware(cluster.deps.exec);
     let clock = 0;
     const app = buildBuiltinGapRoutes({ vault, cluster: { exec, kubeconfig: KUBECONFIG, now: () => clock, sleep: async (ms) => { slept += ms; clock += ms; } } });
     const run = () => app.request('/api/gap/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rungId: 'cka-unready-pods:full_body', code: '# untouched\n' }) });
@@ -395,5 +402,103 @@ describe('the check on open does not wait for a rollout nobody started', () => {
     expect(slept).toBe(0);
     await run(); // the learner may have just run kubectl — now waiting is right
     expect(slept).toBeGreaterThan(10_000);
+  });
+});
+
+// ── found in adversarial review of this family ────────────────────────────────────────────────
+import { isSafeTarget, setupHash } from '../src/server/gap/cluster.js';
+
+describe('an assertion target cannot become a kubectl flag or reach cluster scope', () => {
+  it.each(['deployment/web', 'pod/api-0', 'configmap/app.settings', 'deployments.apps/web'])('%s is allowed', (t) => {
+    expect(isSafeTarget(t)).toBe(true);
+  });
+  // execFile rules out a shell, not a flag: in kubectl's resource position these fetch a URL, read
+  // a local file, or read cluster-scoped objects.
+  it.each(['--filename=http://127.0.0.1:4820/x', '-f/etc/passwd', '--raw=/api/v1/secrets', 'nodes', 'pods',
+    'namespace/kube-system', 'node/myelin-control-plane', 'clusterrole/cluster-admin', 'Deployment/web', 'deployment/web -A', ''])(
+    '%j is refused', (t) => { expect(isSafeTarget(t)).toBe(false); });
+
+  it('checkCluster refuses without running kubectl', async () => {
+    const { exec, calls } = fakeExec(() => undefined);
+    const out = await checkCluster({ exec, kubeconfig: KUBECONFIG },
+      'mx-demo', [{ name: 'x', target: '--filename=http://127.0.0.1/x', path: 'a', op: 'exists' }], 0);
+    expect(out.pass).toBe(false);
+    expect(out.syntaxError).toMatch(/not a namespaced kind\/name/);
+    expect(calls).toEqual([]);
+  });
+
+  it('the gates reject an exercise carrying one, before touching the cluster', async () => {
+    resetClusterMemo();
+    const cluster = fakeCluster();
+    const cases = [
+      { name: 'a', target: '--raw=/api/v1/secrets', path: 'items', op: 'exists' },
+      { name: 'b', target: 'deployment/web', path: 'spec.replicas', op: 'eq', value: 2 },
+      { name: 'c', target: 'deployment/web', path: 'status.readyReplicas', op: 'eq', value: 2 },
+    ];
+    const ex = await generateExercise(mkdtempSync(join(tmpdir(), 'mx-target-')), 'cka-flag', '',
+      { generate: async () => authored({ cases }), cluster: cluster.deps }, 'cluster');
+    expect(ex.status).toBe('rejected');
+    expect(cluster.calls).toEqual([]);
+  });
+});
+
+describe('sandbox namespaces are fenced in', () => {
+  it('cuts egress to the namespace and DNS, sets default limits and a pod cap', async () => {
+    const { exec, calls } = fakeExec(() => undefined);
+    await openNamespace({ exec, kubeconfig: KUBECONFIG }, 'mx-demo', 'kind: ConfigMap\nmetadata:\n  name: a\n');
+    const rails = calls.find((c) => c.stdin?.includes('kind: NetworkPolicy'))!;
+    expect(rails.args).toEqual(['--kubeconfig', KUBECONFIG, 'apply', '-n', 'mx-demo', '-f', '-']);
+    expect(rails.stdin).toContain('policyTypes: [Egress]');
+    expect(rails.stdin).toContain('kind: LimitRange');
+    expect(rails.stdin).toMatch(/pods: "20"/);
+    // and they go in BEFORE the model-written setup starts any pod
+    expect(calls.indexOf(rails)).toBeLessThan(calls.findIndex((c) => c.stdin?.includes('kind: ConfigMap')));
+  });
+
+  // Policies are additive: an "allow all egress" in a model-written setup would undo the fence.
+  it('refuses a NetworkPolicy in model-written YAML', () => {
+    expect(validateNamespaced('apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: open\n')).toMatch(/NetworkPolicy/);
+  });
+});
+
+describe('a regenerated exercise does not inherit the old sandbox', () => {
+  it('rebuilds a session namespace that was built from a different setup', async () => {
+    resetClusterMemo();
+    const vault = mkdtempSync(join(tmpdir(), 'mx-cluster-regen-'));
+    const cluster = fakeCluster();
+    await generateExercise(vault, 'cka-unready-pods', '', { generate: async () => authored(), cluster: cluster.deps }, 'cluster');
+    const exec = namespaceAware(cluster.deps.exec);
+    // a namespace left over from an EARLIER version of this pattern
+    await openNamespace({ ...cluster.deps, exec }, 'mx-cka-unready-pods', 'kind: ConfigMap\nmetadata:\n  name: old\n');
+    cluster.calls.length = 0;
+    const app = buildBuiltinGapRoutes({ vault, cluster: { ...cluster.deps, exec } });
+    await app.request('/api/gap/run', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rungId: 'cka-unready-pods:full_body', code: '# untouched\n' }) });
+    expect(cluster.calls.some((c) => c.args.includes('delete') && c.args.includes('mx-cka-unready-pods'))).toBe(true);
+    const rebuilt = cluster.calls.find((c) => c.stdin?.includes('kind: Namespace'))!;
+    expect(rebuilt.stdin).toContain(setupHash(SETUP));
+  });
+});
+
+describe('a stale "cluster is up" does not outlive a failure', () => {
+  it('a failed run forgets the memo, so the next run re-exports the kubeconfig', async () => {
+    resetClusterMemo();
+    const vault = mkdtempSync(join(tmpdir(), 'mx-cluster-stale-'));
+    const cluster = fakeCluster();
+    await generateExercise(vault, 'cka-unready-pods', '', { generate: async () => authored(), cluster: cluster.deps }, 'cluster');
+    let dockerRestarted = true;
+    const exec: Exec = async (cmd, args, opts) => {
+      if (cmd === 'kubectl' && dockerRestarted) return { code: 1, stdout: '', stderr: 'connection refused' };
+      return namespaceAwareExec(cmd, args, opts);
+    };
+    const namespaceAwareExec = namespaceAware(cluster.deps.exec);
+    const app = buildBuiltinGapRoutes({ vault, cluster: { ...cluster.deps, exec } });
+    const run = () => app.request('/api/gap/run', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rungId: 'cka-unready-pods:full_body', code: '# untouched\n' }) });
+    expect((await (await run()).json() as any).syntaxError).toMatch(/connection refused/);
+    dockerRestarted = false;
+    cluster.calls.length = 0;
+    await run();
+    expect(cluster.calls.some((c) => c.cmd === 'kind' && c.args[0] === 'export')).toBe(true);
   });
 });

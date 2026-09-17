@@ -24,8 +24,8 @@ import { environmentStatuses, withEnvironment } from './environment.js';
 import { availableRuntimes, runProgram, runtimeStatuses, scratchProgram, type ExecCase } from './exec.js';
 import { gradeManifest, scratchManifest, type ManifestAssertion } from './manifest.js';
 import {
-  applyInto, checkCluster, deleteNamespace, ensureCluster, kubeconfigFor, namespaceExists,
-  openNamespace, sessionNamespace, type ClusterAssertion, type ClusterDeps,
+  applyInto, checkCluster, deleteNamespace, ensureCluster, forgetCluster, kubeconfigFor, namespaceSetup,
+  openNamespace, sessionNamespace, setupHash, type ClusterAssertion, type ClusterDeps,
 } from './cluster.js';
 import type { RunnerResult } from './runner.js';
 import { runInChild, type FnCase } from './runner.js';
@@ -78,8 +78,14 @@ async function openClusterSession(
 ): Promise<{ ns: string; fresh: boolean }> {
   await ensureCluster(deps);
   const ns = sessionNamespace(ex.ladder.pattern);
-  const fresh = !(await namespaceExists(deps, ns));
-  if (fresh) await openNamespace(deps, ns, ex.setup);
+  const builtFrom = await namespaceSetup(deps, ns);
+  const fresh = builtFrom !== setupHash(ex.setup);
+  if (fresh) {
+    // Exists but built from a different setup: the pattern was regenerated. Rebuild rather than
+    // grade the learner against the previous exercise's objects.
+    if (builtFrom !== null) await deleteNamespace(deps, ns, true);
+    await openNamespace(deps, ns, ex.setup);
+  }
   return { ns, fresh };
 }
 
@@ -96,6 +102,7 @@ async function runClusterSession(
     const nothingApplied = code.split('\n').every((l) => l.trim() === '' || l.trim().startsWith('#'));
     return await checkCluster(deps, ns, ex.cases, fresh && nothingApplied ? 0 : 20_000);
   } catch (e) {
+    forgetCluster(deps); // a stale "cluster is up" must not make the next run fail the same way
     return { pass: false, results: [], syntaxError: e instanceof Error ? e.message : String(e) };
   }
 }
@@ -422,6 +429,7 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
       await openNamespace(deps, ns, ex.setup);
       return c.json({ ok: true, namespace: ns });
     } catch (e) {
+      forgetCluster(deps);
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
     }
   });

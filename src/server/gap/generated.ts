@@ -27,7 +27,7 @@ import { runProgram, runtimeFor, runtimeStatus, type ExecCase } from './exec.js'
 import { gradeManifest, type ManifestAssertion } from './manifest.js';
 import { runInChild, type FnCase, type RunnerResult } from './runner.js';
 import {
-  applyInto, checkCluster, clusterStatus, kubeconfigFor, validateNamespaced, withScratchNamespace,
+  applyInto, checkCluster, clusterStatus, isSafeTarget, kubeconfigFor, validateNamespaced, withScratchNamespace,
   type ClusterAssertion, type ClusterDeps,
 } from './cluster.js';
 import { scaffoldFor, type SuiteCase } from './streamConsumer.js';
@@ -128,7 +128,9 @@ export async function verifyExercise(
 
   if (family === 'cluster') {
     // Before anything model-written goes near the cluster: it must stay inside its namespace.
-    const escape = validateNamespaced(ex.setup ?? '') ?? validateNamespaced(ex.reference);
+    const badTarget = (ex.cases as ClusterAssertion[]).find((c) => !isSafeTarget(c.target));
+    const escape = validateNamespaced(ex.setup ?? '') ?? validateNamespaced(ex.reference)
+      ?? (badTarget ? `assertion target "${badTarget.target}" is not a namespaced kind/name` : null);
     push('stays-in-namespace', escape === null, escape ?? 'setup and reference hold only namespaced kinds');
     if (escape !== null) return { ok: false, gates };
     if (!cluster) throw new Error('verifying a cluster exercise needs cluster deps');
@@ -305,9 +307,12 @@ troubleshooting task. Grading reads LIVE objects back from the cluster.
 
 Hard constraints — an exercise that breaks one is rejected:
 - setup and reference contain ONLY namespaced kinds (Deployment, Pod, Service, ConfigMap, Secret,
-  Job, CronJob, StatefulSet, DaemonSet, Role, RoleBinding, ServiceAccount, NetworkPolicy,
+  Job, CronJob, StatefulSet, DaemonSet, Role, RoleBinding, ServiceAccount,
   PersistentVolumeClaim, Ingress). No Namespace, no ClusterRole, no PersistentVolume, no CRDs.
 - never write metadata.namespace — the sandbox assigns one.
+- pods can reach only other pods in their namespace and cluster DNS — no internet, no other
+  namespaces — and every container gets default CPU and memory limits, at most 20 pods.
+- every assertion target is exactly kind/name of a namespaced object (deployment/web, pod/api-0).
 - no privileged containers, hostPath, hostNetwork or hostPID (the namespace enforces the baseline
   pod security standard and would refuse them).
 - use small public images that start fast and stay running: nginx:1.27-alpine, busybox:1.36 with

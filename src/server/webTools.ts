@@ -1,6 +1,6 @@
 import { htmlToText } from './htmlText.js';
 import { fetchWithRetry, HttpStatusError, isRetryableError, isRetryableStatus, withRetry } from './retry.js';
-import { assertPublicUrl, UrlRefusedError } from './urlGuard.js';
+import { assertPublicUrl, fetchGuarded, UrlRefusedError } from './urlGuard.js';
 import { z } from 'zod';
 import type { HarnessConfig } from './config.js';
 import type { LoopTool, ServerTool } from './llm/index.js';
@@ -21,35 +21,23 @@ export interface WebToolDeps {
   guard?: (url: string) => Promise<void>;
 }
 
-/** `read_url`'s fetch. Redirects are followed by hand so the guard sees EVERY hop: with
- *  `redirect: 'follow'` a public page answering `302 Location: http://127.0.0.1:4820/...` lands
- *  on loopback after the only check already passed. */
-async function fetchPublicPage(url: string, guard: (url: string) => Promise<void>): Promise<Response> {
-  let current = url;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    await guard(current);
-    const target = current;
-    // Retried: a blip here used to cost the whole turn — the model saw a dead source and taught
-    // from memory instead. A 404/403 still fails immediately, because those are answers about
-    // the URL, not accidents (see retry.ts).
-    const res = await withRetry(
-      async () => {
-        const r = await fetch(target, {
-          redirect: 'manual',
-          signal: AbortSignal.timeout(20_000),
-          headers: { 'user-agent': 'myelin/1.0 (personal tutoring app)' },
-        });
-        if (!r.ok && !(r.status >= 300 && r.status < 400)) throw new HttpStatusError(r.status, target);
-        return r;
-      },
-      (e) => (e instanceof HttpStatusError ? isRetryableStatus(e.status) : isRetryableError(e)),
-      { onRetry: (n, why) => console.error(`[read_url] retry ${n} for ${target}: ${why}`) },
-    );
-    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
-    if (!location) return res;
-    current = new URL(location, target).toString();
-  }
-  throw new Error(`more than ${MAX_REDIRECTS} redirects`);
+/** `read_url`'s fetch: every redirect hop is guarded (see fetchGuarded). Each hop is retried — a
+ *  blip here used to cost the whole turn, the model saw a dead source and taught from memory. A
+ *  404/403 still fails immediately: those are answers about the URL, not accidents (retry.ts). */
+function fetchPublicPage(url: string, guard: (url: string) => Promise<void>): Promise<Response> {
+  return fetchGuarded(url, guard, (target) => withRetry(
+    async () => {
+      const r = await fetch(target, {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(20_000),
+        headers: { 'user-agent': 'myelin/1.0 (personal tutoring app)' },
+      });
+      if (!r.ok && !(r.status >= 300 && r.status < 400)) throw new HttpStatusError(r.status, target);
+      return r;
+    },
+    (e) => (e instanceof HttpStatusError ? isRetryableStatus(e.status) : isRetryableError(e)),
+    { onRetry: (n, why) => console.error(`[read_url] retry ${n} for ${target}: ${why}`) },
+  ), MAX_REDIRECTS);
 }
 
 /** `web_search_20260209` is a PROVIDER-EXECUTED tool: Anthropic runs the search on their side and
