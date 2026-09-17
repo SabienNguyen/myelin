@@ -8,12 +8,35 @@ import type { HarnessConfig, ModelRole } from './config.js';
 // the next turn must see them without a restart.
 const OLLAMA_PREFIX = 'ollama:';
 const OPENAI_PREFIX = 'openai:';
+// OpenRouter is its own first-class route, not a configured openai: endpoint: the endpoint is
+// pinned (https://openrouter.ai/api/v1) so a free-model setup needs NO base URL anywhere, and the
+// key rides OPENROUTER_API_KEY so one settings pane can hold both a compat key and an OpenRouter
+// key without either clobbering the other.
+const OPENROUTER_PREFIX = 'openrouter:';
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+// Groq, first-class for the same reason: it rode openai: + OPENAI_COMPAT_BASE_URL, which is the
+// ONE custom-endpoint slot — so Groq and a LiteLLM proxy (or Nous) could not be configured at once.
+const GROQ_PREFIX = 'groq:';
+const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 
 // One scripted instance per script path, so every role pops from the SAME turn sequence. Without
 // this, the tutor session (which holds its model) advances the counter while each grading call
 // (fresh chatModelFor per grade) restarts at turn 0 — and the grader replays the first tool-call
 // turn forever instead of reaching its scripted verdict.
 const scriptedChatCache = new Map<string, ChatModel>();
+
+export type ModelRoute = 'anthropic' | 'ollama' | 'openai' | 'openrouter' | 'groq';
+
+/** Which provider a model id resolves to, by the same prefix rule chatModelFor uses to pick an
+ *  adapter. Exported so call sites that need to branch on the route (webTools' search backend,
+ *  setupRoutes' needsApiKey) read it from here instead of re-parsing the prefix themselves. */
+export function modelRouteFor(modelId: string): ModelRoute {
+  if (modelId.startsWith(OLLAMA_PREFIX)) return 'ollama';
+  if (modelId.startsWith(OPENAI_PREFIX)) return 'openai';
+  if (modelId.startsWith(OPENROUTER_PREFIX)) return 'openrouter';
+  if (modelId.startsWith(GROQ_PREFIX)) return 'groq';
+  return 'anthropic';
+}
 
 /** The role's configured request defaults — effort, sampler — ride the resolved model, not the
  * call sites: every ChatRequest built through runLoop or the generate* helpers picks them up with
@@ -62,6 +85,20 @@ export function chatModelFor(role: ModelRole, cfg: HarnessConfig): ChatModel {
       // Unset means no Authorization header — the common local case. Set it for a key-protected
       // Ollama reverse proxy.
       apiKey: process.env.OLLAMA_API_KEY,
+    }));
+  }
+  if (modelId.startsWith(OPENROUTER_PREFIX)) {
+    return wrap(openaiCompatModel({
+      modelId: modelId.slice(OPENROUTER_PREFIX.length),
+      baseUrl: OPENROUTER_BASE_URL,
+      apiKey: process.env.OPENROUTER_API_KEY,
+    }));
+  }
+  if (modelId.startsWith(GROQ_PREFIX)) {
+    return wrap(openaiCompatModel({
+      modelId: modelId.slice(GROQ_PREFIX.length),
+      baseUrl: GROQ_BASE_URL,
+      apiKey: process.env.GROQ_API_KEY,
     }));
   }
   if (modelId.startsWith(OPENAI_PREFIX)) {

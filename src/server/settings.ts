@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { atomicWrite } from './atomicWrite.js';
 import { dirname, join } from 'node:path';
 import { credentialsPath } from './credentials.js';
 import type { HarnessConfig, ModelRole } from './config.js';
@@ -18,6 +19,7 @@ export interface Settings {
 
 export const PROVIDER_ENV_KEYS = [
   'OLLAMA_BASE_URL', 'OLLAMA_API_KEY', 'OPENAI_COMPAT_BASE_URL', 'OPENAI_COMPAT_API_KEY',
+  'OPENROUTER_API_KEY', 'GROQ_API_KEY',
 ] as const;
 export type ProviderEnvKey = typeof PROVIDER_ENV_KEYS[number];
 
@@ -37,10 +39,7 @@ export function readSettings(path = settingsPath()): Settings {
 }
 
 export function writeSettings(settings: Settings, path = settingsPath()): void {
-  mkdirSync(join(path, '..'), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
-  // `mode` on writeFileSync is ignored when the file already exists — see writeCredentials.
-  try { chmodSync(path, 0o600); } catch { /* best effort — Windows has no POSIX mode */ }
+  atomicWrite(path, `${JSON.stringify(settings, null, 2)}\n`, 0o600);
 }
 
 /**

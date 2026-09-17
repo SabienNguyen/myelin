@@ -36,11 +36,13 @@ const roleSchema = z.object({
 // means zero behavior change.
 const tutorRoleSchema = roleSchema.extend({ rails: z.boolean().optional() });
 
+export const DEFAULT_MODEL = 'openrouter:openrouter/free';
+
 // `~` for the home dir, and `${VAR}` for an environment variable — the latter so a config that
 // must be portable across checkouts (the e2e fixtures, chiefly) can point at a path computed at
 // launch rather than baking one machine's absolute layout into the file. An unset `${VAR}` expands
 // to empty, the same as a shell would; no existing config uses `$`, so this is purely additive.
-const expand = (p: string) => p
+export const expand = (p: string) => p
   .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, v) => process.env[v] ?? '')
   .replace(/^~(?=$|\/)/, homedir());
 
@@ -145,17 +147,19 @@ const configSchema = z.object({
   // single thoughtful pause. Compat/local routes have no explicit cache and ignore it.
   cacheTtl: z.enum(['5m', '1h']).optional(),
   models: z.object({
-    // Sonnet for the roles that write prose the learner reads, Haiku for the mechanical ones.
-    // Deliberately not Opus by default: the tutor role runs on every single turn, and choosing to
-    // spend that is the user's call, not a default. Override any role in harness.config.json.
-    tutor: tutorRoleSchema.default({ model: 'claude-sonnet-5' }),
-    grader: roleSchema.default({ model: 'claude-haiku-4-5' }),
+    // Every role defaults to OpenRouter's free router, so a fresh install costs nothing to try: one
+    // free key, no card, no local model to pull. That router picks among free models, which are
+    // small — so the tutor defaults to rails (the harness drives the loop; see tutorRoleSchema
+    // above), the same pairing the first-run OpenRouter card saves. Anyone with an Anthropic key or
+    // a strong local model overrides per role in the models dialog or harness.config.json.
+    tutor: tutorRoleSchema.default({ model: DEFAULT_MODEL, rails: true }),
+    grader: roleSchema.default({ model: DEFAULT_MODEL }),
     // Retained so existing settings files still load, but nothing calls it: quiz blocks are staged
     // by the tutor as a block tool, and there is no separate quiz model. Not offered in the model
     // picker for that reason — a setting that cannot change behaviour should not ask to be set.
-    quiz_gen: roleSchema.default({ model: 'claude-sonnet-5' }),
-    card_gen: roleSchema.default({ model: 'claude-haiku-4-5' }),
-    compile: roleSchema.default({ model: 'claude-sonnet-5' }),
+    quiz_gen: roleSchema.default({ model: DEFAULT_MODEL }),
+    card_gen: roleSchema.default({ model: DEFAULT_MODEL }),
+    compile: roleSchema.default({ model: DEFAULT_MODEL }),
     // prefault, not default: in zod 4 `.default()` takes the OUTPUT type (so it would have to
     // restate all five roles), while `.prefault()` feeds `{}` through the schema and lets each
     // role's own default apply. Same intent — "an absent `models` block means all defaults".

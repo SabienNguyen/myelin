@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadConfig } from '../src/server/config.js';
+import { DEFAULT_MODEL, loadConfig } from '../src/server/config.js';
 
 const valid = {
   vault: '/tmp/vault', student: 'sabien',
@@ -63,7 +63,18 @@ describe('loadConfig', () => {
     const p = join(dir, 'partial.json');
     const { grader: _drop, ...restModels } = valid.models;
     writeFileSync(p, JSON.stringify({ ...valid, models: restModels }));
-    expect(loadConfig(p).models.grader.model).toBe('claude-haiku-4-5');
+    expect(loadConfig(p).models.grader.model).toBe(DEFAULT_MODEL);
+  });
+
+  // The zero-cost first run: no role may default to a route that needs a paid key or a pulled
+  // local model, and a free (small) tutor must not be handed the full agentic loop.
+  it('defaults every role to the OpenRouter free router, with the tutor on rails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
+    const p = join(dir, 'empty.json');
+    writeFileSync(p, '{}');
+    const { models } = loadConfig(p);
+    expect(Object.values(models).map((r) => r.model)).toEqual(Array(5).fill('openrouter:openrouter/free'));
+    expect(models.tutor.rails).toBe(true);
   });
 
   it('still fails loud on a role that is present and wrong', () => {

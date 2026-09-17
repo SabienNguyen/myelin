@@ -22,12 +22,20 @@ interface SetupState {
  * A gate, not a dismissible banner. A banner would let someone type a question to a tutor that
  * cannot answer, and the failure would arrive as a lost turn several seconds later.
  */
+/** The split the Anthropic card saves: Sonnet where the learner reads the prose, Haiku for the
+ *  mechanical roles. Not Opus — the tutor runs every turn, and spending that is the user's call. */
+const CLAUDE_ROLES = {
+  tutor: 'claude-sonnet-5', grader: 'claude-haiku-4-5', quiz_gen: 'claude-sonnet-5',
+  card_gen: 'claude-haiku-4-5', compile: 'claude-sonnet-5',
+};
+
 export function FirstRun({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<SetupState | null>(null);
   const [key, setKey] = useState('');
   const [localId, setLocalId] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [compatKey, setCompatKey] = useState('');
+  const [routerKey, setRouterKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,8 +70,11 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ key }),
       });
       const data = await res.json();
-      if (!res.ok) setError(data.error ?? 'That did not work.');
-      else setState(data);
+      if (!res.ok) { setError(data.error ?? 'That did not work.'); return; }
+      // The key alone satisfies nothing: every role defaults to OpenRouter, so the gate would stay
+      // up with no message. Picking this card means "run on Claude" — and off rails, which exist
+      // for models too small to hold the agentic loop.
+      await saveRoles(CLAUDE_ROLES, { rails: false });
     } catch (err: any) {
       setError(`Could not reach the app’s own server (${err?.message ?? err}).`);
     } finally {
@@ -76,7 +87,11 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
    * can split the roles later. Saved through the same endpoint the dialog uses, then /api/setup
    * is re-read: with no role on the Anthropic route, `blocked` comes back false and the gate
    * lifts itself. */
-  async function saveAllRolesTo(id: string, opts: { env?: Record<string, string>; rails?: boolean } = {}) {
+  function saveAllRolesTo(id: string, opts: { env?: Record<string, string>; rails?: boolean } = {}) {
+    return saveRoles({ tutor: id, grader: id, quiz_gen: id, card_gen: id, compile: id }, opts);
+  }
+
+  async function saveRoles(models: Record<string, string>, opts: { env?: Record<string, string>; rails?: boolean } = {}) {
     setBusy(true);
     setError(null);
     try {
@@ -84,9 +99,9 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          models: { tutor: id, grader: id, quiz_gen: id, card_gen: id, compile: id },
+          models,
           ...(opts.env && Object.keys(opts.env).length ? { env: opts.env } : {}),
-          ...(opts.rails ? { tutorRails: true } : {}),
+          ...(opts.rails !== undefined ? { tutorRails: opts.rails } : {}),
         }),
       });
       if (!res.ok) {
@@ -94,7 +109,16 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
         setError((data as any).error ?? 'That did not work.');
         return;
       }
-      setState(await (await fetch('/api/setup')).json());
+      const fresh = await (await fetch('/api/setup')).json();
+      setState(fresh);
+      // A 200 here only means the save landed, not that the id resolves — a typo'd tag or an
+      // unreachable host still leaves the Anthropic-only roles without a model. Without this check
+      // the card just re-rendered itself with the same inputs and no explanation for why the gate
+      // hadn't lifted.
+      if (fresh?.blocked) {
+        const roles = fresh.apiKey?.rolesNeeding?.length ? fresh.apiKey.rolesNeeding.join(', ') : 'some roles';
+        setError(`Saved, but ${roles} still can’t reach a model — check the id and try again.`);
+      }
     } catch (err: any) {
       setError(`Could not reach the app’s own server (${err?.message ?? err}).`);
     } finally {
@@ -111,6 +135,12 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
 
   if (!state?.blocked) return <>{children}</>;
 
+  // Only an `openai:` id reaches a remote OpenAI-compatible endpoint and needs a base URL (plus
+  // maybe a key). A bare id like "deepseek/deepseek-chat" is NOT that — per models.ts's
+  // modelRouteFor, anything without `ollama:` or `openai:` routes through the Anthropic API, so
+  // revealing the compat fields for it would be wrong, not just unlabeled: the id would save,
+  // route to Anthropic, and the base URL the learner typed would go nowhere. Fixed at the copy
+  // layer instead — the note below says explicitly to prefix a remote endpoint with `openai:`.
   const wantsCompat = localId.trim().startsWith('openai:');
 
   return (
@@ -124,10 +154,33 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             the muted footer, because on the first screenshot of this card four lines of absolute
             path were the first thing the eye landed on and the least useful thing on it. */}
         <p className="firstrun-lede">
-          Just one thing: a way to reach a model — Claude with an API key, or any local /
-          OpenAI-compatible model without one.
+          Just one thing: a way to reach a model — a free OpenRouter key, Claude with an
+          Anthropic key, or a local / OpenAI-compatible model.
         </p>
 
+        <form className="firstrun-option" onSubmit={(e) => {
+          e.preventDefault();
+          void saveAllRolesTo('openrouter:openrouter/free', {
+            env: routerKey.trim() ? { OPENROUTER_API_KEY: routerKey.trim() } : {}, rails: true,
+          });
+        }}>
+          <label htmlFor="router-key">OpenRouter API key</label>
+          <div className="firstrun-row">
+            <input id="router-key" type="password" autoFocus autoComplete="off" spellCheck={false}
+              placeholder="Paste your OpenRouter key" value={routerKey}
+              onChange={(e) => setRouterKey(e.target.value)} />
+            <button type="submit" className="firstrun-primary" disabled={busy || !routerKey.trim()}>
+              {busy ? 'Saving…' : 'Use free models'}
+            </button>
+          </div>
+          <p className="firstrun-note">
+            Uses OpenRouter’s free router for every learning role, with guided exercises enabled.
+            No paid fallback. Free models have rate limits and variable availability.
+            Your lesson content is sent to OpenRouter and its selected provider; the key stays on this device.
+          </p>
+          <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">Create an OpenRouter key</a>
+        </form>
+        <p className="firstrun-or" role="separator">or</p>
         <form
           className="firstrun-option"
           onSubmit={(e) => { e.preventDefault(); void saveKey(); }}
@@ -137,7 +190,7 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
           </label>
           <div className="firstrun-row">
             <input
-              id="api-key" type="password" autoFocus autoComplete="off"
+              id="api-key" type="password" autoComplete="off"
               spellCheck={false} placeholder="sk-ant-…"
               value={key} onChange={(e) => setKey(e.target.value)}
             />
@@ -163,7 +216,6 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
           </p>
         </form>
 
-        <p className="firstrun-or" role="separator">or</p>
 
         <form
           className="firstrun-option"
@@ -175,7 +227,7 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
           <div className="firstrun-row">
             <input
               id="local-model" type="text" autoComplete="off" spellCheck={false}
-              placeholder="ollama:qwen3:8b  ·  openai:deepseek/deepseek-chat"
+              placeholder="openai:gpt-4o-mini  ·  ollama:qwen3:8b"
               list="firstrun-model-ids"
               value={localId} onChange={(e) => setLocalId(e.target.value)}
             />
@@ -184,30 +236,33 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             </button>
           </div>
           <datalist id="firstrun-model-ids">
+            <option value="openai:gpt-4o-mini" />
+            <option value="openai:deepseek/deepseek-chat" />
             <option value="ollama:qwen3:8b" />
             <option value="ollama:llama3.1:8b" />
-            <option value="openai:deepseek/deepseek-chat" />
           </datalist>
-          {/* The compat fields appear only once an openai: id makes them relevant — an Ollama
-              first run stays a single input. */}
           {wantsCompat && (
-            <div className="firstrun-row">
-              <input
-                type="text" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible base URL"
-                placeholder="base URL, e.g. https://openrouter.ai/api/v1"
-                value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
-              />
-              <input
-                type="password" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible API key"
-                placeholder="key (if required)"
-                value={compatKey} onChange={(e) => setCompatKey(e.target.value)}
-              />
-            </div>
+            <>
+              <p className="firstrun-note">where that model lives, and the key it needs:</p>
+              <div className="firstrun-row">
+                <input
+                  type="text" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible base URL"
+                  placeholder="base URL, e.g. https://openrouter.ai/api/v1"
+                  value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
+                />
+                <input
+                  type="password" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible API key"
+                  placeholder="API key (if the endpoint needs one)"
+                  value={compatKey} onChange={(e) => setCompatKey(e.target.value)}
+                />
+              </div>
+            </>
           )}
           <p className="firstrun-note">
-            Points every role at it — <code>ollama:</code> needs Ollama running, <code>openai:</code>{' '}
-            reaches OpenRouter, LiteLLM, or any compatible endpoint. Split the roles later from the
-            model badge in the top bar.
+            Points every role at it — <code>ollama:</code> needs Ollama running. Reaching OpenRouter,
+            LM Studio, LiteLLM, or any other OpenAI-compatible host? Prefix the id with{' '}
+            <code>openai:</code> and the base URL and key fields appear. Split the roles later from
+            the model badge in the top bar.
           </p>
           {/* The zero-typing on-ramp: pick a recommended local model and we pull + configure it.
               A pulled model points every role at it with rails on (it's a small local model), then

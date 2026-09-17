@@ -58,7 +58,72 @@ async function openPopover() {
 }
 
 describe('ModelsMenu — the tutor badge opens the model configuration dialog', () => {
-  it('renders every CALLABLE role with its effective id, off a shared datalist', async () => {
+  it('separates the provider from the model id and saves the compatible routed id', async () => {
+    const mock = stubFetch(modelsState({}, { tutor: 'openrouter:vendor/inkling:free', grader: 'ollama:qwen3:8b' }));
+    await openPopover();
+    await waitFor(() => expect((screen.getByLabelText('tutor provider') as HTMLSelectElement).value).toBe('openrouter'));
+    expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('vendor/inkling:free');
+    expect((screen.getByLabelText('grader') as HTMLInputElement).value).toBe('qwen3:8b');
+    fireEvent.change(screen.getByLabelText('grader provider'), { target: { value: 'openrouter' } });
+    fireEvent.change(screen.getByLabelText('grader'), { target: { value: 'vendor/other:free' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect/);
+    const put = mock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(String(put?.[1]?.body)).models).toEqual({ grader: 'openrouter:vendor/other:free' });
+  });
+
+  it('recognizes pasted legacy route prefixes and updates the provider without doubling the prefix', async () => {
+    const mock = stubFetch();
+    await openPopover();
+    fireEvent.change(screen.getByLabelText('tutor'), { target: { value: 'openrouter:vendor/model:free' } });
+    expect((screen.getByLabelText('tutor provider') as HTMLSelectElement).value).toBe('openrouter');
+    expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('vendor/model:free');
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect/);
+    const put = mock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(String(put?.[1]?.body)).models).toEqual({ tutor: 'openrouter:vendor/model:free' });
+  });
+
+  it('shows catalog discovery errors distinctly from an empty free list', async () => {
+    const mock = stubFetch();
+    const fallback = mock.getMockImplementation()!;
+    mock.mockImplementation(async (url, init) => url.endsWith('/api/setup/openrouter/models')
+      ? { ok: false, json: async () => ({ error: 'OpenRouter catalog unavailable' }) }
+      : fallback(url, init));
+    await openPopover();
+    await screen.findByText(/OpenRouter catalog unavailable/);
+    expect(screen.queryByText(/none listed right now/)).toBeNull();
+    screen.getByText(/catalog.*does not guarantee.*access/i);
+  });
+
+  it('saves the dedicated OpenRouter key from a password field', async () => {
+    const mock = stubFetch();
+    await openPopover();
+    const key = await screen.findByLabelText('openrouter api key') as HTMLInputElement;
+    expect(key.type).toBe('password');
+    fireEvent.change(key, { target: { value: 'test-router-key' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect/);
+    const put = mock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(String(put?.[1]?.body)).env).toEqual({ OPENROUTER_API_KEY: 'test-router-key' });
+  });
+  // Groq used to be reachable only by typing its base URL into the one OpenAI-compatible slot.
+  it('picks Groq as a provider, keeps the vendor slash in the id, and saves the key with it', async () => {
+    const mock = stubFetch();
+    await openPopover();
+    fireEvent.change(await screen.findByLabelText('tutor provider'), { target: { value: 'groq' } });
+    fireEvent.change(screen.getByLabelText('tutor'), { target: { value: 'openai/gpt-oss-120b' } });
+    const key = screen.getByLabelText('groq api key') as HTMLInputElement;
+    expect(key.type).toBe('password');
+    fireEvent.change(key, { target: { value: 'gsk-test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect/);
+    const body = JSON.parse(String(mock.mock.calls.find(([, init]) => init?.method === 'PUT')?.[1]?.body));
+    expect(body.models).toEqual({ tutor: 'groq:openai/gpt-oss-120b' });
+    expect(body.env).toEqual({ GROQ_API_KEY: 'gsk-test' });
+  });
+
+  it('renders every CALLABLE role with its effective id, with provider-specific suggestions', async () => {
     // quiz_gen is deliberately not among them: nothing calls it (quiz blocks are staged by the
     // tutor as a block tool), so offering it asked the learner to pick a model that could not
     // change anything. The config key still exists for compatibility.
@@ -67,7 +132,7 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
     expect(screen.queryByLabelText('quiz_gen')).toBeNull();
     for (const role of ['tutor', 'grader', 'card_gen', 'compile']) {
       const input = await screen.findByLabelText(role) as HTMLInputElement;
-      expect(input.getAttribute('list')).toBe('model-id-list');
+      expect(input.getAttribute('list')).toBe('model-id-list-anthropic');
     }
     await waitFor(() => {
       expect((screen.getByLabelText('grader') as HTMLInputElement).value).toBe('claude-haiku-4-5');
@@ -146,21 +211,77 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
   });
 });
 
+// The three GET reads on dialog open (models, usage, setup) used to end in a bare
+// `.catch(() => {})`: the dialog opened anyway with `loaded`/`roles`/`anthropicMeta` left at their
+// unpopulated defaults, and Save stayed clickable — pressing it would diff empty local state against
+// nothing and could wipe roles the server actually had set.
+describe('ModelsMenu — a failed dialog-open read must not leave Save clickable', () => {
+  function stubFailingModelsRead() {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.endsWith('/api/setup/models')) throw new TypeError('fetch failed');
+      const body = u.endsWith('/api/status') ? { student: 'e2e', tutor: 'claude-sonnet-5' }
+        : u.endsWith('/api/usage') ? emptyUsage
+          : u.endsWith('/api/setup') ? { apiKey: { present: false, source: null } }
+            : {};
+      return { ok: true, json: async () => body };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('a failed /api/setup/models read on open disables Save and shows a note', async () => {
+    stubFailingModelsRead();
+    await openPopover();
+    const save = await screen.findByRole('button', { name: 'save' }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(true));
+    expect(screen.getByText(/could not load current models/)).toBeTruthy();
+  });
+
+  it('a successful open, then a failed local-getter refresh, disables Save and does not print "ready"', async () => {
+    let modelsReads = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.endsWith('/api/setup/models')) {
+        modelsReads += 1;
+        // First read (dialog open) succeeds; configureLocal's refresh (the second) fails.
+        if (modelsReads === 1) return { ok: true, json: async () => modelsState({}, {}, { ollama: ['mistral:7b'] }) };
+        throw new TypeError('fetch failed');
+      }
+      const body = u.endsWith('/api/status') ? { student: 'e2e', tutor: 'claude-sonnet-5' }
+        : u.endsWith('/api/usage') ? emptyUsage
+          : u.endsWith('/api/setup') ? { apiKey: { present: false, source: null } }
+            : {};
+      return { ok: true, json: async () => body };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await openPopover();
+    const save = await screen.findByRole('button', { name: 'save' }) as HTMLButtonElement;
+    await waitFor(() => expect(save.disabled).toBe(false));
+
+    fireEvent.click(await screen.findByRole('button', { name: 'use it' }));
+
+    await waitFor(() => expect(save.disabled).toBe(true));
+    expect(screen.queryByText(/ready — press save/)).toBeNull();
+    expect(screen.getByText(/reading back current models failed/)).toBeTruthy();
+  });
+});
+
 describe('ModelsMenu — live discovery', () => {
   const discovered = () => modelsState({}, {}, {
     ollama: ['qwen3:8b', 'llama3.1:8b'],
     openaiCompat: ['mistralai/mistral-7b'],
   });
 
-  it('discovered models join the shared datalist as routable ids', async () => {
+  it('discovered models join provider datalists without routing prefixes', async () => {
     stubFetch(discovered());
     await openPopover();
     await screen.findByText('installed locally:');
-    const options = [...document.querySelectorAll('#model-id-list option')]
+    const options = [...document.querySelectorAll('datalist option')]
       .map((o) => (o as HTMLOptionElement).value);
-    expect(options).toContain('ollama:qwen3:8b');
-    expect(options).toContain('ollama:llama3.1:8b');
-    expect(options).toContain('openai:mistralai/mistral-7b');
+    expect(options).toContain('qwen3:8b');
+    expect(options).toContain('llama3.1:8b');
+    expect(options).toContain('mistralai/mistral-7b');
     expect(options).toContain('claude-sonnet-5'); // the static entries stay
   });
 
@@ -170,7 +291,8 @@ describe('ModelsMenu — live discovery', () => {
     await screen.findByText('installed locally:');
     fireEvent.focus(screen.getByLabelText('grader'));
     fireEvent.click(screen.getByRole('button', { name: 'qwen3:8b' }));
-    expect((screen.getByLabelText('grader') as HTMLInputElement).value).toBe('ollama:qwen3:8b');
+    expect((screen.getByLabelText('grader') as HTMLInputElement).value).toBe('qwen3:8b');
+    expect((screen.getByLabelText('grader' + ' provider') as HTMLSelectElement).value).toBe('ollama');
     expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('claude-sonnet-5');
   });
 
@@ -181,7 +303,8 @@ describe('ModelsMenu — live discovery', () => {
     fireEvent.change(screen.getByLabelText('local preset'), { target: { value: 'llama3.1:8b' } });
     fireEvent.click(screen.getByRole('button', { name: 'apply' }));
     for (const r of ['tutor', 'grader', 'card_gen']) {
-      expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:llama3.1:8b');
+      expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('llama3.1:8b');
+    expect((screen.getByLabelText(r + ' provider') as HTMLSelectElement).value).toBe('ollama');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5');
     expect((screen.getByLabelText('rails') as HTMLInputElement).checked).toBe(true);
@@ -271,7 +394,8 @@ describe('ModelsMenu — live discovery', () => {
     // THE assertion the clobber bug failed: the roles are the pulled model, rails on — not the
     // claude defaults the /api/setup/models refresh returns.
     for (const r of ['tutor', 'grader', 'card_gen']) {
-      expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('ollama:qwen3:8b');
+      expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('qwen3:8b');
+    expect((screen.getByLabelText(r + ' provider') as HTMLSelectElement).value).toBe('ollama');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5'); // preset leaves compile
     expect((screen.getByLabelText('rails') as HTMLInputElement).checked).toBe(true);
