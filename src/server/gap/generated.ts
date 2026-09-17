@@ -19,18 +19,23 @@
 // Both families keep the same defence: the model authors, the gates decide, the real suite in the
 // killable child stays the only grader.
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from '../atomicWrite.js';
 import { environmentFor, environmentStatus, withEnvironment } from './environment.js';
 import { runProgram, runtimeFor, runtimeStatus, type ExecCase } from './exec.js';
 import { gradeManifest, type ManifestAssertion } from './manifest.js';
-import { runInChild, type FnCase } from './runner.js';
+import { runInChild, type FnCase, type RunnerResult } from './runner.js';
+import {
+  applyInto, checkCluster, clusterStatus, kubeconfigFor, validateNamespaced, withScratchNamespace,
+  type ClusterAssertion, type ClusterDeps,
+} from './cluster.js';
 import { scaffoldFor, type SuiteCase } from './streamConsumer.js';
 
-export type GeneratedFamily = 'stream' | 'function' | 'manifest' | 'exec';
+export type GeneratedFamily = 'stream' | 'function' | 'manifest' | 'exec' | 'cluster';
 
 export interface StreamGeneratedCase { name: string; inputText: string; expect: string[] }
-export type GeneratedCase = StreamGeneratedCase | FnCase | ManifestAssertion | ExecCase;
+export type GeneratedCase = StreamGeneratedCase | FnCase | ManifestAssertion | ClusterAssertion | ExecCase;
 
 export interface GeneratedExercise {
   pattern: string;
@@ -43,6 +48,9 @@ export interface GeneratedExercise {
   /** exec family only: a vetted service environment (gap/environment.ts registry) brought up for
    *  each suite run — the program receives its connection string via env var. */
   environment?: string;
+  /** cluster family only: the YAML applied into a fresh namespace to create the situation the
+   *  learner is asked to fix. Applied again, unchanged, whenever the sandbox is reset. */
+  setup?: string;
   entryPoint: string;
   /** The problem statement, emitted as comment lines above the scaffold. */
   statement: string;
@@ -77,7 +85,7 @@ export function toSuiteCases(cases: StreamGeneratedCase[]): SuiteCase[] {
 // exec follows its runtime's own comment prefix.
 function commentPrefix(ex: Pick<GeneratedExercise, 'family' | 'runtime'>): string {
   const family = familyOf(ex);
-  if (family === 'manifest') return '#';
+  if (family === 'manifest' || family === 'cluster') return '#';
   if (family === 'exec') return runtimeFor(ex.runtime ?? 'node')?.comment ?? '#';
   return '//';
 }
@@ -89,6 +97,9 @@ export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'en
   const visible_post = '';
   const scaffold = family === 'manifest'
     ? `${visible_pre}\n# YOUR TURN — write the manifest below.\n`
+    : family === 'cluster'
+      ? `${visible_pre}\n#\n# This is a LIVE cluster. Fix it with kubectl in your own terminal (the sandbox strip above\n`
+        + '# has the command), then press run to check. Or write YAML below: run applies it first.\n'
     : family === 'exec'
       ? `${visible_pre}\n${prefix} YOUR TURN — write the whole program below.\n`
       : scaffoldFor(visible_pre, visible_post);
@@ -102,7 +113,8 @@ export function generatedRungParts(ex: Pick<GeneratedExercise, 'statement' | 'en
  * an unverified exercise is never surfaced.
  */
 export async function verifyExercise(
-  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases' | 'family' | 'runtime' | 'environment'>,
+  ex: Pick<GeneratedExercise, 'entryPoint' | 'statement' | 'reference' | 'cases' | 'family' | 'runtime' | 'environment' | 'setup'>,
+  cluster?: ClusterDeps,
 ): Promise<VerificationReport> {
   const gates: VerificationReport['gates'] = [];
   const family = familyOf(ex);
@@ -114,7 +126,25 @@ export async function verifyExercise(
   }
   push('suite-size', true, `${ex.cases.length} cases`);
 
+  if (family === 'cluster') {
+    // Before anything model-written goes near the cluster: it must stay inside its namespace.
+    const escape = validateNamespaced(ex.setup ?? '') ?? validateNamespaced(ex.reference);
+    push('stays-in-namespace', escape === null, escape ?? 'setup and reference hold only namespaced kinds');
+    if (escape !== null) return { ok: false, gates };
+    if (!cluster) throw new Error('verifying a cluster exercise needs cluster deps');
+  }
+
+  // cluster: a FRESH namespace with the setup applied per gate run, never the learner's own. The
+  // reference gets time to roll out (an image pull is slow the first time); the do-nothing run
+  // only needs long enough to show the broken state is not about to fix itself.
+  const runCluster = (code: string, settleMs: number): Promise<RunnerResult> =>
+    withScratchNamespace(cluster!, ex.setup ?? '', async (ns) => {
+      await applyInto(cluster!, ns, code);
+      return checkCluster(cluster!, ns, ex.cases as ClusterAssertion[], settleMs);
+    }).catch((e): RunnerResult => ({ pass: false, results: [], syntaxError: e instanceof Error ? e.message : String(e) }));
+
   const run = (code: string) => {
+    if (family === 'cluster') return runCluster(code, code === ex.reference ? 150_000 : 10_000);
     if (family === 'manifest') return Promise.resolve(gradeManifest(code, ex.cases as ManifestAssertion[]));
     if (family === 'exec') {
       // A FRESH environment per gate run — the same lifecycle a learner's run gets, so a
@@ -141,7 +171,7 @@ export async function verifyExercise(
   // manifest suite of only `absent` assertions passes an empty file — exactly what this catches).
   // For exec the vacuous program is an empty file: it runs, exits 0, prints nothing — so a suite
   // whose every case expects empty stdout is graded as vacuous, exactly right.
-  const vacuous = family === 'manifest' || family === 'exec' ? ''
+  const vacuous = family === 'manifest' || family === 'exec' || family === 'cluster' ? ''
     : family === 'function'
       ? `function ${ex.entryPoint}() {}`
       : `async function* ${ex.entryPoint}(chunks) { for await (const c of chunks) { /* consume */ } }`;
@@ -151,8 +181,10 @@ export async function verifyExercise(
       : 'the suite fails an empty implementation');
 
   // Gate 3: the answer-stripped scaffold must not pass either (otherwise the exercise ships solved).
+  // For cluster the scaffold is comments only — the same "apply nothing" as the vacuous run, and
+  // each cluster run costs a namespace and a wait, so that verdict is reused rather than re-earned.
   const { scaffold } = generatedRungParts(ex as GeneratedExercise);
-  const scafRun = await run(scaffold);
+  const scafRun = family === 'cluster' ? vacRun : await run(scaffold);
   push('scaffold-does-not-pass', !scafRun.pass,
     scafRun.pass ? 'the scaffold already passes — the exercise is pre-solved' : 'scaffold fails, as it should');
 
@@ -166,7 +198,9 @@ export async function verifyExercise(
   // recalling values. A leak gate would reject exactly the good exercises — so no answers to
   // check, and the gate passes vacuously for this family.
   const answersOf = (c: GeneratedCase): string[] => {
-    if (family === 'manifest') return [];
+    // cluster: the values asserted are the symptom the task already states ("both replicas ready").
+    // What would leak is the ROOT CAUSE, which is prose no string check can recognise.
+    if (family === 'manifest' || family === 'cluster') return [];
     if (family === 'exec') return [(c as ExecCase).expect];
     if (family === 'function') {
       const e = (c as FnCase).expect;
@@ -198,8 +232,7 @@ export function generatedDir(vault: string): string {
 }
 
 export function saveGenerated(vault: string, ex: GeneratedExercise): void {
-  mkdirSync(generatedDir(vault), { recursive: true });
-  writeFileSync(join(generatedDir(vault), `${ex.pattern}.json`), `${JSON.stringify(ex, null, 2)}\n`);
+  atomicWrite(join(generatedDir(vault), `${ex.pattern}.json`), `${JSON.stringify(ex, null, 2)}\n`);
 }
 
 export function listGenerated(vault: string): GeneratedExercise[] {
@@ -259,6 +292,45 @@ Respond with ONLY valid JSON, no fences:
   "prose": {"context_line": <one line of framing>, "hint": <one nudge>, "success_line": <one line for after>}
 }`;
 
+// The cluster family: a live sandbox. The model authors a SITUATION (setup YAML), a task, a fix
+// (reference YAML) and assertions over live objects — and the gates then prove, in a real
+// namespace, that the setup fails the assertions and the fix passes them.
+const CLUSTER_PROMPT = (pattern: string, description: string) => `Author a live-cluster troubleshooting exercise for the pattern "${pattern}".
+${description ? `Context from the tutor: ${description}\n` : ''}
+The exercise family is: a real Kubernetes namespace is prepared with your SETUP manifests, which
+create a realistic broken or incomplete situation (an image tag that does not exist, a Service
+whose selector matches no pods, a missing ConfigMap key, too few replicas, a wrong container
+port). The learner investigates and fixes it with kubectl, in the style of a CKA/CKAD
+troubleshooting task. Grading reads LIVE objects back from the cluster.
+
+Hard constraints — an exercise that breaks one is rejected:
+- setup and reference contain ONLY namespaced kinds (Deployment, Pod, Service, ConfigMap, Secret,
+  Job, CronJob, StatefulSet, DaemonSet, Role, RoleBinding, ServiceAccount, NetworkPolicy,
+  PersistentVolumeClaim, Ingress). No Namespace, no ClusterRole, no PersistentVolume, no CRDs.
+- never write metadata.namespace — the sandbox assigns one.
+- no privileged containers, hostPath, hostNetwork or hostPID (the namespace enforces the baseline
+  pod security standard and would refuse them).
+- use small public images that start fast and stay running: nginx:1.27-alpine, busybox:1.36 with
+  a sleep command, redis:7-alpine.
+- the setup applied ALONE must FAIL the assertions; setup followed by "kubectl apply" of your
+  reference must PASS all of them within two minutes.
+
+Each assertion names a live object and a dot-path into it (arrays as [n], a key containing dots as
+a bracket-quoted segment), checked with "eq", "exists", "absent" or "matches". Prefer assertions
+on OBSERVED state (status.readyReplicas, status.availableReplicas) alongside spec, so the grade
+means "it works", not "the YAML looks right". An "absent" assertion passes when the object itself
+no longer exists.
+
+Respond with ONLY valid JSON, no fences:
+{
+  "title": <short human title>,
+  "statement": <the task, 3-6 lines, exam style: the symptom the learner is told about and what "fixed" means — do NOT name the root cause>,
+  "setup": <complete YAML (multi-document with --- is fine) that creates the broken situation>,
+  "reference": <complete YAML that, applied over the setup with kubectl apply, fixes it>,
+  "cases": [4-8 of {"name": <the requirement checked — never the root cause>, "target": <kind/name, e.g. "deployment/web">, "path": <dot path>, "op": "eq"|"exists"|"absent"|"matches", "value": <JSON value or regex source, omit for exists/absent>}],
+  "prose": {"context_line": <one line of framing>, "hint": <one nudge toward HOW to investigate, not the answer>, "success_line": <one line for after>}
+}`;
+
 // The generalist family: a whole program in a named runtime, judged on stdout. The prompt pins
 // the judge contract (stdin/args in, exact stdout out, deterministic) and leaves the subject and
 // language free.
@@ -291,6 +363,8 @@ Respond with ONLY valid JSON, no fences:
 }`;
 
 export interface GenerateDeps {
+  /** cluster family only. Absent -> the real kind/kubectl against the vault's own kubeconfig. */
+  cluster?: ClusterDeps;
   /** Injectable model call, same seam as grading.ts's GradingDeps — testable with a stub. */
   generate: (prompt: string) => Promise<string>;
   now?: () => Date;
@@ -359,9 +433,14 @@ export async function generateExercise(
       if (!envStatus.available) throw new Error(envStatus.reason ?? `${environment} environment unavailable`);
     }
   }
+  if (family === 'cluster' && !deps.cluster) {
+    const status = await clusterStatus();
+    if (!status.available) throw new Error(status.reason ?? 'the cluster sandbox is not available');
+  }
   const envBlurb = environment ? environmentFor(environment)?.blurb : undefined;
   const prompt = family === 'exec' ? EXEC_PROMPT(pattern, description, runtime ?? 'node', envBlurb)
     : family === 'manifest' ? MANIFEST_PROMPT(pattern, description)
+    : family === 'cluster' ? CLUSTER_PROMPT(pattern, description)
       : family === 'function' ? FUNCTION_PROMPT(pattern, description)
         : STREAM_PROMPT(pattern, description);
   const raw = await deps.generate(prompt);
@@ -375,9 +454,10 @@ export async function generateExercise(
   // strings would silently change what the suite asserts.
   const cases: GeneratedCase[] = Array.isArray(parsed.cases)
     ? parsed.cases.map((c: any): GeneratedCase => {
-      if (family === 'manifest') {
+      if (family === 'manifest' || family === 'cluster') {
         const op = ['eq', 'exists', 'absent', 'matches'].includes(c.op) ? c.op : 'eq';
-        return { name: String(c.name ?? ''), path: String(c.path ?? ''), op, ...(c.value === undefined ? {} : { value: c.value }) };
+        return {
+          ...(family === 'cluster' ? { target: String(c.target ?? '') } : {}), name: String(c.name ?? ''), path: String(c.path ?? ''), op, ...(c.value === undefined ? {} : { value: c.value }) };
       }
       if (family === 'exec') {
         return {
@@ -400,6 +480,7 @@ export async function generateExercise(
     family,
     ...(family === 'exec' ? { runtime: runtime ?? 'node' } : {}),
     ...(environment ? { environment } : {}),
+    ...(family === 'cluster' ? { setup: String(parsed.setup ?? '') } : {}),
     entryPoint: String(parsed.entryPoint ?? (family === 'exec' ? 'main' : 'parse')),
     statement: String(parsed.statement ?? ''),
     reference: String(parsed.reference ?? ''),
@@ -414,7 +495,7 @@ export async function generateExercise(
     generatedBy: deps.modelName ?? 'unknown',
     generatedAt: (deps.now?.() ?? new Date()).toISOString(),
   };
-  ex.verification = await verifyExercise(ex);
+  ex.verification = await verifyExercise(ex, family === 'cluster' ? (deps.cluster ?? { kubeconfig: kubeconfigFor(vault) }) : undefined);
   // Failed gates are stored too — a rejected exercise with its failing gate named is how the
   // compile step stays debuggable. It is auto-rejected, not left pending, so nobody wastes a
   // review on something the machine already refused. A PASSING one is auto-approved for the
@@ -423,4 +504,20 @@ export async function generateExercise(
   ex.status = ex.verification.ok ? 'approved' : 'rejected';
   saveGenerated(vault, ex);
   return ex;
+}
+
+/** What generate_exercise hands back to the tutor. It lives beside the status assignment above
+ *  because the two must change together: when the review gate was removed, 'approved' became the
+ *  success status while the message (then in session.ts) still read every non-'pending' status as
+ *  a rejection — and a tutor told "rejected" on every success regenerated the same exercise five
+ *  times in one turn. */
+export function tutorReport(ex: GeneratedExercise): { pattern: string; status: string; gates: string[]; note: string } {
+  return {
+    pattern: ex.pattern,
+    status: ex.status,
+    gates: ex.verification.gates.map((g) => `${g.ok ? 'PASS' : 'FAIL'} ${g.gate}`),
+    note: ex.status === 'approved'
+      ? `verified mechanically and ready now — stage it with code_exercise, pattern "${ex.pattern}". Do not generate it again.`
+      : 'rejected by the verification gates — do not retry with the same content',
+  };
 }

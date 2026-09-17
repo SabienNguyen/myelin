@@ -23,6 +23,11 @@ import {
 import { environmentStatuses, withEnvironment } from './environment.js';
 import { availableRuntimes, runProgram, runtimeStatuses, scratchProgram, type ExecCase } from './exec.js';
 import { gradeManifest, scratchManifest, type ManifestAssertion } from './manifest.js';
+import {
+  applyInto, checkCluster, deleteNamespace, ensureCluster, kubeconfigFor, namespaceExists,
+  openNamespace, sessionNamespace, type ClusterAssertion, type ClusterDeps,
+} from './cluster.js';
+import type { RunnerResult } from './runner.js';
 import { runInChild, type FnCase } from './runner.js';
 import {
   STREAM_CONSUMER_CASES, STREAM_CONSUMER_ENTRY, STREAM_CONSUMER_LADDER, STREAM_CONSUMER_RUNGS,
@@ -38,6 +43,7 @@ export type BuiltinExercise = {
   | { family: 'stream'; cases: SuiteCase[] }
   | { family: 'function'; cases: FnCase[] }
   | { family: 'manifest'; cases: ManifestAssertion[] }
+  | { family: 'cluster'; cases: ClusterAssertion[]; setup: string }
   | { family: 'exec'; cases: ExecCase[]; runtime: string; environment?: string }
 );
 
@@ -45,6 +51,9 @@ export type BuiltinExercise = {
  *  touch the child (data, not code); exec spawns the named runtime per case (exec.ts), inside a
  *  fresh composed environment when the exercise names one (environment.ts). */
 function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?: SuiteCase[] | FnCase[] | ManifestAssertion[] | ExecCase[]) {
+  // A cluster exercise is graded against a live namespace (runClusterSession, which needs the
+  // vault's kubeconfig) — the run route dispatches it before ever reaching here.
+  if (ex.family === 'cluster') throw new Error('cluster exercises are graded by runClusterSession');
   if (ex.family === 'manifest') return Promise.resolve(gradeManifest(code, (cases ?? ex.cases) as ManifestAssertion[]));
   if (ex.family === 'exec') {
     const suite = (cases ?? ex.cases) as ExecCase[];
@@ -58,6 +67,37 @@ function runSuite(ex: BuiltinExercise, code: string, entryPoint: string, cases?:
   return ex.family === 'function'
     ? runInChild({ kind: 'suite', family: 'function', code, entryPoint, cases: (cases ?? ex.cases) as FnCase[] })
     : runInChild({ kind: 'suite', code, entryPoint, cases: (cases ?? ex.cases) as SuiteCase[] });
+}
+
+/** The learner's sandbox for one exercise: the shared cluster (built once, then reused), and a
+ *  namespace named after the pattern that is created — with the setup applied — only if it is not
+ *  already there. So the first run of the first cluster exercise is slow, and every run after it,
+ *  of this exercise or any other, costs a namespace at most. */
+async function openClusterSession(
+  deps: ClusterDeps, ex: Extract<BuiltinExercise, { family: 'cluster' }>,
+): Promise<{ ns: string; fresh: boolean }> {
+  await ensureCluster(deps);
+  const ns = sessionNamespace(ex.ladder.pattern);
+  const fresh = !(await namespaceExists(deps, ns));
+  if (fresh) await openNamespace(deps, ns, ex.setup);
+  return { ns, fresh };
+}
+
+/** One check. YAML in the editor is applied first; an untouched editor applies nothing and the
+ *  check reads whatever the learner did with kubectl. Waits for a rollout to land — except on a
+ *  session this very call created with nothing applied: no fix can be in flight, so the broken
+ *  state is reported at once instead of after a 20-second wait for a rollout nobody started. */
+async function runClusterSession(
+  deps: ClusterDeps, ex: Extract<BuiltinExercise, { family: 'cluster' }>, code: string,
+): Promise<RunnerResult> {
+  try {
+    const { ns, fresh } = await openClusterSession(deps, ex);
+    await applyInto(deps, ns, code);
+    const nothingApplied = code.split('\n').every((l) => l.trim() === '' || l.trim().startsWith('#'));
+    return await checkCluster(deps, ns, ex.cases, fresh && nothingApplied ? 0 : 20_000);
+  } catch (e) {
+    return { pass: false, results: [], syntaxError: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 /** How a function case reads when shown to a learner: the call they are predicting. */
@@ -91,7 +131,17 @@ export function builtinPatterns(vault?: string): string[] {
  *  has to say what each one IS: given bare ids, a tutor asked for a PyTorch exercise staged the
  *  built-in SSE demo. Titles make that choice about the subject. */
 export function patternChoices(vault?: string): string[] {
-  const generated = vault ? approvedGenerated(vault).map((e) => `${e.pattern} — ${e.title}`) : [];
+  // The family's subject goes in the line too. A title describes the SITUATION ("The web Deployment
+  // never becomes ready"), which shares no word with how a learner asks for it ("a kubernetes
+  // troubleshooting exercise") — and session.ts withholds code_exercise when nothing listed
+  // overlaps the topic, so a fitting sandbox exercise was refused as unrelated.
+  const kind: Partial<Record<GeneratedFamily, string>> = {
+    cluster: ' (live kubernetes cluster sandbox, kubectl troubleshooting)',
+    manifest: ' (kubernetes YAML manifest writing)',
+  };
+  const generated = vault
+    ? approvedGenerated(vault).map((e) => `${e.pattern} — ${e.title}${kind[familyOf(e)] ?? ''}`)
+    : [];
   return [...Object.keys(EXERCISES).map((p) => `${p} — built-in demo ladder`), ...generated];
 }
 
@@ -101,6 +151,7 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
   const parts = generatedRungParts(g);
   const family: GeneratedFamily = familyOf(g);
   const cases = family === 'manifest' ? (g.cases as ManifestAssertion[])
+    : family === 'cluster' ? (g.cases as ClusterAssertion[])
     : family === 'exec' ? (g.cases as ExecCase[])
       : family === 'function' ? (g.cases as FnCase[])
         : toSuiteCases(g.cases as StreamGeneratedCase[]);
@@ -115,7 +166,7 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
       // as text so they read cleanly; a function case reads as the call expression itself; an
       // exec case reads as its stdin. A manifest has no output to predict (assertions are the
       // whole grade), so no gate.
-      predictCases: family !== 'manifest' && cases.length ? [cases[0].name] : [],
+      predictCases: family !== 'manifest' && family !== 'cluster' && cases.length ? [cases[0].name] : [],
       visible_pre: parts.visible_pre,
       visible_post: parts.visible_post,
       reference_answer: g.reference,
@@ -124,6 +175,7 @@ function liftGenerated(g: GeneratedExercise): BuiltinExercise {
     }],
     family,
     ...(family === 'exec' ? { runtime: g.runtime ?? 'node', ...(g.environment ? { environment: g.environment } : {}) } : {}),
+    ...(family === 'cluster' ? { setup: g.setup ?? '' } : {}),
     cases,
     entryPoint: g.entryPoint,
   } as BuiltinExercise;
@@ -168,6 +220,17 @@ export function builtinLadderPayload(pattern = DEFAULT_PATTERN, vault?: string):
     })),
     mined: [],
     family: ex.family,
+    ...(ex.family === 'cluster' && vault ? { sandbox: sandboxInfo(vault, ex.ladder.pattern) } : {}),
+  };
+}
+
+function sandboxInfo(vault: string, pattern: string) {
+  const namespace = sessionNamespace(pattern);
+  const kubeconfig = kubeconfigFor(vault);
+  return {
+    namespace, kubeconfig,
+    // One paste: the app's own kubeconfig, pinned to this exercise's namespace for the shell only.
+    command: `export KUBECONFIG='${kubeconfig}' && kubectl config set-context --current --namespace=${namespace}`,
   };
 }
 
@@ -186,11 +249,15 @@ export interface BuiltinGapOpts {
    *  wires the compile role. Absent -> the generate route answers 501 rather than pretending. */
   generate?: (prompt: string) => Promise<string>;
   modelName?: string;
+  /** The cluster sandbox's command seam — tests inject a fake exec; production derives the real
+   *  one from the vault's kubeconfig. */
+  cluster?: ClusterDeps;
 }
 
 export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
   const app = new Hono();
   const { vault } = opts;
+  const clusterDeps = (): ClusterDeps | undefined => opts.cluster ?? (vault ? { kubeconfig: kubeconfigFor(vault) } : undefined);
 
   app.get('/api/gap/ladder', (c) => {
     const pattern = c.req.query('pattern');
@@ -340,6 +407,25 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     });
   });
 
+  // Back to the broken starting state: the namespace is deleted and rebuilt from the setup. The
+  // CLUSTER is untouched — that is the slow part, and the reason a reset takes seconds.
+  app.post('/api/gap/cluster/reset', async (c) => {
+    const body = await c.req.json().catch(() => null);
+    const ex = typeof body?.pattern === 'string' ? lookupExercise(body.pattern, vault) : undefined;
+    if (!ex || ex.family !== 'cluster') return c.json({ error: 'not a cluster exercise' }, 404);
+    const deps = clusterDeps();
+    if (!deps) return c.json({ error: 'the cluster sandbox needs a vault' }, 501);
+    try {
+      await ensureCluster(deps);
+      const ns = sessionNamespace(ex.ladder.pattern);
+      await deleteNamespace(deps, ns, true);
+      await openNamespace(deps, ns, ex.setup);
+      return c.json({ ok: true, namespace: ns });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    }
+  });
+
   app.post('/api/gap/run', async (c) => {
     const body = await c.req.json().catch(() => null);
     if (!body || typeof body.code !== 'string') {
@@ -347,6 +433,15 @@ export function buildBuiltinGapRoutes(opts: BuiltinGapOpts = {}) {
     }
     const ex = exerciseForRung(body.rungId, vault);
     if (!ex) return c.json({ error: `no built-in exercise for rung "${body.rungId}"` }, 404);
+
+    if (ex.family === 'cluster') {
+      const deps = clusterDeps();
+      if (!deps) return c.json({ error: 'the cluster sandbox needs a vault' }, 501);
+      console.log(`[gap] cluster check rung=${body.rungId}`);
+      const out = await runClusterSession(deps, ex, typeof body.input === 'string' ? '' : body.code);
+      console.log(`[gap]   -> pass=${out.pass} ${out.results.map((r) => (r.pass ? '+' : '-')).join('')}${out.syntaxError ? ` ${out.syntaxError}` : ''}`);
+      return c.json(out);
+    }
 
     // Scratch run: the learner's own input, their own output, NO expected value anywhere — leaks
     // nothing and carries no evidence penalty. Same body-dispatch as the sidecar, so the client

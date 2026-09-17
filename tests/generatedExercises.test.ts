@@ -8,7 +8,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  generateExercise, listGenerated, approvedGenerated, setGeneratedStatus, verifyExercise,
+  generateExercise, listGenerated, approvedGenerated, setGeneratedStatus, tutorReport, verifyExercise,
 } from '../src/server/gap/generated.js';
 import { buildBuiltinGapRoutes, builtinPatterns } from '../src/server/gap/service.js';
 
@@ -342,5 +342,27 @@ describe('the function family (any-domain exercises)', () => {
     // Files written before the family existed have no `family` key — familyOf defaults them.
     const report = await verifyExercise(NDJSON);
     expect(report.ok).toBe(true);
+  });
+});
+
+// What the tutor is TOLD about a generation. This drifted once: the review gate was removed (a
+// passing exercise became 'approved', not 'pending') while the message still read anything
+// non-pending as a rejection — so every success said "rejected by the verification gates", and a
+// live tutor generated the same Deployment exercise five times in one 403-second turn before
+// giving up on a feature that had worked every time.
+describe('tutorReport', () => {
+  const gates = (ok: boolean) => ({ ok, gates: [{ gate: 'reference-passes', ok, detail: '' }] });
+  it('tells the tutor a passing exercise is ready and how to stage it', () => {
+    const r = tutorReport({ pattern: 'cka-deploy', status: 'approved', verification: gates(true) } as any);
+    expect(r.status).toBe('approved');
+    expect(r.note).toMatch(/ready now/);
+    expect(r.note).toContain('code_exercise');
+    expect(r.note).toContain('cka-deploy');
+    expect(r.note).not.toMatch(/reject/i);
+  });
+  it('tells the tutor a failing exercise was rejected, naming the gate, and not to retry it as is', () => {
+    const r = tutorReport({ pattern: 'cka-deploy', status: 'rejected', verification: gates(false) } as any);
+    expect(r.note).toMatch(/rejected/);
+    expect(r.gates).toEqual(['FAIL reference-passes']);
   });
 });
