@@ -1,3 +1,4 @@
+import { explainTurnError } from './turnError.js';
 // Rails mode, phase 1 (docs/superpowers/specs/2026-07-30-rails-mode.md): the HARNESS decides what
 // happens next and the model does only narrow generation — plan → assemble → generate → stage →
 // (on resubmit) grade + harness-recorded evidence → feedback → next plan. A rails turn never gives
@@ -12,11 +13,11 @@ import {
 } from './llm/index.js';
 import type { HarnessConfig } from './config.js';
 import { gradeBlockOutput, type Grade } from './grading.js';
-import type { Engram } from './mcp.js';
+import { searchHits, type Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import type { Mode } from './prompt.js';
 import type { Stance } from '../shared/commands.js';
-import { saveThread } from './sessionStore.js';
+import { logGuardrail, saveThread } from './sessionStore.js';
 import { lastUserText } from './deriveMode.js';
 import { topicTokens } from './session.js';
 import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
@@ -386,17 +387,23 @@ export async function askedForItem(
 ): Promise<RailsItem | null> {
   const topic = topicTokens(asked);
   if (topic.length === 0) return null;
+  // engram's search returns {slug,title,status,score} hits — no level. That comes from
+  // get_student_state, the same authority restRoutes.ts's readStanding reads (its `.detail`
+  // shape), not a field search ever carried. searchHits() accepts both the bare-array shape
+  // older engram checkouts still return and the current `{results, note?}` shape.
   const hits = await lw.call('search', { query: topic.join(' ') })
-    .then((r: any) => (Array.isArray(r?.results) ? r.results : Array.isArray(r) ? r : []))
+    .then((r: unknown) => searchHits(r))
     .catch(() => []);
   const best = hits.find((h: any) => h?.slug && !staged.has(h.slug));
   if (!best) return null;
-  const page = await lw.call('read_page', { slug: best.slug })
-    .then((r: any) => r?.page).catch(() => null);
+  const [state, page] = await Promise.all([
+    lw.call('get_student_state', { student, slug: best.slug }).catch(() => null),
+    lw.call('read_page', { slug: best.slug }).then((r: any) => r?.page).catch(() => null),
+  ]);
   return {
     slug: best.slug,
     title: page?.meta?.title ?? best.slug,
-    level: best.level ?? 'unseen',
+    level: (state as any)?.detail?.effective ?? 'unseen',
     reason: 'asked',
   };
 }
@@ -404,7 +411,6 @@ export async function askedForItem(
 export function createRailsSession(
   lw: Engram, cfg: HarnessConfig, opts: { model?: ChatModel } = {},
 ) {
-  const model = opts.model ?? chatModelFor('tutor', cfg);
   // Per-thread memory of what this session already staged — same in-memory lifetime as
   // session.ts's lastModeByThread; seedStaged() rebuilds it from the thread after a restart.
   const stagedByThread = new Map<string, Set<string>>();
@@ -439,6 +445,8 @@ export function createRailsSession(
   async function respond(
     messages: UIMessage[], _mode: Mode, threadId = 'default', signal?: AbortSignal,
   ): Promise<Response> {
+    // Resolve at request start rather than freezing the model when this session is created.
+    const model = opts.model ?? chatModelFor('tutor', cfg);
     const pending = pendingBlockOutputs(messages);
     // The thread's stance rides every generation prompt this turn stages — the rails analogue of
     // session.ts's tail HARNESS note. Read per turn, so a stance set mid-thread applies at once.
@@ -463,7 +471,7 @@ export function createRailsSession(
       onError: (e) => {
         const msg = e instanceof Error ? e.message : String(e);
         console.error('[rails-turn-error]', msg);
-        return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}`;
+        return explainTurnError(e);
       },
       signal,
       execute: async (writer, runSignal) => {
@@ -513,7 +521,22 @@ export function createRailsSession(
           ? (lastMsg.parts as any[]).map((part) => part.toolCallId).filter(Boolean) : []);
         const graded: { question: string; answer: string; grade: Grade }[] = [];
         for (const p of pending) {
-          const grade = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+          // Same recovery as session.ts's agentic respond: a malformed checker must not take the
+          // whole turn down, nor drop grades already collected for earlier pending blocks.
+          let grade: Grade;
+          try {
+            grade = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+          } catch (e) {
+            const why = (e as Error)?.message ?? String(e);
+            console.error(`[grade-error] ${p.tool}: ${why}`);
+            grade = {
+              verdict: 'ungraded',
+              source: 'model',
+              retryable: true,
+              detail: `Could not grade this answer (${why}). Your answer is saved; retry grading after fixing the issue. This is not an incorrect answer. Any tutor feedback is unverified.`,
+              evidence: [],
+            };
+          }
           p.output.grading = grade;
           if (continuable.has(p.toolCallId)) {
             writer.write({ type: 'tool-output-available', toolCallId: p.toolCallId, output: p.output });
@@ -526,9 +549,16 @@ export function createRailsSession(
         }
         for (const g of graded) {
           for (const e of g.grade.evidence) {
-            await lw.call('record_evidence', {
+            const result = await lw.call('record_evidence', {
               student: cfg.student, slug: e.slug, kind: e.kind, note: e.note,
             });
+            // record_evidence is the only way mastery moves (README invariant) — a failed call
+            // that goes unnoticed here is a win the student earned and never actually got.
+            if ((result as any)?.isError) {
+              const text = (result as any)?.content?.find((c: any) => c?.type === 'text')?.text
+                ?? 'record_evidence failed';
+              logGuardrail(cfg.vault, `record_evidence failed for "${e.slug}" (${e.kind}): ${text}`);
+            }
           }
         }
 

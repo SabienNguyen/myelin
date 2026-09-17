@@ -75,6 +75,26 @@ describe('evidence guardrail', () => {
     expect(readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8')).toMatch(/quick_check/);
   }, 30_000);
 
+  it('registers and stages quick_check on a plain teaching turn over a covered page', async () => {
+    const calls: ChatRequest[] = [];
+    const model = streamModel((req) => {
+      calls.push(structuredClone(req));
+      return { toolCalls: [{ toolName: 'quick_check', input: {
+        question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith',
+      } }] };
+    });
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond([
+      { id: 'probe-user', role: 'user', parts: [{ type: 'text', text: 'Teach me arithmetic' }] },
+    ] as any, 'learn', 'tool-registration-probe')).text();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].tools?.map((tool) => tool.name)).toContain('quick_check');
+    expect(calls[0].tools?.map((tool) => tool.name)).not.toContain('web_search');
+    expect(body).toContain('tool-input-available');
+    expect(body).not.toContain('unknown tool');
+    expect(body).not.toContain('tool-output-error');
+  });
+
   it('does not nudge on plain conversation', async () => {
     const { model, calls } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
@@ -285,6 +305,41 @@ describe('usage ledger', () => {
   }, 30_000);
 });
 
+describe('a failed turn still records what happened before it failed', () => {
+  // The graded block output is persisted (output.grading set) the moment grading runs, BEFORE
+  // the model is ever called — so if the model call that follows rejects, the turn must not lose
+  // the SPEND already billed for the step that succeeded, nor go silent about the evidence that
+  // was never recorded because the model never got the chance.
+  it('rejects after a real step, and still yields a guardrail log line and a ledger row for the billed usage', async () => {
+    const model = streamModel((_req, call) => {
+      if (call === 0) {
+        // A real first step — some spend lands — before the second step's model call rejects.
+        return {
+          toolCalls: [{ toolName: 'course_problems', input: { k: 1 } }],
+          usage: { inputTokens: 271, outputTokens: 19, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        };
+      }
+      throw new Error('provider overloaded');
+    });
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
+      { model, now: () => new Date('2026-07-12') });
+
+    // No unhandled rejection: the wire layer turns the throw into an 'error' chunk on a 200 stream.
+    const body = await (await session.respond(blockOutputHistory, 'learn', 'failed-turn-thread')).text();
+    expect(body).toMatch(/"type":"error"/);
+
+    // (a) partial usage from the step that DID complete reached the ledger.
+    const rows = readFileSync(join(vault, '.harness', 'usage.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l));
+    expect(rows.find((r) => r.in === 271)).toMatchObject({ role: 'tutor', in: 271, out: 19 });
+
+    // (b) the unrecorded-evidence guardrail still ran and logged, although the model never got a
+    // chance to call record_evidence.
+    const log = readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8');
+    expect(log).toMatch(/unrecorded evidence for quick_check/);
+  }, 30_000);
+});
+
 describe('grading round-trip (Bug 2)', () => {
   // History diet wiring: a block graded in an EARLIER turn reaches the model as a verdict line
   // (historyDiet.ts), while the turn's own pending block keeps its full payload.
@@ -313,10 +368,15 @@ describe('grading round-trip (Bug 2)', () => {
     await (await session.respond(history, 'learn', 'diet-thread')).text();
 
     const all = JSON.stringify(calls[0].messages);
-    // The old block's distinctive choices payload is gone; its prompt survives in the verdict line.
+    // The old block's OUTPUT is compacted to a verdict line…
     expect(all).toMatch(/"compacted":true/);
-    expect(all).toMatch(/OLDMARK/); // the question is kept (capped), so the model knows WHAT was asked
-    expect(all).not.toMatch(/"choices":\["a","b"\]/);
+    // …while its INPUT keeps the tool's real argument shape (capped strings). Rewriting inputs to
+    // `{compacted:true, prompt}` (the old behavior) taught a live model to emit quick_check with
+    // `prompt` where the schema demands `question` — the malformed-block loop in the vault thread.
+    // Shape preservation deliberately costs the tiny `choices` array here.
+    expect(all).toMatch(/OLDMARK/);
+    expect(all).toMatch(/"choices":\["a","b"\]/);
+    expect(all).toMatch(/"toolName":"quick_check","input":\{"question"/);
     // The pending block keeps its full payload, machine grade merged.
     expect(all).toMatch(/"choices":\["3","4"\]/);
     expect(all).toMatch(/"verdict":"correct"/);

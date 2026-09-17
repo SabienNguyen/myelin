@@ -30,6 +30,15 @@ describe('block schemas', () => {
     expect(BLOCK_TOOLS.structured_check.result.parse({ values: ['9.81 m/s^2'] }))
       .toEqual({ values: ['9.81 m/s^2'] });
   });
+  it('structured_check pattern rejects an empty expected string, but keeps boolean/number', () => {
+    const base = { prompt: 'p', pageSlug: 'topic' };
+    expect(() => BLOCK_TOOLS.structured_check.input.parse(
+      { ...base, checker: { kind: 'pattern', expected: '' } })).toThrow();
+    expect(BLOCK_TOOLS.structured_check.input.parse(
+      { ...base, checker: { kind: 'pattern', expected: false } })).toMatchObject({ checker: { expected: false } });
+    expect(BLOCK_TOOLS.structured_check.input.parse(
+      { ...base, checker: { kind: 'pattern', expected: 0 } })).toMatchObject({ checker: { expected: 0 } });
+  });
   it('quick_check round-trips', () => {
     const input = { question: '2+2?', mode: 'choice', choices: ['3', '4'], pageSlug: 'arith' };
     expect(BLOCK_TOOLS.quick_check.input.parse(input)).toEqual(input);
@@ -165,5 +174,32 @@ describe('pattern checker accepts the shapes models really send', () => {
     const r = parse('mitochondria');
     expect(r.success).toBe(true);
     expect((r as any).data.checker.expected).toBe('mitochondria');
+  });
+});
+
+// Found live: asked for a Kubernetes exercise, the tutor generated one and then had nothing to put
+// it in — code_exercise is withheld when no EXISTING pattern fits the topic, and the pattern list
+// is a snapshot from the start of the turn. It staged a multi-line manifest as a one-line quiz.
+describe('code_exercise stays stageable in a turn that can generate', () => {
+  let turnBlockTools: typeof import('../src/server/session.js').turnBlockTools;
+  beforeAll(async () => { ({ turnBlockTools } = await import('../src/server/session.js')); });
+  const names = (tools: { name: string }[]) => tools.map((t) => t.name);
+  const patterns = ['stream-consumer — Consuming SSE token streams'];
+  const topic = ['kubernetes', 'deployment'];
+
+  it('is still withheld for an unrelated topic when nothing can be generated', () => {
+    expect(names(turnBlockTools(false, patterns, false, topic))).not.toContain('code_exercise');
+  });
+
+  it('is offered when generate_exercise is, and says a just-generated pattern is valid', () => {
+    const tools = turnBlockTools(false, patterns, false, topic, true);
+    expect(names(tools)).toContain('code_exercise');
+    const help = tools.find((t) => t.name === 'code_exercise')!.description;
+    expect(help).toMatch(/generate_exercise returned/);
+    expect(help).toMatch(/not listed/);
+  });
+
+  it('a grading turn still withholds it — generating does not reopen staging over a grade', () => {
+    expect(names(turnBlockTools(true, patterns, false, topic, true))).not.toContain('code_exercise');
   });
 });

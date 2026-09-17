@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
+  createRailsSession,
   fallbackQuickCheck, firstHeadingOrLine, generateRailsQuickCheck, generateRailsFeedback,
   askedForItem, nextRailsSeq, pickRailsItem, railsHistoryLines, trimToBudget,
   RAILS_PAGE_BUDGET, type WorkingSetMember,
@@ -196,22 +200,25 @@ describe('rails ids and fallback seeds', () => {
  * ordering, with nothing acknowledging the swap. Harness-driven does not have to mean deaf.
  */
 describe('rails honours a named subject', () => {
-  const lw = (hits: any[]) => ({
+  // engram's real search returns a bare array of {slug,title,status,score} — no level.
+  const lw = (hits: any[], levels: Record<string, string> = {}) => ({
     call: async (name: string, args: any) => {
-      if (name === 'search') return { results: hits };
+      if (name === 'search') return hits;
       if (name === 'read_page') return { page: { meta: { title: `T:${args.slug}` } } };
+      if (name === 'get_student_state') return { detail: { effective: levels[args.slug] ?? 'unseen' } };
       return {};
     },
   }) as any;
 
-  it('returns the page the learner asked about', async () => {
+  it('returns the page the learner asked about, its level read from get_student_state', async () => {
     const item = await askedForItem(
-      lw([{ slug: 'gradient-accumulation', level: 'exposed' }]),
+      lw([{ slug: 'gradient-accumulation' }], { 'gradient-accumulation': 'exposed' }),
       'kid', 'explain gradient accumulation to me', new Set(),
     );
     expect(item?.slug).toBe('gradient-accumulation');
     expect(item?.reason).toBe('asked');
     expect(item?.title).toBe('T:gradient-accumulation');
+    expect(item?.level).toBe('exposed');
   });
 
   it('yields to the frontier when the message names no subject', async () => {
@@ -230,4 +237,75 @@ describe('rails honours a named subject', () => {
   it('yields to the frontier when the vault has nothing on it', async () => {
     expect(await askedForItem(lw([]), 'kid', 'teach me about quantum chromodynamics', new Set())).toBeNull();
   });
+
+  // T13: engram's search now wraps hits in `{results, note?}` (note set when embeddings were
+  // unavailable). askedForItem goes through searchHits(), which must unwrap this shape exactly
+  // like it does the bare array above — a checkout on the new engram must not go blind to every
+  // named-subject ask.
+  it('reads hits out of the newer {results, note} search shape', async () => {
+    const lwResults = (results: any[], note?: string) => ({
+      call: async (name: string, args: any) => {
+        if (name === 'search') return { results, note };
+        if (name === 'read_page') return { page: { meta: { title: `T:${args.slug}` } } };
+        if (name === 'get_student_state') return { detail: { effective: 'exposed' } };
+        return {};
+      },
+    }) as any;
+    const item = await askedForItem(
+      lwResults([{ slug: 'gradient-accumulation' }], 'embeddings unavailable'),
+      'kid', 'explain gradient accumulation to me', new Set(),
+    );
+    expect(item?.slug).toBe('gradient-accumulation');
+    expect(item?.reason).toBe('asked');
+  });
+});
+
+describe('rails resubmit resilience', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'lwh-rails-resilience-'));
+  const railsCfg = { student: 'kid', vault, models: { tutor: { model: 'test-model', rails: true } } } as any;
+
+  const pendingHistory = (input: any, output: any) => ([
+    { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'drill me' }] },
+    {
+      id: 'a1', role: 'assistant',
+      parts: [{ type: 'tool-quick_check', toolCallId: 'rails-1', state: 'output-available', input, output }],
+    },
+  ]) as any[];
+
+  it('a malformed checker does not kill the turn — it grades ungraded, not a thrown error', async () => {
+    const { model } = textModel(JSON.stringify({ feedback: 'noted', next: 'stop-offer' }));
+    const lw = { call: async (name: string) => (name === 'record_evidence' ? { ok: true } : {}) } as any;
+    const session = createRailsSession(lw, railsCfg, { model });
+    // expected: true (not a string) reproduces the live bug — input.expected.trim() throws inside
+    // the mechanical quick_check grader.
+    const body = await (await session.respond(
+      pendingHistory({ question: 'q', mode: 'choice', choices: ['1', '2'], expected: true, pageSlug: 'arith' },
+        { answer: '1' }),
+      'review', 'rails-malformed-checker',
+    )).text();
+    expect(body).not.toMatch(/"type":"error"/);
+    expect(body).toMatch(/noted/); // the turn still reached and sent its feedback
+    expect(body).toContain('"verdict":"ungraded"');
+    expect(body).toContain('"retryable":true');
+    expect(body).toContain('"evidence":[]');
+    expect(body).not.toContain("judge the student's work yourself");
+  }, 30_000);
+
+  it('logs through the guardrail logger when record_evidence reports isError', async () => {
+    const { model } = textModel(JSON.stringify({ feedback: 'noted', next: 'stop-offer' }));
+    const lw = {
+      call: async (name: string) => (name === 'record_evidence'
+        ? { isError: true, content: [{ type: 'text', text: 'page not found' }] }
+        : {}),
+    } as any;
+    const session = createRailsSession(lw, railsCfg, { model });
+    await (await session.respond(
+      pendingHistory({ question: 'q', mode: 'choice', choices: ['1', '2'], expected: '1', pageSlug: 'arith' },
+        { answer: '1' }),
+      'review', 'rails-record-evidence-error',
+    )).text();
+    const log = readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8');
+    expect(log).toMatch(/record_evidence failed for "arith"/);
+    expect(log).toMatch(/page not found/);
+  }, 30_000);
 });
