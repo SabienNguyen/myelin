@@ -10,7 +10,7 @@
   "scripts": {
     "test": "vitest",
     "typecheck": "tsc --noEmit",
-    "dev:server": "tsx src/server/index.ts",
+    "dev:server": "tsx watch src/server/index.ts",
     "dev:client": "vite",
     "build": "vite build",
     "start": "tsx src/server/index.ts",

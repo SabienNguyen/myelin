@@ -3,8 +3,9 @@
 // reads as "no stances", never a failed turn. Mutations are synchronous read-merge-write with no
 // await between read and write, so (like sessionStore) no mutex is needed — Node never preempts
 // synchronous code, and nothing here holds the map across an await.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 import { isStance, type Stance } from '../shared/commands.js';
 
 /** What each stance means, in the tutor's operating terms. One source of truth: session.ts's
@@ -47,8 +48,7 @@ export function readStance(vault: string, threadId: string): Stance | null {
 }
 
 export function setStance(vault: string, threadId: string, stance: Stance): void {
-  mkdirSync(join(vault, '.harness'), { recursive: true });
-  writeFileSync(storePath(vault), JSON.stringify({ ...readStances(vault), [threadId]: stance }, null, 2));
+  atomicWrite(storePath(vault), JSON.stringify({ ...readStances(vault), [threadId]: stance }, null, 2));
 }
 
 /** Drop a thread's stance — chatRoute's DELETE calls this beside deleteThread, so a deleted
@@ -57,5 +57,5 @@ export function clearStance(vault: string, threadId: string): void {
   const stances = readStances(vault);
   if (!(threadId in stances)) return;
   delete stances[threadId];
-  writeFileSync(storePath(vault), JSON.stringify(stances, null, 2));
+  atomicWrite(storePath(vault), JSON.stringify(stances, null, 2));
 }

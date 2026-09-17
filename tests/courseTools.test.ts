@@ -8,9 +8,9 @@ import { join } from 'node:path';
 import { buildCourseTools } from '../src/server/session.js';
 import { readBank, saveProblems } from '../src/server/courseBank.js';
 
-function bankedVault() {
+async function bankedVault() {
   const vault = mkdtempSync(join(tmpdir(), 'lwh-course-tools-'));
-  saveProblems(vault, 'midterm-2', [
+  await saveProblems(vault, 'midterm-2', [
     { n: 1, text: 'State the pumping lemma for regular languages.', answer: 'see notes' },
     { n: 2, text: 'Define a spanning tree.' },
   ]);
@@ -21,7 +21,7 @@ const exec = (tools: any[], name: string, args: any) => tools.find((t) => t.name
 
 describe('course_problems', () => {
   it('returns the banked problems verbatim, with ids the model can hand back', async () => {
-    const vault = bankedVault();
+    const vault = await bankedVault();
     const { problems } = await exec(buildCourseTools(vault, 'kid'), 'course_problems', {});
     expect(problems.map((p: any) => p.id)).toEqual(['midterm-2#1', 'midterm-2#2']);
     expect(problems[0].text).toBe('State the pumping lemma for regular languages.');
@@ -36,7 +36,7 @@ describe('course_problems', () => {
   });
 
   it('respects k', async () => {
-    const vault = bankedVault();
+    const vault = await bankedVault();
     const { problems } = await exec(buildCourseTools(vault, 'kid'), 'course_problems', { k: 1 });
     expect(problems).toHaveLength(1);
   });
@@ -44,14 +44,14 @@ describe('course_problems', () => {
 
 describe('mark_course_problem', () => {
   it('sets lastCorrect on the named problem — the never-answered count drops', async () => {
-    const vault = bankedVault();
+    const vault = await bankedVault();
     const out = await exec(buildCourseTools(vault, 'kid'), 'mark_course_problem', { id: 'midterm-2#1' });
     expect(out).toEqual({ marked: 'midterm-2#1' });
     expect(readBank(vault).filter((p) => !p.lastCorrect).map((p) => p.id)).toEqual(['midterm-2#2']);
   });
 
   it('an unknown id is an error the model can read, not a silent no-op', async () => {
-    const vault = bankedVault();
+    const vault = await bankedVault();
     const out = await exec(buildCourseTools(vault, 'kid'), 'mark_course_problem', { id: 'midterm-2#9' });
     expect(out.error).toMatch(/no banked problem/);
     expect(readBank(vault).every((p) => !p.lastCorrect)).toBe(true);

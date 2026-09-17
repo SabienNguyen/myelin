@@ -145,28 +145,80 @@ export function discoverDocFiles(repoPath: string): string[] {
 
 // Exported for the large-output test — the truncation this guards against only shows past the pipe
 // buffer, so it needs a real spawn to exercise.
-export function runCommand(cmd: string, args: string[], opts: { cwd?: string } = {}): Promise<{ stdout: string; stderr: string }> {
+//
+// `timeoutMs` guards a git subprocess wedged on an unresponsive remote (dead host, firewall black
+// hole) that would otherwise hang the background ingest continuation forever with no user-visible
+// failure. SIGTERM first, then SIGKILL a few seconds later if the process ignored it — a git
+// process blocked in a network read does not always act on SIGTERM promptly. The timeout rejects
+// immediately rather than waiting for the eventual SIGKILL-triggered 'close', so the caller learns
+// about the timeout on schedule.
+const KILL_GRACE_MS = 5_000;
+
+export function runCommand(
+  cmd: string, args: string[],
+  opts: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number; timeoutMessage?: string } = {},
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd: opts.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, {
+      cwd: opts.cwd,
+      env: opts.env ? { ...process.env, ...opts.env } : undefined,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
+    let settled = false;
+    let timeoutTimer: NodeJS.Timeout | undefined;
+
+    if (opts.timeoutMs !== undefined) {
+      timeoutTimer = setTimeout(() => {
+        settled = true;
+        child.kill('SIGTERM');
+        setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS).unref?.();
+        reject(new Error(opts.timeoutMessage ?? `${cmd} ${args.join(' ')} timed out after ${opts.timeoutMs}ms`));
+      }, opts.timeoutMs);
+      timeoutTimer.unref?.();
+    }
+
     child.stdout.on('data', (d) => { stdout += d; });
     child.stderr.on('data', (d) => { stderr += d; });
-    child.on('error', reject);
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      reject(err);
+    });
     // 'close', NOT 'exit': 'exit' fires when the process ends but its stdout/stderr pipes may still
     // hold unread buffered data, so resolving there would truncate the capture. 'close' fires only
     // once every stdio stream has drained. Every other spawn helper in this codebase (runner.ts,
     // exec.ts, environment.ts) already waits on 'close' for this reason.
     child.on('close', (code) => {
+      clearTimeout(timeoutTimer);
+      if (settled) return; // already rejected on timeout; the promise has settled
+      settled = true;
       if (code === 0) resolve({ stdout, stderr });
       else reject(Object.assign(new Error(`${cmd} ${args.join(' ')} exited with code ${code}`), { stdout, stderr }));
     });
   });
 }
 
-async function defaultClone(source: string, destDir: string): Promise<void> {
+// 5 minutes: generous for a shallow clone of anything a learner would plausibly ingest, short
+// enough that a wedged clone doesn't sit silently for the life of the process.
+export const GIT_CLONE_TIMEOUT_MS = 5 * 60_000;
+
+// GIT_TERMINAL_PROMPT=0 stops git from blocking on an interactive credential prompt for a private
+// or mistyped-URL repo — with no terminal attached to this background continuation, that prompt
+// would hang exactly like a wedged network call, just silently instead of on the timeout above.
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0' };
+
+export async function defaultClone(
+  source: string, destDir: string, timeoutMs = GIT_CLONE_TIMEOUT_MS,
+): Promise<void> {
   mkdirSync(dirname(destDir), { recursive: true });
-  await runCommand('git', ['clone', '--depth', '1', source, destDir]);
+  await runCommand('git', ['clone', '--depth', '1', source, destDir], {
+    env: GIT_ENV,
+    timeoutMs,
+    timeoutMessage: `git clone of ${source} timed out after ${timeoutMs}ms`,
+  });
 }
 
 // Re-ingest strategy (documented design decision): fetch --depth 1 + reset --hard FETCH_HEAD,
@@ -177,13 +229,20 @@ async function defaultClone(source: string, destDir: string): Promise<void> {
 // merge conflict against local changes (there never are any — this checkout is never edited by
 // hand). `--depth 1` keeps the refreshed history exactly as shallow as a fresh clone, so repeated
 // re-ingests don't accumulate history bloat either.
-async function defaultReingest(source: string, destDir: string): Promise<void> {
+export async function defaultReingest(
+  source: string, destDir: string, timeoutMs = GIT_CLONE_TIMEOUT_MS,
+): Promise<void> {
   try {
-    await runCommand('git', ['fetch', '--depth', '1', 'origin', 'HEAD'], { cwd: destDir });
-    await runCommand('git', ['reset', '--hard', 'FETCH_HEAD'], { cwd: destDir });
+    await runCommand('git', ['fetch', '--depth', '1', 'origin', 'HEAD'], {
+      cwd: destDir,
+      env: GIT_ENV,
+      timeoutMs,
+      timeoutMessage: `git fetch for ${source} timed out after ${timeoutMs}ms`,
+    });
+    await runCommand('git', ['reset', '--hard', 'FETCH_HEAD'], { cwd: destDir, env: GIT_ENV });
   } catch {
     rmSync(destDir, { recursive: true, force: true });
-    await defaultClone(source, destDir);
+    await defaultClone(source, destDir, timeoutMs);
   }
 }
 

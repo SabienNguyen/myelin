@@ -28,8 +28,9 @@
 // and swallowed (an ingest must not fail because its sidecar could not be written), and a vault
 // path of '' is a silent no-op (some test fixtures carry no vault).
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 import { logGuardrail } from './sessionStore.js';
 
 export type Attribution = 'verified' | 'claimed' | 'unknown';
@@ -89,8 +90,7 @@ export function recordSource(vault: string, rec: SourceRecord): void {
   try {
     const kept = readSources(vault).filter((r) => r.book !== rec.book);
     kept.push(rec);
-    mkdirSync(join(vault, '.harness'), { recursive: true });
-    writeFileSync(sourcesPath(vault), JSON.stringify(kept, null, 2));
+    atomicWrite(sourcesPath(vault), JSON.stringify(kept, null, 2));
     if (rec.attributionWarning) {
       logGuardrail(vault, `attribution mismatch for "${rec.book}": ${rec.attributionWarning}`);
     }
@@ -136,8 +136,7 @@ export function recordSpineChapter(vault: string, book: string, entry: SpineChap
       .sort((a, b) => a.chapterOrdinal - b.chapterOrdinal);
     const kept = all.filter((r) => r.book !== book);
     kept.push(rec);
-    mkdirSync(join(vault, '.harness'), { recursive: true });
-    writeFileSync(sourcesPath(vault), JSON.stringify(kept, null, 2));
+    atomicWrite(sourcesPath(vault), JSON.stringify(kept, null, 2));
   } catch (e) {
     console.error('[provenance] spine record failed:', e instanceof Error ? e.message : e);
   }

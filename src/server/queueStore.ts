@@ -23,9 +23,10 @@
 // on-disk state rather than clobbering each other.
 
 import {
-  existsSync, mkdirSync, readFileSync, writeFileSync,
+  existsSync, readFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 
 export type QueueStatus = 'converting' | 'convert-error' | 'pending' | 'compiling' | 'done' | 'error';
 export interface QueueEntry {
@@ -78,9 +79,9 @@ export function readQueue(vault: string): QueueEntry[] {
   }
 }
 
-/** Low-level whole-array writer — a synchronous writeFileSync, so no interleaved partial writes.
- * NOT serialized against updateQueue and NOT itself safe for read-modify-write: pairing it with an
- * earlier readQueue call that crossed an await is precisely the lost-update bug this module exists
+/** Low-level whole-array writer — synchronous and atomic (atomicWrite), so no interleaved or torn
+ * writes. NOT serialized against updateQueue and NOT itself safe for read-modify-write: pairing it
+ * with an earlier readQueue call that crossed an await is precisely the lost-update bug this module exists
  * to close (see the module doc comment above). Kept exported for two reasons only: (1) offline
  * repair/migration scripts operating against a quiescent vault (no server running), and (2) the two
  * call sites in ingest.ts/ingestRepo.ts (startConversion, ingestRepo) whose initial placeholder push
@@ -88,8 +89,7 @@ export function readQueue(vault: string): QueueEntry[] {
  * specifically because nothing async happens between their read and write. Every OTHER production
  * mutation goes through updateQueue. */
 export function writeQueue(vault: string, ledger: QueueEntry[]): void {
-  mkdirSync(join(vault, '.harness'), { recursive: true });
-  writeFileSync(ledgerPath(vault), JSON.stringify(ledger, null, 2));
+  atomicWrite(ledgerPath(vault), JSON.stringify(ledger, null, 2));
 }
 
 // ── serialized mutation ─────────────────────────────────────────────────────────────────────

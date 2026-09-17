@@ -437,6 +437,62 @@ describe('anthropic streaming', () => {
     expect(err.retryable).toBe(true);
     expect(err.message).toBe('Overloaded');
   });
+
+  it('skips a non-JSON SSE frame (proxy keepalive or HTML error page) instead of killing the turn', async () => {
+    respond = sse([[
+      frame('message_start', { type: 'message_start', message: { usage: { input_tokens: 3 } } }),
+      frame('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'ok' } }),
+      // A keepalive/proxy comment or an HTML error body riding the SSE channel as one frame's
+      // data — not valid JSON, and must not abort the whole stream.
+      'event: ping\ndata: <html>502 Bad Gateway</html>\n\n',
+      frame('content_block_stop', { type: 'content_block_stop', index: 0 }),
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } }),
+      frame('message_stop', { type: 'message_stop' }),
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events).toEqual([
+      { type: 'text-start', id: '0' },
+      { type: 'text-delta', id: '0', text: 'ok' },
+      { type: 'text-end', id: '0' },
+      {
+        type: 'finish', reason: 'stop',
+        usage: { inputTokens: 3, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    ]);
+  });
+});
+
+describe('anthropic abort listener lifecycle', () => {
+  it('removes the per-attempt abort listener once the request is done, on both generate() and stream()', async () => {
+    respond = okText;
+    const ctrl = new AbortController();
+    let added = 0;
+    let removed = 0;
+    const realAdd = ctrl.signal.addEventListener.bind(ctrl.signal);
+    const realRemove = ctrl.signal.removeEventListener.bind(ctrl.signal);
+    ctrl.signal.addEventListener = ((...args: Parameters<typeof realAdd>) => {
+      added++;
+      return realAdd(...args);
+    }) as typeof realAdd;
+    ctrl.signal.removeEventListener = ((...args: Parameters<typeof realRemove>) => {
+      removed++;
+      return realRemove(...args);
+    }) as typeof realRemove;
+
+    await model().generate({ messages: USER_Q, signal: ctrl.signal });
+    expect(added).toBe(1);
+    expect(removed).toBe(1);
+
+    respond = sse([[
+      frame('message_start', { type: 'message_start', message: { usage: {} } }),
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 0 } }),
+      frame('message_stop', { type: 'message_stop' }),
+    ].join('')]);
+    await collect(model().stream({ messages: USER_Q, signal: ctrl.signal }));
+    expect(added).toBe(2);
+    expect(removed).toBe(2);
+  });
 });
 
 describe('anthropic error taxonomy', () => {

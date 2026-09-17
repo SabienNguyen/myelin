@@ -11,8 +11,9 @@
 // students/. The goal deliberately stores only a POINTER (a path slug or a page slug) — never a copy
 // of the syllabus itself, which would immediately drift from the path doc it was copied from.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 
 export interface Goal {
   /** 'path' -> a curated path slug (the normal case); 'page' -> a single target page slug. */
@@ -59,14 +60,13 @@ export function readGoal(vault: string): Goal | null {
 
 /** Sets (or with null, clears) the active goal. Returns what was stored so the caller can echo it. */
 export function writeGoal(vault: string, goal: Omit<Goal, 'setOn'> | null, now = new Date()): Goal | null {
-  mkdirSync(join(vault, '.harness'), { recursive: true });
   if (goal === null) {
-    writeFileSync(goalPath(vault), JSON.stringify(null));
+    atomicWrite(goalPath(vault), JSON.stringify(null));
     return null;
   }
   if (!SLUG_RE.test(goal.slug)) throw new Error(`invalid goal slug: ${goal.slug}`);
   const stored: Goal = { kind: goal.kind, slug: goal.slug, setOn: now.toISOString().slice(0, 10) };
-  writeFileSync(goalPath(vault), JSON.stringify(stored, null, 2));
+  atomicWrite(goalPath(vault), JSON.stringify(stored, null, 2));
   return stored;
 }
 

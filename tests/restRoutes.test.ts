@@ -706,14 +706,14 @@ describe('GET /api/due and /api/session-plan', () => {
   });
 
   describe('course-bank entries', () => {
-    function bankedCfg(problems: { n: number; text: string }[]) {
+    async function bankedCfg(problems: { n: number; text: string }[]) {
       const vault = mkdtempSync(join(tmpdir(), 'lwh-plan-bank-'));
-      saveProblems(vault, 'midterm-2', problems);
+      await saveProblems(vault, 'midterm-2', problems);
       return { ...cfg, vault } as HarnessConfig;
     }
 
     it('rotates in up to TWO never-answered bank problems as [course] items, with their own titles', async () => {
-      const bcfg = bankedCfg([1, 2, 3, 4].map((n) => ({ n, text: `problem ${n}` })));
+      const bcfg = await bankedCfg([1, 2, 3, 4].map((n) => ({ n, text: `problem ${n}` })));
       const { plan } = await (await buildRestRoutes(spacedLw(), bcfg).request('/api/session-plan')).json();
       const course = plan.filter((p: any) => p.kind === 'course');
       expect(course.map((p: any) => p.slug)).toEqual(['midterm-2#1', 'midterm-2#2']); // capped at 2
@@ -723,8 +723,8 @@ describe('GET /api/due and /api/session-plan', () => {
     });
 
     it('answered problems stay out — only never-answered ones enter the plan', async () => {
-      const bcfg = bankedCfg([{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
-      markCorrect(bcfg.vault, 'midterm-2#1', 'kid');
+      const bcfg = await bankedCfg([{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
+      await markCorrect(bcfg.vault, 'midterm-2#1', 'kid');
       const { plan } = await (await buildRestRoutes(spacedLw(), bcfg).request('/api/session-plan')).json();
       expect(plan.filter((p: any) => p.kind === 'course').map((p: any) => p.slug)).toEqual(['midterm-2#2']);
     });
@@ -781,9 +781,9 @@ describe('GET /api/course-bank', () => {
 
   it('reports per-source problem and never-answered counts', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-bank-route-'));
-    saveProblems(vault, 'midterm-2', [{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
-    saveProblems(vault, 'pset-7', [{ n: 1, text: 'c' }]);
-    markCorrect(vault, 'midterm-2#1', 'kid');
+    await saveProblems(vault, 'midterm-2', [{ n: 1, text: 'a' }, { n: 2, text: 'b' }]);
+    await saveProblems(vault, 'pset-7', [{ n: 1, text: 'c' }]);
+    await markCorrect(vault, 'midterm-2#1', 'kid');
     const app = buildRestRoutes(lw, { ...cfg, vault } as HarnessConfig);
     const { sources } = await (await app.request('/api/course-bank')).json();
     expect(sources).toEqual([
@@ -918,6 +918,23 @@ describe('student profiles — one vault, several learners', () => {
       body: JSON.stringify({ name: '../evil' }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('expands HARNESS_CONFIG the same way config.ts does, including ${VAR}', async () => {
+    // config.ts resolves HARNESS_CONFIG through expand() (handles ~ and ${VAR}); this route read
+    // it raw, so a config path set via an env var (the e2e fixtures' pattern) silently missed the
+    // on-disk file this route persists to.
+    process.env.SOME_VAR = vault;
+    process.env.HARNESS_CONFIG = '${SOME_VAR}/harness.config.json';
+    const cfg = mkCfg();
+    const res = await buildRestRoutes(lw, cfg).request('/api/student', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'zoe' }),
+    });
+    expect((await res.json()).current).toBe('zoe');
+    const onDisk = JSON.parse(readFileSync(cfgFile, 'utf8'));
+    expect(onDisk.student).toBe('zoe'); // written to the ${SOME_VAR}-expanded path, not literally
+    delete process.env.SOME_VAR;
   });
 });
 

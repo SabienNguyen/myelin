@@ -197,7 +197,7 @@ function residualsProportional(
   return ratio !== undefined || sawPoint;
 }
 
-import { gradeChemEquation, gradeNotes, gradeUnitAnswer, normalizeSciNotation } from './structuredCheckers.js';
+import { gradeChemEquation, gradeNotes, gradeUnitAnswer, normalizeSciNotation, unitsEquivalent } from './structuredCheckers.js';
 import { z } from 'zod';
 
 // ── structured_check: mechanical checkers ──────────────────────────────────────────────────────
@@ -211,18 +211,13 @@ function normKey(s: string): string {
   return s.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, ' ').toLowerCase();
 }
 
-/** Fold Unicode super/subscript digits to ASCII ("m/s²" -> "m/s2") so a unit typed in the printed
- *  form the prompt renders (KaTeX shows m/s², the answer preview echoes it) is not read as different
- *  from a declared "m/s^2". */
-function foldSup(s: string): string {
-  return s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
-}
-
-/** A unit reduced to a comparison key: superscripts folded, case/space/^ dropped, so "m/s^2",
- *  "m/s2" and "M/S²" all match. Shared by every checker that verifies a unit — the numeric and
- *  vector paths drifted apart once and told a vector answer its correctly-typed unit was wrong. */
-function unitKey(s: string): string {
-  return foldSup(normKey(s)).replace(/[\s^]/g, '');
+/** Whatever trails the leading number in a free-text answer — "20 km/s" -> "km/s", "9.81" -> "".
+ *  Used to hand the unit checker the unit ALONE, not the whole answer string, so equivalence can
+ *  be judged by real unit algebra (unitsEquivalent) rather than a substring match on the answer. */
+function trailingUnit(s: string): string {
+  const cleaned = normalizeSciNotation(s.trim().replace(/,(?=\d{3}\b)/g, ''));
+  const m = cleaned.match(/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?\s*/);
+  return m ? cleaned.slice(m[0].length).trim() : '';
 }
 
 /** Leading number out of free text, tolerating a trailing unit and thousands separators:
@@ -319,17 +314,22 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     const tol = checker.tolerance ?? 1e-9;
     const limit = checker.relative ? Math.abs(checker.expected) * tol : tol;
     const numOk = Math.abs(got - checker.expected) <= limit;
-    // Unit is checked only when the question asked for one, and only as a normalised substring
-    // (unitKey: "m/s^2", "m/s2" and "M/S²" all satisfy a declared "m/s^2").
-    // '%' is formatting, not a unit that changes meaning: a bare "0.1" against an expected-%
-    // checker cannot mean anything else (a fraction-vs-percent confusion fails the NUMERIC
-    // comparison already). A live check dinged a learner `struggled` for answering "0.1" when
-    // the tutor's own example said 'e.g. "5" for 5%' — bare numbers must satisfy a % unit,
+    // Unit is checked only when the question asked for one, through real unit algebra
+    // (unitsEquivalent) rather than a normalised-substring match — a substring match let "20 km/s"
+    // satisfy an expected "m/s" because the string "km/s" literally contains "m/s" (audit
+    // 2026-08-30 H6). '%' is formatting, not a unit that changes meaning: a bare "0.1" against an
+    // expected-% checker cannot mean anything else (a fraction-vs-percent confusion fails the
+    // NUMERIC comparison already). A live check dinged a learner `struggled` for answering "0.1"
+    // when the tutor's own example said 'e.g. "5" for 5%' — bare numbers must satisfy a % unit,
     // though an explicitly different unit ("0.1 kg") still fails it.
     const bareNumber = !/[a-z%]/i.test((clean[0] ?? '').trim());
+    const typedUnit = trailingUnit(clean[0] ?? '');
+    // mathjs's unit parser does not accept a bare '%' as a unit expression on its own (it only
+    // means percent inside an evaluated expression), so an explicit "0.1%" has to be recognised
+    // here rather than handed to unitsEquivalent, which would throw and read it as a mismatch.
     const unitOk = !checker.unit
-      || unitKey(clean[0] ?? '').includes(unitKey(checker.unit))
-      || (checker.unit.trim() === '%' && bareNumber);
+      || (checker.unit.trim() === '%' && (bareNumber || typedUnit === '%'))
+      || unitsEquivalent(typedUnit, checker.unit);
     const ok = numOk && unitOk;
     // "value and unit match" only when a unit was actually asked for — the audit caught a unitless
     // numeric check congratulating a unit that never existed, which is a small lie in the one
@@ -343,7 +343,19 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
 
   if (checker.kind === 'vector') {
     const parsed = parseVector(clean[0] ?? '');
-    if (!parsed) return { allCorrect: false, anyCorrect: false, detail: 'no numbers found in the answer' };
+    if (!parsed) {
+      // An answer the parser cannot read is not a wrong answer. Prose with numbers, a sentence,
+      // or a shown derivation contains no parseable leading vector, and grading it `incorrect`
+      // asserted the learner was wrong when the machine simply failed to read them — minting
+      // `struggled` on the strength of a parse failure. `ungraded`: no evidence, no verdict
+      // color, and a detail the tutor is told to judge (session.ts/rails.ts route it like
+      // 'reviewed', but the card shows the real cause instead of a verdict).
+      return {
+        allCorrect: false, anyCorrect: false,
+        detail: `could not interpret “${(clean[0] ?? '').trim()}” as a list of numbers `
+          + '— try “(a, b, c)” with each component on its own',
+      };
+    }
     const want = checker.expected as number[];
     if (parsed.nums.length !== want.length) {
       return {
@@ -358,10 +370,10 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
     });
     const hits = perItem.filter((p) => p.correct).length;
     const valuesOk = hits === want.length;
-    // The SAME unit key as the numeric checker (superscripts folded): a vector answer typed as
-    // "(0, -9.8) m/s²" must satisfy a declared "m/s^2", exactly as a scalar one does. This path
-    // used a local key without the fold and told correctly-typed superscript units they were wrong.
-    const unitOk = !checker.unit || unitKey(parsed.rest).includes(unitKey(checker.unit));
+    // The SAME real unit-algebra check as the numeric checker: a vector answer typed as
+    // "(0, -9.8) m/s²" must satisfy a declared "m/s^2", exactly as a scalar one does, and "km/s"
+    // must not satisfy "m/s" (audit 2026-08-30 H6 — the old substring match let it).
+    const unitOk = !checker.unit || unitsEquivalent(parsed.rest, checker.unit);
     return {
       allCorrect: valuesOk && unitOk,
       anyCorrect: hits > 0,
@@ -471,9 +483,10 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
 export type GradeSource = 'mechanical' | 'model';
 
 export interface Grade {
-  verdict: 'correct' | 'partial' | 'incorrect' | 'reviewed';
+  verdict: 'correct' | 'partial' | 'incorrect' | 'reviewed' | 'ungraded';
   /** How the verdict was reached. Every return site declares it; see capApplied. */
   source: GradeSource;
+  retryable?: boolean;
   detail: string;
   perItem?: { id: string; correct: boolean }[];
   annotations?: WritingAnnotations;
@@ -715,6 +728,16 @@ export async function gradeBlockOutput(
       };
     }
     const g = gradeStructured(input.checker, result.values ?? []);
+    // `ungraded` (an unparseable answer — see gradeStructured's vector path) must not mint
+    // evidence or a verdict color: a parse failure says nothing about the learner's grasp.
+    if (g.detail.startsWith('could not interpret')) {
+      return {
+        verdict: 'ungraded',
+        source: 'mechanical',
+        detail: g.detail,
+        evidence: [],
+      };
+    }
     const kind: EvidenceKind = g.allCorrect ? 'applied-correctly' : 'struggled';
     return {
       verdict: g.allCorrect ? 'correct' : g.anyCorrect ? 'partial' : 'incorrect',
@@ -754,9 +777,13 @@ export async function gradeBlockOutput(
   // "require several passes" rule is what lets a machine-graded sound mint applied-correctly
   // without a single lucky attempt counting as mastery.
   if (tool === 'pronounce') {
-    const applied = result.applied === true;
     const passes = Number(result.passes ?? 0);
     const required = Number(result.required ?? input.requiredPasses ?? 3);
+    // `result.applied` is the client's own opinion, not proof — trust it only when the pass count
+    // it reports actually clears the required bar. A client that sends `applied: true` alongside
+    // `passes: 0` (e.g. a stale or malformed report) must not mint applied-correctly on the claim
+    // alone.
+    const applied = result.applied === true && passes >= required;
     const kind: EvidenceKind = applied ? 'applied-correctly' : passes > 0 ? 'exposed' : 'struggled';
     const system: ToneSystem = input.toneSystem === 'zh' ? 'zh' : 'vi';
     const toneName = TONE_SYSTEMS[system].names[input.tone] ?? input.tone;
@@ -825,7 +852,13 @@ export async function gradeBlockOutput(
     // for a 1/4 submission — observed live in audit 45. A red suite is a diagnosis, not a pass:
     // it earns 'struggled', same as stopping.
     const suiteGreen = result.testsPassed === result.testsTotal;
-    const earned: EvidenceKind = !result.completed || !suiteGreen ? 'struggled'
+    // 0 === 0 satisfies suiteGreen but verifies nothing: the "submit anyway" flow above sends
+    // testsTotal 0 when the suite never finished running, and wroteCode:true + 0/0 minted
+    // 'applied-correctly' for code that no test had actually checked (audit 2026-08-30 C2). A
+    // guided-only run legitimately has testsTotal 0 too (no code was submitted to test at all) —
+    // that path is still honest, so the extra check applies only when wroteCode is true.
+    const verified = suiteGreen && (!result.wroteCode || result.testsTotal > 0);
+    const earned: EvidenceKind = !result.completed || !verified ? 'struggled'
       : result.wroteCode ? 'applied-correctly' : 'exposed';
     const kind: EvidenceKind = earned === 'applied-correctly' && revealed ? 'exposed' : earned;
     // The failing-case names ride into the evidence note: "stopped at full_body" says the learner
@@ -839,8 +872,10 @@ export async function gradeBlockOutput(
       : '';
     const note = !result.completed
       ? `stopped at ${result.rungReached}${failingNote}`
-      : !suiteGreen
-        ? `submitted with ${result.testsPassed}/${result.testsTotal} passing${failingNote}`
+      : !verified
+        ? (result.wroteCode && result.testsTotal === 0
+          ? 'submitted with no tests run'
+          : `submitted with ${result.testsPassed}/${result.testsTotal} passing${failingNote}`)
         : result.wroteCode
           ? (revealed
             ? 'passed real tests with own code, but revealed expected values — capped at exposed'
@@ -854,15 +889,17 @@ export async function gradeBlockOutput(
     // tutor now knows the ceiling applied rather than inferring a clean pass from "5/5 tests".
     const detail = !result.completed
       ? `recorded as struggled — stopped at ${result.rungReached}${failingNote}`
-      : !suiteGreen
-        ? `recorded as struggled — submitted with a failing suite${failingNote}`
+      : !verified
+        ? (result.wroteCode && result.testsTotal === 0
+          ? 'recorded as struggled — no tests ran, so nothing was verified'
+          : `recorded as struggled — submitted with a failing suite${failingNote}`)
         : kind === 'applied-correctly'
           ? 'recorded as applied-correctly'
           : revealed
             ? 'recorded as exposed — expected values were revealed, so this cannot count as applying the pattern'
             : 'recorded as exposed — guided rungs only, no code of your own was graded';
     return {
-      verdict: result.completed && suiteGreen ? 'correct' : 'incorrect',
+      verdict: result.completed && verified ? 'correct' : 'incorrect',
       // The artifact's real suite ran in the sandbox — the strongest mechanical grade in the app.
       source: 'mechanical',
       detail,
@@ -898,7 +935,10 @@ export async function gradeBlockOutput(
         model: deps.model ?? chatModelFor('grader', cfg), prompt: rubricPrompt,
         schema: rubricSchema, schemaName: 'rubric_judgment',
       });
-      recordUsage(cfg.vault, { role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage });
+      recordUsage(cfg.vault, {
+        role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage,
+        contextTokens: cfg.models?.grader?.contextTokens,
+      });
       return object;
     };
     // The rubric judge and the annotation grader are independent reads of the same draft — run
@@ -1003,7 +1043,10 @@ async function annotateDraft(
     prompt: draftPrompt,
     schema: annotationSchema, schemaName: 'draft_annotations',
   });
-  recordUsage(cfg.vault, { role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage });
+  recordUsage(cfg.vault, {
+    role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage,
+    contextTokens: cfg.models?.grader?.contextTokens,
+  });
   return object;
 }
 
@@ -1057,8 +1100,26 @@ async function gradeOpenAnswer(
   // model, never copied into the evidence note.
   const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
   const { text, usage } = await generateText({ model: deps.model ?? chatModelFor('grader', cfg), prompt });
-  recordUsage(cfg.vault, { role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage });
-  const ok = /^CORRECT/i.test(text.trim());
+  recordUsage(cfg.vault, {
+    role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage,
+    contextTokens: cfg.models?.grader?.contextTokens,
+  });
+  // A strict token match, not `/^CORRECT/i`: that matched "Correct answer: ... the student said
+  // the opposite" as a pass, because the prefix alone doesn't say the token was the grader's
+  // actual verdict rather than the first word of some other sentence. Strip leading whitespace and
+  // markdown emphasis the grader sometimes wraps its verdict in (**CORRECT**, _INCORRECT_), then
+  // require the bare token followed by punctuation or end of line — "Correct answer: X" fails that
+  // (the word "answer" follows, not punctuation), while "**CORRECT** — fine" passes.
+  const stripped = text.trim().replace(/^[\s*_#]+/, '');
+  const match = stripped.match(/^(CORRECT|INCORRECT)[*_]*(?:\s*[-—:.,]|\s*$)/i);
+  if (!match) {
+    console.error(`gradeOpenAnswer: grader reply unparseable: ${text.slice(0, 200)}`);
+    return {
+      verdict: 'incorrect', source: 'model', detail: 'grader reply unparseable',
+      evidence: [ev(slug, 'struggled', `open answer: ${question}`, 'model')],
+    };
+  }
+  const ok = match[1].toUpperCase() === 'CORRECT';
   return {
     verdict: ok ? 'correct' : 'incorrect', source: 'model', detail: text.trim(),
     // Already 'explained-correctly' before capApplied existed — this path is where the convention

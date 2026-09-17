@@ -87,6 +87,59 @@ export function gradeUnitAnswer(
   };
 }
 
+/** "m/s2" -> "m/s^2": a bare digit run stuck to a unit letter is the form the numeric/vector
+ *  checkers' own detail text has always accepted as spelling out an exponent, but mathjs's unit
+ *  parser rejects it outright ("Unit \"s2\" not found"). A caret ("s^2") or a superscript already
+ *  folded to a caret by normalizeQuantity is left alone — this only fires on the bare-digit form. */
+function expandBareExponents(s: string): string {
+  return s.replace(/([a-zA-Z])(\d+)(?![a-zA-Z\d])/g, '$1^$2');
+}
+
+/** Fold Unicode super/subscript digits to ASCII ("m/s²" -> "m/s2") so a unit typed in the printed
+ *  form the prompt renders is not read as different from a declared "m/s^2" by the FALLBACK path
+ *  below — mathjs-side folding already happens in normalizeQuantity, but the fallback never reaches
+ *  mathjs, so it needs its own. */
+function foldSup(s: string): string {
+  return s.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]/g, (c) => '0123456789+-'['⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻'.indexOf(c)]);
+}
+
+/** A unit reduced to a comparison key: trimmed, lowercased, superscripts folded, spaces and '^'
+ *  dropped — so "m/s^2", "m/s2" and "M/S²" all match. This is the fallback for units mathjs's
+ *  parser has never heard of ("bits", "items/s", "cells/mL", "apples"): those are legitimate
+ *  checker units (a `unit` checker is free to name any counted quantity, not just an SI one), and
+ *  before real unit algebra existed they were compared exactly this way. EQUALITY only, never
+ *  `.includes()` — a substring match is the H6 bug this file exists to not repeat ("kbits" must
+ *  not satisfy "bits" merely because the text contains it). */
+function unitKey(s: string): string {
+  return foldSup(s.trim().toLowerCase()).replace(/[\s^]/g, '');
+}
+
+/**
+ * Is `typedUnit` the SAME unit as `expectedUnit` — not merely the same dimension? The plain
+ * numeric and vector checkers' unit field used to compare NORMALISED STRINGS with `.includes()`,
+ * which let "20 km/s" satisfy an expected "m/s": "km/s" literally contains the substring "m/s"
+ * (audit 2026-08-30 H6). Real unit algebra instead: converting exactly 1 typedUnit into
+ * expectedUnit must land on exactly 1 — same dimension AND same scale, so km/s (ratio 1000) and
+ * g against kg (ratio 1000) both correctly fail, while m/s against m/s (ratio 1) passes.
+ *
+ * mathjs only knows SI-ish units, though, and a `unit` checker is free to name any counted
+ * quantity a tutor writes a question about — "bits", "items/s", "cells/mL", "apples". None of
+ * those parse, so mathUnit throws for both sides alike and the catch below used to just say
+ * false, grading a learner who typed the checker's exact unit wrong (audit 2026-08-30 follow-up).
+ * The fallback is normalized-key EQUALITY (unitKey), never `.includes()` — same discipline as the
+ * mathjs path, just without the dimensional conversion mathjs can't do for a unit it can't parse.
+ */
+export function unitsEquivalent(typedUnit: string, expectedUnit: string): boolean {
+  try {
+    const a = expandBareExponents(normalizeQuantity(typedUnit));
+    const b = expandBareExponents(normalizeQuantity(expectedUnit));
+    const ratio = mathUnit(1, a).toNumber(b);
+    return Math.abs(ratio - 1) <= 1e-9;
+  } catch {
+    return unitKey(typedUnit) === unitKey(expectedUnit);
+  }
+}
+
 // ── chem_equation: conservation per element and per charge ─────────────────────────────────────
 
 export interface Species { coeff: number; counts: Record<string, number>; charge: number; formula: string }

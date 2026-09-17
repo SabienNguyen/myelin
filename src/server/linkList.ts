@@ -20,8 +20,9 @@
 // the compile pipeline, which is worse than a false negative (a link list compiled into mediocre
 // pages still shows its links as links).
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 import { maskFences } from './convert.js';
 
 export interface DirectoryLink {
@@ -165,8 +166,7 @@ export function analyzeLinkList(markdown: string): LinkListAnalysis {
 const dirFor = (vault: string) => join(vault, '.harness', 'linklists');
 
 export function saveLinkDirectory(vault: string, entry: LinkDirectoryFile): void {
-  mkdirSync(dirFor(vault), { recursive: true });
-  writeFileSync(join(dirFor(vault), `${entry.name}.json`), JSON.stringify(entry, null, 2));
+  atomicWrite(join(dirFor(vault), `${entry.name}.json`), JSON.stringify(entry, null, 2));
 }
 
 export function readLinkDirectories(vault: string): LinkDirectoryFile[] {

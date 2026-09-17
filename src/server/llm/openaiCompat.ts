@@ -652,7 +652,15 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
 
       for await (const frame of sseFrames(res.body)) {
         if (frame.data === '[DONE]') break;
-        const chunk = JSON.parse(frame.data) as WireChunk;
+        let chunk: WireChunk;
+        try {
+          chunk = JSON.parse(frame.data) as WireChunk;
+        } catch {
+          // A proxy keepalive or an HTML error page can ride the SSE channel as a non-JSON
+          // frame; throwing here would kill the whole turn over a frame that carries no signal.
+          console.error('openaiCompat: skipping non-JSON SSE frame:', frame.data.slice(0, 200));
+          continue;
+        }
         // The usage-bearing final chunk may have EMPTY choices — read usage before bailing.
         if (chunk.usage) usage = usageOf(chunk.usage);
         const choice = chunk.choices?.[0];

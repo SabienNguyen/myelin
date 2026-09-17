@@ -1,6 +1,7 @@
 import cron from 'node-cron';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 import type { HarnessConfig } from './config.js';
 import type { Engram } from './mcp.js';
 import { sendNotification } from './notify.js';
@@ -73,8 +74,7 @@ export async function runDigestTick(
   // send (boot-before-login) fails and must retry on a later tick, not vanish.
   const delivered = await notify('Myelin', items.map((i) => i.message).join('\n'));
   if (!delivered) return 'undelivered';
-  mkdirSync(join(cfg.vault, '.harness'), { recursive: true });
-  writeFileSync(ledgerPath(cfg.vault), JSON.stringify(newLedger));
+  atomicWrite(ledgerPath(cfg.vault), JSON.stringify(newLedger));
   return 'notified';
 }
 

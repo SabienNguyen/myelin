@@ -111,6 +111,15 @@ describe('structured_check checkers (mechanical, any subject)', () => {
     expect((await grade(c, ['0.001'])).verdict).toBe('incorrect'); // fraction confusion → numeric miss
   });
 
+  it('does not grade unparseable prose as a wrong vector or emit negative evidence', async () => {
+    const answer = 'we can take 100 requests in 800ms and avg model compute time is 1reqs/8ms';
+    const g = await grade({ kind: 'vector', expected: [125, 8] }, [answer]);
+    expect(g.verdict).toBe('ungraded');
+    expect(g.evidence).toEqual([]);
+    expect(g.detail).toContain('could not interpret');
+    expect(g.detail).not.toContain('no numbers');
+  });
+
   it('vector: ordered components with tolerance, any bracket notation, optional unit', async () => {
     const c = { kind: 'vector', expected: [3, 4], tolerance: 0.01 };
     expect((await grade(c, ['(3, 4)'])).verdict).toBe('correct');
@@ -181,6 +190,30 @@ describe('structured_check checkers (mechanical, any subject)', () => {
   it('numeric: parses thousands separators and trailing units', async () => {
     const c = { kind: 'numeric', expected: 1024, tolerance: 0.5 };
     expect((await grade(c, ['1,024'])).verdict).toBe('correct');
+  });
+
+  // Audit 2026-08-30 H6: the unit field used to compare normalised STRINGS with `.includes()`,
+  // which let "20 km/s" satisfy an expected "m/s" — the string "km/s" literally contains "m/s".
+  // Real unit algebra (mathjs) instead: only the SAME unit at the SAME scale can satisfy it.
+  it('numeric: a differently-scaled unit fails, even though its name contains the expected unit', async () => {
+    const mps = { kind: 'numeric', expected: 20, tolerance: 0.5, unit: 'm/s' };
+    const wrongScale = await grade(mps, ['20 km/s']);
+    expect(wrongScale.verdict).toBe('partial'); // value read fine; the UNIT is what's wrong
+    expect(wrongScale.evidence[0]).toMatchObject({ kind: 'struggled' });
+    expect((await grade(mps, ['20 m/s'])).verdict).toBe('correct');
+
+    const grams = { kind: 'numeric', expected: 5, tolerance: 0.5, unit: 'g' };
+    expect((await grade(grams, ['5 kg'])).verdict).toBe('partial');
+
+    const seconds = { kind: 'numeric', expected: 3, tolerance: 0.5, unit: 's' };
+    expect((await grade(seconds, ['3 ms'])).verdict).toBe('partial');
+  });
+  it('vector: a differently-scaled unit fails the same way as numeric', async () => {
+    const c = { kind: 'vector', expected: [20, 0], tolerance: 0.5, unit: 'm/s' };
+    const wrongScale = await grade(c, ['(20, 0) km/s']);
+    expect(wrongScale.verdict).toBe('partial');
+    expect(wrongScale.evidence[0].kind).toBe('struggled');
+    expect((await grade(c, ['(20, 0) m/s'])).verdict).toBe('correct');
   });
   it('set: order-insensitive, penalises extras and duplicates', async () => {
     const c = { kind: 'set', expected: ['fluorine', 'chlorine', 'bromine'] };
@@ -395,6 +428,17 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     // and the learner needs to know which one they got.
     expect(g.detail).toBe('recorded as exposed — guided rungs only, no code of your own was graded');
   });
+
+  // Audit 2026-08-30 C2: the "tests aren't passing, submit anyway?" client flow sends
+  // testsTotal: 0 when the suite never finished running — and 0 === 0 satisfied the old
+  // `suiteGreen` check, minting 'applied-correctly' for code no test had actually verified.
+  it('completed + wroteCode with testsTotal 0 ("submit anyway", suite never ran) -> struggled, not applied-correctly', async () => {
+    const g = await gradeBlockOutput('code_exercise',
+      { pattern: 'stream-consumer', rung: 'full_body', pageSlug: 'stream-consumer' },
+      { completed: true, rungReached: 'full_body', testsPassed: 0, testsTotal: 0, wroteCode: true }, cfg);
+    expect(g.verdict).toBe('incorrect');
+    expect(g.evidence[0]).toMatchObject({ slug: 'stream-consumer', kind: 'struggled' });
+  });
   it('!completed (abandoned via "stop here") -> struggled', async () => {
     const g = await gradeBlockOutput('code_exercise',
       { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
@@ -414,6 +458,15 @@ describe('gradeBlockOutput — mechanical paths (no LLM)', () => {
     expect(g.verdict).toBe('correct');
     expect(g.evidence[0]).toMatchObject({ slug: 'vietnamese-tones', kind: 'applied-correctly' });
     expect(g.detail).toContain('3/3');
+  });
+  // Audit 2026-08-30: `applied` is the client's own claim, not proof — it must not mint
+  // applied-correctly when the pass count it reports never actually reached `required`.
+  it('pronounce: applied claimed true but passes short of required -> not applied-correctly', async () => {
+    const g = await gradeBlockOutput('pronounce',
+      { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'vietnamese-tones', requiredPasses: 3 },
+      { passes: 0, required: 3, applied: true, attempts: 1 }, cfg);
+    expect(g.evidence[0].kind).not.toBe('applied-correctly');
+    expect(g.evidence[0]).toMatchObject({ kind: 'struggled' });
   });
   it('pronounce: some clean but short of required -> exposed, never applied-correctly', async () => {
     const g = await gradeBlockOutput('pronounce',
@@ -455,7 +508,7 @@ describe('gradeBlockOutput — model-graded paths (injected grader model)', () =
   const cfg = { models: { grader: { model: 'claude-haiku-4-5' } } } as any;
 
   it('sends an open quick_check answer to the grader with the question/answer in the prompt', async () => {
-    const { model, prompts } = textModel('CORRECT nice work');
+    const { model, prompts } = textModel('CORRECT — nice work');
     const g = await gradeBlockOutput('quick_check',
       { question: 'Why does the chain rule apply here?', pageSlug: 'derivatives' },
       { answer: 'because f is composed with g' }, cfg, { model });
@@ -553,6 +606,33 @@ describe('quick_check phrasing tolerance (audit: correct answer graded wrong on 
     const { model } = textModel('INCORRECT — that is not it');
     const g = await gradeBlockOutput('quick_check', input, { answer: 'the file descriptor' }, cfg, { model });
     expect(g.verdict).toBe('incorrect');
+    expect(g.evidence[0].kind).toBe('struggled');
+  });
+});
+
+// The grader's reply used to be matched with /^CORRECT/i, which read the PREFIX of any sentence
+// starting with the word "Correct" as a verdict — including one narrating that the student was
+// WRONG. The token must now be the grader's actual bare verdict: stripped of markdown emphasis,
+// followed by punctuation or end of line.
+describe('open-answer grader reply parsing (strict CORRECT/INCORRECT token)', () => {
+  const input = { question: 'q?', mode: 'text', expected: 'buffer', pageSlug: 'p' };
+  const cfg = { models: { grader: { model: 'claude-haiku-4-5' } } } as any;
+
+  it('a markdown-wrapped verdict still parses', async () => {
+    const { model } = textModel('**CORRECT** — fine');
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'a buffer' }, cfg, { model });
+    expect(g.verdict).toBe('correct');
+    expect(g.evidence[0].kind).toBe('explained-correctly');
+  });
+
+  // The word "Correct" leading a sentence about the STUDENT being wrong must not be read as the
+  // verdict token — the bare word has to be followed by punctuation or end of line, not "answer:".
+  it('"Correct answer: ..." narrating the student was wrong is unparseable, not a pass', async () => {
+    const reply = 'Correct answer: buffer. However, the student said the opposite, which is wrong.';
+    const { model } = textModel(reply);
+    const g = await gradeBlockOutput('quick_check', input, { answer: 'the opposite' }, cfg, { model });
+    expect(g.verdict).not.toBe('correct');
+    expect(g.detail).toBe('grader reply unparseable');
     expect(g.evidence[0].kind).toBe('struggled');
   });
 });

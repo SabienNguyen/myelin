@@ -169,7 +169,7 @@ const structuredCheck = {
         // No .transform(): these schemas are converted with z.toJSONSchema() for the model's tool
         // definitions, and a transform cannot be represented there. The grader already compares
         // this as text, which is why a boolean `expected` graded correctly all along.
-        expected: z.union([z.string(), z.boolean(), z.number()]),
+        expected: z.union([z.string().min(1), z.boolean(), z.number()]),
       }),
       // A quantity where the UNIT is part of being right and equivalent units must count — graded
       // by real unit algebra (mathjs), so "1 N·m" satisfies an expected "1 J" and "72 km/h"

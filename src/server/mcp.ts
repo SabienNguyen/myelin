@@ -6,11 +6,24 @@ import {
 import type { HarnessConfig } from './config.js';
 import { invalidateGraphCache } from './graphCache.js';
 
-// Matches transport-shaped failures from a dead/dying MCP child: "write EPIPE" and the stdio
-// client's own "mcp transport closed: …" rejections (matched by 'closed').
-const TRANSPORT_ERROR = /closed|EPIPE|transport|disconnected/i;
+// Thrown by Engram.call() when engram's own tool handler reports isError — a page-not-found, a
+// bad slug, any ordinary tool-level failure. INCIDENT: TRANSPORT_ERROR used to match on 'closed'
+// alone, and an error like `engram read_page: page not found: closed-loop-control` contains
+// "closed" as part of the SLUG, not the transport. withRespawn treated every such vault miss as a
+// dead child, respawned engram, and clobbered `this.client` with the fresh process without closing
+// the live one — a leaked child process per ordinary miss. Tagging tool-result errors with this
+// class, and checking `instanceof` before the regex, keeps a miss from ever reading as a transport
+// death regardless of what words the miss happens to contain.
+export class EngramToolError extends Error {}
+
+// Matches only the client's OWN transport-shaped rejections (mcpClient.ts): every real rejection
+// it produces is prefixed "mcp transport closed: …" (see the `^mcp transport` branch), plus the
+// raw EPIPE/ECONNRESET a dying child's stdio can surface. Deliberately narrow — see the
+// EngramToolError comment above for why a broad substring match here is unsafe.
+const TRANSPORT_ERROR = /^mcp transport|EPIPE|ECONNRESET/i;
 
 export function isTransportError(e: unknown): boolean {
+  if (e instanceof EngramToolError) return false;
   const msg = e instanceof Error ? e.message : String(e);
   return TRANSPORT_ERROR.test(msg);
 }
@@ -28,7 +41,30 @@ const READ_ONLY_ENGRAM_TOOLS = new Set([
   'compile_source',                               // reads a raw file + snapshot; the writes happen via write_page later
   'list_paths', 'read_path',                      // path docs: listPathDocs/readPathDoc
   'get_student_state', 'next_lessons', 'find_analogies', 'working_set', // student reads: readStudent + snapshot
+  'author_affinity',                               // reads snapshot + student state only, no writes
 ]);
+
+export interface SearchHit { slug: string; title: string; status?: string; score: number }
+
+// Engram's `search` tool used to return a bare SearchHit[]. It now returns
+// `{ results: SearchHit[], note?: string }`, with `note` set when embeddings were unavailable and
+// the results fell back to a weaker match (engram graphTools.ts). Older sibling checkouts —
+// config.ts accepts any checkout on the sibling path, not a pinned version — still return the bare
+// array, so both consumers here must accept either shape rather than assume the newer one.
+export function searchHits(res: unknown): SearchHit[] {
+  if (Array.isArray(res)) return res as SearchHit[];
+  if (res && typeof res === 'object' && Array.isArray((res as { results?: unknown }).results)) {
+    return (res as { results: SearchHit[] }).results;
+  }
+  return [];
+}
+
+export function searchNote(res: unknown): string | undefined {
+  if (res && typeof res === 'object' && typeof (res as { note?: unknown }).note === 'string') {
+    return (res as { note: string }).note;
+  }
+  return undefined;
+}
 
 export class Engram {
   // A respawn in flight, shared by every caller that hits the dead client at once. null when none.
@@ -80,6 +116,9 @@ export class Engram {
     if (!this.respawning) {
       this.respawning = (async () => {
         await new Promise((r) => setTimeout(r, 100)); // short backoff
+        // Close the dying client before swapping it out — otherwise its process leaks: nothing
+        // else holds a reference to it once `this.client` is overwritten below.
+        await this.client.close().catch(() => {});
         this.client = await Engram.spawn(this.cfg);
         return this.client;
       })().finally(() => { this.respawning = null; });
@@ -106,7 +145,7 @@ export class Engram {
   // vault through exactly one of the two methods below (call() or execTool()) — both live on
   // this wrapper and both already know the tool name, so this is the single, least-invasive
   // place to hook invalidateGraphCache() rather than sprinkling it across every write_page call
-  // site (ingestRepo.ts/seedPatternPages.ts call lw.call('write_page', ...) directly; the
+  // site (seedPatternPages.ts calls lw.call('write_page', ...) directly; the
   // tutor-session and compile agent loops in session.ts/ingest.ts instead hand out the tools
   // from tools(), whose execute() is execTool() below — the model triggers write_page through
   // THAT path, not call()). Only invalidate on success: a rejected/erroring write never touched
@@ -136,7 +175,7 @@ export class Engram {
     return this.withRespawn(async (client) => {
       const res = await client.callTool(name, args);
       const text = res.content[0]?.text ?? '';
-      if (res.isError) throw new Error(`engram ${name}: ${text}`);
+      if (res.isError) throw new EngramToolError(`engram ${name}: ${text}`);
       const parsed = JSON.parse(text);
       Engram.invalidateIfWrite(name);
       return parsed;

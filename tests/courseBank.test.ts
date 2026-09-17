@@ -67,22 +67,22 @@ describe('bank storage', () => {
   beforeEach(() => { vault = mkdtempSync(join(tmpdir(), 'lwh-bank-')); });
   afterEach(() => { rmSync(vault, { recursive: true, force: true }); });
 
-  it('saves, reads back, and namespaces ids by source', () => {
-    const saved = saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
+  it('saves, reads back, and namespaces ids by source', async () => {
+    const saved = await saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
     expect(saved).toHaveLength(4);
     expect(saved[0].id).toBe('chem201-midterm2#1');
     expect(readBank(vault)).toHaveLength(4);
   });
 
-  it('re-ingesting a source replaces its entries instead of duplicating', () => {
-    saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
-    saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
+  it('re-ingesting a source replaces its entries instead of duplicating', async () => {
+    await saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
+    await saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
     expect(readBank(vault)).toHaveLength(4);
   });
 
-  it('nextProblems serves never-answered first, then correct-longest-ago', () => {
-    saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
-    expect(markCorrect(vault, 'chem201-midterm2#1', 'kid')).toBe(true);
+  it('nextProblems serves never-answered first, then correct-longest-ago', async () => {
+    await saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
+    expect(await markCorrect(vault, 'chem201-midterm2#1', 'kid')).toBe(true);
     const next = nextProblems(vault, 'kid', 4);
     // 2,3,4 are unanswered and come first; 1 (answered today) is last.
     expect(next.map((p) => p.n)).toEqual([2, 3, 4, 1]);
@@ -91,31 +91,48 @@ describe('bank storage', () => {
   // Real psets repeat printed numbers across sections (two "Problem 1"s), and parseFloat
   // collapses "2.10" into 2.1 — colliding ids let markCorrect mark the wrong problem and made
   // the second holder unreachable. Repeats now carry a stable occurrence suffix.
-  it('repeated printed numbers get distinct, stable ids', () => {
+  it('repeated printed numbers get distinct, stable ids', async () => {
     const problems = [
       { n: 1, text: 'Section A problem one' },
       { n: 2, text: 'Section A problem two' },
       { n: 1, text: 'Section B problem one' },
       { n: 1, text: 'Section C problem one' },
     ];
-    const saved = saveProblems(vault, 'two-part-exam', problems);
+    const saved = await saveProblems(vault, 'two-part-exam', problems);
     expect(saved.map((p) => p.id)).toEqual([
       'two-part-exam#1', 'two-part-exam#2', 'two-part-exam#1~2', 'two-part-exam#1~3',
     ]);
     // The suffixed id is individually markable — the collision made this impossible before.
-    expect(markCorrect(vault, 'two-part-exam#1~2', 'kid')).toBe(true);
+    expect(await markCorrect(vault, 'two-part-exam#1~2', 'kid')).toBe(true);
     const bank = readBank(vault);
     expect(bank.find((e) => e.text === 'Section B problem one')!.lastCorrect).toBeTruthy();
     expect(bank.find((e) => e.text === 'Section A problem one')!.lastCorrect).toBeUndefined();
     // Re-ingesting reproduces the same ids (deterministic extraction order).
-    expect(saveProblems(vault, 'two-part-exam', problems).map((p) => p.id))
+    expect((await saveProblems(vault, 'two-part-exam', problems)).map((p) => p.id))
       .toEqual(['two-part-exam#1', 'two-part-exam#2', 'two-part-exam#1~2', 'two-part-exam#1~3']);
   });
 
-  it('markCorrect on an unknown id reports failure rather than inventing an entry', () => {
-    saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
-    expect(markCorrect(vault, 'nope#9', 'kid')).toBe(false);
+  it('markCorrect on an unknown id reports failure rather than inventing an entry', async () => {
+    await saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
+    expect(await markCorrect(vault, 'nope#9', 'kid')).toBe(false);
     expect(readBank(vault)).toHaveLength(4);
+  });
+
+  // markCorrect is a read-modify-write of the WHOLE bank file. Fired without an intervening
+  // await, two calls race the same shape as queueStore's postmortem: without serialization each
+  // reads the pre-mutation bank and the loser's write clobbers the winner's, so only one problem
+  // ends up marked even though both calls resolved `true`.
+  it('two overlapping markCorrect calls both land', async () => {
+    await saveProblems(vault, 'chem201-midterm2', extractProblems(EXAM));
+    const [firstOk, secondOk] = await Promise.all([
+      markCorrect(vault, 'chem201-midterm2#1', 'kid'),
+      markCorrect(vault, 'chem201-midterm2#2', 'kid'),
+    ]);
+    expect(firstOk).toBe(true);
+    expect(secondOk).toBe(true);
+    const bank = readBank(vault);
+    expect(bank.find((e) => e.id === 'chem201-midterm2#1')!.lastCorrectBy?.kid).toBeTruthy();
+    expect(bank.find((e) => e.id === 'chem201-midterm2#2')!.lastCorrectBy?.kid).toBeTruthy();
   });
 });
 
@@ -127,7 +144,7 @@ describe('courseSeeds', () => {
     const { courseSeeds } = await import('../src/server/seedPatternPages.js');
     const v = mkd(j(tmp(), 'lwh-seed-'));
     try {
-      saveProblems(v, 'chem201-midterm2', extractProblems(EXAM));
+      await saveProblems(v, 'chem201-midterm2', extractProblems(EXAM));
       const seeds = courseSeeds(v);
       expect(seeds).toHaveLength(1);
       expect(seeds[0].slug).toBe('course-chem201-midterm2');
@@ -147,21 +164,21 @@ describe('courseSeeds', () => {
  * vault — while their evidence stayed properly separate, which is what made it easy to miss.
  */
 describe('the bank tracks answers per student', () => {
-  it('one student answering does not hide the problem from another', () => {
+  it('one student answering does not hide the problem from another', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-bank-multi-'));
-    saveProblems(vault, 'exam1', [{ n: 1, text: 'First problem.' }, { n: 2, text: 'Second problem.' }]);
+    await saveProblems(vault, 'exam1', [{ n: 1, text: 'First problem.' }, { n: 2, text: 'Second problem.' }]);
     const first = nextProblems(vault, 'ana')[0];
 
-    expect(markCorrect(vault, first.id, 'ana')).toBe(true);
+    expect(await markCorrect(vault, first.id, 'ana')).toBe(true);
     // ana has answered it, so it drops behind her never-answered ones.
     expect(nextProblems(vault, 'ana')[0].id).not.toBe(first.id);
     // ben has answered nothing: it is still his first.
     expect(nextProblems(vault, 'ben')[0].id).toBe(first.id);
   });
 
-  it('honours a legacy bank written before per-student answers existed', () => {
+  it('honours a legacy bank written before per-student answers existed', async () => {
     const vault = mkdtempSync(join(tmpdir(), 'lwh-bank-legacy-'));
-    saveProblems(vault, 'exam1', [{ n: 1, text: 'First problem.' }, { n: 2, text: 'Second problem.' }]);
+    await saveProblems(vault, 'exam1', [{ n: 1, text: 'First problem.' }, { n: 2, text: 'Second problem.' }]);
     const all = readBank(vault);
     // The old shape: a bare lastCorrect with no lastCorrectBy.
     writeFileSync(join(vault, '.harness', 'course-bank.jsonl'),
