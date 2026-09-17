@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, mkdtempSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  deriveRepoName, discoverDocFiles, ingestRepo, isGitUrl, runCommand,
+  defaultClone, deriveRepoName, discoverDocFiles, ingestRepo, isGitUrl, runCommand,
 } from '../src/server/ingestRepo.js';
 import type { RepoMineReport } from '../src/server/gap/mineRepo.js';
 import { readQueue } from '../src/server/ingest.js';
@@ -345,5 +347,63 @@ describe('runCommand', () => {
     const N = 300_000;
     const { stdout } = await runCommand(process.execPath, ['-e', `process.stdout.write("x".repeat(${N}))`]);
     expect(stdout.length).toBe(N);
+  });
+
+  it('kills a wedged child and rejects on timeout instead of hanging forever', async () => {
+    // A child that ignores SIGTERM (traps it and keeps sleeping) exercises the SIGKILL follow-up,
+    // not just the timeout rejection — a real git process stuck in a network read behaves the
+    // same way.
+    const child = 'process.on("SIGTERM", () => {}); setTimeout(() => {}, 60_000);';
+    const started = Date.now();
+    await expect(runCommand(process.execPath, ['-e', child], {
+      timeoutMs: 50,
+      timeoutMessage: 'wedged child timed out',
+    })).rejects.toThrow('wedged child timed out');
+    // Rejects on the timeout itself, not after waiting out the SIGKILL grace period.
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
+
+  it('passes env through to the child', async () => {
+    const { stdout } = await runCommand(
+      process.execPath, ['-e', 'process.stdout.write(process.env.PROBE_VALUE || "")'],
+      { env: { ...process.env, PROBE_VALUE: 'seen' } },
+    );
+    expect(stdout).toBe('seen');
+  });
+});
+
+describe('defaultClone', () => {
+  // A fake `git` on PATH stands in for the real binary so the timeout and env wiring can be
+  // proven deterministically — a real `git clone` against an unreachable host doesn't hang on a
+  // predictable schedule in CI, and a reachable-but-slow host isn't available in a unit test.
+  function withFakeGitOnPath<T>(script: string, fn: () => Promise<T>): Promise<T> {
+    const binDir = mkdtempSync(join(tmpdir(), 'lwh-fakegit-'));
+    writeFileSync(join(binDir, 'git'), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${binDir}${process.platform === 'win32' ? ';' : ':'}${originalPath}`;
+    return fn().finally(() => { process.env.PATH = originalPath; });
+  }
+
+  it('rejects with a message naming the source URL when the clone times out, and kills the child', async () => {
+    const url = 'https://example.com/org/wedged.git';
+    await withFakeGitOnPath('trap "" TERM; sleep 60', async () => {
+      const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-clonetimeout-'));
+      const destDir = join(vault, 'repos', 'wedged');
+      const started = Date.now();
+      await expect(defaultClone(url, destDir, 50)).rejects.toThrow(
+        /git clone of https:\/\/example\.com\/org\/wedged\.git timed out/,
+      );
+      expect(Date.now() - started).toBeLessThan(4_000);
+    });
+  }, 10_000);
+
+  it('sets GIT_TERMINAL_PROMPT=0 so a credential prompt cannot block the child', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-ingestrepo-noprompt-'));
+    const marker = join(vault, 'saw-prompt-disabled');
+    await withFakeGitOnPath(
+      `if [ "$GIT_TERMINAL_PROMPT" = "0" ]; then touch "${marker}"; fi`,
+      () => defaultClone('https://example.com/org/widgets.git', join(vault, 'repos', 'widgets')),
+    );
+    expect(existsSync(marker)).toBe(true);
   });
 });

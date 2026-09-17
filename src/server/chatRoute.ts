@@ -8,10 +8,19 @@ import { deriveMode, lastUserText } from './deriveMode.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { clearStance, setStance } from './stanceStore.js';
 import { MODES, type Mode } from './prompt.js';
+import { detachedResponse } from './detachedResponse.js';
 
 export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
   const { respond } = createTutorSession(lw, cfg);
+  // `done` settles when the turn has fully ended (its thread saved, its entry removed), so a
+  // superseding send can wait for that rather than race the old turn's final save.
+  const runs = new Map<string, { controller: AbortController; done: Promise<void>; lastUserId?: string }>();
+  // Generous on purpose: a turn is silent while a tool runs, and the slowest tool (building the
+  // kind cluster, then an exercise's rollout gate) takes minutes. This is for a stream that will
+  // never speak again, not one that is slow.
+  const IDLE_MS = 10 * 60_000;
+  const SUPERSEDE_WAIT_MS = 10_000;
 
   app.post('/api/chat', async (c) => {
     const body = await c.req.json() as {
@@ -57,23 +66,101 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     const baseMode = commandMode ?? mode;
     const effectiveMode: Mode = writeUp && baseMode !== 'freeform' ? 'freeform' : baseMode;
     const threadId = body.threadId ?? 'default';
+    // The thread id becomes a file name below (sessionStore's assertThreadId, stanceStore has no
+    // such check of its own) — reject a bad one BEFORE setStance so a doomed turn never leaves a
+    // stance file behind under an id that saveThread would then refuse.
+    try {
+      loadThread(cfg.vault, threadId);
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
+    // A send while a turn is running SUPERSEDES it, as it did before turns outlived their
+    // connection: then, the client's abort closed the socket and that ended the old turn. Now the
+    // old turn survives a disconnect by design, so the server ends it. Refusing instead (a bare
+    // 409) stranded the learner: the client showed "unreachable", hid Stop because it no longer
+    // thought anything was running, and the thread refused every send until the orphan finished.
+    //
+    // A DUPLICATE is still refused: the same last user message (a double-fired request, a retry
+    // racing a reload) must not kill the healthy turn that is already answering it.
+    const lastUserId = [...(body.messages ?? [])].reverse().find((m) => m.role === 'user')?.id;
+    const running = runs.get(threadId);
+    if (running && (lastUserId === undefined || lastUserId === running.lastUserId)) {
+      return c.json({ error: 'This thread already has a running turn.' }, 409);
+    }
+    if (running) {
+      running.controller.abort();
+      const ended = await Promise.race([
+        running.done.then(() => true),
+        new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), SUPERSEDE_WAIT_MS); }),
+      ]);
+      if (!ended) {
+        return c.json({ error: 'The previous turn is still shutting down — try again in a moment.' }, 409);
+      }
+    }
     // A stance command persists BEFORE the turn runs, so session.ts's tail note already carries
     // the new stance on this very turn — a bare "/beginner" with no text still runs a turn, and
     // the tutor answers it already teaching at the new level.
     if (isStance(command)) setStance(cfg.vault, threadId, command);
     saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
-    // The request's own signal: the runtime fires it when the client disconnects (tab closed,
-    // send superseded), and respond threads it down to the in-flight provider request.
-    return respond(body.messages, effectiveMode, threadId, c.req.raw.signal);
+    // A page reload only drops delivery; the server still completes and persists the turn.
+    const controller = new AbortController();
+    let finish!: () => void;
+    const entry = { controller, lastUserId, done: new Promise<void>((resolve) => { finish = resolve; }) };
+    runs.set(threadId, entry);
+    // Only this turn's own entry: a superseding turn may already have registered under the id.
+    const end = () => { if (runs.get(threadId) === entry) runs.delete(threadId); finish(); };
+    try {
+      return detachedResponse(await respond(body.messages, effectiveMode, threadId, controller.signal),
+        end, { ms: IDLE_MS, onIdle: () => controller.abort() });
+    } catch (error) {
+      end();
+      throw error;
+    }
+  });
+  app.get('/api/thread/:id/run', (c) => {
+    try {
+      const messages = loadThread(cfg.vault, c.req.param('id'));
+      return c.json({ running: runs.has(c.req.param('id')), messages });
+    } catch (error: any) {
+      return c.json({ error: error?.message ?? String(error) }, 400);
+    }
+  });
+  app.post('/api/thread/:id/stop', (c) => {
+    try {
+      loadThread(cfg.vault, c.req.param('id'));
+      runs.get(c.req.param('id'))?.controller.abort();
+      return c.json({ ok: true });
+    } catch (error: any) {
+      return c.json({ error: error?.message ?? String(error) }, 400);
+    }
   });
   app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
-  app.get('/api/thread/:id', (c) => c.json(loadThread(cfg.vault, c.req.param('id'))));
+  // loadThread/saveThread/deleteThread throw on a threadId that fails sessionStore's filename
+  // allowlist (assertThreadId) — a real client bug (nothing legitimate sends one), but it must
+  // read as a 400 naming the problem, not a bare 500 with no message.
+  app.get('/api/thread/:id', (c) => {
+    try {
+      return c.json(loadThread(cfg.vault, c.req.param('id')));
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
+  });
   app.put('/api/thread/:id', async (c) => {
-    saveThread(cfg.vault, c.req.param('id'), await c.req.json());
+    if (runs.has(c.req.param('id'))) return c.json({ error: 'A turn is still running.' }, 409);
+    try {
+      saveThread(cfg.vault, c.req.param('id'), await c.req.json());
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
     return c.json({ ok: true });
   });
   app.delete('/api/thread/:id', (c) => {
-    deleteThread(cfg.vault, c.req.param('id'));
+    if (runs.has(c.req.param('id'))) return c.json({ error: 'Stop the running turn before deleting this thread.' }, 409);
+    try {
+      deleteThread(cfg.vault, c.req.param('id'));
+    } catch (e: any) {
+      return c.json({ error: e?.message ?? String(e) }, 400);
+    }
     clearStance(cfg.vault, c.req.param('id'));
     return c.body(null, 204);
   });

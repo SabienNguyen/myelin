@@ -40,6 +40,7 @@ export class ChatStore {
   private state: ChatState;
   private listeners = new Set<() => void>();
   private inflight: AbortController | null = null;
+  private recoveryGeneration = 0;
   // Tool outputs added while a stream is RUNNING. Every onUpdate/onFinish snapshot comes from
   // the stream's assembler, which knows nothing of client-added outputs — without re-applying
   // them to each snapshot, the next chunk silently undoes the learner's answer (ai@6 never had
@@ -126,7 +127,47 @@ export class ChatStore {
     if (blockOutputsComplete({ messages })) this.resubmit();
   }
 
+  /** Explicit retry only: never re-grade successful work or loop automatically on a failure. */
+  retryGrading(toolCallId: string): boolean {
+    if (this.state.isRunning) return false;
+    const part = this.state.messages.flatMap((m) => m.parts).filter(isToolUIPart)
+      .find((p) => p.toolCallId === toolCallId);
+    const output = part?.output as Record<string, unknown> | undefined;
+    const grading = output?.grading as { verdict?: string; retryable?: boolean } | undefined;
+    if (part?.state !== 'output-available' || grading?.verdict !== 'ungraded' || !grading.retryable) return false;
+    const { grading: _previousGrade, ...answer } = output!;
+    const messages = patchToolOutput(this.state.messages, toolCallId, answer, false);
+    if (!messages) return false;
+    this.setState({ messages });
+    this.resubmit();
+    return true;
+  }
+
+  /** Reattach by polling saved state, never by replaying a POST or model call. */
+  async recover(signal: AbortSignal): Promise<void> {
+    const generation = ++this.recoveryGeneration;
+    try {
+      while (!signal.aborted && generation === this.recoveryGeneration) {
+        const res = await this.fetchImpl(`/api/thread/${this.opts.threadId}/run`, { signal });
+        if (!res.ok) return;
+        const status = await res.json() as { running: boolean; messages: UIMessage[] };
+        if (signal.aborted || generation !== this.recoveryGeneration || this.inflight) return;
+        if (!Array.isArray(status.messages)) return;
+        this.setState({ messages: status.messages, isRunning: status.running });
+        if (!status.running) return;
+        await new Promise<void>(resolve => setTimeout(resolve, 500));
+      }
+    } catch (error) {
+      if (!signal.aborted && generation === this.recoveryGeneration) {
+        this.setState({ isRunning: false, error: `Could not reconnect to the running turn: ${String(error)}` });
+      }
+    }
+  }
+
   abort(): void {
+    this.recoveryGeneration++;
+    void this.fetchImpl(`/api/thread/${this.opts.threadId}/stop`, { method: 'POST' })
+      .catch(() => this.setState({ error: 'Could not stop the server turn. Reconnect and try Stop again.' }));
     this.inflight?.abort();
     this.inflight = null;
     this.setState({ isRunning: false });
@@ -143,6 +184,7 @@ export class ChatStore {
   }
 
   private async run(): Promise<void> {
+    this.recoveryGeneration++;
     this.inflight?.abort(); // a superseded send loses the stream, not the history
     const controller = new AbortController();
     this.inflight = controller;

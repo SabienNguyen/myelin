@@ -36,6 +36,10 @@ export interface GapLadderPayload {
    *  The client uses it for COPY (a function returns one value; a stream yields a sequence),
    *  never for grading. */
   family?: string;
+  /** cluster family only: where the learner's live sandbox is. The namespace is derived from the
+   *  pattern, so this is known before the (slow, first-time) cluster exists — `command` is what
+   *  they paste into their own terminal. */
+  sandbox?: { namespace: string; kubeconfig: string; command: string };
 }
 
 /** Fetches the built-in sandbox's ladder payload (gap/service.ts), through the same stripped

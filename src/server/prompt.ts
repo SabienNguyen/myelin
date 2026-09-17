@@ -8,9 +8,46 @@ export type Mode = (typeof MODES)[number];
 
 const here = dirname(fileURLToPath(import.meta.url));
 let cached: string | null = null;
-export function buildInstructions(): string {
+
+/** What is true of THIS turn, for deciding which rules the tutor needs to be told.
+ *
+ *  The prompt grew one rule per observed failure and nothing ever left, so every turn carried all
+ *  of it: ~8,100 tokens before a word of conversation, of which a plain teaching turn uses about
+ *  half. That is slower and dearer everywhere, and on a provider with a small per-minute budget
+ *  (Groq's free tier: 8,000) a single request could not be sent at all.
+ *
+ *  `tools` is the names actually on offer this turn. It is the main gate, and the honest one: a
+ *  rule about `web_search` on a turn where session.ts withheld `web_search` is not just wasted, it
+ *  tells the model to call something that will answer "unknown tool". `facts` covers what a tool
+ *  list cannot say — see session.ts's turnFacts for each one's definition. */
+export interface TurnFacts { tools: ReadonlySet<string>; facts: ReadonlySet<string> }
+
+const SECTION = /<!-- when: (.+?) -->\n([\s\S]*?)<!-- end -->\n?/g;
+
+/** The tutor's rules. With no `turn`, every section — the whole prompt, as one document.
+ *
+ *  Conditional sections are fenced in tutor-system-prompt.md itself:
+ *      <!-- when: tool:code_exercise -->  …rule…  <!-- end -->
+ *  so the prompt stays one readable file, and a rule's condition sits beside the rule. A condition
+ *  is `tool:<name>` or `fact:<name>` terms joined by `|` (any one suffices). An unknown term throws
+ *  at build time: a typo that silently dropped a rule forever would bring its bug back unnoticed. */
+export function buildInstructions(turn?: TurnFacts): string {
   cached ??= readFileSync(join(here, 'tutor-system-prompt.md'), 'utf8');
-  return cached;
+  return cached.replace(SECTION, (_, condition: string, body: string) => {
+    const holds = condition.split('|').map((t) => t.trim()).some((term) => {
+      const [kind, name] = term.split(':');
+      if ((kind !== 'tool' && kind !== 'fact') || !name) throw new Error(`tutor-system-prompt.md: bad condition "${term}"`);
+      return turn === undefined || (kind === 'tool' ? turn.tools : turn.facts).has(name);
+    });
+    return holds ? body : '';
+  });
+}
+
+/** Every condition term the prompt file uses — for the test that pins each `tool:` to a tool that
+ *  really exists and each `fact:` to one session.ts really computes. */
+export function promptConditionTerms(): string[] {
+  cached ??= readFileSync(join(here, 'tutor-system-prompt.md'), 'utf8');
+  return [...new Set([...cached.matchAll(SECTION)].flatMap((m) => m[1].split('|').map((t) => t.trim())))];
 }
 
 const FRAMING: Record<Mode, string> = {

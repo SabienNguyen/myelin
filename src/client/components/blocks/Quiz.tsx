@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SymbolInput } from '../SymbolInput.js';
 import { CheckIcon as Check, ListChecksIcon as ListChecks } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
@@ -34,7 +35,7 @@ export function QuizInner({ args, addResult }: {
               // The prompt sits right above (BlockProse), but it isn't programmatically tied to the
               // field — a screen-reader user tabbing here would otherwise hear "edit text, blank".
               // A positional label disambiguates it from the other items' inputs.
-              <input
+              <SymbolInput
                 aria-label={`answer for question ${i + 1}`}
                 value={answers[item.id] ?? ''}
                 onChange={(e) => setAnswer(item.id, e.target.value)}

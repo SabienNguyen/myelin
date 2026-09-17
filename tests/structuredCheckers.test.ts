@@ -6,7 +6,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  gradeUnitAnswer, gradeChemEquation, gradeNotes, parseFormula, parseNote,
+  gradeUnitAnswer, gradeChemEquation, gradeNotes, parseFormula, parseNote, unitsEquivalent,
 } from '../src/server/structuredCheckers.js';
 import { gradeStructured } from '../src/server/grading.js';
 
@@ -62,6 +62,32 @@ describe('unit — quantity equivalence, not digit equality', () => {
   it('reads learner typography: · × ² and thousands separators', () => {
     expect(gradeUnitAnswer('9.81 m/s²', { expected: 9.81, unit: 'm/s^2' }).ok).toBe(true);
     expect(gradeUnitAnswer('1,000 J', { expected: 1, unit: 'kJ' }).ok).toBe(true);
+  });
+});
+
+// unitsEquivalent backs the numeric/vector checkers' `unit` field (grading.ts). Real unit algebra
+// (mathjs) handles anything SI; a checker is free to name a unit mathjs has never heard of ("bits",
+// "items/s", "cells/mL", "apples" — a `unit` checker can grade any counted quantity, not only an
+// SI one), and mathUnit throws for both sides alike there. The fallback is normalized-key EQUALITY
+// — trim, lowercase, fold superscripts, drop spaces/'^' — never `.includes()`, so a typed unit that
+// merely contains the expected one as a substring ("kbits" vs "bits") still fails.
+describe('unitsEquivalent — real unit algebra, with a normalized-equality fallback for non-SI units', () => {
+  it('mathjs path: same unit at the same scale passes, a different scale fails', () => {
+    expect(unitsEquivalent('m/s', 'm/s')).toBe(true);
+    expect(unitsEquivalent('km/s', 'm/s')).toBe(false);
+    expect(unitsEquivalent('g', 'kg')).toBe(false);
+  });
+  it('mathjs path: printed superscripts and case differences still resolve to the same unit', () => {
+    expect(unitsEquivalent('M/S²', 'm/s^2')).toBe(true);
+  });
+  it('fallback path: a unit mathjs cannot parse still matches itself exactly', () => {
+    expect(unitsEquivalent('bits', 'bits')).toBe(true);
+    expect(unitsEquivalent('items/s', 'items/s')).toBe(true);
+    expect(unitsEquivalent('cells/mL', 'cells/mL')).toBe(true);
+    expect(unitsEquivalent('apples', 'apples')).toBe(true);
+  });
+  it('fallback path: equality only, never substring — "kbits" does not satisfy "bits"', () => {
+    expect(unitsEquivalent('kbits', 'bits')).toBe(false);
   });
 });
 

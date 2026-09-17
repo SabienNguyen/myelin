@@ -44,6 +44,36 @@ const settled = (store: ChatStore) =>
 const flush = async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setTimeout(r, 0)); };
 
 describe('ChatStore', () => {
+  it('recovers a running server turn after reload without posting it again', async () => {
+    const initial: UIMessage[] = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Explain' }] }];
+    const final: UIMessage[] = [...initial, { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Complete answer' }] }];
+    let checks = 0;
+    const fetchImpl = vi.fn(async (_url: RequestInfo | URL) => Response.json(++checks === 1
+      ? { running: true, messages: initial } : { running: false, messages: final }));
+    const store = new ChatStore({ threadId: 't1', initialMessages: initial,
+      requestContext: () => ({ mode: 'learn', writeUp: false }), fetchImpl });
+    const recovered = store.recover(new AbortController().signal);
+    await vi.waitFor(() => expect(store.getState().isRunning).toBe(true));
+    await recovered;
+    expect(store.getState().messages).toEqual(final);
+    expect(store.getState().isRunning).toBe(false);
+    expect(fetchImpl.mock.calls.every(([url]) => String(url).endsWith('/run'))).toBe(true);
+  });
+
+  it('retries only an ungraded result, preserving the answer and other grades', async () => {
+    const history = pausedBlockHistory();
+    const part = history[1].parts[2] as ToolUIPart;
+    part.state = 'output-available';
+    part.output = { answer: '4', confidence: 'sure', grading: { verdict: 'ungraded', retryable: true, evidence: [] } };
+    const { store, chatCalls } = makeStore([continuationChunks('a1', 'tc1')], history);
+    expect(store.retryGrading('tc1')).toBe(true);
+    expect(store.retryGrading('tc1')).toBe(false); // no duplicate in-flight submission
+    await settled(store);
+    const sent = (chatCalls()[0].body as { messages: UIMessage[] }).messages;
+    expect((sent[1].parts[2] as ToolUIPart).output).toEqual({ answer: '4', confidence: 'sure' });
+    expect(chatCalls()).toHaveLength(1);
+    expect(store.retryGrading('missing')).toBe(false);
+  });
   it('sendMessage appends the user turn, streams the response, and persists via PUT', async () => {
     const { store, calls, chatCalls } = makeStore([scriptedTurnChunks()], []);
     const seen: boolean[] = [];
@@ -297,6 +327,15 @@ describe('ChatStore', () => {
       errorText: 'User cancelled tool call by sending a new message.',
     });
     expect(sent[2]).toMatchObject({ role: 'user', parts: [{ type: 'text', text: 'actually, explain it differently' }] });
+  });
+
+  it('explicit Stop sends cancellation to the server', async () => {
+    const { store, calls } = makeStore(['hang'], []);
+    store.sendMessage('Explain');
+    store.abort();
+    await flush();
+    expect(calls.some(c => c.url === '/api/thread/t1/stop' && c.init.method === 'POST')).toBe(true);
+    expect(store.getState().isRunning).toBe(false);
   });
 
   it('aborts a superseded send; the newer run owns the state', async () => {

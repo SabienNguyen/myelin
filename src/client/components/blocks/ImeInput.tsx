@@ -10,6 +10,7 @@
 // is how a learner types an answer; the toggle covers the paste / mid-edit case.
 import { useRef, useState } from 'react';
 import { KeyboardIcon as Keyboard } from '@phosphor-icons/react/dist/csr/Keyboard';
+import { SymbolInput } from '../SymbolInput.js';
 import { telex } from '../../../shared/telex.js';
 import { pinyin } from '../../../shared/pinyin.js';
 
@@ -46,7 +47,7 @@ export function ImeInput({ lang, name, onSubmit }: {
         e.preventDefault();
         onSubmit((new FormData(e.currentTarget).get(name) as string) ?? '');
       }}>
-        <input key="plain" name={name} autoFocus aria-label="answer" defaultValue={seed.current} />
+        <SymbolInput key="plain" name={name} autoFocus aria-label="answer" defaultValue={seed.current} />
         {method && (
           <button type="button" className="ime-toggle" onClick={() => setOn(true)} aria-pressed={false}>
             <Keyboard size={14} weight="duotone" aria-hidden /> {method.label} off

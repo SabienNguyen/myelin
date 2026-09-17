@@ -34,6 +34,12 @@ export function modelLabel(id: string): { name: string; how: string } {
   if (id.startsWith('openai:')) {
     return { name: id.slice('openai:'.length), how: 'OpenAI-compatible endpoint' };
   }
+  if (id.startsWith('openrouter:')) {
+    return { name: id.slice('openrouter:'.length), how: 'OpenRouter' };
+  }
+  if (id.startsWith('groq:')) {
+    return { name: id.slice('groq:'.length), how: 'Groq' };
+  }
   return { name: pretty(id), how: 'Anthropic API' };
 }
 
@@ -176,6 +182,27 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
 // staged by the TUTOR as a block tool, there is no separate quiz model — so offering it here asked
 // the learner to choose a model that could not affect anything, and reserved a usage row that never
 // filled. The config key is kept (config.ts) so existing settings still load.
+const PROVIDERS = [
+  { id: 'anthropic', label: 'Anthropic' },
+  { id: 'openrouter', label: 'OpenRouter' },
+  { id: 'groq', label: 'Groq' },
+  { id: 'ollama', label: 'Ollama' },
+  { id: 'openai', label: 'OpenAI-compatible' },
+] as const;
+type Provider = typeof PROVIDERS[number]['id'];
+
+// Keep the wire/storage format stable. Only known routing prefixes are removed, never a
+// model's own suffix (qwen3:8b, vendor/model:free). Pasted legacy routed ids still work.
+function splitModel(id: string): { provider: Provider; model: string } {
+  const prefix = /^(openrouter|groq|ollama|openai):/.exec(id);
+  return prefix
+    ? { provider: prefix[1] as Provider, model: id.slice(prefix[0].length) }
+    : { provider: 'anthropic', model: id };
+}
+function routedModel(provider: Provider, model: string): string {
+  return provider === 'anthropic' ? model : `${provider}:${model}`;
+}
+
 const ROLE_ORDER = ['tutor', 'grader', 'card_gen', 'compile'] as const;
 type RoleName = typeof ROLE_ORDER[number];
 const URL_FIELDS = [
@@ -187,6 +214,8 @@ const URL_FIELDS = [
 const KEY_FIELDS = [
   { key: 'OLLAMA_API_KEY', label: 'ollama api key' },
   { key: 'OPENAI_COMPAT_API_KEY', label: 'openai-compatible api key' },
+  { key: 'OPENROUTER_API_KEY', label: 'openrouter api key' },
+  { key: 'GROQ_API_KEY', label: 'groq api key' },
 ] as const;
 type EnvKey = (typeof URL_FIELDS | typeof KEY_FIELDS)[number]['key'];
 
@@ -205,6 +234,7 @@ type ModelsState = {
 const STATIC_MODEL_IDS = [
   'claude-sonnet-5', 'claude-haiku-4-5', 'claude-opus-5',
   'ollama:qwen2.5-coder:14b', 'openai:deepseek/deepseek-chat', 'openai:gemini/gemini-2.5-flash',
+ 'openrouter:openrouter/free', 'groq:openai/gpt-oss-120b', 'groq:llama-3.3-70b-versatile',
 ];
 
 /** Discovered models as routable ids: `ollama:<name>` / `openai:<id>`, deduped against the static
@@ -261,15 +291,24 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   // What the server reported at load — a save only sends what changed against this.
   const [loaded, setLoaded] = useState<ModelsState | null>(null);
   const [env, setEnv] = useState<Record<EnvKey, string>>({
-    OLLAMA_BASE_URL: '', OLLAMA_API_KEY: '', OPENAI_COMPAT_BASE_URL: '', OPENAI_COMPAT_API_KEY: '',
+    OLLAMA_BASE_URL: '', OLLAMA_API_KEY: '', OPENAI_COMPAT_BASE_URL: '', OPENAI_COMPAT_API_KEY: '', OPENROUTER_API_KEY: '', GROQ_API_KEY: '',
   });
   const [note, setNote] = useState<{ text: string; err: boolean } | null>(null);
+  // Set when any of the dialog-open reads fails. Those reads used to end in a bare
+  // `.catch(() => {})`: the dialog opened anyway, with `loaded`/`roles`/`anthropicMeta` left at
+  // their unpopulated defaults, and Save stayed clickable — pressing it would have diffed the
+  // empty local state against nothing and could have wiped roles the server actually had set.
+  // While this is true the note stays up and Save is disabled until a reopen reloads cleanly.
+  const [loadFailed, setLoadFailed] = useState(false);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   // The Anthropic key: input stays empty (the value never returns from the server; typing here
   // means "replace it"), meta says whether one exists and whether the environment shadows it.
   const [anthropicKey, setAnthropicKey] = useState('');
   const [anthropicMeta, setAnthropicMeta] = useState<{ present: boolean; source: string | null }>({ present: false, source: null });
   const [available, setAvailable] = useState<Available>({});
+  // Free OpenRouter teaching models, fetched when the dialog opens; '' while loading/absent.
+  const [freeModels, setFreeModels] = useState<{ id: string; name: string }[] | null>(null);
+  const [catalogError, setCatalogError] = useState('');
   // Which local model the preset row would apply — '' until the user picks, so the first
   // discovered model is the default without an effect syncing state to fetches.
   const [presetPick, setPresetPick] = useState('');
@@ -290,20 +329,35 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       ...e,
       OLLAMA_BASE_URL: d.env.OLLAMA_BASE_URL.value ?? '',
       OPENAI_COMPAT_BASE_URL: d.env.OPENAI_COMPAT_BASE_URL.value ?? '',
-      OLLAMA_API_KEY: '', OPENAI_COMPAT_API_KEY: '',
+      OLLAMA_API_KEY: '', OPENAI_COMPAT_API_KEY: '', OPENROUTER_API_KEY: '', GROQ_API_KEY: '',
     }));
   };
 
   useEffect(() => {
     if (!open) return;
     setNote(null);
-    fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(() => {});
-    fetch('/api/usage').then((r) => r.json()).then(setUsage).catch(() => {});
+    setLoadFailed(false);
+    const failed = () => {
+      setLoadFailed(true);
+      setNote({ text: 'could not load current models — reopen this to retry before saving', err: true });
+    };
+    fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(failed);
+    fetch('/api/usage').then((r) => r.json()).then(setUsage).catch(failed);
+    setFreeModels(null);
+    setCatalogError('');
+    fetch('/api/setup/openrouter/models').then(async (r) => {
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? 'Could not load the OpenRouter catalog');
+      return d;
+    }).then((d) => setFreeModels(d.models ?? [])).catch((err) => {
+      setFreeModels([]);
+      setCatalogError(`${err.message || 'Could not load the OpenRouter catalog'} — reopen to retry.`);
+    });
     // The Anthropic key's presence/source lives on the setup state, not the models state — the
     // first-run card writes it, this dialog is where it gets CHANGED afterwards.
     fetch('/api/setup').then((r) => r.json())
       .then((d) => setAnthropicMeta({ present: Boolean(d?.apiKey?.present), source: d?.apiKey?.source ?? null }))
-      .catch(() => {});
+      .catch(failed);
     const onDoc = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
@@ -322,7 +376,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (busy) return;
+    if (busy || loadFailed) return;
     const models: Record<string, string> = {};
     for (const r of ROLE_ORDER) {
       const v = roles[r].trim();
@@ -392,8 +446,17 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   // been saved yet), so the preset must be applied AFTER the refresh or it would be clobbered
   // straight back to the current saved models.
   const configureLocal = async (ollamaTag: string) => {
-    await fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(() => {});
+    const refreshed = await fetch('/api/setup/models').then((r) => r.json()).then((d) => { takeState(d); return true; })
+      .catch(() => false);
     pointPresetAt(ollamaTag);
+    if (!refreshed) {
+      // A failed re-read must not print "ready": the preset was applied to local state only, and
+      // `loaded` is still whatever (or nothing) the dialog opened with, so a save now could revert
+      // roles the server actually has. Same recovery as any other load failure: reopen to retry.
+      setLoadFailed(true);
+      setNote({ text: `${ollamaTag} pulled, but reading back current models failed — reopen this dialog before saving`, err: true });
+      return;
+    }
     setNote({ text: `${ollamaTag} ready — press save to use it`, err: false });
   };
   return (
@@ -414,13 +477,29 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
           {ROLE_ORDER.map((r, i) => (
             <Fragment key={r}>
               <span className="models-row">
+                <label htmlFor={`models-provider-${r}`}>{r} provider</label>
+                <select
+                  id={`models-provider-${r}`} value={splitModel(roles[r]).provider}
+                  onFocus={() => { lastRole.current = r; }}
+                  onChange={(e) => setRoles((s) => ({ ...s,
+                    [r]: routedModel(e.target.value as Provider, splitModel(s[r]).model),
+                  }))}
+                >
+                  {PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+                </select>
+              </span>
+              <span className="models-row">
                 <label htmlFor={`models-role-${r}`}>{r}</label>
                 <input
                   id={`models-role-${r}`} ref={i === 0 ? firstRef : undefined}
-                  list="model-id-list" autoComplete="off" spellCheck={false}
-                  value={roles[r]}
+                  list={`model-id-list-${splitModel(roles[r]).provider}`} autoComplete="off" spellCheck={false}
+                  value={splitModel(roles[r]).model}
                   onFocus={() => { lastRole.current = r; }}
-                  onChange={(e) => setRoles((s) => ({ ...s, [r]: e.target.value }))}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setRoles((s) => ({ ...s, [r]: /^(openrouter|groq|ollama|openai):/.test(value.trim())
+                      ? value.trim() : routedModel(splitModel(s[r]).provider, value) }));
+                  }}
                 />
               </span>
               {r === 'tutor' && (
@@ -440,15 +519,44 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
               )}
             </Fragment>
           ))}
-          <datalist id="model-id-list">
-            {STATIC_MODEL_IDS.map((id) => (
-              <option
-                key={id} value={id}
-                label={id === 'openai:gemini/gemini-2.5-flash' ? 'via a LiteLLM proxy on the openai: route' : undefined}
-              />
-            ))}
-            {discoveredModelIds(available).map((id) => <option key={id} value={id} />)}
-          </datalist>
+          {PROVIDERS.map((p) => (
+            <datalist key={p.id} id={`model-id-list-${p.id}`}>
+              {[...STATIC_MODEL_IDS, ...discoveredModelIds(available)]
+                .map(splitModel).filter((m) => m.provider === p.id)
+                .map((m) => <option key={m.model} value={m.model} />)}
+            </datalist>
+          ))}
+          {/* The no-cost on-ramp: every id here is verified zero-priced AND tool-capable by the
+              server, so a tutor that needs block tools never lands on a model that can't run them. */}
+          <span className="models-group">free models (OpenRouter)</span>
+          {freeModels === null && <span className="models-hint">checking the OpenRouter catalog…</span>}
+          {catalogError && <span className="models-note err" role="status">{catalogError}</span>}
+          <span className="models-hint">Catalog membership does not guarantee account access. Provider restrictions and rate limits still apply; no automatic paid fallback.</span>
+          {!catalogError && freeModels?.length === 0 && (
+            <span className="models-hint">
+              none listed right now — select OpenRouter and enter an exact catalog model id.
+              Saves check catalog membership, not account access.
+            </span>
+          )}
+          {freeModels && freeModels.length > 0 && (
+            <>
+              <span className="models-chips">
+                {freeModels.slice(0, 8).map((m) => (
+                  <button
+                    key={m.id} type="button" className="models-chip"
+                    title={`fills the last-focused role input — ${m.name}`}
+                    onClick={() => setRoles((s) => ({ ...s, [lastRole.current]: `openrouter:${m.id}` }))}
+                  >
+                    {m.id.replace(/:free$/, '')}
+                  </button>
+                ))}
+              </span>
+              <span className="models-hint">
+                zero-cost, tool-capable — a key is required (free tier still needs an account), and
+                rate limits are the provider's
+              </span>
+            </>
+          )}
           <span className="models-group">get a local model</span>
           <LocalModelGetter installed={localModels} onConfigured={configureLocal} busy={busy} />
           <span className="models-hint">
@@ -511,7 +619,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             )}
           </span>
           {/* Paired per provider: each base url sits directly above its key. */}
-          {([URL_FIELDS[0], KEY_FIELDS[0], URL_FIELDS[1], KEY_FIELDS[1]] as const).map((f) => {
+          {([URL_FIELDS[0], KEY_FIELDS[0], URL_FIELDS[1], KEY_FIELDS[1], KEY_FIELDS[2], KEY_FIELDS[3]] as const).map((f) => {
             const meta = loaded?.env[f.key];
             const isKey = f.key.endsWith('_API_KEY');
             return (
@@ -543,7 +651,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             </>
           )}
           <span className="models-foot">
-            <button type="submit" disabled={busy}>{busy ? 'saving…' : 'save'}</button>
+            <button type="submit" disabled={busy || loadFailed}>{busy ? 'saving…' : 'save'}</button>
             {note && (
               <span className={`models-note${note.err ? ' err' : ''}`} role="status">{note.text}</span>
             )}

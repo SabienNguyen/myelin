@@ -3,7 +3,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
-import { escapeLooseDollars } from '../lib/panelBus.js';
+import { escapeLooseDollars, scrubModelArtifacts } from '../lib/panelBus.js';
 import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
 
 /**
@@ -27,6 +27,12 @@ import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
  * `wikiLinks` turns `#/page/slug` anchors into in-app page opens (the vault's own pages link to each
  * other; an external source does not). `inline` drops the wrapping `<p>` for a prompt spliced into a
  * sentence.
+ *
+ * `text` is model output whenever this renders a block prompt (BlockProse) or a page the compile
+ * role wrote — the same untrusted-text status MarkdownText's `chatPreprocess` treats a chat turn as.
+ * A degenerate local model can leak raw ChatML control tokens (`<|im_start|>assistant`) into either
+ * path, so `scrubModelArtifacts` runs first, same as chatPreprocess does, before the loose-dollar
+ * guard judges what's left.
  */
 export function RichMarkdown(
   { text, wikiLinks = false, inline = false }: { text: string; wikiLinks?: boolean; inline?: boolean },
@@ -42,7 +48,7 @@ export function RichMarkdown(
         ...(inline ? { p: ({ children }: { children?: React.ReactNode }) => <>{children}</> } : {}),
       }}
     >
-      {escapeLooseDollars(text)}
+      {escapeLooseDollars(scrubModelArtifacts(text))}
     </Markdown>
   );
 }

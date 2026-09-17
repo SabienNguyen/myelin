@@ -159,7 +159,13 @@ function buildBody(modelId: string, req: ChatRequest, stream: boolean): Json {
   return body;
 }
 
-function post(opts: AnthropicModelOptions, body: Json, signal?: AbortSignal): Promise<Response> {
+/** A successful post() hands the caller both the response and `release`: the caller MUST call it
+ * in a `finally` once it is done reading `res.body` (or `res.json()`). Releasing any earlier would
+ * unwire the caller's abort signal from `ctrl` while the body is still streaming in — see the
+ * comment below on why the listener has to outlive the headers. */
+interface PostResult { res: Response; release: () => void }
+
+function post(opts: AnthropicModelOptions, body: Json, signal?: AbortSignal): Promise<PostResult> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   return withRetries(async () => {
     // Per-attempt controller so the header timeout can be cleared once headers arrive — a plain
@@ -186,7 +192,7 @@ function post(opts: AnthropicModelOptions, body: Json, signal?: AbortSignal): Pr
         signal: ctrl.signal,
       });
       if (!res.ok) throw await errorFromResponse(PROVIDER, res);
-      return res;
+      return { res, release: () => signal?.removeEventListener('abort', forwardAbort) };
     } catch (e) {
       signal?.removeEventListener('abort', forwardAbort);
       // fetch wraps its signal's reason; unwrap so the timeout's retryable 408 reaches withRetries.
@@ -218,155 +224,171 @@ function mapStop(reason: string | null | undefined): FinishReason {
 export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
   return {
     async generate(req: ChatRequest): Promise<GenerateResult> {
-      const res = await post(opts, buildBody(opts.modelId, req, false), req.signal);
-      const msg = await res.json() as {
-        content?: WireBlock[];
-        stop_reason?: string | null;
-        usage?: WireUsage;
-      };
-      let text = '';
-      const toolCalls: ToolCallPart[] = [];
-      const thinking: ThinkingPart[] = [];
-      for (const block of msg.content ?? []) {
-        if (block.type === 'text') text += block.text;
-        else if (block.type === 'tool_use') {
-          toolCalls.push({ type: 'tool-call', toolCallId: block.id, toolName: block.name, input: block.input });
-        } else if (block.type === 'thinking') {
-          // Kept out of `text`: one-shot callers read prose, and reasoning leaking into a graded
-          // answer or a generated card would be a correctness bug, not a display nit.
-          thinking.push({
-            type: 'thinking', text: block.thinking,
-            ...(block.signature !== undefined ? { signature: block.signature } : {}),
-          });
-        } else if (block.type === 'redacted_thinking') {
-          thinking.push({ type: 'thinking', text: '', redacted: { data: block.data } });
+      const { res, release } = await post(opts, buildBody(opts.modelId, req, false), req.signal);
+      try {
+        const msg = await res.json() as {
+          content?: WireBlock[];
+          stop_reason?: string | null;
+          usage?: WireUsage;
+        };
+        let text = '';
+        const toolCalls: ToolCallPart[] = [];
+        const thinking: ThinkingPart[] = [];
+        for (const block of msg.content ?? []) {
+          if (block.type === 'text') text += block.text;
+          else if (block.type === 'tool_use') {
+            toolCalls.push({ type: 'tool-call', toolCallId: block.id, toolName: block.name, input: block.input });
+          } else if (block.type === 'thinking') {
+            // Kept out of `text`: one-shot callers read prose, and reasoning leaking into a graded
+            // answer or a generated card would be a correctness bug, not a display nit.
+            thinking.push({
+              type: 'thinking', text: block.thinking,
+              ...(block.signature !== undefined ? { signature: block.signature } : {}),
+            });
+          } else if (block.type === 'redacted_thinking') {
+            thinking.push({ type: 'thinking', text: '', redacted: { data: block.data } });
+          }
+          // server_tool_use / web_search_tool_result are provider-side artifacts; the one-shot
+          // generate() callers never request server tools, so they are ignored here.
         }
-        // server_tool_use / web_search_tool_result are provider-side artifacts; the one-shot
-        // generate() callers never request server tools, so they are ignored here.
+        return {
+          text, toolCalls,
+          ...(thinking.length ? { thinking } : {}),
+          usage: usageOf(msg.usage), finishReason: mapStop(msg.stop_reason),
+        };
+      } finally {
+        release();
       }
-      return {
-        text, toolCalls,
-        ...(thinking.length ? { thinking } : {}),
-        usage: usageOf(msg.usage), finishReason: mapStop(msg.stop_reason),
-      };
     },
 
     async *stream(req: ChatRequest): AsyncIterable<StreamEvent> {
-      const res = await post(opts, buildBody(opts.modelId, req, true), req.signal);
-      if (!res.body) throw new LlmHttpError(PROVIDER, res.status, 'response had no body');
-      const usage = zeroUsage();
-      let stopReason: string | null | undefined;
-      // Per-index state for open content blocks. tool_use input arrives as string fragments and
-      // is only parseable once the block stops, so it accumulates here — as do a thinking block's
-      // text and signature fragments, since thinking-end promises the assembled block.
-      const blocks = new Map<number, {
-        kind: 'text' | 'tool' | 'server-tool' | 'thinking';
-        id: string; name: string; json: string;
-        thinking: string; signature?: string; redacted?: { data: string };
-      }>();
-      const serverToolNames = new Map<string, string>();
+      const { res, release } = await post(opts, buildBody(opts.modelId, req, true), req.signal);
+      try {
+        if (!res.body) throw new LlmHttpError(PROVIDER, res.status, 'response had no body');
+        const usage = zeroUsage();
+        let stopReason: string | null | undefined;
+        // Per-index state for open content blocks. tool_use input arrives as string fragments and
+        // is only parseable once the block stops, so it accumulates here — as do a thinking block's
+        // text and signature fragments, since thinking-end promises the assembled block.
+        const blocks = new Map<number, {
+          kind: 'text' | 'tool' | 'server-tool' | 'thinking';
+          id: string; name: string; json: string;
+          thinking: string; signature?: string; redacted?: { data: string };
+        }>();
+        const serverToolNames = new Map<string, string>();
 
-      for await (const frame of sseFrames(res.body)) {
-        const ev = JSON.parse(frame.data) as WireEvent;
-        switch (ev.type) {
-          case 'message_start': {
-            const u = usageOf(ev.message?.usage);
-            usage.inputTokens = u.inputTokens;
-            usage.cacheReadTokens = u.cacheReadTokens;
-            usage.cacheWriteTokens = u.cacheWriteTokens;
-            break;
+        for await (const frame of sseFrames(res.body)) {
+          let ev: WireEvent;
+          try {
+            ev = JSON.parse(frame.data) as WireEvent;
+          } catch {
+            // A proxy keepalive or an HTML error page can ride the SSE channel as a non-JSON
+            // frame; throwing here would kill the whole turn over a frame that carries no signal.
+            console.error('anthropic: skipping non-JSON SSE frame:', frame.data.slice(0, 200));
+            continue;
           }
-          case 'content_block_start': {
-            const block = ev.content_block;
-            if (block.type === 'text') {
-              const id = String(ev.index);
-              blocks.set(ev.index, { kind: 'text', id, name: '', json: '', thinking: '' });
-              yield { type: 'text-start', id };
-            } else if (block.type === 'thinking') {
-              const id = String(ev.index);
-              blocks.set(ev.index, { kind: 'thinking', id, name: '', json: '', thinking: '' });
-              yield { type: 'thinking-start', id };
-            } else if (block.type === 'redacted_thinking') {
-              // Opaque and whole on arrival: start/end bracket it anyway so downstream sees the
-              // one thinking shape, with the payload riding thinking-end's `redacted`.
-              const id = String(ev.index);
-              blocks.set(ev.index, {
-                kind: 'thinking', id, name: '', json: '', thinking: '', redacted: { data: block.data },
-              });
-              yield { type: 'thinking-start', id };
-            } else if (block.type === 'tool_use') {
-              blocks.set(ev.index, { kind: 'tool', id: block.id, name: block.name, json: '', thinking: '' });
-              yield { type: 'tool-input-start', toolCallId: block.id, toolName: block.name };
-            } else if (block.type === 'server_tool_use') {
-              // Buffered silently: a provider-executed call is announced whole at block stop.
-              blocks.set(ev.index, { kind: 'server-tool', id: block.id, name: block.name, json: '', thinking: '' });
-              serverToolNames.set(block.id, block.name);
-            } else if (block.type === 'web_search_tool_result') {
-              yield {
-                type: 'server-tool-result',
-                toolCallId: block.tool_use_id,
-                toolName: serverToolNames.get(block.tool_use_id) ?? 'web_search',
-                output: block.content,
-              };
+          switch (ev.type) {
+            case 'message_start': {
+              const u = usageOf(ev.message?.usage);
+              usage.inputTokens = u.inputTokens;
+              usage.cacheReadTokens = u.cacheReadTokens;
+              usage.cacheWriteTokens = u.cacheWriteTokens;
+              break;
             }
-            break;
-          }
-          case 'content_block_delta': {
-            const st = blocks.get(ev.index);
-            if (!st) break;
-            if (ev.delta.type === 'text_delta') {
-              yield { type: 'text-delta', id: st.id, text: ev.delta.text };
-            } else if (ev.delta.type === 'thinking_delta') {
-              st.thinking += ev.delta.thinking;
-              yield { type: 'thinking-delta', id: st.id, text: ev.delta.thinking };
-            } else if (ev.delta.type === 'signature_delta') {
-              // Accumulated silently: the signature is echo plumbing, not display, and it is
-              // announced whole on thinking-end.
-              st.signature = (st.signature ?? '') + ev.delta.signature;
-            } else if (ev.delta.type === 'input_json_delta') {
-              st.json += ev.delta.partial_json;
-              if (st.kind === 'tool') yield { type: 'tool-input-delta', toolCallId: st.id, delta: ev.delta.partial_json };
+            case 'content_block_start': {
+              const block = ev.content_block;
+              if (block.type === 'text') {
+                const id = String(ev.index);
+                blocks.set(ev.index, { kind: 'text', id, name: '', json: '', thinking: '' });
+                yield { type: 'text-start', id };
+              } else if (block.type === 'thinking') {
+                const id = String(ev.index);
+                blocks.set(ev.index, { kind: 'thinking', id, name: '', json: '', thinking: '' });
+                yield { type: 'thinking-start', id };
+              } else if (block.type === 'redacted_thinking') {
+                // Opaque and whole on arrival: start/end bracket it anyway so downstream sees the
+                // one thinking shape, with the payload riding thinking-end's `redacted`.
+                const id = String(ev.index);
+                blocks.set(ev.index, {
+                  kind: 'thinking', id, name: '', json: '', thinking: '', redacted: { data: block.data },
+                });
+                yield { type: 'thinking-start', id };
+              } else if (block.type === 'tool_use') {
+                blocks.set(ev.index, { kind: 'tool', id: block.id, name: block.name, json: '', thinking: '' });
+                yield { type: 'tool-input-start', toolCallId: block.id, toolName: block.name };
+              } else if (block.type === 'server_tool_use') {
+                // Buffered silently: a provider-executed call is announced whole at block stop.
+                blocks.set(ev.index, { kind: 'server-tool', id: block.id, name: block.name, json: '', thinking: '' });
+                serverToolNames.set(block.id, block.name);
+              } else if (block.type === 'web_search_tool_result') {
+                yield {
+                  type: 'server-tool-result',
+                  toolCallId: block.tool_use_id,
+                  toolName: serverToolNames.get(block.tool_use_id) ?? 'web_search',
+                  output: block.content,
+                };
+              }
+              break;
             }
-            break;
-          }
-          case 'content_block_stop': {
-            const st = blocks.get(ev.index);
-            if (!st) break;
-            blocks.delete(ev.index);
-            if (st.kind === 'text') {
-              yield { type: 'text-end', id: st.id };
-            } else if (st.kind === 'thinking') {
-              yield {
-                type: 'thinking-end', id: st.id, text: st.thinking,
-                ...(st.signature !== undefined ? { signature: st.signature } : {}),
-                ...(st.redacted !== undefined ? { redacted: st.redacted } : {}),
-              };
-            } else {
-              // A no-argument tool streams no input_json_delta at all: empty accumulation is {}.
-              const input: unknown = st.json ? JSON.parse(st.json) : {};
-              yield st.kind === 'tool'
-                ? { type: 'tool-call', toolCallId: st.id, toolName: st.name, input }
-                : { type: 'server-tool-call', toolCallId: st.id, toolName: st.name, input };
+            case 'content_block_delta': {
+              const st = blocks.get(ev.index);
+              if (!st) break;
+              if (ev.delta.type === 'text_delta') {
+                yield { type: 'text-delta', id: st.id, text: ev.delta.text };
+              } else if (ev.delta.type === 'thinking_delta') {
+                st.thinking += ev.delta.thinking;
+                yield { type: 'thinking-delta', id: st.id, text: ev.delta.thinking };
+              } else if (ev.delta.type === 'signature_delta') {
+                // Accumulated silently: the signature is echo plumbing, not display, and it is
+                // announced whole on thinking-end.
+                st.signature = (st.signature ?? '') + ev.delta.signature;
+              } else if (ev.delta.type === 'input_json_delta') {
+                st.json += ev.delta.partial_json;
+                if (st.kind === 'tool') yield { type: 'tool-input-delta', toolCallId: st.id, delta: ev.delta.partial_json };
+              }
+              break;
             }
-            break;
-          }
-          case 'message_delta': {
-            if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
-            if (ev.usage?.output_tokens !== undefined) usage.outputTokens = ev.usage.output_tokens;
-            break;
-          }
-          case 'message_stop':
-            yield { type: 'finish', reason: mapStop(stopReason), usage };
-            return;
-          case 'ping':
-            break;
-          case 'error': {
-            // Mid-stream fault: the HTTP status was already 200, so a status is reconstructed —
-            // overloaded_error is the streaming face of HTTP 529; anything else reports as 500.
-            const status = ev.error?.type === 'overloaded_error' ? 529 : 500;
-            throw new LlmHttpError(PROVIDER, status, ev.error?.message ?? 'stream error');
+            case 'content_block_stop': {
+              const st = blocks.get(ev.index);
+              if (!st) break;
+              blocks.delete(ev.index);
+              if (st.kind === 'text') {
+                yield { type: 'text-end', id: st.id };
+              } else if (st.kind === 'thinking') {
+                yield {
+                  type: 'thinking-end', id: st.id, text: st.thinking,
+                  ...(st.signature !== undefined ? { signature: st.signature } : {}),
+                  ...(st.redacted !== undefined ? { redacted: st.redacted } : {}),
+                };
+              } else {
+                // A no-argument tool streams no input_json_delta at all: empty accumulation is {}.
+                const input: unknown = st.json ? JSON.parse(st.json) : {};
+                yield st.kind === 'tool'
+                  ? { type: 'tool-call', toolCallId: st.id, toolName: st.name, input }
+                  : { type: 'server-tool-call', toolCallId: st.id, toolName: st.name, input };
+              }
+              break;
+            }
+            case 'message_delta': {
+              if (ev.delta?.stop_reason) stopReason = ev.delta.stop_reason;
+              if (ev.usage?.output_tokens !== undefined) usage.outputTokens = ev.usage.output_tokens;
+              break;
+            }
+            case 'message_stop':
+              yield { type: 'finish', reason: mapStop(stopReason), usage };
+              return;
+            case 'ping':
+              break;
+            case 'error': {
+              // Mid-stream fault: the HTTP status was already 200, so a status is reconstructed —
+              // overloaded_error is the streaming face of HTTP 529; anything else reports as 500.
+              const status = ev.error?.type === 'overloaded_error' ? 529 : 500;
+              throw new LlmHttpError(PROVIDER, status, ev.error?.message ?? 'stream error');
+            }
           }
         }
+      } finally {
+        release();
       }
     },
   };

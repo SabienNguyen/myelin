@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { modelRouteFor } from './models.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Hono } from 'hono';
@@ -96,7 +97,7 @@ async function consumePull(model: string, job: PullJob, stream: AsyncIterable<Ui
  *  Anthropic key it will never use. (Found live: an all-openai: config booted into the key gate.) */
 export function needsApiKey(cfg: HarnessConfig): string[] {
   return Object.entries(cfg.models)
-    .filter(([, r]) => !r.model.startsWith('ollama:') && !r.model.startsWith('openai:'))
+    .filter(([, r]) => modelRouteFor(r.model) === 'anthropic')
     .map(([role]) => role);
 }
 
@@ -128,7 +129,13 @@ export function buildSetupRoutes(
     // no authorisation at all — every model call is intercepted before any provider is reached.
     // Without this the first-run gate blocked the whole e2e suite at "Ready when you are", a
     // screen no scripted run can click through.
-    const authorised = roles.length === 0 || fromEnv || saved || Boolean(process.env.LW_MOCK_MODEL);
+    const routerRequired = Object.values(cfg.models).some(r => modelRouteFor(r.model) === 'openrouter');
+    const routerPresent = Boolean(process.env.OPENROUTER_API_KEY);
+    const groqRequired = Object.values(cfg.models).some((r) => modelRouteFor(r.model) === 'groq');
+    const groqPresent = Boolean(process.env.GROQ_API_KEY);
+    const authorised = Boolean(process.env.LW_MOCK_MODEL)
+      || ((roles.length === 0 || fromEnv || saved) && (!routerRequired || routerPresent)
+        && (!groqRequired || groqPresent));
     return {
       apiKey: {
         // Which roles would break without a key, so the message can be specific: "the tutor needs
@@ -141,11 +148,42 @@ export function buildSetupRoutes(
       },
       vault: { path: displayPath(cfg.vault), exists: existsSync(cfg.vault) },
       config: configSource(),
+      openrouter: { required: routerRequired, present: routerPresent },
+      groq: { required: groqRequired, present: groqPresent },
       blocked: !authorised,
     };
   };
 
   app.get('/api/setup', (c) => c.json(state()));
+
+  // Catalog membership is not entitlement: restricted models may still reject this account.
+  // Use the full public catalog for saves, never the free/tool-capable suggestion subset.
+  const openrouterCatalog = async (): Promise<any[]> => {
+    const res = await (deps.probeFetch ?? fetch)('https://openrouter.ai/api/v1/models', {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`OpenRouter catalog returned HTTP ${res.status}`);
+    const data = await res.json() as { data?: unknown };
+    if (!Array.isArray(data?.data)) throw new Error('Invalid OpenRouter catalog');
+    return data.data;
+  };
+
+  // Public catalog only: never send a user's key to discovery. Fail visibly rather than show a
+  // fabricated or stale list. The explicit suffix plus zero pricing prevents paid suggestions.
+  app.get('/api/setup/openrouter/models', async (c) => {
+    try {
+      const catalog = await openrouterCatalog();
+      const zero = (v: unknown) => (typeof v === 'string' && v.trim() !== '' || typeof v === 'number')
+        && Number(v) === 0;
+      const models = catalog.filter((m: any) => typeof m?.id === 'string'
+        && m.id.endsWith(':free') && zero(m.pricing?.prompt) && zero(m.pricing?.completion)
+        && Array.isArray(m.supported_parameters) && m.supported_parameters.includes('tools'))
+        .map((m: any) => ({ id: m.id, name: typeof m.name === 'string' ? m.name : m.id }));
+      return c.json({ models });
+    } catch {
+      return c.json({ error: 'Could not load OpenRouter free models. Try again.' }, 502);
+    }
+  });
 
   app.put('/api/setup/api-key', async (c) => {
     const body = await c.req.json().catch(() => ({}));
@@ -203,6 +241,8 @@ export function buildSetupRoutes(
       // should show what the next turn will actually do.
       tutorRails: Boolean(cfg.models.tutor.rails),
       env: {
+        OPENROUTER_API_KEY: { set: Boolean(saved.env?.OPENROUTER_API_KEY), shadowed: shadow.OPENROUTER_API_KEY },
+        GROQ_API_KEY: { set: Boolean(saved.env?.GROQ_API_KEY), shadowed: shadow.GROQ_API_KEY },
         OLLAMA_BASE_URL: { value: saved.env?.OLLAMA_BASE_URL ?? '', shadowed: shadow.OLLAMA_BASE_URL },
         OLLAMA_API_KEY: { set: Boolean(saved.env?.OLLAMA_API_KEY), shadowed: shadow.OLLAMA_API_KEY },
         OPENAI_COMPAT_BASE_URL: {
@@ -373,6 +413,32 @@ export function buildSetupRoutes(
         error: `model "${openaiRole[1].trim()}" needs an OpenAI-compatible base URL — fill it in `
           + `below (e.g. https://openrouter.ai/api/v1) or set OPENAI_COMPAT_BASE_URL`,
       }, 400);
+    }
+
+    // Same reasoning for groq: — the endpoint is pinned, so the key is the one thing that can be
+    // missing, and a keyless Groq call is a 401 in the middle of a lesson.
+    const groqRole = ids.find(([, id]) => modelRouteFor(id.trim()) === 'groq');
+    if (groqRole && !(String(env.GROQ_API_KEY ?? '').trim() || process.env.GROQ_API_KEY)) {
+      return c.json({
+        error: `model "${groqRole[1].trim()}" needs a Groq API key — fill it in below `
+          + '(create one at https://console.groq.com/keys) or set GROQ_API_KEY',
+      }, 400);
+    }
+
+    const routerIds = ids.filter(([, id]) => modelRouteFor(id.trim()) === 'openrouter');
+    if (routerIds.length) {
+      let catalog: any[];
+      try { catalog = await openrouterCatalog(); }
+      catch {
+        return c.json({ error: 'Could not validate the OpenRouter catalog — settings not saved. Check your connection and retry.' }, 502);
+      }
+      const known = new Set(catalog.map((m) => m?.id).filter((id) => typeof id === 'string'));
+      for (const [role, routedId] of routerIds) {
+        const id = routedId.trim().slice('openrouter:'.length);
+        if (!id || !known.has(id)) {
+          return c.json({ error: `${role}: "${id}" is not in the OpenRouter catalog. Use an exact catalog model id; settings not saved.` }, 400);
+        }
+      }
     }
 
     // Persist: merge over what is already saved, so a request that only touches one role or one

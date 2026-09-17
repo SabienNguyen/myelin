@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig } from '../src/server/config.js';
+import { DEFAULT_MODEL, loadConfig } from '../src/server/config.js';
 import {
   applySettings, envShadow, PROVIDER_ENV_KEYS, readSettings, resetEnvShadow, settingsPath,
   writeSettings,
@@ -67,7 +67,7 @@ describe('merge precedence: defaults < harness.config.json < settings.json', () 
     expect(cfg.models.grader.model).toBe('ollama:from-settings'); // saved beats file
     expect(cfg.models.tutor.model).toBe('ollama:saved-tutor');    // saved beats default
     expect(cfg.models.card_gen.model).toBe('ollama:file-card');   // file beats default
-    expect(cfg.models.compile.model).toBe('claude-sonnet-5');     // default untouched
+    expect(cfg.models.compile.model).toBe(DEFAULT_MODEL);         // default untouched
   });
 
   it('a hand-edited claude-sdk: id in settings.json is skipped, not applied, and named', () => {
@@ -76,7 +76,7 @@ describe('merge precedence: defaults < harness.config.json < settings.json', () 
       writeSettings({ models: { tutor: 'claude-sdk:opus' } });
       const cfg = loadConfig(bareConfig());
       applySettings(cfg);
-      expect(cfg.models.tutor.model).toBe('claude-sonnet-5'); // the boot value survives
+      expect(cfg.models.tutor.model).toBe(DEFAULT_MODEL); // the boot value survives
       expect(String(err.mock.calls[0]?.[0])).toMatch(/claude-sdk:' has been removed/);
     } finally {
       err.mockRestore();

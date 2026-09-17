@@ -1,5 +1,6 @@
-import { mkdirSync, readFileSync, writeFileSync, appendFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { mkdirSync, readFileSync, appendFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 import { dedupeById } from '../shared/messages.js';
 
 const dir = (vault: string) => join(vault, '.harness', 'sessions');
@@ -40,7 +41,7 @@ export function saveThread(vault: string, threadId: string, messages: unknown[])
     seen.add(m?.id);
   }
   for (const m of incoming) if (!seen.has(m?.id)) merged.push(m);
-  writeFileSync(join(dir(vault), `${threadId}.json`), JSON.stringify(merged));
+  atomicWrite(join(dir(vault), `${threadId}.json`), JSON.stringify(merged));
 }
 /** Restores a persisted thread. A corrupt file (invalid JSON, or JSON that isn't an array) must
  * never 500 the GET — it's treated as an empty thread instead. Deduped by id as a durable

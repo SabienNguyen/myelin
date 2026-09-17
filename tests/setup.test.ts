@@ -10,7 +10,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultVaultPath, loadConfig, resolveEngram, configSource } from '../src/server/config.js';
+import { DEFAULT_MODEL, defaultVaultPath, loadConfig, resolveEngram, configSource } from '../src/server/config.js';
 import {
   credentialsPath, readCredentials, writeCredentials, applyCredentials, looksLikeAnthropicKey,
 } from '../src/server/credentials.js';
@@ -41,7 +41,7 @@ describe('zero-config startup', () => {
     expect(configSource()).toEqual({ path, found: true });
     expect(cfg.port).toBe(9999);
     expect(cfg.models.tutor.model).toBe('ollama:qwen');
-    expect(cfg.models.grader.model).toBe('claude-haiku-4-5'); // untouched roles still default
+    expect(cfg.models.grader.model).toBe(DEFAULT_MODEL); // untouched roles still default
   });
 
   it('still refuses a config that exists but is wrong', () => {

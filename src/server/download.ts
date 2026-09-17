@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { htmlToText, htmlTitle } from './htmlText.js';
+import { assertPublicUrl, fetchGuarded } from './urlGuard.js';
 import {
   HttpStatusError, isRetryableError, isRetryableStatus, withRetry,
 } from './retry.js';
@@ -52,9 +53,13 @@ export interface DownloadedFile {
  * response, never a stack trace reaching the caller.
  */
 export async function downloadToTemp(
-  url: string, opts: { fetchImpl?: typeof fetch } = {},
+  url: string, opts: { fetchImpl?: typeof fetch; guard?: (url: string) => Promise<void> } = {},
 ): Promise<DownloadedFile> {
   const doFetch = opts.fetchImpl ?? fetch;
+  // ingest_paper hands this a MODEL-supplied URL, and what it fetches is converted and compiled
+  // into vault pages the model then reads back — the same proxy-onto-loopback threat read_url is
+  // guarded against, with a longer memory. Tests inject `guard` to reach their 127.0.0.1 fixture.
+  const guard = opts.guard ?? assertPublicUrl;
   const target = rewriteArxivUrl(url);
 
   // Retried like the tutor's own fetches: a transient failure here used to kill an entire ingest,
@@ -64,7 +69,8 @@ export async function downloadToTemp(
   try {
     res = await withRetry(
       async () => {
-        const r = await doFetch(target, { redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
+        const r = await fetchGuarded(target, guard,
+          (hop) => doFetch(hop, { redirect: 'manual', signal: AbortSignal.timeout(TIMEOUT_MS) }));
         if (!r.ok) throw new HttpStatusError(r.status, target);
         return r;
       },

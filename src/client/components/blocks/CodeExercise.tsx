@@ -37,6 +37,7 @@ import { CodeIcon as Code, CheckIcon as Check } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 import { PredictGate } from './gap/PredictGate.js';
+import { ClusterSandbox, type SandboxInfo } from './gap/ClusterSandbox.js';
 import { Verdict } from './Verdict.js';
 import { getLadder, postRun } from './gap/api.js';
 import { RungEditor } from './gap/RungEditor.js';
@@ -91,6 +92,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   const [mined, setMined] = useState<MinedEntry[] | undefined>(undefined);
   const [ladderPattern, setLadderPattern] = useState<string | undefined>(undefined);
   const [ladderFamily, setLadderFamily] = useState<string | undefined>(undefined);
+  const [sandbox, setSandbox] = useState<SandboxInfo | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | undefined>(undefined);
   // Bumped by the unavailable-state's Try again, so the ladder fetch below re-runs. A down
   // sandbox is usually transient (it is a separate service), so retrying in place beats
@@ -156,6 +158,7 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
         setMined(payload.mined);
         setLadderPattern(payload.ladder?.pattern);
         setLadderFamily((payload as any).family);
+        setSandbox((payload as any).sandbox);
       })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message); });
     return () => { cancelled = true; };
@@ -270,7 +273,18 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
     }
   }, [currentRung, detector]);
 
-  useDebouncedRun(code, run);
+  // A cluster exercise runs against a LIVE namespace, and a run applies whatever YAML is in the
+  // editor. The run on open is wanted — it is what builds the sandbox, so the namespace exists
+  // before the learner reaches for kubectl. A run per typing pause is not: it would apply
+  // half-written manifests to a real cluster. After open, only run/ctrl+enter checks.
+  const openedRef = useRef(false);
+  useDebouncedRun(code, (c) => {
+    if (ladderFamily === 'cluster') {
+      if (openedRef.current || !currentRung) return;
+      openedRef.current = true;
+    }
+    void run(c);
+  });
 
   const fullBodyDraftKey = currentRung ? gapDraftKey(currentRung.artifactId, currentRung.template) : undefined;
   // RungEditor v2: the PRISTINE starting doc (never draft-adjusted) — the one wroteCode diffs
@@ -289,11 +303,13 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
   const doSubmit = useCallback(() => {
     setConfirmSubmit(false);
     const testsPassed = results.filter((r) => r.pass).length;
-    const wroteCode = code !== initialScaffold;
+    // In a cluster exercise the work is done with kubectl, so an untouched editor is the NORMAL
+    // passing case, not a sign the learner wrote nothing.
+    const wroteCode = ladderFamily === 'cluster' || code !== initialScaffold;
     finish(true, 'full_body', testsPassed, results.length, wroteCode,
       { failingTests: failingNames(results) });
     if (fullBodyDraftKey) clearDraft(fullBodyDraftKey);
-  }, [results, code, finish, fullBodyDraftKey, initialScaffold]);
+  }, [results, code, finish, fullBodyDraftKey, initialScaffold, ladderFamily]);
 
   // Reasonable enabling rule (spec): Submit is always clickable. If the latest run has failing
   // tests — or there's been no run at all yet — clicking it opens an inline confirm instead of
@@ -389,6 +405,11 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
           {ladderFamily === 'manifest' && template === 'full_body'
             ? 'write the YAML manifest the task describes. checks run automatically as you type, '
               + 'or press run (ctrl/cmd+enter) any time — nothing is graded until you press submit.'
+            : ladderFamily === 'cluster' && template === 'full_body'
+              ? 'this is a live cluster. paste the sandbox command into your own terminal and fix '
+                + 'the problem with kubectl, then press run (ctrl/cmd+enter) to check the cluster. '
+                + 'yaml written here is applied when you press run. the first open on a machine '
+                + 'builds the cluster (a minute or two); after that it is reused.'
             : ladderFamily === 'exec' && template === 'full_body'
               ? 'write the whole program — it is run once per test case with that case\'s stdin '
                 + 'and arguments. tests run automatically as you type, or press run (ctrl/cmd+enter) '
@@ -529,6 +550,9 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
               <ProximityHeader results={results} hasRun={hasRun} />
               {running && <span className="ide-spinner" role="status" aria-label="running tests" />}
             </div>
+            {ladderFamily === 'cluster' && sandbox && (
+              <ClusterSandbox pattern={ladderPattern ?? args.pattern} sandbox={sandbox} onReset={() => run(initialScaffold)} />
+            )}
             <Editor
               scaffold={initialScaffold}
               onDocChange={onFullBodyDocChange}

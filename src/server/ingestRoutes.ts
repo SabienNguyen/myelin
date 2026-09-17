@@ -92,7 +92,11 @@ export function buildIngestRoutes(
 
       let downloaded: Awaited<ReturnType<typeof downloadToTemp>>;
       try {
-        downloaded = await downloadToTemp(body.url, { fetchImpl: deps.fetchImpl });
+        // No private-address guard here, deliberately: this URL was pasted by the learner into Add
+        // material, and a docs server on their own machine is a legitimate source. The guard exists
+        // for MODEL-supplied URLs (ingest_paper keeps downloadToTemp's default), and localOnly
+        // already stops another site from posting to this route.
+        downloaded = await downloadToTemp(body.url, { fetchImpl: deps.fetchImpl, guard: async () => {} });
       } catch (e: any) {
         return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
       }

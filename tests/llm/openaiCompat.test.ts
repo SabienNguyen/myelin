@@ -465,6 +465,30 @@ describe('openai-compat streaming', () => {
       },
     ]);
   });
+
+  it('skips a non-JSON SSE frame (proxy keepalive or HTML error page) instead of killing the turn', async () => {
+    respond = sse([[
+      data({ choices: [{ index: 0, delta: { content: 'Hi' } }] }),
+      // A keepalive/proxy comment or an HTML error body riding the SSE channel as one frame's
+      // data — not valid JSON, and must not abort the whole stream.
+      'event: ping\ndata: <html>502 Bad Gateway</html>\n\n',
+      data({ choices: [{ index: 0, delta: { content: ' there' } }] }),
+      data({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }),
+      data({ choices: [], usage: { prompt_tokens: 2, completion_tokens: 1 } }),
+      'data: [DONE]\n\n',
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events).toEqual([
+      { type: 'text-start', id: '0' },
+      { type: 'text-delta', id: '0', text: 'Hi' },
+      { type: 'text-delta', id: '0', text: ' there' },
+      { type: 'text-end', id: '0' },
+      {
+        type: 'finish', reason: 'stop',
+        usage: { inputTokens: 2, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    ]);
+  });
 });
 
 // The qwen3-class convention: reasoning arrives INSIDE message.content as a leading

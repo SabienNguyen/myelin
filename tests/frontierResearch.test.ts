@@ -125,6 +125,20 @@ describe('findCanonicalPapers', () => {
  * mixture-of-experts ROUTING, the top hit was "The location-routing problem for UAV monitoring
  * under time-varying noise constraints" — a real, recent paper about a different sense of one word.
  */
+describe('findRecentPapers timeout', () => {
+  it('settles instead of hanging forever when a source never responds', async () => {
+    // A real fetch would honor the AbortSignal passed in `init` and reject; this fake mimics
+    // that so the test proves the signal is actually wired up, not just that fetch was called.
+    const neverRespondingFetch: typeof fetch = (async (_url: any, init?: any) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('timed out', 'TimeoutError')));
+    })) as typeof fetch;
+
+    // Both sources fail, so findRecentPapers rejects rather than hanging — the point of this
+    // test is that it settles at all within the tiny timeout, not what it settles to.
+    await expect(findRecentPapers('kv cache', neverRespondingFetch, 5)).rejects.toThrow(/timed out/i);
+  });
+});
+
 describe('frontier results are filtered to the topic', () => {
   const T = 'mixture-of-experts routing';
 

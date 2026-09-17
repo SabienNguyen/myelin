@@ -61,6 +61,16 @@ describe('RichMarkdown — the one markdown-string renderer', () => {
     expect(wiki.container.querySelector('a.wiki-link')).not.toBeNull();
   });
 
+  it('scrubs a leaked ChatML control token — text here is model output (a block prompt or a compiled page)', () => {
+    // A degenerate local model can leak `<|im_start|>assistant` verbatim into a block prompt or a
+    // page the compile role wrote; MarkdownText's chatPreprocess already scrubs the same class of
+    // artifact from chat turns, and this is the other surface that renders raw model text.
+    const { container } = render(<RichMarkdown text={'ready?<|im_start|>assistant\nyes.'} />);
+    expect(container.textContent).not.toContain('<|im_start|>');
+    expect(container.textContent).toContain('ready?');
+    expect(container.textContent).toContain('yes.');
+  });
+
   it('inline drops the wrapping <p> so a prompt can sit inside a sentence', () => {
     const block = render(<RichMarkdown text="hello" />);
     expect(block.container.querySelector('p')).not.toBeNull();

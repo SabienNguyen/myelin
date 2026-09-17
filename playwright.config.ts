@@ -20,7 +20,9 @@ const ENGRAM_SRC = [
   join(REPO_ROOT, 'loreweaver', 'src', 'server.ts'),
 ].find(existsSync) ?? join(REPO_ROOT, '..', 'engram', 'src', 'server.ts');
 // The env the harness backends read the portable fixture paths from (config `${E2E_DIR}` etc.).
-const backendEnv = { E2E_DIR, ENGRAM_SRC };
+// MYELIN_CONFIG_DIR keeps the fixture backends away from the developer's real
+// ~/.config/myelin/settings.json — see credentials.ts.
+const backendEnv = { E2E_DIR, ENGRAM_SRC, MYELIN_CONFIG_DIR: join(E2E_DIR, '.tmp-config') };
 
 // Where global-setup.ts writes the fake microphone WAV, and where the launch args point Chromium.
 export const FAKE_AUDIO_WAV = join(E2E_DIR, '.tmp-fake-audio.wav');

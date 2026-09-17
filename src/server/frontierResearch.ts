@@ -37,11 +37,13 @@ function tagText(block: string, tag: string): string {
   return m ? m[1].replace(/\s+/g, ' ').trim() : '';
 }
 
-export async function searchArxiv(topic: string, fetchImpl: typeof fetch = fetch): Promise<FrontierPaper[]> {
+export async function searchArxiv(
+  topic: string, fetchImpl: typeof fetch = fetch, timeoutMs = 15_000,
+): Promise<FrontierPaper[]> {
   const q = encodeURIComponent(`all:"${topic}"`);
   const url = `https://export.arxiv.org/api/query?search_query=${q}&start=0&max_results=${MAX_PER_SOURCE}`
     + '&sortBy=submittedDate&sortOrder=descending';
-  const res = await fetchImpl(url);
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`arXiv responded ${res.status}`);
   const xml = await res.text();
   const entries = xml.split('<entry>').slice(1);
@@ -62,11 +64,12 @@ export async function searchArxiv(topic: string, fetchImpl: typeof fetch = fetch
 
 export async function searchCrossref(
   topic: string, fetchImpl: typeof fetch = fetch, sort: 'created' | 'is-referenced-by-count' = 'created',
+  timeoutMs = 15_000,
 ): Promise<FrontierPaper[]> {
   const url = `https://api.crossref.org/works?query=${encodeURIComponent(topic)}`
     + `&sort=${sort}&order=desc&rows=${MAX_PER_SOURCE}`
     + '&select=title,author,created,URL,DOI,container-title,is-referenced-by-count';
-  const res = await fetchImpl(url);
+  const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`Crossref responded ${res.status}`);
   const body = await res.json() as any;
   const items: any[] = body?.message?.items ?? [];
@@ -111,10 +114,10 @@ export function concernsTopic(paper: Pick<FrontierPaper, 'title' | 'summary'>, t
 }
 
 export async function findRecentPapers(
-  topic: string, fetchImpl: typeof fetch = fetch,
+  topic: string, fetchImpl: typeof fetch = fetch, timeoutMs = 15_000,
 ): Promise<{ papers: FrontierPaper[]; sourceErrors: string[] }> {
   const [arxiv, crossref] = await Promise.allSettled([
-    searchArxiv(topic, fetchImpl), searchCrossref(topic, fetchImpl),
+    searchArxiv(topic, fetchImpl, timeoutMs), searchCrossref(topic, fetchImpl, 'created', timeoutMs),
   ]);
   const sourceErrors: string[] = [];
   const all: FrontierPaper[] = [];
@@ -154,10 +157,11 @@ export async function findRecentPapers(
  * most-cited answers "who should I read first". Both end in ingest_url, never in generated prose.
  */
 export async function findCanonicalPapers(
-  topic: string, fetchImpl: typeof fetch = fetch,
+  topic: string, fetchImpl: typeof fetch = fetch, timeoutMs = 15_000,
 ): Promise<{ papers: FrontierPaper[]; sourceErrors: string[] }> {
   try {
-    const papers = (await searchCrossref(topic, fetchImpl, 'is-referenced-by-count')).slice(0, MAX_TOTAL);
+    const papers = (await searchCrossref(topic, fetchImpl, 'is-referenced-by-count', timeoutMs))
+      .slice(0, MAX_TOTAL);
     return { papers, sourceErrors: [] };
   } catch (e: any) {
     throw new Error(`no index reachable — Crossref: ${e?.message ?? e}`);

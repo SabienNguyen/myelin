@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { atomicWrite } from './atomicWrite.js';
 import { join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import type { AnkiClient } from './anki/client.js';
@@ -6,6 +7,7 @@ import { backlogDays } from './anki/inbound.js';
 import { isGapUp } from './gapProxy.js';
 import type { Engram } from './mcp.js';
 import type { HarnessConfig } from './config.js';
+import { expand } from './config.js';
 import { getGraphCached, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
 import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
@@ -30,9 +32,10 @@ async function fetchGraph(lw: Engram, cfg: HarnessConfig): Promise<GraphPayload>
       prereqs: p.prereqs, deepens: p.deepens,
       mastery: (student as Record<string, any>)[p.slug] ?? null,
     }));
-  } catch {
+  } catch (err) {
     // An older bundled engram without list_pages: the per-page path still works, it is just
     // slow at scale. Version skew is real for packaged apps, so degrade rather than break.
+    console.error('[graph] list_pages failed, walking pages:', err);
     const slugs = await lw.listSlugs();
     nodes = await Promise.all(slugs.map(async (slug) => {
       const { page } = await lw.call('read_page', { slug });
@@ -449,10 +452,10 @@ export function buildRestRoutes(
     // Persist so a restart keeps the switch. Read-modify-write of the JSON on disk preserves
     // every other field (and any fields this build does not know about).
     try {
-      const path = process.env.HARNESS_CONFIG ?? './harness.config.json';
+      const path = expand(process.env.HARNESS_CONFIG ?? './harness.config.json');
       const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
       onDisk.student = name;
-      writeFileSync(path, `${JSON.stringify(onDisk, null, 2)}\n`);
+      atomicWrite(path, `${JSON.stringify(onDisk, null, 2)}\n`);
     } catch (e: any) {
       // The in-memory switch already took effect; a failed persist is named, not hidden.
       return c.json({ current: name, warning: `switched for this run, but not saved: ${e?.message ?? e}` });
@@ -467,10 +470,10 @@ export function buildRestRoutes(
     const voice = String(body?.voice ?? '').trim().slice(0, 200);
     (cfg as any).voice = voice || undefined;
     try {
-      const path = process.env.HARNESS_CONFIG ?? './harness.config.json';
+      const path = expand(process.env.HARNESS_CONFIG ?? './harness.config.json');
       const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
       if (voice) onDisk.voice = voice; else delete onDisk.voice;
-      writeFileSync(path, JSON.stringify(onDisk, null, 2) + '\n');
+      atomicWrite(path, JSON.stringify(onDisk, null, 2) + '\n');
     } catch (e: any) {
       return c.json({ voice, warning: 'set for this run, but not saved: ' + (e?.message ?? e) });
     }

@@ -3,8 +3,8 @@ import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blo
 import { UI_TOOLS } from '../shared/uiTools.js';
 import type { UIMessage } from '../shared/uiMessages.js';
 import {
-  createUiStream, generateMessageId, runLoop, uiMessagesToChatMessages,
-  type ChatMessage, type ChatModel, type LoopTool,
+  createUiStream, generateMessageId, runLoop, uiMessagesToChatMessages, zeroUsage,
+  type ChatMessage, type ChatModel, type LoopTool, type Usage,
 } from './llm/index.js';
 import { recentLapses } from './anki/inbound.js';
 import type { HarnessConfig } from './config.js';
@@ -18,16 +18,18 @@ import { appliedGradeBypass, gradeBlockOutput, untouchedSlugEvidence } from './g
 import { createRailsSession, pendingBlockOutputs } from './rails.js';
 import { dietUiMessages } from './historyDiet.js';
 import { buildIngestTools } from './ingestTools.js';
-import type { Engram } from './mcp.js';
+import { searchHits, searchNote, type Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
 import { readGoal, pathProgress } from './goalStore.js';
-import { buildBootstrapContext, buildInstructions, type Mode } from './prompt.js';
+import { buildBootstrapContext, buildInstructions, type Mode, type TurnFacts } from './prompt.js';
+import { readSources } from './provenance.js';
 import { lastUserText } from './deriveMode.js';
 import { logGuardrail, saveThread } from './sessionStore.js';
 import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
-import { generateExercise, listGenerated } from './gap/generated.js';
+import { generateExercise, listGenerated, tutorReport } from './gap/generated.js';
+import { explainTurnError } from './turnError.js';
 import { builtinPatterns, patternChoices } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { zodTool } from './zodTool.js';
@@ -317,8 +319,13 @@ export function isSelectedPassage(text: string): boolean {
  *  stop it (it sits 300 lines from the work); removing the tool does. */
 export function turnBlockTools(
   gradingOnly: boolean, patterns: string[] = [], readingSource = false, topic: string[] = [],
+  canGenerate = false,
 ): LoopTool[] {
-  const unrelated = !relatedPattern(patterns, topic);
+  // `patterns` is a snapshot from the START of the turn. When generate_exercise is on offer the
+  // tutor can mint a fitting pattern mid-turn, so "nothing here fits" stops being a reason to
+  // withhold the one tool that can stage it: a live tutor asked for a Kubernetes exercise
+  // generated one, found no code_exercise to put it in, and staged the manifest as a one-line quiz.
+  const unrelated = !canGenerate && !relatedPattern(patterns, topic);
   const drop = (tools: LoopTool[]) => tools.filter((t) => {
     if (readingSource && t.name === 'open_source') return false;
     // Every code_exercise pattern is pre-authored, so most subjects have none — and told merely to
@@ -329,9 +336,97 @@ export function turnBlockTools(
     if (t.name === 'code_exercise' && topic.length > 0 && unrelated) return false;
     return true;
   });
-  if (!gradingOnly) return drop(blockTools(patterns));
+  if (!gradingOnly) return drop(blockTools(patterns, canGenerate));
   const keep = new Set(['open_source', 'speak', 'offer_write']); // navigation, not staging work
-  return drop(blockTools(patterns).filter((t) => keep.has(t.name)));
+  return drop(blockTools(patterns, canGenerate).filter((t) => keep.has(t.name)));
+}
+
+/** Words that mean the subject is a spoken language — the only signal for the `speak` / `lang` /
+ *  `pronounce` guidance, which is ~400 tokens of Telex and tone names no other subject needs. Read
+ *  off everything the STUDENT has said in the thread, so it holds for the whole conversation once
+ *  they name the language. A miss costs the long guidance, not the tools: their own descriptions
+ *  still ride the turn. */
+const LANGUAGE_SUBJECT = /\b(vietnamese|mandarin|chinese|cantonese|japanese|korean|spanish|french|german|italian|portuguese|russian|arabic|hindi|thai|pronounc\w*|pinyin|telex|tones?|vocab\w*|conjugat\w*|language)\b/i;
+
+const SPEECH_TOOLS = ['pronounce', 'speak'];
+const VIDEO_TOOLS = ['find_video', 'video_transcript', 'watch_video'];
+const LITERATURE_TOOLS = ['find_recent_papers', 'find_canonical_sources', 'paper_references'];
+
+const ASKS_FOR_VIDEO = /\b(videos?|watch|youtube|lectures?|clip)\b/i;
+const ASKS_FOR_LITERATURE = /\b(new|newest|recent|latest|state.of.the.art|sota|frontier|papers?|research|literature|canonical|citations?|references?|sources?|reading list|what should i read|who should i read)\b/i;
+
+/** Should this tool's schema ride this turn? Tools whose whole use is one kind of subject or one
+ *  kind of request were sent on every turn: a calculus lesson carried a tone-pronunciation grader,
+ *  a video search and three literature tools — ~1,200 tokens of schema it could not use.
+ *
+ *  Deliberately loose. A false positive costs tokens; a false negative costs the learner a tool
+ *  they asked for, so every request-shaped gate also opens on `research` (the turn is already
+ *  going to the outside world), and the word lists err toward matching. Anything not named here is
+ *  always offered. */
+export function toolFitsTurn(name: string, t: {
+  language: boolean; research: boolean; hasSources: boolean; hasVideoSources: boolean; lastUserText: string;
+  /** Tool names already called in this thread. A family that has been used stays on offer: the
+   *  request that opened it ("find me a video") is one turn, the follow-up ("the second one") names
+   *  nothing, and a model that sees its own earlier call will repeat it — straight into
+   *  "unknown tool" if the schema has gone. */
+  used: ReadonlySet<string>;
+}): boolean {
+  const family = [SPEECH_TOOLS, VIDEO_TOOLS, LITERATURE_TOOLS].find((f) => f.includes(name));
+  if (!family) return true;
+  if (family.some((n) => t.used.has(n))) return true;
+  if (family === SPEECH_TOOLS) return t.language;
+  if (family === VIDEO_TOOLS) return t.research || t.hasVideoSources || ASKS_FOR_VIDEO.test(t.lastUserText);
+  if (name === 'paper_references') return t.hasSources || t.research;
+  return t.research || ASKS_FOR_LITERATURE.test(t.lastUserText);
+}
+
+/** Tool names this thread's assistant turns have already called. */
+export function toolsUsed(messages: UIMessage[]): Set<string> {
+  return new Set(messages.filter((m) => m.role === 'assistant')
+    .flatMap((m) => (m.parts as any[]).map((p) => String(p?.type ?? '')))
+    .filter((type) => type.startsWith('tool-')).map((type) => type.slice('tool-'.length)));
+}
+
+/** Is this a language lesson? Three signals, any one enough, because the student often never
+ *  types the language's English name: they click a suggested lesson, or write IN the language
+ *  ("Xin chào, hôm nay mình học gì?"). So: what they typed, the vault's own page ids (a vault with
+ *  `vietnamese-tones` in it is a language vault), and whether the thread has already used a
+ *  speech tool. A false positive costs ~750 tokens; a miss cost the learner the ability to hear
+ *  the word. */
+export function isLanguageSubject(messages: UIMessage[], slugs: string[]): boolean {
+  if (LANGUAGE_SUBJECT.test(studentText(messages))) return true;
+  if (slugs.some((s) => LANGUAGE_SUBJECT.test(s.replace(/-/g, ' ')))) return true;
+  return SPEECH_TOOLS.some((n) => toolsUsed(messages).has(n));
+}
+
+/** Everything the student has typed in this thread, as one string. */
+function studentText(messages: UIMessage[]): string {
+  return messages.filter((m) => m.role === 'user')
+    .flatMap((m) => (m.parts as any[]).filter((p) => p?.type === 'text').map((p) => String(p.text))).join('\n');
+}
+
+/** The per-turn facts prompt.ts selects rules by. `tools` does most of the work; these are the
+ *  things a tool list cannot say. Pure, so each definition is pinned by a test. */
+export function turnFacts(a: {
+  tools: string[]; mode: string; messages: UIMessage[]; emptyVault: boolean; bankSize: number;
+  sources: { origin?: { kind?: string } }[]; readingSource: boolean; slugs?: string[];
+}): TurnFacts {
+  const tools = new Set(a.tools);
+  const said = a.messages.filter((m) => m.role === 'user')
+    .flatMap((m) => (m.parts as any[]).filter((p) => p?.type === 'text').map((p) => String(p.text)));
+  const facts = new Set<string>();
+  // The app's one-click plan (Thread.tsx) — anywhere in the thread, because the turns that WORK
+  // the plan come after the message that set it.
+  if (said.some((t) => t.startsWith("Run today's session"))) facts.add('plan');
+  if (a.mode === 'review') facts.add('review');
+  if (a.bankSize > 0) facts.add('courseBank');
+  if (a.emptyVault) facts.add('emptyVault');
+  if (a.sources.length > 0 || a.readingSource) facts.add('sources');
+  if (a.sources.some((s) => s.origin?.kind === 'video')) facts.add('videoSources');
+  if (isLanguageSubject(a.messages, a.slugs ?? [])) facts.add('language');
+  // Research is possible when the turn can search, read, or write what it found.
+  if (['web_search', 'read_url', 'write_page'].some((t) => tools.has(t))) facts.add('research');
+  return { tools, facts };
 }
 
 /** Does any available pattern plausibly cover what the student just asked about? Deliberately a
@@ -348,7 +443,7 @@ export function relatedPattern(patterns: string[], topic: string[]): boolean {
 
 /** Frontend tools: no execute — the loop pauses on them (runLoop's external-tool halt); the
  *  browser supplies output via addToolOutput and the resubmit carries it back. */
-export function blockTools(patterns: string[] = []): LoopTool[] {
+export function blockTools(patterns: string[] = [], canGenerate = false): LoopTool[] {
   // code_exercise's `pattern` is an id from a RUNTIME list, not free text. Without the list in the
   // description a tutor asked for "something to DO" staged a whole prose paragraph as the pattern
   // and the block hung at input-available forever (observed on a PyTorch vault). Advertise what
@@ -375,9 +470,14 @@ export function blockTools(patterns: string[] = []): LoopTool[] {
     : 'Present a code_exercise block to the student and wait for their work. NONE AVAILABLE right '
       + 'now: no exercises exist in this vault, so do not call this tool — use another instrument '
       + '(writing_draft, structured_check, math_scratchpad) or generate_exercise in freeform.';
+  // The list above was read when the turn began, so it cannot name what this turn creates.
+  const generatedHelp = canGenerate
+    ? '\nALSO VALID: the `pattern` that generate_exercise returned with status "approved" earlier in '
+      + 'THIS turn, even though it is not listed — stage it straight away.'
+    : '';
   const blocks = availableBlocks().map((name) => zodTool(name, {
     description: name === 'code_exercise'
-      ? codeExerciseHelp
+      ? codeExerciseHelp + generatedHelp
       : `Present a ${name} block to the student and wait for their work.`,
     input: BLOCK_TOOLS[name].input as z.ZodTypeAny,
   }));
@@ -601,7 +701,7 @@ export function buildCourseTools(vault: string, student: string): LoopTool[] {
       input: z.object({
         id: z.string().describe('the problem id from course_problems, e.g. "midterm-2#3"'),
       }),
-      execute: async ({ id }) => (markCorrect(vault, id, student)
+      execute: async ({ id }) => ((await markCorrect(vault, id, student))
         ? { marked: id }
         : { error: `no banked problem with id "${id}"` }),
     }),
@@ -625,7 +725,7 @@ export function buildFrontierTools(
         + 'work) for the NEWEST papers on a topic, sorted by date. Use this whenever the student '
         + 'asks what is new, recent, state-of-the-art, or frontier in any field — your training '
         + 'knowledge has a cutoff and this tool does not. Present results with their dates and '
-        + 'offer to ingest any of them (ingest_url with the pdfUrl) as course pages.',
+        + 'offer to ingest any of them (ingest_paper with the pdfUrl) as course pages.',
       input: z.object({
         topic: z.string().describe('the research topic, e.g. "KV cache compression"'),
       }),
@@ -645,7 +745,7 @@ export function buildFrontierTools(
       description: 'The references of an INGESTED paper or book chapter, parsed from the source '
         + 'itself — citation chasing. Use when the student wants to go deeper than the current '
         + 'paper: present the actionable ones (those with a url) as next reads and offer '
-        + 'ingest_url (pdfUrl when present, else url). Entries without an id are listed for '
+        + 'ingest_paper (pdfUrl when present, else url). Entries without an id are listed for '
         + 'manual searching — say so.',
       input: z.object({
         title: z.string().describe('the source title as the Library shows it'),
@@ -735,14 +835,7 @@ export function createTutorSession(
   lw: Engram, cfg: HarnessConfig,
   opts: { model?: ChatModel; now?: () => Date } = {},
 ) {
-  const model = opts.model ?? chatModelFor('tutor', cfg);
-  // Which model id the WEB TOOLS should assume — deliberately not the same question as `model`
-  // above. A provider-executed search tool is a request-shape feature of Anthropic's API, so it
-  // only means anything on a real Anthropic route; an injected model (tests) or the scripted e2e
-  // model would carry the declaration to a provider that has never heard of it. `undefined` here
-  // makes buildWebTools fall back to SearXNG-or-nothing, which is the honest answer for those.
-  const searchModelId = opts.model || process.env.LW_MOCK_MODEL
-    ? undefined : cfg.models?.tutor?.model;
+  // Keep thread state here; resolve the configured model inside each respond call.
 
   async function bootstrap(mode: Mode, slugs: string[]): Promise<string> {
     const activeGoal = readGoal(cfg.vault);
@@ -801,7 +894,7 @@ export function createTutorSession(
   function turnError(e: unknown): string {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('[turn-error]', msg);
-    return `The tutor hit an error and this turn was lost: ${msg.slice(0, 200)}`;
+    return explainTurnError(e);
   }
 
   // Which mode each thread's LAST turn ran in. Session context is first-turn-only, so a mid-thread
@@ -813,7 +906,7 @@ export function createTutorSession(
 
   // The rails branch shares this session's model so injected fakes (tests) and the scripted e2e
   // model drive rails turns exactly as they drive agentic ones.
-  const rails = createRailsSession(lw, cfg, { model });
+  const rails = createRailsSession(lw, cfg, { model: opts.model });
 
   async function respond(
     messages: UIMessage[], mode: Mode, threadId = 'default', signal?: AbortSignal,
@@ -827,6 +920,11 @@ export function createTutorSession(
     // that is exactly what `freeform` means here: the harness routes a turn to it by reading the
     // learner's own words, and chatRoute's one-shot writeUp promotion lands in the same place.
     if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId, signal);
+
+    // Snapshot one adapter per turn: UI saves affect the next request, not an in-flight loop.
+    const model = opts.model ?? chatModelFor('tutor', cfg);
+    const searchModelId = opts.model || process.env.LW_MOCK_MODEL
+      ? undefined : cfg.models?.tutor?.model;
 
     const pending = pendingBlockOutputs(messages);
     // A PURE grading turn is the client's auto-resubmit: the history still ENDS on the answered
@@ -888,9 +986,10 @@ export function createTutorSession(
             const why = (e as Error)?.message ?? String(e);
             console.error(`[grade-error] ${p.tool}: ${why}`);
             grading = {
-              verdict: 'reviewed',
+              verdict: 'ungraded',
               source: 'model',
-              detail: `grading failed (${why}) — judge the student's work yourself and say so plainly`,
+              retryable: true,
+              detail: `Could not grade this answer (${why}). Your answer is saved; retry grading after fixing the issue. This is not an incorrect answer. Any tutor feedback is unverified.`,
               evidence: [],
             };
           }
@@ -911,7 +1010,15 @@ export function createTutorSession(
         // research directive over the graded card, so the tutor re-researches and re-teaches the
         // whole topic instead of landing the grade.
         const gap = resubmitPending ? null : await vaultGap(mode, messages, slugs, {
-          search: (query) => lw.call('search', { query }) as Promise<any>,
+          search: async (query) => {
+            const res = await lw.call('search', { query });
+            // engram sets `note` when embeddings were unavailable and the results fell back to a
+            // weaker match — surface it once per turn rather than let a degraded gap-check pass
+            // for a healthy one.
+            const note = searchNote(res);
+            if (note) console.error('[search] degraded:', note);
+            return searchHits(res);
+          },
           readPage: async (slug) => (await lw.call('read_page', { slug })).page,
         });
         // A researched topic must be able to LAND. Teaching modes used to research a gap and then
@@ -947,20 +1054,27 @@ export function createTutorSession(
               + 'Family "manifest": the student writes a YAML manifest from an exam-style task '
               + '(Kubernetes/CKA prep, CI configs, any YAML-configured system), graded by '
               + 'mechanical assertions over the parsed document. '
+              + 'Family "cluster": a LIVE Kubernetes sandbox — a real namespace is set up broken '
+              + '(bad image tag, selector matching nothing, missing ConfigMap key) and the student '
+              + 'fixes it with kubectl in their own terminal, graded on live cluster state. Use it '
+              + 'when the student wants hands-on troubleshooting or asks for a sandbox; use '
+              + '"manifest" when the skill is writing YAML from a spec. The first cluster exercise '
+              + 'on a machine takes a minute or two (the cluster is built once, then reused); needs '
+              + 'kind, kubectl and Docker, and fails loudly with the fix when one is missing. '
               + 'Family "exec": the student writes a WHOLE PROGRAM in a named runtime (python3, '
               + 'bash, ruby, node, sqlite, ...), judged per test case on stdin/argv in and exact '
               + 'stdout out — use it for algorithm practice, CLI tools, text processing, and any '
               + 'language the student wants that their machine has. The sqlite runtime judges SQL: '
               + 'each case is a schema+data fixture and the expected rows of the student\'s query. '
               + 'Family "stream": async-generator-over-byte-chunks (SSE, NDJSON, line protocols, '
-              + 'framing). The result is verified mechanically and stored PENDING REVIEW — tell the '
-              + 'student it is waiting in the Library\'s Practice section for their approval, and do '
-              + 'not promise it mid-conversation.',
+              + 'framing). The result is verified mechanically; one that passes is usable at once — '
+              + 'stage it with code_exercise using the returned pattern. One that fails is rejected: '
+              + 'say so, and do not call this again with the same content.',
             input: z.object({
               pattern: z.string().describe('kebab-case pattern id, e.g. dilution-calculator'),
               description: z.string().describe('what the exercise should teach, 1-3 sentences'),
-              family: z.enum(['function', 'manifest', 'exec', 'stream']).optional()
-                .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); exec for whole programs in a chosen language; stream only for byte-stream parsing'),
+              family: z.enum(['function', 'manifest', 'cluster', 'exec', 'stream']).optional()
+                .describe('function (default) for any-domain computations; manifest for YAML-writing tasks (e.g. Kubernetes); cluster for hands-on kubectl troubleshooting in a live sandbox; exec for whole programs in a chosen language; stream only for byte-stream parsing'),
               runtime: z.enum(['python3', 'bash', 'ruby', 'node', 'typescript', 'sqlite', 'c', 'rust', 'cuda', 'go', 'java']).optional()
                 .describe('exec family only: which runtime the program targets. node and typescript always work (the app itself runs them); python3/bash/ruby need a local install; sqlite needs the sqlite3 shell and judges SQL against an in-memory database; c needs cc, rust needs rustc; go and java run in Docker containers and need Docker running with the image pulled. Generation fails loudly with the exact fix when something is missing.'),
               environment: z.enum(['redis', 'postgres']).optional()
@@ -975,13 +1089,7 @@ export function createTutorSession(
                 const ex = await generateExercise(cfg.vault, slug, description, {
                   generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
                 }, family ?? 'function', runtime, environment);
-                return {
-                  pattern: ex.pattern, status: ex.status,
-                  gates: ex.verification.gates.map((g) => `${g.ok ? 'PASS' : 'FAIL'} ${g.gate}`),
-                  note: ex.status === 'pending'
-                    ? 'verified mechanically; waiting in the Library tab\'s Practice section for the student to approve it'
-                    : 'rejected by the verification gates — do not retry with the same content',
-                };
+                return tutorReport(ex);
               } catch (e: any) {
                 return { error: e?.message ?? String(e) };
               }
@@ -996,18 +1104,34 @@ export function createTutorSession(
         // offer is the only possible ending, and the student's "yes" is a real user turn where
         // the tools return. open_source stays available: navigation is not staging work.
         const gradingOnly = resubmitPending;
-        const system = `${buildInstructions()}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
-          + (gradingOnly
-            ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
-            : '');
+        const sources = readSources(cfg.vault);
         const tools: LoopTool[] = [
-          ...activeMcp, ...buildCourseTools(cfg.vault, cfg.student), ...buildFrontierTools(cfg.vault),
+          ...activeMcp,
+          // No bank, no tools: two schemas describing problems that do not exist were sent on
+          // every turn of every learner who never uploaded a problem set.
+          ...(readBank(cfg.vault).length > 0 ? buildCourseTools(cfg.vault, cfg.student) : []),
+          ...buildFrontierTools(cfg.vault),
           ...webTools.tools, ...ingestTools, ...generateTool,
           // Read per turn, not per boot: an exercise mined or generated mid-session becomes
           // stageable in the very next turn.
           ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource,
-            topicTokens(lastUserText(messages))),
-        ];
+            topicTokens(lastUserText(messages)), generateTool.length > 0),
+        ].filter((tool) => toolFitsTurn(tool.name, {
+          language: isLanguageSubject(messages, slugs),
+          used: toolsUsed(messages),
+          research: gap !== null || mode === 'freeform',
+          hasSources: sources.length > 0,
+          hasVideoSources: sources.some((s) => s.origin?.kind === 'video'),
+          lastUserText: lastUserText(messages),
+        }));
+        const system = `${buildInstructions(turnFacts({
+          tools: [...tools, ...webTools.serverTools].map((t) => t.name), mode, messages,
+          emptyVault: slugs.length === 0, bankSize: readBank(cfg.vault).length,
+          sources, readingSource, slugs,
+        }))}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
+          + (gradingOnly
+            ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
+            : '');
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
         // A mode switch mid-thread re-arms the context injection (see lastModeByThread above).
@@ -1171,46 +1295,77 @@ export function createTutorSession(
         // Which pages this turn actually touched — the provenance the evidence check below needs.
         const touched = { read: [] as string[], staged: [] as string[], written: [] as string[] };
         const run = async (msgs: ChatMessage[]) => {
-          const result = await runLoop({
-            model, system, messages: msgs, tools, serverTools: webTools.serverTools,
-            maxSteps: 24, cache: true, cacheTtl: cfg.cacheTtl, signal: runSignal,
-            onEvent: (e) => writer.forward(e),
-          });
-          // Charged to the CONFIGURED tutor id even when opts.model/LW_MOCK_MODEL injected the
-          // model — the role is what the ledger tracks, and the injected cases report zeros anyway.
-          recordUsage(cfg.vault, {
-            role: 'tutor',
-            model: cfg.models?.tutor?.model ?? 'unknown',
-            usage: result.usage,
-            contextTokens: cfg.models?.tutor?.contextTokens,
-          });
-          loopToolCalls += result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
-          loopText += result.steps.map((s) => s.text).join('\n');
-          for (const tc of result.steps.flatMap((s) => s.toolCalls)) {
-            const a = (tc.input ?? {}) as { slug?: unknown; pageSlug?: unknown };
-            const slug = typeof a.slug === 'string' ? a.slug : undefined;
-            const pageSlug = typeof a.pageSlug === 'string' ? a.pageSlug : undefined;
-            if (tc.toolName === 'read_page' && slug) touched.read.push(slug);
-            else if (tc.toolName === 'write_page' && slug) touched.written.push(slug);
-            else if (pageSlug) touched.staged.push(pageSlug);
+          // Usage tracks the loop's own running total (loop.ts's onUsage), not just runLoop's
+          // return value: a model call can reject or be aborted AFTER real spend already landed
+          // (the provider billed a prior step before the one that failed), and the finally below
+          // must still charge the ledger for that spend even though `result` never gets assigned.
+          let usage: Usage = zeroUsage();
+          try {
+            const result = await runLoop({
+              model, system, messages: msgs, tools, serverTools: webTools.serverTools,
+              maxSteps: 24, cache: true, cacheTtl: cfg.cacheTtl, signal: runSignal,
+              onEvent: (e) => writer.forward(e),
+              onUsage: (u) => { usage = u; },
+            });
+            usage = result.usage;
+            loopToolCalls += result.steps.reduce((n, s) => n + s.toolCalls.length, 0);
+            loopText += result.steps.map((s) => s.text).join('\n');
+            for (const tc of result.steps.flatMap((s) => s.toolCalls)) {
+              const a = (tc.input ?? {}) as { slug?: unknown; pageSlug?: unknown };
+              const slug = typeof a.slug === 'string' ? a.slug : undefined;
+              const pageSlug = typeof a.pageSlug === 'string' ? a.pageSlug : undefined;
+              if (tc.toolName === 'read_page' && slug) touched.read.push(slug);
+              else if (tc.toolName === 'write_page' && slug) touched.written.push(slug);
+              else if (pageSlug) touched.staged.push(pageSlug);
+            }
+            return result.steps.flatMap((s) => s.toolCalls)
+              .filter((tc) => tc.toolName === 'record_evidence')
+              .map((tc) => (tc.input ?? {}) as any);
+          } finally {
+            // Charged to the CONFIGURED tutor id even when opts.model/LW_MOCK_MODEL injected the
+            // model — the role is what the ledger tracks, and the injected cases report zeros
+            // anyway. Runs even when runLoop threw: partial spend is still spend.
+            recordUsage(cfg.vault, {
+              role: 'tutor',
+              model: cfg.models?.tutor?.model ?? 'unknown',
+              usage,
+              contextTokens: cfg.models?.tutor?.contextTokens,
+            });
           }
-          return result.steps.flatMap((s) => s.toolCalls)
-            .filter((tc) => tc.toolName === 'record_evidence')
-            .map((tc) => (tc.input ?? {}) as any);
         };
-        const recordedCalls: any[] = await run(model_messages);
         // Gate on evidence, not on grade COUNT: a grade can legitimately carry none (an unavailable
         // code_exercise — see grading.ts), and nagging the tutor to record evidence that does not
         // exist would train it to invent some.
-        if (grades.some((g) => g.evidence.length > 0) && recordedCalls.length === 0) {
-          // Guardrail: one nudged retry, forwarded into the SAME stream (one start/finish pair).
-          const nudged = await run([...model_messages, userTurn(
-            'HARNESS GUARDRAIL: you did not call record_evidence for the graded block result. Do it now, then continue.',
-          )]);
-          recordedCalls.push(...nudged);
-          if (nudged.length === 0) {
+        let recordedCalls: any[] = [];
+        let guardrailLogged = false;
+        try {
+          recordedCalls = await run(model_messages);
+          if (grades.some((g) => g.evidence.length > 0) && recordedCalls.length === 0) {
+            // Guardrail: one nudged retry, forwarded into the SAME stream (one start/finish pair).
+            const nudged = await run([...model_messages, userTurn(
+              'HARNESS GUARDRAIL: you did not call record_evidence for the graded block result. Do it now, then continue.',
+            )]);
+            recordedCalls.push(...nudged);
+            if (nudged.length === 0) {
+              logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
+              writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true });
+              guardrailLogged = true;
+            }
+          }
+        } finally {
+          // The graded output is already persisted with output.grading set (p.output mutated
+          // above) the moment grading finished, BEFORE either run() call — so a model call that
+          // throws or aborts here (a provider error, a client disconnect) still leaves a graded
+          // card with no evidence, no ledger row, and no guardrail line unless this runs. Same
+          // gate as the try block, so a turn that recorded everything before throwing (a late
+          // abort after the real work landed) is not double-logged.
+          if (!guardrailLogged && grades.some((g) => g.evidence.length > 0) && recordedCalls.length === 0) {
             logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
-            writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true });
+            // No wire chunk when the client is already gone — same rule wire.ts uses for the
+            // error chunk itself: nothing is left to show it to.
+            if (!runSignal.aborted) {
+              writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true });
+            }
           }
         }
         // Recording-integrity detection (DETECTION ONLY): capApplied guarantees the machine grade,

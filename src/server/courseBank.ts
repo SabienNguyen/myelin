@@ -9,8 +9,9 @@
 // Extraction is mechanical (numbering patterns), not model-driven: a bank whose problems were
 // paraphrased by a model would quietly lose the alignment that is its whole reason to exist.
 
-import { existsSync, mkdirSync, readFileSync, appendFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { atomicWrite } from './atomicWrite.js';
 
 export interface CourseProblem {
   /** Stable id: <source-slug>#<n>. */
@@ -126,44 +127,69 @@ export function readBank(vault: string): CourseProblem[] {
   return out;
 }
 
+function writeBank(vault: string, all: CourseProblem[]): void {
+  atomicWrite(bankPath(vault), all.map((e) => JSON.stringify(e)).join('\n') + (all.length ? '\n' : ''));
+}
+
+// One promise-chain "mutex" per vault path, the same shape as queueStore.updateQueue's `chains`
+// and for the same reason: markCorrect and saveProblems both read the WHOLE bank, mutate it, and
+// write the whole thing back. Two calls racing without this (a card graded correct in one turn
+// while another ingest saves a fresh source's problems) would each read the pre-mutation bank and
+// the loser's write clobbers the winner's — the exact lost-update shape queueStore's postmortem
+// describes, just against course-bank.jsonl instead of compile-queue.json.
+const chains = new Map<string, Promise<unknown>>();
+
+function withBank<T>(vault: string, mutator: (all: CourseProblem[]) => T): Promise<T> {
+  const prior = chains.get(vault) ?? Promise.resolve();
+  const next = prior.catch(() => {}).then(() => {
+    const all = readBank(vault);
+    const result = mutator(all);
+    writeBank(vault, all);
+    return result;
+  });
+  chains.set(vault, next);
+  return next;
+}
+
 /** Append a source's extracted problems. Idempotent per source: re-ingesting the same document
  *  replaces its entries rather than duplicating them (a student re-adds the same pset constantly). */
 export function saveProblems(
   vault: string, source: string, problems: { n: number; text: string; answer?: string }[],
-): CourseProblem[] {
-  mkdirSync(join(vault, '.harness'), { recursive: true });
+): Promise<CourseProblem[]> {
   const added = new Date().toISOString().slice(0, 10);
-  // Ids must be unique or spacing lies: real psets repeat printed numbers across sections (two
-  // "Problem 1"s), and parseFloat collapses "2.10" into 2.1 — either way markCorrect would mark
-  // the FIRST holder of the id and mark_course_problem could never reach the second. Repeats get
-  // a stable occurrence suffix (extraction order is deterministic, so re-ingesting reproduces
-  // the same ids and the replace-per-source idempotence keeps holding).
-  const counts = new Map<string, number>();
-  const fresh: CourseProblem[] = problems.map((p) => {
-    const base = `${source}#${p.n}`;
-    const seen = counts.get(base) ?? 0;
-    counts.set(base, seen + 1);
-    return {
-      id: seen === 0 ? base : `${base}~${seen + 1}`, source, n: p.n, text: p.text,
-      ...(p.answer ? { answer: p.answer } : {}), added,
-    };
+  return withBank(vault, (all) => {
+    // Ids must be unique or spacing lies: real psets repeat printed numbers across sections (two
+    // "Problem 1"s), and parseFloat collapses "2.10" into 2.1 — either way markCorrect would mark
+    // the FIRST holder of the id and mark_course_problem could never reach the second. Repeats get
+    // a stable occurrence suffix (extraction order is deterministic, so re-ingesting reproduces
+    // the same ids and the replace-per-source idempotence keeps holding).
+    const counts = new Map<string, number>();
+    const fresh: CourseProblem[] = problems.map((p) => {
+      const base = `${source}#${p.n}`;
+      const seen = counts.get(base) ?? 0;
+      counts.set(base, seen + 1);
+      return {
+        id: seen === 0 ? base : `${base}~${seen + 1}`, source, n: p.n, text: p.text,
+        ...(p.answer ? { answer: p.answer } : {}), added,
+      };
+    });
+    const others = all.filter((e) => e.source !== source);
+    all.length = 0;
+    all.push(...others, ...fresh);
+    return fresh;
   });
-  const others = readBank(vault).filter((e) => e.source !== source);
-  const all = [...others, ...fresh];
-  writeFileSync(bankPath(vault), all.map((e) => JSON.stringify(e)).join('\n') + (all.length ? '\n' : ''));
-  return fresh;
 }
 
 /** Mark a problem correctly answered today BY THIS STUDENT — spacing reads this to decide re-asks. */
-export function markCorrect(vault: string, id: string, student: string): boolean {
-  const all = readBank(vault);
-  const hit = all.find((e) => e.id === id);
-  if (!hit) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  hit.lastCorrectBy = { ...(hit.lastCorrectBy ?? {}), [student]: today };
-  hit.lastCorrect = today; // legacy mirror
-  writeFileSync(bankPath(vault), all.map((e) => JSON.stringify(e)).join('\n') + '\n');
-  return true;
+export function markCorrect(vault: string, id: string, student: string): Promise<boolean> {
+  return withBank(vault, (all) => {
+    const hit = all.find((e) => e.id === id);
+    if (!hit) return false;
+    const today = new Date().toISOString().slice(0, 10);
+    hit.lastCorrectBy = { ...(hit.lastCorrectBy ?? {}), [student]: today };
+    hit.lastCorrect = today; // legacy mirror
+    return true;
+  });
 }
 
 /** When THIS student last answered it, or undefined. A bank written before `lastCorrectBy` existed

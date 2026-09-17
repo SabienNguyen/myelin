@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { anthropicModel, runLoop } from '../src/server/llm/index.js';
 import { buildWebTools, type WebTools } from '../src/server/webTools.js';
+import { UrlRefusedError } from '../src/server/urlGuard.js';
 
 let server: Server;
 let base: string;
@@ -19,6 +20,11 @@ beforeAll(async () => {
       }));
       return;
     }
+    if (url.pathname === '/moved') {
+      res.statusCode = 302; res.setHeader('location', '/internal'); res.end();
+      return;
+    }
+    if (url.pathname === '/internal') { res.end('<p>loopback secret</p>'); return; }
     if (url.pathname === '/page') {
       res.setHeader('content-type', 'text/html');
       res.end('<html><nav>MENU</nav><body><h1>Title</h1><p>Real content here.</p><footer>foot</footer></body></html>');
@@ -34,6 +40,10 @@ afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
 const cfg = (searxng?: string) => ({ search: searxng ? { searxng } : undefined }) as any;
 const OLLAMA = 'ollama:qwen2.5';
+const OPENAI = 'openai:gpt-5';
+
+// The fixture server is on 127.0.0.1, which the production guard exists to refuse.
+const LOCAL_OK = { guard: async () => {} };
 
 const names = (wt: WebTools) => wt.tools.map((t) => t.name);
 const tool = (wt: WebTools, name: string) => wt.tools.find((t) => t.name === name)!;
@@ -63,6 +73,25 @@ describe('web research tools', () => {
     ]);
   });
 
+  it('falls back to SearXNG for an openai:-routed tutor too, since the provider tool is Anthropic-only', async () => {
+    // H7: an openai:-routed tutor is served by openaiCompat.ts, which drops server tools rather
+    // than send them — declaring web_search_20260209 here would be a silent no-op, not a feature.
+    const wt = buildWebTools(cfg(base), OPENAI);
+    expect(wt.serverTools).toEqual([]);
+    const search = tool(wt, 'web_search');
+    const out: any = await search.execute!({ query: 'derivatives' });
+    expect(out.results).toEqual([
+      { title: 'Alpha', url: 'https://a.example/x', snippet: 'first hit' },
+      { title: 'Beta', url: 'https://b.example/y', snippet: 'second hit' },
+    ]);
+  });
+
+  it('gives an openai:-routed tutor with no SearXNG configured no search tool at all', () => {
+    const wt = buildWebTools(cfg(), OPENAI);
+    expect(names(wt)).toEqual(['read_url']);
+    expect(wt.serverTools).toEqual([]);
+  });
+
   it('prefers the provider tool over a configured SearXNG when both are possible', () => {
     const wt = buildWebTools(cfg(base), 'claude-opus-5');
     expect(wt.serverTools.map((t) => t.name)).toEqual(['web_search']);
@@ -76,7 +105,7 @@ describe('web research tools', () => {
   });
 
   it('read_url extracts readable text, skipping nav/footer', async () => {
-    const wt = buildWebTools(cfg(base), OLLAMA);
+    const wt = buildWebTools(cfg(base), OLLAMA, LOCAL_OK);
     const out: any = await tool(wt, 'read_url').execute!({ url: `${base}/page` });
     expect(out.text).toContain('Real content here.');
     expect(out.text).not.toContain('MENU');
@@ -134,8 +163,28 @@ describe('web research tools', () => {
     const down = buildWebTools(cfg('http://127.0.0.1:1'), OLLAMA);
     const s: any = await tool(down, 'web_search').execute!({ query: 'x' });
     expect(s.error).toMatch(/unavailable/);
-    const wt = buildWebTools(cfg(base), OLLAMA);
+    const wt = buildWebTools(cfg(base), OLLAMA, LOCAL_OK);
     const f: any = await tool(wt, 'read_url').execute!({ url: `${base}/missing` });
     expect(f.error).toMatch(/404/);
+  });
+
+  // The model reads untrusted pages; one of them naming a loopback URL must not turn read_url into
+  // a proxy onto this app's own API, Ollama or AnkiConnect.
+  it('read_url refuses a loopback address by default, and says refused rather than unavailable', async () => {
+    const wt = buildWebTools(cfg(), OLLAMA);
+    const out: any = await tool(wt, 'read_url').execute!({ url: `${base}/page` });
+    expect(out.error).toMatch(/^refused: .*private or loopback/);
+    expect(out.text).toBeUndefined();
+  });
+
+  it('read_url re-checks every redirect hop, so a permitted page cannot bounce it somewhere refused', async () => {
+    const guard = async (url: string) => {
+      if (url.endsWith('/internal')) throw new UrlRefusedError('internal is off limits');
+    };
+    const wt = buildWebTools(cfg(), OLLAMA, { guard });
+    const out: any = await tool(wt, 'read_url').execute!({ url: `${base}/moved` });
+    expect(out.error).toBe('refused: internal is off limits');
+    const followed: any = await tool(buildWebTools(cfg(), OLLAMA, LOCAL_OK), 'read_url').execute!({ url: `${base}/moved` });
+    expect(followed.text).toContain('loopback secret');
   });
 });

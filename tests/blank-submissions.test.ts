@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { gradeBlockOutput } from '../src/server/grading.js';
+import { BLOCK_TOOL_NAMES } from '../src/shared/blocks.js';
 
 const cfg = { vault: '/tmp', student: 'kid', models: {} } as any;
 const yesMan = {
@@ -47,6 +48,21 @@ const CASES: [string, any, any][] = [
   ['math_scratchpad',
     { problemLatex: 'x^2', pageSlug: 'p', expectedLatex: '2x' },
     { steps: [], finalLatex: '' }],
+  ['code_exercise (never attempted)',
+    { pattern: 'stream-consumer', rung: 'ladder', pageSlug: 'stream-consumer' },
+    { completed: false, rungReached: 'ladder', testsPassed: 0, testsTotal: 0, wroteCode: false }],
+  ['pronounce (no clean attempt)',
+    { word: 'má', lang: 'vi', tone: 'sac', pageSlug: 'p', requiredPasses: 3 },
+    { passes: 0, required: 3, applied: false, attempts: 0 }],
+  ['label_diagram (nothing placed)',
+    {
+      prompt: 'Label the heart', pageSlug: 'p', svg: '<svg></svg>',
+      regions: [{ id: 'r1', x: 10, y: 10, label: 'Atrium' }, { id: 'r2', x: 50, y: 50, label: 'Ventricle' }],
+    },
+    { placements: [] }],
+  ['watch_video (not watched)',
+    { url: 'https://youtu.be/dQw4w9WgXcQ', why: 'w', pageSlug: 'p' },
+    { watched: false }],
 ];
 
 describe('no block grades an empty submission correct', () => {
@@ -57,5 +73,12 @@ describe('no block grades an empty submission correct', () => {
     for (const e of g.evidence ?? []) {
       expect(['struggled', 'misconception', 'exposed']).toContain(e.kind);
     }
+  });
+
+  // The property this file guards only holds if every block kind is actually represented above —
+  // a new block added to blocks.ts without a case here would silently go untested.
+  it('CASES covers every block kind in BLOCK_TOOL_NAMES', () => {
+    const covered = new Set(CASES.map(([name]) => name.split(' ')[0]));
+    expect([...covered].sort()).toEqual([...BLOCK_TOOL_NAMES].sort());
   });
 });

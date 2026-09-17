@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { atomicWrite } from './atomicWrite.js';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,7 +13,16 @@ import { join } from 'node:path';
  * The environment always wins. A user who exports ANTHROPIC_API_KEY, or a deployment that injects
  * it, should never have a stale saved key silently override them.
  */
+/**
+ * Where credentials (and settings.json) live when they did not come from the environment.
+ *
+ * MYELIN_CONFIG_DIR overrides the OS location wholesale. The e2e suite sets it: the fixture
+ * backends must not read the developer's real settings.json, whose saved model ids and
+ * tutorRails flag silently overrode the fixture config (rails.config.json's scripted models
+ * became gpt-5.6-luna mid-suite — CI never saw it because CI has no ~/.config/myelin).
+ */
 export function credentialsPath(home = homedir(), os = platform()): string {
+  if (process.env.MYELIN_CONFIG_DIR) return join(process.env.MYELIN_CONFIG_DIR, 'credentials.json');
   if (os === 'darwin') return join(home, 'Library', 'Application Support', 'Myelin', 'credentials.json');
   if (os === 'win32') {
     return join(process.env.APPDATA ?? join(home, 'AppData', 'Roaming'), 'Myelin', 'credentials.json');
@@ -36,11 +46,8 @@ export function readCredentials(path = credentialsPath()): Credentials {
 }
 
 export function writeCredentials(creds: Credentials, path = credentialsPath()): void {
-  mkdirSync(join(path, '..'), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(creds, null, 2)}\n`, { mode: 0o600 });
-  // Explicit chmod as well as the open mode: if the file already existed, `mode` on writeFileSync
-  // is ignored, so a file created loosely once would stay loose forever.
-  try { chmodSync(path, 0o600); } catch { /* best effort — Windows has no POSIX mode */ }
+  // Atomic: a save torn by a crash reads back as "no key", and the app would ask for one again.
+  atomicWrite(path, `${JSON.stringify(creds, null, 2)}\n`, 0o600);
 }
 
 /**

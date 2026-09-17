@@ -42,6 +42,11 @@ export interface RunLoopOptions {
    * execution, so an abandoned run stops burning tokens and tool side effects. */
   signal?: AbortSignal;
   onEvent?: (e: LoopEvent) => void;
+  /** Fires after every step with the running total so far. A step's model call can throw (a
+   * provider error, an abort) AFTER usage for that step already landed on the wire but BEFORE
+   * runLoop returns — session.ts's usage ledger needs that spend recorded even when the turn
+   * never reaches a normal return, so it tracks this instead of only reading the final result. */
+  onUsage?: (usage: Usage) => void;
 }
 
 export interface LoopStep {
@@ -105,6 +110,7 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       }
     }
     opts.onEvent?.({ type: 'step-finish' });
+    opts.onUsage?.({ ...usage });
     steps.push({ toolCalls, text });
 
     // Thinking first, mirroring wire order (it streams ahead of text and tool calls): the
@@ -151,8 +157,17 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       if (!tool) {
         // A hallucinated tool name is reported as a failed result so the model can recover,
         // rather than halting the run as if a client were going to answer it.
-        output = `unknown tool: ${call.toolName}`;
+        //
+        // Mostly this is not hallucination: session.ts offers a different registry per turn (block
+        // tools withheld on a grading turn, web tools and write_page only on a vault gap), while
+        // the transcript still shows the model calling those names a turn ago — so it calls them
+        // again. Naming what IS on offer lets it recover in one step instead of retrying the same
+        // name, and the log line is the only trace this leaves: it never reproduces on a fresh
+        // thread, because a fresh thread has no such history to imitate.
+        const offered = [...byName.keys(), ...(opts.serverTools ?? []).map((t) => t.name)].join(', ') || 'none';
+        output = `unknown tool: ${call.toolName} is not available on this turn. Available: ${offered}`;
         isError = true;
+        console.error(`[loop] model called ${call.toolName}, which this turn does not offer (offered: ${offered})`);
       } else {
         try {
           output = await tool.execute!(call.input);

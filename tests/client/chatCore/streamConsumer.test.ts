@@ -93,6 +93,16 @@ describe('consumeChatStream', () => {
     expect(onError).toHaveBeenCalledWith('The connection to the tutor dropped mid-turn.');
   });
 
+  // A 409 used to read "The tutor is unreachable right now (HTTP 409)" — the server was reached
+  // and had said exactly why it refused.
+  it('shows the server\'s own reason for a 4xx instead of calling the tutor unreachable', async () => {
+    const refused = new Response(JSON.stringify({ error: 'The previous turn is still shutting down — try again in a moment.' }),
+      { status: 409, headers: { 'content-type': 'application/json' } });
+    const { result, onError } = consume(async () => refused);
+    await result;
+    expect(onError.mock.calls[0]![0]).toBe('The previous turn is still shutting down — try again in a moment.');
+  });
+
   it('reports an HTTP failure without a method or path in the learner-facing text', async () => {
     const { result, onFinish, onError } = consume(async () => ({ ok: false, status: 502, body: null } as unknown as Response));
     await result;

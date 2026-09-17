@@ -178,6 +178,52 @@ describe('runLoop', () => {
     expect(out.messages.at(-1)).toMatchObject({ role: 'user' });
   });
 
+  it('reports the running usage total via onUsage after every step', async () => {
+    const { model } = scriptedModel([
+      [call('t1', 'lookup', {}), finish('tool-calls', { inputTokens: 10, outputTokens: 5 })],
+      [finish('stop', { inputTokens: 20, outputTokens: 7 })],
+    ]);
+    const reported: Usage[] = [];
+    await runLoop({
+      model,
+      messages: START,
+      tools: [{ name: 'lookup', description: 'd', inputSchema: {}, execute: async () => 'r' }],
+      maxSteps: 5,
+      onUsage: (u) => reported.push(u),
+    });
+    expect(reported).toEqual([
+      { inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      { inputTokens: 30, outputTokens: 12, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ]);
+  });
+
+  // A caller (session.ts) records spend to the ledger even when the turn never reaches a normal
+  // return — a model call rejecting mid-turn must not make the FIRST step's already-billed usage
+  // vanish from the books.
+  it('has reported the prior step\'s usage via onUsage before a later step throws', async () => {
+    let calls = 0;
+    const model: ChatModel = {
+      generate() { throw new Error('loop tests never call generate'); },
+      async *stream(_req: ChatRequest) {
+        if (calls++ === 0) {
+          yield call('t1', 'lookup', {});
+          yield finish('tool-calls', { inputTokens: 10, outputTokens: 5 });
+        } else {
+          throw new Error('provider overloaded');
+        }
+      },
+    };
+    const reported: Usage[] = [];
+    await expect(runLoop({
+      model,
+      messages: START,
+      tools: [{ name: 'lookup', description: 'd', inputSchema: {}, execute: async () => 'r' }],
+      maxSteps: 5,
+      onUsage: (u) => reported.push(u),
+    })).rejects.toThrow('provider overloaded');
+    expect(reported).toEqual([{ inputTokens: 10, outputTokens: 5, cacheReadTokens: 0, cacheWriteTokens: 0 }]);
+  });
+
   it('turns a throwing execute into an isError result and continues', async () => {
     const { model, requests } = scriptedModel([
       [call('t1', 'lookup', { q: 'x' }), finish('tool-calls')],
@@ -215,7 +261,7 @@ describe('runLoop', () => {
     expect(out.stopReason).toBe('end');
     expect(out.messages[2].content[0]).toEqual({
       type: 'tool-result', toolCallId: 't1', toolName: 'no_such_tool',
-      output: 'unknown tool: no_such_tool', isError: true,
+      output: 'unknown tool: no_such_tool is not available on this turn. Available: lookup', isError: true,
     });
   });
 
@@ -402,7 +448,7 @@ describe('runLoop', () => {
     });
     expect(out.messages[2].content).toEqual([
       { type: 'tool-result', toolCallId: 't1', toolName: 'p', output: { n: 1 } },
-      { type: 'tool-result', toolCallId: 't2', toolName: 'ghost', output: 'unknown tool: ghost', isError: true },
+      { type: 'tool-result', toolCallId: 't2', toolName: 'ghost', output: 'unknown tool: ghost is not available on this turn. Available: p', isError: true },
       { type: 'tool-result', toolCallId: 't3', toolName: 'p', output: { n: 2 } },
     ]);
   });

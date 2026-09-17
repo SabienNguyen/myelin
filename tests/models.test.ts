@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { chatModelFor, withRequestDefaults } from '../src/server/models.js';
+import { chatModelFor, modelRouteFor, withRequestDefaults } from '../src/server/models.js';
 import type { ChatModel, ChatRequest } from '../src/server/llm/index.js';
 
 const cfg = { models: { tutor: { model: 'claude-sonnet-5' }, grader: { model: 'claude-haiku-4-5' } } } as any;
@@ -54,6 +54,36 @@ describe('chatModelFor (the model router)', () => {
     } finally {
       if (prevKey !== undefined) process.env.OPENAI_COMPAT_API_KEY = prevKey;
     }
+  });
+
+  it('openrouter: resolves without OPENAI_COMPAT_BASE_URL and reads OPENROUTER_API_KEY per call', () => {
+    const orCfg = { models: { grader: { model: 'openrouter:deepseek/deepseek-chat:free' } } } as any;
+    const savedBase = process.env.OPENAI_COMPAT_BASE_URL;
+    const savedKey = process.env.OPENROUTER_API_KEY;
+    delete process.env.OPENAI_COMPAT_BASE_URL;
+    delete process.env.OPENROUTER_API_KEY;
+    try {
+      // The whole point of the openrouter: route: no compat base URL configured anywhere, and it
+      // still resolves — the route pins its own endpoint.
+      expect(typeof chatModelFor('grader', orCfg).generate).toBe('function');
+    } finally {
+      if (savedBase !== undefined) process.env.OPENAI_COMPAT_BASE_URL = savedBase;
+      if (savedKey !== undefined) process.env.OPENROUTER_API_KEY = savedKey;
+    }
+  });
+
+  it('openrouter: works without an api key at resolve time — the provider owns the 401', () => {
+    // Keyless resolve on purpose: the key may be saved through the setup panel AFTER the role is
+    // configured, and models resolve per call, so a missing key at route time is not an error.
+    const orCfg = { models: { grader: { model: 'openrouter:z-ai/glm-5.2:free' } } } as any;
+    expect(typeof chatModelFor('grader', orCfg).generate).toBe('function');
+  });
+
+  it('modelRouteFor classifies the openrouter: prefix', () => {
+    expect(modelRouteFor('openrouter:deepseek/deepseek-chat:free')).toBe('openrouter');
+    expect(modelRouteFor('openai:foo')).toBe('openai');
+    expect(modelRouteFor('ollama:q')).toBe('ollama');
+    expect(modelRouteFor('claude-sonnet-5')).toBe('anthropic');
   });
 
   it('withRequestDefaults injects the role\'s effort and sampler into every request without touching the rest', async () => {

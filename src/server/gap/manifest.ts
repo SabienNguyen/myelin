@@ -69,6 +69,48 @@ export function resolvePath(root: unknown, path: string): { found: boolean; valu
 
 const show = (v: unknown) => (v === undefined ? '(undefined)' : JSON.stringify(v));
 
+/** One assertion against one parsed object. Shared by the two graders that differ only in where
+ *  the object comes from: a document in the learner's YAML (gradeManifest), or a live resource
+ *  read back from a cluster (cluster.ts). `label` is how the path reads in a failure row. */
+export function assertOn(
+  root: unknown, path: string, a: ManifestAssertion, label = a.path,
+): RunnerResult['results'][number] {
+  const { found, value } = resolvePath(root, path);
+
+  let ok = false;
+  let expected = '';
+  let actual = '';
+  switch (a.op) {
+    case 'exists':
+      ok = found;
+      expected = `${label} present`;
+      actual = found ? 'present' : 'missing';
+      break;
+    case 'absent':
+      ok = !found;
+      expected = `${label} absent`;
+      actual = found ? `present: ${show(value)}` : 'absent';
+      break;
+    case 'matches':
+      ok = found && new RegExp(String(a.value ?? '')).test(String(value));
+      expected = `${label} matching /${String(a.value ?? '')}/`;
+      actual = found ? show(value) : 'missing';
+      break;
+    case 'eq':
+    default:
+      // canonicalJSON, not raw stringify: a YAML map is unordered, so a learner whose labels read
+      // { tier, app } must match an expected { app, tier }. Arrays keep their order (a container
+      // list or args sequence is meaning), which canonicalJSON preserves.
+      ok = found && canonicalJSON(value) === canonicalJSON(a.value);
+      expected = show(a.value);
+      actual = found ? show(value) : 'missing';
+      break;
+  }
+  const row: RunnerResult['results'][number] = { name: a.name, pass: ok };
+  if (!ok) { row.expected = expected; row.actual = actual; }
+  return row;
+}
+
 /**
  * Grade a learner's YAML against the assertions. Returns the same RunnerResult shape the child
  * runner produces, so /api/gap/run's consumers (TestResultsPanel, grading.ts, the reveal ceiling)
@@ -87,42 +129,9 @@ export function gradeManifest(yamlText: string, assertions: ManifestAssertion[])
   for (const a of assertions) {
     const docMatch = /^docs\[(\d+)\]\.(.*)$/.exec(a.path);
     const root = docMatch ? docs[Number(docMatch[1])] : docs[0];
-    const path = docMatch ? docMatch[2] : a.path;
-    const { found, value } = resolvePath(root, path);
-
-    let ok = false;
-    let expected = '';
-    let actual = '';
-    switch (a.op) {
-      case 'exists':
-        ok = found;
-        expected = `${a.path} present`;
-        actual = found ? 'present' : 'missing';
-        break;
-      case 'absent':
-        ok = !found;
-        expected = `${a.path} absent`;
-        actual = found ? `present: ${show(value)}` : 'absent';
-        break;
-      case 'matches':
-        ok = found && new RegExp(String(a.value ?? '')).test(String(value));
-        expected = `${a.path} matching /${String(a.value ?? '')}/`;
-        actual = found ? show(value) : 'missing';
-        break;
-      case 'eq':
-      default:
-        // canonicalJSON, not raw stringify: a YAML map is unordered, so a learner whose labels read
-        // { tier, app } must match an expected { app, tier }. Arrays keep their order (a container
-        // list or args sequence is meaning), which canonicalJSON preserves.
-        ok = found && canonicalJSON(value) === canonicalJSON(a.value);
-        expected = show(a.value);
-        actual = found ? show(value) : 'missing';
-        break;
-    }
-    const row: RunnerResult['results'][number] = { name: a.name, pass: ok };
-    if (!ok) { row.expected = expected; row.actual = actual; }
+    const row = assertOn(root, docMatch ? docMatch[2] : a.path, a);
     results.push(row);
-    if (ok) fired.push(a.name);
+    if (row.pass) fired.push(a.name);
   }
   return { pass: results.every((r) => r.pass), results, trace: { fired } };
 }

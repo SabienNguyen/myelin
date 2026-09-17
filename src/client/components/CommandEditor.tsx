@@ -12,9 +12,11 @@ import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import { Placeholder, UndoRedo } from '@tiptap/extensions';
 import { PluginKey, TextSelection } from '@tiptap/pm/state';
+import { closeHistory } from '@tiptap/pm/history';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { Suggestion } from '@tiptap/suggestion';
 import type { Command } from '../../shared/commands.js';
+import { SymbolKeyboard } from './SymbolKeyboard.js';
 import {
   filterCommands, serializeComposerDoc, type CommandSpec, type ComposerPayload,
 } from '../lib/slashCommands.js';
@@ -242,6 +244,15 @@ export function CommandEditor({ handleRef, onEnter, onEmptyChange }: {
         </div>
       )}
       <EditorContent editor={editor} />
+      <SymbolKeyboard disabled={!editor} onInsert={(symbol) => {
+        if (!editor) return;
+        editor.commands.command(({ tr, dispatch }) => {
+          closeHistory(tr);
+          if (dispatch) dispatch(tr.insertText(symbol));
+          return true;
+        });
+        editor.commands.focus();
+      }} />
     </div>
   );
 }

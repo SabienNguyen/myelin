@@ -38,11 +38,20 @@ export interface SpawnMcpServerOptions {
    * passes {...process.env, ENGRAM_VAULT, ...}). Absent means inherit. */
   env?: Record<string, string>;
   onUncaughtError?: (error: unknown) => void;
+  /** How long a single request may sit unanswered before it's treated as a dead transport.
+   * Default 120s — generous for a slow tool call (e.g. a large embed), short enough that a
+   * wedged engram child doesn't hang a turn forever. The rejection message starts with
+   * `mcp transport timeout:` so mcp.ts's isTransportError path respawns the child on it, same
+   * as a closed pipe. */
+  requestTimeoutMs?: number;
 }
+
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 interface Pending {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
+  timer: NodeJS.Timeout;
 }
 
 export async function spawnMcpServer(opts: SpawnMcpServerOptions): Promise<McpConnection> {
@@ -53,12 +62,13 @@ export async function spawnMcpServer(opts: SpawnMcpServerOptions): Promise<McpCo
     shell: false,
   });
   const onUncaught = opts.onUncaughtError ?? ((e: unknown) => console.error('[mcp-client]', e));
+  const requestTimeoutMs = opts.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const pending = new Map<number, Pending>();
   let nextId = 1;
   let closed = false;
 
   const rejectAll = (reason: string) => {
-    for (const p of pending.values()) p.reject(new Error(reason));
+    for (const p of pending.values()) { clearTimeout(p.timer); p.reject(new Error(reason)); }
     pending.clear();
   };
 
@@ -87,6 +97,7 @@ export async function spawnMcpServer(opts: SpawnMcpServerOptions): Promise<McpCo
     const p = pending.get(msg.id);
     if (!p) return;
     pending.delete(msg.id);
+    clearTimeout(p.timer);
     if (msg.error) p.reject(new Error(`mcp error ${msg.error.code}: ${msg.error.message}`));
     else p.resolve(msg.result);
   };
@@ -123,7 +134,12 @@ export async function spawnMcpServer(opts: SpawnMcpServerOptions): Promise<McpCo
     if (closed) return Promise.reject(new Error('mcp transport closed'));
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`mcp transport timeout: ${method}`));
+      }, requestTimeoutMs);
+      timer.unref?.();
+      pending.set(id, { resolve, reject, timer });
       send({ jsonrpc: '2.0', id, method, ...(params !== undefined ? { params } : {}) });
     });
   };

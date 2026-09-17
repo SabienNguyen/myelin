@@ -99,6 +99,30 @@ describe('syncOutbound — ledger dedup and update-in-place', () => {
     await lw.close();
   }, 30_000);
 
+  // The ledger mutex stops another writer interleaving; it does nothing for the process dying, and
+  // a run makes one model call per page. A note that reached Anki with no ledger row is orphaned
+  // for good — every later tick's addNote throws "duplicate" for it. So the ledger must already
+  // hold push N on disk by the time push N+1 starts.
+  it('has persisted each push before the next one begins', async () => {
+    const { vault, cfg, lw } = await makeVaultEngram('kid-flush', 'limits', 'Limits');
+    await bringToPracticing(lw, 'kid-flush', 'limits');
+    const real = new AnkiClient(url);
+    const ledgerPath = join(vault, '.harness', 'anki-map.json');
+    const onDiskAtEachAdd: number[] = [];
+    const anki = {
+      isUp: () => real.isUp(),
+      invoke: (action: string, params: unknown) => {
+        if (action === 'addNote') {
+          onDiskAtEachAdd.push(existsSync(ledgerPath) ? Object.keys(JSON.parse(readFileSync(ledgerPath, 'utf8'))).length : 0);
+        }
+        return real.invoke(action, params as any);
+      },
+    } as unknown as AnkiClient;
+    await syncOutbound(lw, anki, cfg, { generateCards: async () => [{ front: 'Q1', back: 'A1' }, { front: 'Q2', back: 'A2' }] });
+    expect(onDiskAtEachAdd).toEqual([0, 1]);
+    await lw.close();
+  }, 30_000);
+
   it('updates notes in place when generated card content changes', async () => {
     const { cfg, lw } = await makeVaultEngram('kid2', 'chain-rule', 'Chain Rule');
     await bringToPracticing(lw, 'kid2', 'chain-rule');

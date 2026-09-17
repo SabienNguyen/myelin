@@ -88,8 +88,8 @@ and decays it over time, so the picture moves down as well as up.
 
 1. **Node ≥ 22**
 2. `npm i`
-3. `npm start`, open the app, and paste an **Anthropic API key** when it asks (or point the model
-   roles at a local `ollama:` model — see below).
+3. `npm start`, open the app, and paste a free **[OpenRouter](https://openrouter.ai/settings/keys) key**
+   when it asks (or point the model roles at Anthropic or a local `ollama:` model — see below).
 
 That is the whole required setup. **There is no config file to write** — every field has a working
 default (`src/server/config.ts`):
@@ -98,7 +98,7 @@ default (`src/server/config.ts`):
 |---|---|---|
 | Vault | `~/Documents/Myelin` (created at boot) | `vault` |
 | Student id | your OS username | `student` |
-| Models | Sonnet for tutor/quiz/compile, Haiku for grader/card_gen | click the model badge in the top bar, or `models.*.model` |
+| Models | `openrouter:openrouter/free` for every role, tutor on rails — free to try | click the model badge in the top bar, or `models.*.model` |
 | Engram server | found automatically: installed dependency, then a sibling checkout | `ENGRAM_ENTRY`, or `engram.command`/`args` |
 | Port | 4820 | `port` |
 
@@ -136,6 +136,8 @@ Every `models.*.model` id is routed by prefix, so a config can freely mix routes
 | *plain id* (`claude-sonnet-5`) | Anthropic API | `ANTHROPIC_API_KEY` |
 | `ollama:qwen2.5-coder:14B` | local Ollama (OpenAI-compatible endpoint) | free, local; `OLLAMA_BASE_URL` to move it, `OLLAMA_API_KEY` only for a key-protected proxy |
 | `openai:deepseek/deepseek-chat` | any OpenAI-compatible provider | `OPENAI_COMPAT_BASE_URL` (required) + `OPENAI_COMPAT_API_KEY` |
+| `openrouter:openrouter/free` | OpenRouter, endpoint pinned — **the default** | `OPENROUTER_API_KEY` (a free key works) |
+| `groq:openai/gpt-oss-120b` | Groq, endpoint pinned | `GROQ_API_KEY` — the free tier caps tokens per minute below one full tutor request, so pair it with rails |
 
 All of this is editable in-app: click the model badge in the top bar to change any role or the
 provider endpoints while the app runs — saves land in `settings.json` beside the credentials file
@@ -307,9 +309,12 @@ unverified.
 
 **Dev** (two processes, hot reload):
 ```bash
-npm run dev:server   # Hono + first-party model harness (src/server/llm) + Engram MCP client, :4820
-npm run dev:client   # Vite dev server, :5173
+npm run dev:server   # Backend on :4820; restarts automatically when imported source files change
+npm run dev:client   # Vite on :5173; browser updates automatically when client files change
 ```
+Open **http://localhost:5173** while developing. Vite proxies `/api` to the backend on :4820.
+The :4820 page serves the last production build and does not hot-reload.
+Backend edits restart the server and can interrupt an in-flight request; resend it after restart.
 
 **Production-ish** (single machine, no reload):
 ```bash
