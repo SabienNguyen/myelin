@@ -246,6 +246,34 @@ a `WEAK_MODE=reject-rf` variant that refuses `response_format` so the forced-too
 engages. Point the app at it with `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:4901/v1` and the model
 id `openai:weak-7b`.
 
+### When a conversation outgrows the context window
+
+Two layers keep a long thread inside the model's window, and both apply to the **model's view
+only** — the saved transcript, the client, and grading always see every word.
+
+**The history diet** shrinks what each turn costs: a graded block's submission collapses to a
+verdict line once the turn moves on, a page body or search result older than two turns becomes a
+one-line stub, and an attachment from an earlier message becomes `[image attached earlier: …]`.
+
+**Compaction** bounds how many turns there are. Once the estimated history crosses its budget, the
+oldest turns are replaced by a summary written by the `compile` role — what was taught, what the
+student did and how it graded, what was left unfinished. The last six turns are never summarized,
+cuts only happen at turn boundaries, and the summary tells the tutor to trust `get_student_state`
+and the pages over its own precis.
+
+Summaries are written **once and stored** under `vault/.harness/compaction/<thread>.json`, then
+replayed byte-for-byte on every later turn. That is not an optimization detail — the prompt cache
+is a prefix match, so a summary recomputed each turn would invalidate the cache on every request
+and cost more than the overflow it prevents. Blocks are append-only for the same reason: adding a
+second one leaves the first one's bytes alone.
+
+The budget is `models.tutor.contextTokens` minus 16k of headroom for the system prompt and the
+answer, or 48k tokens when no window is declared — roughly fifty turns, so an ordinary sitting
+never reaches it. Set `contextTokens` on the tutor role if your model's window is smaller than
+64k. Compaction logs one line when it fires (`[compaction] thread …`); if the summarizing call
+fails, a mechanical summary naming the topics and verdicts is stored instead, because a thread
+being saved from overflow is the wrong moment to fail the turn.
+
 <details>
 <summary><b>Ollama caveats: context length and leaked chat-template tokens</b></summary>
 

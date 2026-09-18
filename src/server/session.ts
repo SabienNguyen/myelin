@@ -16,6 +16,8 @@ import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
 import { appliedGradeBypass, gradeBlockOutput, untouchedSlugEvidence } from './grading.js';
 import { dietUiMessages } from './historyDiet.js';
+import { compactHistory, historyBudgetTokens } from './historyCompaction.js';
+import { compactionDeps } from './historyCompactionSeam.js';
 import { buildIngestTools } from './ingestTools.js';
 import { searchHits, searchNote, type Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
@@ -1264,7 +1266,22 @@ export function createTutorSession(
         // about to grade-and-discuss, and their payload carries the machine grade merged above.
         const keepIds = new Set(pending.map((p) => p.toolCallId));
         const dieted = dietUiMessages(messages, keepIds);
-        const model_messages = [...leading, ...uiMessagesToChatMessages(dieted), ...trailing];
+        // History compaction: the diet bounds what each turn COSTS, this bounds how many turns
+        // there are (historyCompaction.ts). Measured on the DIETED messages, because that is what
+        // actually rides the request. Almost always a no-op returning the same array — a thread
+        // has to outgrow the budget before anything is summarized.
+        const compaction = await compactHistory({
+          vault: cfg.vault, threadId, messages: dieted,
+          budgetTokens: historyBudgetTokens(cfg.models?.tutor?.contextTokens),
+          deps: compactionDeps(cfg),
+        });
+        if (compaction.newBlock) {
+          // Worth a line in the log: it is the one moment the cached prefix legitimately shifts,
+          // and the one moment the tutor's view of the conversation loses detail.
+          console.error(`[compaction] thread ${threadId}: summarized the first `
+            + `${compaction.compacted} messages to fit the context window`);
+        }
+        const model_messages = [...leading, ...uiMessagesToChatMessages(compaction.messages), ...trailing];
         // The transcript must END on a user turn. A bare slash-command send (a user message whose
         // only part is data-command, which uiMessagesToChatMessages rightly drops) can otherwise
         // leave the assistant's own last message final — and the Anthropic wire reads a trailing
