@@ -324,9 +324,16 @@ describe('a failed turn still records what happened before it failed', () => {
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
       { model, now: () => new Date('2026-07-12') });
 
-    // No unhandled rejection: the wire layer turns the throw into an 'error' chunk on a 200 stream.
+    // No unhandled rejection: the wire layer turns the throw into a spoken turn on a 200 stream.
+    // It used to assert an 'error' chunk here; that chunk is gone deliberately, because the client
+    // renders one as a bubble UNDER the message's own parts and it duplicated the note word for
+    // word. What the learner gets now is the explanation as TEXT — which, unlike the chunk,
+    // survives into the saved thread — plus the finish reason the client needs to hold back the
+    // auto-resubmit of the graded block.
     const body = await (await session.respond(blockOutputHistory, 'learn', 'failed-turn-thread')).text();
-    expect(body).toMatch(/"type":"error"/);
+    expect(body).toMatch(/The tutor hit an error and this turn was lost: provider overloaded/);
+    expect(body).toMatch(/"finishReason":"error"/);
+    expect(body).not.toMatch(/"type":"error"/);
 
     // (a) partial usage from the step that DID complete reached the ledger.
     const rows = readFileSync(join(vault, '.harness', 'usage.jsonl'), 'utf8')

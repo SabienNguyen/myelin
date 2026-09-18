@@ -296,7 +296,7 @@ describe('ModelsMenu — live discovery', () => {
     expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('claude-sonnet-5');
   });
 
-  it('the local preset sets the teaching roles, checks rails, and leaves compile alone', async () => {
+  it('the local preset sets the teaching roles and leaves compile alone', async () => {
     stubFetch(discovered());
     await openPopover();
     await screen.findByText('installed locally:');
@@ -307,7 +307,6 @@ describe('ModelsMenu — live discovery', () => {
     expect((screen.getByLabelText(r + ' provider') as HTMLSelectElement).value).toBe('ollama');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5');
-    expect((screen.getByLabelText('rails') as HTMLInputElement).checked).toBe(true);
   });
 
   it('nothing discovered means no chips and no preset row — a clean offline dialog', async () => {
@@ -360,11 +359,11 @@ describe('ModelsMenu — live discovery', () => {
     expect(screen.getByText(/overridden by ANTHROPIC_API_KEY in the environment/)).toBeTruthy();
   });
 
-  // Regression: after a pull completes, the teaching roles must be repointed at the model and
-  // rails checked. A first cut refreshed discovery AFTER applying the preset, and the refresh
+  // Regression: after a pull completes, the teaching roles must be repointed at the model. A
+  // first cut refreshed discovery AFTER applying the preset, and the refresh
   // (takeState) reset the roles straight back to the saved claude defaults — the preset silently
   // vanished. The refresh must run BEFORE the preset is applied.
-  it('the local getter pulls a model, then repoints the teaching roles at it with rails on', async () => {
+  it('the local getter pulls a model, then repoints the teaching roles at it', async () => {
     // Discovery flips from "nothing installed" to "qwen3:8b installed" once the job lands. The
     // pull is a server-side background job now: POST accepts, GET /pulls reports it done.
     let pulled = false;
@@ -391,13 +390,12 @@ describe('ModelsMenu — live discovery', () => {
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Get' })[0]); // qwen3:8b, the first recommended
     await screen.findByText(/qwen3:8b ready/);
-    // THE assertion the clobber bug failed: the roles are the pulled model, rails on — not the
-    // claude defaults the /api/setup/models refresh returns.
+    // THE assertion the clobber bug failed: the roles are the pulled model — not the claude
+    // defaults the /api/setup/models refresh returns.
     for (const r of ['tutor', 'grader', 'card_gen']) {
       expect((screen.getByLabelText(r) as HTMLInputElement).value).toBe('qwen3:8b');
     expect((screen.getByLabelText(r + ' provider') as HTMLSelectElement).value).toBe('ollama');
     }
     expect((screen.getByLabelText('compile') as HTMLInputElement).value).toBe('claude-sonnet-5'); // preset leaves compile
-    expect((screen.getByLabelText('rails') as HTMLInputElement).checked).toBe(true);
   });
 });

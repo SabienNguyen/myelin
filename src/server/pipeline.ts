@@ -41,7 +41,7 @@ export interface PieceReceipt {
   class?: PipelineFailureClass;
 }
 
-/** The ladder, per piece: one attempt, one rejection-retry (the rails recipe), then the
+/** The ladder, per piece: one attempt, one rejection-retry, then the
  * consumer's floor with a DIAGNOSED class. Transport rejects the whole map — a dead endpoint
  * would floor every piece into fallback content during an outage, which is exactly the
  * "consumed the entry with undistilled content" bug the old compile ladder guarded against.

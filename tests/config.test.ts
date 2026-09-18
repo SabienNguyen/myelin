@@ -67,14 +67,13 @@ describe('loadConfig', () => {
   });
 
   // The zero-cost first run: no role may default to a route that needs a paid key or a pulled
-  // local model, and a free (small) tutor must not be handed the full agentic loop.
-  it('defaults every role to the OpenRouter free router, with the tutor on rails', () => {
+  // local model.
+  it('defaults every role to the OpenRouter free router', () => {
     const dir = mkdtempSync(join(tmpdir(), 'lwh-'));
     const p = join(dir, 'empty.json');
     writeFileSync(p, '{}');
     const { models } = loadConfig(p);
     expect(Object.values(models).map((r) => r.model)).toEqual(Array(5).fill('openrouter:openrouter/free'));
-    expect(models.tutor.rails).toBe(true);
   });
 
   it('still fails loud on a role that is present and wrong', () => {

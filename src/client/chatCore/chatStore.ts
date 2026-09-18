@@ -199,6 +199,7 @@ export class ChatStore {
     this.setState({ messages, isRunning: true, error: undefined });
 
     let finished: UIMessage[] | null = null;
+    let turnFailed = false;
     const result = await consumeChatStream({
       body: {
         messages: this.state.messages, threadId: this.opts.threadId, writeUp,
@@ -219,7 +220,7 @@ export class ChatStore {
       onError: (errorText) => {
         this.setState({ messages: refreshLast(this.state.messages), error: errorText });
       },
-      onFinish: (finalMessages) => { finished = finalMessages; },
+      onFinish: (finalMessages, { failed }) => { finished = finalMessages; turnFailed = failed; },
     });
     if (result === 'aborted') return; // the superseding run owns the state now
     this.inflight = null;
@@ -239,7 +240,11 @@ export class ChatStore {
     }).catch(() => {});
     // The finish-time predicate check (a result added while the previous stream was still
     // running). Never after an errored turn — a resubmit that errors again would loop.
-    if (this.state.error === undefined && blockOutputsComplete({ messages: settled })) this.resubmit();
+    // `turnFailed` is the server's own verdict on a turn that explained itself in the message
+    // instead of raising an error bubble; `error` still covers the failures that never produced
+    // a stream. Either one blocks the resubmit — retrying a failing turn loops.
+    if (!turnFailed && this.state.error === undefined
+      && blockOutputsComplete({ messages: settled })) this.resubmit();
   }
 }
 

@@ -139,7 +139,7 @@ describe('Engram client', () => {
 }, 60_000);
 
 // T13: engram's search result changed from a bare array to `{results, note?}`. Both consumers
-// (session.ts's vaultGap, rails.ts's askedForItem) go through searchHits()/searchNote(), so this
+// (session.ts's vaultGap) goes through searchHits()/searchNote(), so this
 // pins the parsing itself rather than re-deriving it inside each consumer's own test.
 describe('searchHits / searchNote', () => {
   const hit = { slug: 'derivatives', title: 'Derivatives', score: 0.9 };

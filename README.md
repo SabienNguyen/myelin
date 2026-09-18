@@ -98,7 +98,7 @@ default (`src/server/config.ts`):
 |---|---|---|
 | Vault | `~/Documents/Myelin` (created at boot) | `vault` |
 | Student id | your OS username | `student` |
-| Models | `openrouter:openrouter/free` for every role, tutor on rails — free to try | click the model badge in the top bar, or `models.*.model` |
+| Models | `openrouter:openrouter/free` for every role — free to try, and the weakest setup that works | click the model badge in the top bar, or `models.*.model` |
 | Engram server | found automatically: installed dependency, then a sibling checkout | `ENGRAM_ENTRY`, or `engram.command`/`args` |
 | Port | 4820 | `port` |
 
@@ -137,7 +137,7 @@ Every `models.*.model` id is routed by prefix, so a config can freely mix routes
 | `ollama:qwen2.5-coder:14B` | local Ollama (OpenAI-compatible endpoint) | free, local; `OLLAMA_BASE_URL` to move it, `OLLAMA_API_KEY` only for a key-protected proxy |
 | `openai:deepseek/deepseek-chat` | any OpenAI-compatible provider | `OPENAI_COMPAT_BASE_URL` (required) + `OPENAI_COMPAT_API_KEY` |
 | `openrouter:openrouter/free` | OpenRouter, endpoint pinned — **the default** | `OPENROUTER_API_KEY` (a free key works) |
-| `groq:openai/gpt-oss-120b` | Groq, endpoint pinned | `GROQ_API_KEY` — the free tier caps tokens per minute below one full tutor request, so pair it with rails |
+| `groq:openai/gpt-oss-120b` | Groq, endpoint pinned | `GROQ_API_KEY` — the free tier caps tokens per minute below one full tutor request, so a paid tier is needed for the tutor role |
 
 All of this is editable in-app: click the model badge in the top bar to change any role or the
 provider endpoints while the app runs — saves land in `settings.json` beside the credentials file
@@ -148,8 +148,8 @@ Installed models appear in the dialog automatically: opening it probes Ollama's 
 OpenAI-compatible endpoint's `/models`, so every model you've pulled is a pick, not an id typed
 from memory. Downloads run server-side: closing the dialog mid-pull costs nothing — keep using
 the app, and reopening the dialog picks the running progress bar back up. A one-row local preset points the teaching roles (tutor, grader, quiz_gen, card_gen)
-at an installed model and turns rails on in one click — compile stays where it is, because compile
-writes the vault and belongs on the strongest model you have. Structured generations are
+at an installed model in one click — compile stays where it is, because compile writes the vault
+and belongs on the strongest model you have. Structured generations are
 schema-constrained at the decoder on providers that support `response_format` (Ollama, LiteLLM,
 OpenRouter); others fall back to forced tool calls automatically.
 
@@ -230,29 +230,49 @@ and `minP` are the levers that cut rambling and choice-list loops:
 The block applies to every request that role makes; requests keep their existing `temperature`
 and `effort` handling unchanged.
 
-### Rails mode (small local models)
+### How small a model can go
 
-The agentic tutor loop asks a lot of a model — pick the next topic across the vault, drive a dozen
-tools, remember to record evidence — and an 8-14B `ollama:` model reliably can't hold it. Rails
-mode inverts control: the harness plans the next item (due reviews first, then suggested lessons),
-assembles the page context, stages the `quick_check`, grades the answer, and records the evidence
-itself; the model only writes the question and the feedback line, one structured call each. Turn
-it on with the **rails** checkbox beside the tutor id in the models dialog, or
-`"tutor": { "model": "ollama:…", "rails": true }` in the config. Phase-1 scope is quick_check
-drills in learn/review/quiz; freeform always runs the full agentic loop (writing pages needs real
-tool use). Off by default — off means the loop is byte-for-byte what it was.
+The tutor runs one loop: the model picks the next topic, drives the tools, stages the block and
+records the evidence. That asks a lot, and an 8-14B model will struggle with it — expect dropped
+`record_evidence` calls, blocks written as prose instead of staged as tools, and tool arguments
+that truncate mid-JSON. None of that kills the turn (a malformed call is answered and retried, and
+a turn that fails still says what happened), but it does make for a worse lesson. Put the tutor
+role on the strongest model you can reach and keep the small ones for `grader` and `card_gen`,
+whose calls are single schema-constrained generations.
 
-To vet a model before pointing rails at it: `npm run eval:model -- ollama:qwen3:8b [--n 20]
-[--feedback]` runs the real rails generation prompts against it and reports first-try validity,
-retries, fallbacks, and latency.
+To see how the app behaves against a bad model without a GPU, `npm run weak:model` starts a
+deliberately weak fake on the same wire — fenced-JSON, truncation, and prose-refusal cycles, plus
+a `WEAK_MODE=reject-rf` variant that refuses `response_format` so the forced-tool fallback
+engages. Point the app at it with `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:4901/v1` and the model
+id `openai:weak-7b`.
 
-No local model handy? `npm run weak:model` starts a deliberately weak fake on the same wire —
-deterministic fenced-JSON, truncation, expected∉choices, and prose-refusal cycles (plus a
-`WEAK_MODE=reject-rf` variant that refuses `response_format`, exercising the forced-tool
-fallback). Point the eval at it with `OPENAI_COMPAT_BASE_URL=http://127.0.0.1:4901/v1 npm run
-eval:model -- openai:weak-7b --n 6`. The same cycles run in CI as
-`tests/llm/weakModel.integration.test.ts`, pinning the invariant that a small model's worst
-output degrades to a retry or the deterministic fallback — never an error at the learner.
+### When a conversation outgrows the context window
+
+Two layers keep a long thread inside the model's window, and both apply to the **model's view
+only** — the saved transcript, the client, and grading always see every word.
+
+**The history diet** shrinks what each turn costs: a graded block's submission collapses to a
+verdict line once the turn moves on, a page body or search result older than two turns becomes a
+one-line stub, and an attachment from an earlier message becomes `[image attached earlier: …]`.
+
+**Compaction** bounds how many turns there are. Once the estimated history crosses its budget, the
+oldest turns are replaced by a summary written by the `compile` role — what was taught, what the
+student did and how it graded, what was left unfinished. The last six turns are never summarized,
+cuts only happen at turn boundaries, and the summary tells the tutor to trust `get_student_state`
+and the pages over its own precis.
+
+Summaries are written **once and stored** under `vault/.harness/compaction/<thread>.json`, then
+replayed byte-for-byte on every later turn. That is not an optimization detail — the prompt cache
+is a prefix match, so a summary recomputed each turn would invalidate the cache on every request
+and cost more than the overflow it prevents. Blocks are append-only for the same reason: adding a
+second one leaves the first one's bytes alone.
+
+The budget is `models.tutor.contextTokens` minus 16k of headroom for the system prompt and the
+answer, or 48k tokens when no window is declared — roughly fifty turns, so an ordinary sitting
+never reaches it. Set `contextTokens` on the tutor role if your model's window is smaller than
+64k. Compaction logs one line when it fires (`[compaction] thread …`); if the summarizing call
+fails, a mechanical summary naming the topics and verdicts is stored instead, because a thread
+being saved from overflow is the wrong moment to fail the turn.
 
 <details>
 <summary><b>Ollama caveats: context length and leaked chat-template tokens</b></summary>

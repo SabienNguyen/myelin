@@ -358,8 +358,8 @@ export function gradeStructured(checker: any, values: string[]): StructuredGrade
       // or a shown derivation contains no parseable leading vector, and grading it `incorrect`
       // asserted the learner was wrong when the machine simply failed to read them — minting
       // `struggled` on the strength of a parse failure. `ungraded`: no evidence, no verdict
-      // color, and a detail the tutor is told to judge (session.ts/rails.ts route it like
-      // 'reviewed', but the card shows the real cause instead of a verdict).
+      // color, and a detail the tutor is told to judge (session.ts routes it like 'reviewed',
+      // but the card shows the real cause instead of a verdict).
       return {
         allCorrect: false, anyCorrect: false,
         detail: `could not interpret “${(clean[0] ?? '').trim()}” as a list of numbers `

@@ -10,7 +10,7 @@ const dir = (vault: string) => join(vault, '.harness', 'sessions');
 // and violate the single-writer invariant — the harness may only write under
 // vault/.harness/**.
 const THREAD_ID = /^[A-Za-z0-9_-]{1,64}$/;
-function assertThreadId(threadId: string) {
+export function assertThreadId(threadId: string) {
   if (!THREAD_ID.test(threadId)) {
     throw new Error(`invalid threadId ${JSON.stringify(threadId)}: must match ${THREAD_ID}`);
   }
@@ -64,6 +64,11 @@ export function deleteThread(vault: string, threadId: string) {
   assertThreadId(threadId);
   const p = join(dir(vault), `${threadId}.json`);
   if (existsSync(p)) unlinkSync(p);
+  // A thread's compaction blocks are keyed by message id, and a new thread created under the
+  // same id would hold none of those ids — historyCompaction drops stale blocks on its own, but
+  // leaving the file behind would keep a deleted conversation's summary on disk.
+  const c = join(vault, '.harness', 'compaction', `${threadId}.json`);
+  if (existsSync(c)) unlinkSync(c);
 }
 
 export type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number };

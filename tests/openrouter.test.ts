@@ -23,16 +23,15 @@ describe('OpenRouter', () => {
   it('rejects unknown catalog ids before writing any settings or live state', async () => {
     const config = cfg();
     const original = structuredClone(config.models);
-    writeSettings({ tutorRails: false });
     const probeFetch = vi.fn(async () => Response.json({ data: [{ id: 'openrouter/free' }] }));
     const res = await buildSetupRoutes(config, { probeFetch }).request('/api/setup/models', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ models: { tutor: 'openrouter:invented/model' }, tutorRails: true,
+      body: JSON.stringify({ models: { tutor: 'openrouter:invented/model' },
         env: { OPENROUTER_API_KEY: 'do-not-save' } }),
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/tutor.*invented\/model.*catalog/i);
-    expect(readSettings()).toEqual({ tutorRails: false });
+    expect(readSettings()).toEqual({});
     expect(config.models).toEqual(original);
     expect(process.env.OPENROUTER_API_KEY).toBe('');
   });

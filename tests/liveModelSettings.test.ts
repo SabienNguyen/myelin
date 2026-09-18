@@ -7,7 +7,7 @@ import { buildChatRoute } from '../src/server/chatRoute.js';
 import { buildSetupRoutes } from '../src/server/setupRoutes.js';
 import { resetEnvShadow } from '../src/server/settings.js';
 import { chatModelFor } from '../src/server/models.js';
-import { streamModel, textModel } from './mockModel.js';
+import { streamModel } from './mockModel.js';
 import type { HarnessConfig } from '../src/server/config.js';
 import type { Engram } from '../src/server/mcp.js';
 
@@ -21,22 +21,17 @@ afterEach(() => {
 });
 
 describe('UI model saves reach the existing chat handler', () => {
-  it.each([false, true])('uses the newly saved tutor on the next turn (rails=%s)', async (rails) => {
+  it('uses the newly saved tutor on the next turn', async () => {
     dir = mkdtempSync(join(tmpdir(), 'myelin-live-model-'));
     vi.stubEnv('MYELIN_CONFIG_DIR', join(dir, 'config'));
     resetEnvShadow();
     const used: string[] = [];
     vi.mocked(chatModelFor).mockImplementation((_role, cfg) => {
       const id = cfg.models.tutor.model;
-      return (rails
-        ? (textModel(() => {
-          used.push(id);
-          return JSON.stringify({ question: 'Which number?', mode: 'choice', choices: ['1', '2', '3'], expected: '2', framing: 'Try this.' });
-        }).model)
-        : streamModel(() => { used.push(id); return { text: 'Hello.' }; }));
+      return streamModel(() => { used.push(id); return { text: 'Hello.' }; });
     });
     const cfg = { student: 'test', vault: dir, models: {
-      tutor: { model: 'ollama:old', rails }, grader: { model: 'ollama:grader' },
+      tutor: { model: 'ollama:old' }, grader: { model: 'ollama:grader' },
       card_gen: { model: 'ollama:cards' }, compile: { model: 'ollama:compile' },
     } } as HarnessConfig;
     const lw = {

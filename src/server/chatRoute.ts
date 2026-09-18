@@ -9,6 +9,7 @@ import { deleteThread, listThreads, loadThread, saveThread } from './sessionStor
 import { clearStance, setStance } from './stanceStore.js';
 import { MODES, type Mode } from './prompt.js';
 import { detachedResponse } from './detachedResponse.js';
+import { TurnStalled } from './turnError.js';
 
 export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
@@ -111,10 +112,16 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     const end = () => { if (runs.get(threadId) === entry) runs.delete(threadId); finish(); };
     try {
       return detachedResponse(await respond(body.messages, effectiveMode, threadId, controller.signal),
-        end, { ms: IDLE_MS, onIdle: () => controller.abort() });
+        end, { ms: IDLE_MS, onIdle: () => controller.abort(new TurnStalled(IDLE_MS)) });
     } catch (error) {
       end();
-      throw error;
+      // A throw BEFORE the stream exists is the one failure the closing guarantee in
+      // createUiStream cannot cover — there is no response to write a note into. Hono would turn
+      // it into a bare 500 whose body the client cannot parse, which shows up as the dead
+      // "unreachable" state. Answer in the shape the client already reads instead.
+      console.error('[chat-route]', error);
+      const message = error instanceof Error ? error.message : String(error);
+      return c.json({ error: `The turn could not be started: ${message}` }, 500);
     }
   });
   app.get('/api/thread/:id/run', (c) => {

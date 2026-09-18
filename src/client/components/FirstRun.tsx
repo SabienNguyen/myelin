@@ -72,9 +72,8 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? 'That did not work.'); return; }
       // The key alone satisfies nothing: every role defaults to OpenRouter, so the gate would stay
-      // up with no message. Picking this card means "run on Claude" — and off rails, which exist
-      // for models too small to hold the agentic loop.
-      await saveRoles(CLAUDE_ROLES, { rails: false });
+      // up with no message. Picking this card means "run on Claude".
+      await saveRoles(CLAUDE_ROLES);
     } catch (err: any) {
       setError(`Could not reach the app’s own server (${err?.message ?? err}).`);
     } finally {
@@ -87,11 +86,11 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
    * can split the roles later. Saved through the same endpoint the dialog uses, then /api/setup
    * is re-read: with no role on the Anthropic route, `blocked` comes back false and the gate
    * lifts itself. */
-  function saveAllRolesTo(id: string, opts: { env?: Record<string, string>; rails?: boolean } = {}) {
+  function saveAllRolesTo(id: string, opts: { env?: Record<string, string> } = {}) {
     return saveRoles({ tutor: id, grader: id, quiz_gen: id, card_gen: id, compile: id }, opts);
   }
 
-  async function saveRoles(models: Record<string, string>, opts: { env?: Record<string, string>; rails?: boolean } = {}) {
+  async function saveRoles(models: Record<string, string>, opts: { env?: Record<string, string> } = {}) {
     setBusy(true);
     setError(null);
     try {
@@ -101,7 +100,6 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({
           models,
           ...(opts.env && Object.keys(opts.env).length ? { env: opts.env } : {}),
-          ...(opts.rails !== undefined ? { tutorRails: opts.rails } : {}),
         }),
       });
       if (!res.ok) {
@@ -161,7 +159,7 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
         <form className="firstrun-option" onSubmit={(e) => {
           e.preventDefault();
           void saveAllRolesTo('openrouter:openrouter/free', {
-            env: routerKey.trim() ? { OPENROUTER_API_KEY: routerKey.trim() } : {}, rails: true,
+            env: routerKey.trim() ? { OPENROUTER_API_KEY: routerKey.trim() } : {},
           });
         }}>
           <label htmlFor="router-key">OpenRouter API key</label>
@@ -265,13 +263,13 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             the model badge in the top bar.
           </p>
           {/* The zero-typing on-ramp: pick a recommended local model and we pull + configure it.
-              A pulled model points every role at it with rails on (it's a small local model), then
-              re-reads /api/setup — with nothing on the Anthropic route the gate lifts itself. */}
+              A pulled model points every role at it, then re-reads /api/setup — with nothing on the
+              Anthropic route the gate lifts itself. */}
           <p className="firstrun-getter-lede">Don’t have a model yet? Pick one and we’ll install it:</p>
           <LocalModelGetter
             installed={installedLocal}
             busy={busy}
-            onConfigured={(id) => saveAllRolesTo(`ollama:${id}`, { rails: true })}
+            onConfigured={(id) => saveAllRolesTo(`ollama:${id}`)}
           />
         </form>
 

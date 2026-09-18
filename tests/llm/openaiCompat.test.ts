@@ -402,6 +402,34 @@ describe('openai-compat streaming', () => {
     expect(finish).toMatchObject({ type: 'finish', reason: 'tool-calls' });
   });
 
+  // A call the model truncated at its output cap. A bare JSON.parse here threw inside the stream
+  // generator — before the call reached the tool loop — so the whole turn was lost. Seen with
+  // nvidia/nemotron through OpenRouter.
+  it('reports unparseable tool arguments as inputError instead of throwing', async () => {
+    respond = sse([[
+      data({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'lookup', arguments: '{"topic": "photo' } }] } }] }),
+      data({ choices: [{ index: 0, delta: {}, finish_reason: 'length' }] }),
+      'data: [DONE]\n\n',
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    const call = events.find((e) => e.type === 'tool-call') as any;
+    expect(call.toolName).toBe('lookup');
+    expect(call.input).toEqual({});
+    expect(call.inputError).toContain('{"topic": "photo');
+  });
+
+  it('a well-formed call carries no inputError', async () => {
+    respond = sse([[
+      data({ choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'lookup', arguments: '{"topic":"x"}' } }] } }] }),
+      data({ choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] }),
+      'data: [DONE]\n\n',
+    ].join('')]);
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events.find((e) => e.type === 'tool-call')).toEqual({
+      type: 'tool-call', toolCallId: 'c1', toolName: 'lookup', input: { topic: 'x' },
+    });
+  });
+
   it('parses reasoning_content deltas into thinking events, closing on the first content delta', async () => {
     respond = sse([[
       data({ choices: [{ index: 0, delta: { reasoning_content: 'Hmm, ' } }] }),

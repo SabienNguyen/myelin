@@ -259,7 +259,7 @@ describe('createUiStream wire shape', () => {
     expect(parts.filter((p) => p.type === 'data-note')).toEqual([{ type: 'data-note', id: 'n1', data: { x: 2 } }]);
   });
 
-  it('turns an execute() throw into an error chunk on a 200 stream that still terminates', async () => {
+  it('turns an execute() throw into a spoken turn on a 200 stream that still terminates', async () => {
     let ended = false;
     const res = createUiStream({
       originalMessages: USER_TURN,
@@ -270,14 +270,129 @@ describe('createUiStream wire shape', () => {
     expect(res.status).toBe(200);
     const { chunks, terminated } = await collect(res);
     expect(terminated).toBe(true);
-    const error = chunks.find((c) => c.type === 'error');
-    expect(error).toEqual({
-      type: 'error',
-      errorText: 'The tutor hit an error and this turn was lost: model exploded',
-    });
-    expect(chunks[chunks.length - 1].type).toBe('finish');
+    // The explanation rides as TEXT, not as an error chunk the client would render a second
+    // time under the message's own parts.
+    expect(chunks.filter((c) => c.type === 'text-delta').map((c) => c.delta)).toEqual([
+      'The tutor hit an error and this turn was lost: model exploded',
+    ]);
+    expect(chunks.some((c) => c.type === 'error')).toBe(false);
+    // The failure still reaches the client — as the finish reason, which is what holds back the
+    // auto-resubmit of a graded block.
+    expect(chunks[chunks.length - 1]).toEqual({ type: 'finish', finishReason: 'error' });
     expect(ended).toBe(true);
     expectValidChunks(chunks);
+  });
+
+  // THE CLOSING GUARANTEE. The 'error' chunk is live UI only — the reducer drops it — so before
+  // this, a failed turn vanished on reload and the learner was left with their own message and
+  // nothing after it. Every path out of execute must leave a persisted assistant text part.
+  describe('a turn never ends silently', () => {
+    it('persists the failure as text in the saved message, not just as an error chunk', async () => {
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: USER_TURN,
+        execute: async () => { throw new Error('model exploded'); },
+        onError: () => 'The tutor hit an error and this turn was lost: model exploded',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      const { chunks } = await collect(res);
+      // The turn is marked failed for the client's state machine...
+      expect(chunks.at(-1)).toEqual({ type: 'finish', finishReason: 'error' });
+      // ...and the explanation is a text part that survives into the thread on disk.
+      const saved = finalMessages.at(-1)!;
+      expect(saved.role).toBe('assistant');
+      const text = saved.parts.filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+      expect(text).toBe('The tutor hit an error and this turn was lost: model exploded');
+      expectValidChunks(chunks);
+    });
+
+    it('closes an empty turn on emptyText when nothing was produced and nothing threw', async () => {
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: USER_TURN,
+        execute: async () => {},
+        emptyText: 'the model returned nothing',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      const { chunks } = await collect(res);
+      const text = finalMessages.at(-1)!.parts
+        .filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+      expect(text).toBe('the model returned nothing');
+      expect(chunks.some((c) => c.type === 'error')).toBe(false);
+      expectValidChunks(chunks);
+    });
+
+    it('adds no note when the turn produced real text', async () => {
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: USER_TURN,
+        execute: async (writer) => forwardAll(writer, scriptedRun),
+        emptyText: 'the model returned nothing',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      await collect(res);
+      const text = finalMessages.at(-1)!.parts
+        .filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+      expect(text).not.toContain('the model returned nothing');
+    });
+
+    it('adds no note when the turn staged a block but wrote no prose', async () => {
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: USER_TURN,
+        execute: async (writer) => {
+          writer.forward({ type: 'tool-call', toolCallId: 'tc9', toolName: 'quick_check',
+            input: { question: '3+3?', mode: 'text', expected: '6', pageSlug: 'arith' } });
+        },
+        emptyText: 'the model returned nothing',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      await collect(res);
+      const text = finalMessages.at(-1)!.parts
+        .filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+      expect(text).toBe('');
+    });
+
+    it('speaks when an abort carries a reason abortText recognizes — the stalled-provider case', async () => {
+      const upstream = new AbortController();
+      let finalMessages: UIMessage[] = [];
+      class Stalled extends Error {}
+      const res = createUiStream({
+        originalMessages: USER_TURN,
+        signal: upstream.signal,
+        execute: async (_writer, signal) => {
+          upstream.abort(new Stalled('the tutor stopped responding'));
+          signal.throwIfAborted();
+        },
+        abortText: (reason) => (reason instanceof Stalled ? reason.message : undefined),
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      await collect(res);
+      const text = finalMessages.at(-1)!.parts
+        .filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+      expect(text).toBe('the tutor stopped responding');
+    });
+
+    it('stays silent on an aborted turn — Stop is the learner\'s own action, not a failure', async () => {
+      const upstream = new AbortController();
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: USER_TURN,
+        signal: upstream.signal,
+        execute: async (_writer, signal) => {
+          upstream.abort();
+          signal.throwIfAborted();
+        },
+        emptyText: 'the model returned nothing',
+        onError: () => 'should not appear',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      const { chunks } = await collect(res);
+      expect(chunks.some((c) => c.type === 'error')).toBe(false);
+      const text = finalMessages.at(-1)!.parts
+        .filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
+      expect(text).toBe('');
+    });
   });
 
   it('assembles onEnd messages the way the client\'s processor does', async () => {

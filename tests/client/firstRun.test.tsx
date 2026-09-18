@@ -66,13 +66,12 @@ describe('FirstRun — two ways through the gate', () => {
     const body = JSON.parse(String(put?.[1]?.body));
     expect(Object.values(body.models)).toEqual(Array(5).fill('openrouter:openrouter/free'));
     expect(body.env).toEqual({ OPENROUTER_API_KEY: 'test-router-key' });
-    expect(body.tutorRails).toBe(true);
   });
 
   // Every role defaults to OpenRouter now, so a saved Anthropic key alone satisfies nothing: the
   // roles still route to OpenRouter, the gate stays up, and the card re-renders with no message.
   // Choosing the Anthropic card has to mean "run on Claude", not just "store this key".
-  it('an Anthropic key also moves the roles onto Claude, with the tutor off rails', async () => {
+  it('an Anthropic key also moves the roles onto Claude', async () => {
     const mock = stubFetch();
     render(<FirstRun><p>the app</p></FirstRun>);
     fireEvent.change(await screen.findByLabelText(/Anthropic API key/), { target: { value: 'sk-ant-test' } });
@@ -84,7 +83,6 @@ describe('FirstRun — two ways through the gate', () => {
       tutor: 'claude-sonnet-5', grader: 'claude-haiku-4-5', quiz_gen: 'claude-sonnet-5',
       card_gen: 'claude-haiku-4-5', compile: 'claude-sonnet-5',
     });
-    expect(body.tutorRails).toBe(false);
   });
   it('blocked state offers the Anthropic key AND the local/compat model path', async () => {
     stubFetch();

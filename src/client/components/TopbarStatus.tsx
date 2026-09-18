@@ -225,7 +225,6 @@ type Available = { ollama?: string[]; openaiCompat?: string[] };
 
 type ModelsState = {
   roles: Record<string, { effective: string; saved: string | null }>;
-  tutorRails?: boolean;
   env: Record<EnvKey, { value?: string; set?: boolean; shadowed: boolean }>;
   available?: Available;
 };
@@ -287,7 +286,6 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [roles, setRoles] = useState<Record<RoleName, string>>(Object.fromEntries(ROLE_ORDER.map((r) => [r, ''])) as Record<RoleName, string>);
-  const [rails, setRails] = useState(false);
   // What the server reported at load — a save only sends what changed against this.
   const [loaded, setLoaded] = useState<ModelsState | null>(null);
   const [env, setEnv] = useState<Record<EnvKey, string>>({
@@ -322,7 +320,6 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const takeState = (d: ModelsState) => {
     setLoaded(d);
     setRoles(Object.fromEntries(ROLE_ORDER.map((r) => [r, d.roles[r]?.effective ?? ''])) as Record<RoleName, string>);
-    setRails(Boolean(d.tutorRails));
     if (d.available) setAvailable(d.available);
     // Key inputs stay empty — the value never leaves the server; base URLs are not secrets.
     setEnv((e) => ({
@@ -398,7 +395,6 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
         method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           models, env: envOut,
-          ...(rails !== Boolean(loaded?.tutorRails) ? { tutorRails: rails } : {}),
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -437,14 +433,13 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const pointPresetAt = (ollamaTag: string) => {
     const id = `ollama:${ollamaTag}`;
     setRoles((s) => ({ ...s, ...Object.fromEntries(PRESET_ROLES.map((r) => [r, id])) }));
-    setRails(true);
   };
   const applyPreset = () => pointPresetAt(presetValue);
   // Pull-then-configure: after the getter installs (or on "use it" for an already-installed one),
   // re-read discovery so the model joins the installed list, THEN point the teaching roles at it.
-  // Order matters: takeState resets the working role/rails state from the server (which has not
-  // been saved yet), so the preset must be applied AFTER the refresh or it would be clobbered
-  // straight back to the current saved models.
+  // Order matters: takeState resets the working role state from the server (which has not been
+  // saved yet), so the preset must be applied AFTER the refresh or it would be clobbered straight
+  // back to the current saved models.
   const configureLocal = async (ollamaTag: string) => {
     const refreshed = await fetch('/api/setup/models').then((r) => r.json()).then((d) => { takeState(d); return true; })
       .catch(() => false);
@@ -502,21 +497,6 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                   }}
                 />
               </span>
-              {r === 'tutor' && (
-                <span className="models-row">
-                  <label htmlFor="models-tutor-rails">rails</label>
-                  <span className="models-rails">
-                    <input
-                      id="models-tutor-rails" type="checkbox"
-                      checked={rails}
-                      onChange={(e) => setRails(e.target.checked)}
-                    />
-                    <span className="models-hint">
-                      harness drives, model generates — for small local models
-                    </span>
-                  </span>
-                </span>
-              )}
             </Fragment>
           ))}
           {PROVIDERS.map((p) => (
@@ -592,8 +572,8 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                 </span>
               </span>
               <span className="models-hint">
-                sets tutor, grader, card_gen to it and turns rails on. compile stays put —
-                compile writes the vault, keep it on the strongest model you have. save still applies.
+                sets tutor, grader, card_gen to it. compile stays put — compile writes the vault,
+                keep it on the strongest model you have. save still applies.
               </span>
             </>
           )}

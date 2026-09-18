@@ -15,8 +15,9 @@ import { searchVideos } from './videoSearch.js';
 import { extractReferences } from './references.js';
 import { readQueue } from './queueStore.js';
 import { appliedGradeBypass, gradeBlockOutput, untouchedSlugEvidence } from './grading.js';
-import { createRailsSession, pendingBlockOutputs } from './rails.js';
 import { dietUiMessages } from './historyDiet.js';
+import { compactHistory, historyBudgetTokens } from './historyCompaction.js';
+import { compactionDeps } from './historyCompactionSeam.js';
 import { buildIngestTools } from './ingestTools.js';
 import { searchHits, searchNote, type Engram } from './mcp.js';
 import { chatModelFor } from './models.js';
@@ -29,7 +30,7 @@ import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated, tutorReport } from './gap/generated.js';
-import { explainTurnError } from './turnError.js';
+import { explainTurnError, stalledText } from './turnError.js';
 import { builtinPatterns, patternChoices } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { zodTool } from './zodTool.js';
@@ -41,6 +42,27 @@ const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidenc
 // Tools whose `student` argument must always be the configured student — models
 // (especially small local ones) invent ids like "student" otherwise.
 const STUDENT_TOOLS = ['record_evidence', 'get_student_state', 'next_lessons', 'find_analogies'];
+
+/** Find answered-but-ungraded block outputs ANYWHERE in the incoming history. The common case is
+ * the tail (the client's auto-resubmit ends the history on the answered block), but a grading
+ * continuation aborted mid-stream — the learner sent a new message before the grade landed —
+ * leaves the answered block one or more messages back, and a last-message-only scan stranded it
+ * ungraded forever. The sweep is self-limiting: `!output.grading` stops matching the moment a
+ * turn grades it. */
+export function pendingBlockOutputs(messages: UIMessage[]) {
+  const out: { tool: BlockToolName; toolCallId: string; input: any; output: any }[] = [];
+  for (const msg of messages) {
+    if (msg?.role !== 'assistant') continue;
+    for (const part of msg.parts as any[]) {
+      const name = String(part.type).replace(/^tool-/, '') as BlockToolName;
+      if (part.type?.startsWith('tool-') && BLOCK_TOOL_NAMES.includes(name)
+        && part.state === 'output-available' && !part.output?.grading) {
+        out.push({ tool: name, toolCallId: part.toolCallId, input: part.input, output: part.output });
+      }
+    }
+  }
+  return out;
+}
 
 /** The evidence kinds a MACHINE mints. The README's invariant — "a model's opinion can never mint
  *  the evidence a machine check earns" — is exactly these two: they mean a checker verified the
@@ -535,6 +557,33 @@ export function topicTokens(text: string): string[] {
 
 
 
+/** An opening with no ask in it: "hi", "hey there", "good morning", "i'm back".
+ *
+ * A greeting is not a request to be taught anything, and three separate mechanisms read it as one.
+ * A new thread opening with "hi" got the LEARN framing ("teach the next suggested lesson") plus
+ * the suggested-lessons list, so the tutor picked up exactly where the last session left off — a
+ * learner who wanted to start something else had their old topic handed back to them. Worse,
+ * topicTokens("hello") is ["hello"], so vaultGap searched the vault for it, found nothing, and
+ * unlocked web research AND write_page: a greeting could send the tutor off to write a page.
+ *
+ * Detected by SHAPE like PROGRESS_QUESTIONS, and deliberately strict: EVERY word must be a
+ * greeting word, so "hi, teach me calculus" is an ask and only "hi" is not. Kept short as a second
+ * guard — a long message that happens to open with "hey" is saying something.
+ */
+const GREETING_WORDS = new Set([
+  'hi', 'hey', 'hello', 'hiya', 'howdy', 'yo', 'sup', 'greetings', 'hullo',
+  'good', 'morning', 'afternoon', 'evening', 'day',
+  'there', 'again', 'back', 'here',
+  'how', 'hows', 'are', 'is', 'it', 'you', 'u', 'doing', 'going', 'whats', 'what', 'up',
+  'im', 'i', 'm', 's', 'we', 'so',
+]);
+
+export function isBareGreeting(text: string): boolean {
+  const words = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  if (words.length === 0 || words.length > 6) return false;
+  return words.every((w) => GREETING_WORDS.has(w));
+}
+
 /** Questions ABOUT the session rather than about a subject: progress, what is next, what was
  *  covered. These must never unlock research. Their words look like topic words to topicTokens —
  *  "how far through my current goal am I" yields ["far","through","current","goal"] — so the gap
@@ -624,6 +673,9 @@ export async function vaultGap(
   // Asking about the session is not asking to be taught something: no subject means nothing to
   // research, and researching anyway writes pages nobody asked for (see PROGRESS_QUESTIONS).
   if (isProgressQuestion(text)) return null;
+  // Same reason: "hello" is not a subject, and searching for it finds nothing, which reads as a
+  // vault gap and unlocks research and write_page over a word the student used to say hello.
+  if (isBareGreeting(text)) return null;
   const tokens = topicTokens(text);
   // "ok", "next", "go on" — the student is continuing, not naming a subject. Continuing a lesson the
   // vault already holds is precisely the case that should stay grounded.
@@ -837,7 +889,7 @@ export function createTutorSession(
 ) {
   // Keep thread state here; resolve the configured model inside each respond call.
 
-  async function bootstrap(mode: Mode, slugs: string[]): Promise<string> {
+  async function bootstrap(mode: Mode, slugs: string[], greeting = false): Promise<string> {
     const activeGoal = readGoal(cfg.vault);
     const [state, lessonsRes] = await Promise.all([
       lw.call('get_student_state', { student: cfg.student }),
@@ -867,7 +919,7 @@ export function createTutorSession(
     }
     const ctx = buildBootstrapContext({
       voice: cfg.voice,
-      mode, state,
+      mode, state, greeting,
       lessons,
       reviewsDue: lessons.filter((l: any) => l.reason === 'review-due').map((l: any) => l.slug),
       ankiLapses: recentLapses(cfg.vault),
@@ -904,23 +956,9 @@ export function createTutorSession(
   // failure.
   const lastModeByThread = new Map<string, Mode>();
 
-  // The rails branch shares this session's model so injected fakes (tests) and the scripted e2e
-  // model drive rails turns exactly as they drive agentic ones.
-  const rails = createRailsSession(lw, cfg, { model: opts.model });
-
   async function respond(
     messages: UIMessage[], mode: Mode, threadId = 'default', signal?: AbortSignal,
   ): Promise<Response> {
-    // Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the loop
-    // when the flag is set — read per turn so the models-dialog toggle is live.
-    //
-    // The gate is a CAPABILITY test wearing a mode's name. What it actually asks is "does this turn
-    // need to author?" — building a path or ingesting material needs real tool use, so those turns
-    // run the full agentic loop. Now that the mode is derived rather than chosen (deriveMode.ts),
-    // that is exactly what `freeform` means here: the harness routes a turn to it by reading the
-    // learner's own words, and chatRoute's one-shot writeUp promotion lands in the same place.
-    if (cfg.models?.tutor?.rails && mode !== 'freeform') return rails.respond(messages, mode, threadId, signal);
-
     // Snapshot one adapter per turn: UI saves affect the next request, not an in-flight loop.
     const model = opts.model ?? chatModelFor('tutor', cfg);
     const searchModelId = opts.model || process.env.LW_MOCK_MODEL
@@ -965,6 +1003,14 @@ export function createTutorSession(
       // request instead of streaming tokens nobody will see.
       signal,
       onError: turnError,
+      // A turn the idle watchdog ended because the provider went quiet says so; Stop and a
+      // superseding send stay silent.
+      abortText: stalledText,
+      // A model that answered with neither prose nor a block has still ended the turn, and
+      // silence reads as the app breaking. Say what happened and what to do about it.
+      emptyText: `${cfg.models?.tutor?.model ?? 'The tutor model'} returned nothing for this turn — `
+        + 'no answer and no block staged. Nothing you did was lost. Send your message again, or '
+        + 'point the tutor role at a different model from the model badge in the top bar.',
       execute: async (writer, runSignal) => {
         // A passage the learner selected in the reader and asked about: the document is open and
         // that text is on their screen. See turnBlockTools — open_source is withheld for the turn.
@@ -1148,12 +1194,13 @@ export function createTutorSession(
         // the natural head of a brand-new transcript.
         const leading: ChatMessage[] = [];
         const trailing: ChatMessage[] = [];
-        if (isFirstTurn) leading.push(userTurn(await bootstrap(mode, slugs)));
+        const openedWithGreeting = isBareGreeting(lastUserText(messages));
+        if (isFirstTurn) leading.push(userTurn(await bootstrap(mode, slugs, openedWithGreeting)));
         else if (modeSwitched) trailing.push(userTurn(
           `HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
           + 'Fresh session context follows — trust it over anything earlier in this conversation '
           + '(mastery and due reviews may have changed since the conversation started).\n\n'
-          + await bootstrap(mode, slugs),
+          + await bootstrap(mode, slugs, openedWithGreeting),
         ));
         // The thread's stance (/beginner|/intermediate|/advanced — stanceStore.ts) rides EVERY
         // turn while set, as a tail note under the same Tier-2 cache-prefix rule as the notes
@@ -1165,7 +1212,10 @@ export function createTutorSession(
         // note fixed: an abstract directive ("stage a block") does little, naming the tool works.
         // Skipped on a grading turn — 1a owns that one, and it must end on the offer, not a block —
         // and on a bare command turn, which has no words to teach about yet.
-        if (!gradingOnly && !readingSource && lastUserText(messages).trim()) trailing.push(userTurn(
+        // ...and on a bare greeting, which has no subject to produce anything about. Forcing a
+        // block there is what made "hi" open with an exercise on last session's topic.
+        if (!gradingOnly && !readingSource && lastUserText(messages).trim()
+          && !isBareGreeting(lastUserText(messages))) trailing.push(userTurn(
           'HARNESS: end this turn on something the student PRODUCES, not on prose. If nothing more '
           + 'specific fits, call `writing_draft` asking them to put the idea in their own words with '
           + 'a 2-4 point rubric; use `quick_check` only as a first-contact calibration. A turn that '
@@ -1179,6 +1229,7 @@ export function createTutorSession(
         // carries it.
         const namedTopic = !gradingOnly && !readingSource
           && !isProgressQuestion(lastUserText(messages))
+          && !isBareGreeting(lastUserText(messages))
           && topicTokens(lastUserText(messages)).length > 0;
         if (namedTopic) trailing.push(userTurn(
           'HARNESS: the student named a subject in this message. Teach THAT — every block this turn '
@@ -1250,7 +1301,22 @@ export function createTutorSession(
         // about to grade-and-discuss, and their payload carries the machine grade merged above.
         const keepIds = new Set(pending.map((p) => p.toolCallId));
         const dieted = dietUiMessages(messages, keepIds);
-        const model_messages = [...leading, ...uiMessagesToChatMessages(dieted), ...trailing];
+        // History compaction: the diet bounds what each turn COSTS, this bounds how many turns
+        // there are (historyCompaction.ts). Measured on the DIETED messages, because that is what
+        // actually rides the request. Almost always a no-op returning the same array — a thread
+        // has to outgrow the budget before anything is summarized.
+        const compaction = await compactHistory({
+          vault: cfg.vault, threadId, messages: dieted,
+          budgetTokens: historyBudgetTokens(cfg.models?.tutor?.contextTokens),
+          deps: compactionDeps(cfg),
+        });
+        if (compaction.newBlock) {
+          // Worth a line in the log: it is the one moment the cached prefix legitimately shifts,
+          // and the one moment the tutor's view of the conversation loses detail.
+          console.error(`[compaction] thread ${threadId}: summarized the first `
+            + `${compaction.compacted} messages to fit the context window`);
+        }
+        const model_messages = [...leading, ...uiMessagesToChatMessages(compaction.messages), ...trailing];
         // The transcript must END on a user turn. A bare slash-command send (a user message whose
         // only part is data-command, which uiMessagesToChatMessages rightly drops) can otherwise
         // leave the assistant's own last message final — and the Anthropic wire reads a trailing
