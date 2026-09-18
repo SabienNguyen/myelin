@@ -59,6 +59,10 @@ const FRAMING: Record<Mode, string> = {
 
 export function buildBootstrapContext(a: {
   mode: Mode; state: unknown;
+  /** True when the message that opened this session is a greeting and nothing else — see
+   *  session.ts's isBareGreeting. The framing changes from "teach the next lesson" to "offer one
+   *  and wait", because the student has not said what they want yet. */
+  greeting?: boolean;
   lessons: { slug: string; title: string; reason: string; detail: string }[];
   reviewsDue: string[];
   ankiLapses: { slug: string; count: number }[];
@@ -73,7 +77,18 @@ export function buildBootstrapContext(a: {
 }): string {
   const lines = [
     'SESSION CONTEXT (auto-injected by harness — not visible to the student):',
-    FRAMING[a.mode],
+    // A greeting carries no ask, so the mode framing must not read as one. Without this, "hi" on
+    // a fresh thread met "Mode: LEARN. Teach the next suggested lesson." plus the suggestions
+    // below, and the tutor resumed last session's topic as though it had been asked for. Rule 1b
+    // still holds — the tutor names ONE next step rather than offering a menu — it just waits for
+    // the answer before teaching.
+    a.greeting
+      ? `Mode: ${a.mode.toUpperCase()}. The student opened with a greeting and nothing else — they `
+        + 'have NOT said what they want to do. Greet them back in one line, say briefly what is '
+        + 'waiting (what is due, what you would suggest next, where the goal stands), and name ONE '
+        + 'specific next step as a question. Do not stage a block and do not start teaching until '
+        + 'they answer. If they want something else, that answer is where you find out.'
+      : FRAMING[a.mode],
     ...(a.voice ? [`Teaching style the student asked for: ${a.voice}. Honor it in tone, pace and
 vocabulary — it changes HOW you teach, never what counts as evidence.`] : []),
     `Student state: ${JSON.stringify(a.state)}`,

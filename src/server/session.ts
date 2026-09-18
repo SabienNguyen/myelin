@@ -557,6 +557,33 @@ export function topicTokens(text: string): string[] {
 
 
 
+/** An opening with no ask in it: "hi", "hey there", "good morning", "i'm back".
+ *
+ * A greeting is not a request to be taught anything, and three separate mechanisms read it as one.
+ * A new thread opening with "hi" got the LEARN framing ("teach the next suggested lesson") plus
+ * the suggested-lessons list, so the tutor picked up exactly where the last session left off — a
+ * learner who wanted to start something else had their old topic handed back to them. Worse,
+ * topicTokens("hello") is ["hello"], so vaultGap searched the vault for it, found nothing, and
+ * unlocked web research AND write_page: a greeting could send the tutor off to write a page.
+ *
+ * Detected by SHAPE like PROGRESS_QUESTIONS, and deliberately strict: EVERY word must be a
+ * greeting word, so "hi, teach me calculus" is an ask and only "hi" is not. Kept short as a second
+ * guard — a long message that happens to open with "hey" is saying something.
+ */
+const GREETING_WORDS = new Set([
+  'hi', 'hey', 'hello', 'hiya', 'howdy', 'yo', 'sup', 'greetings', 'hullo',
+  'good', 'morning', 'afternoon', 'evening', 'day',
+  'there', 'again', 'back', 'here',
+  'how', 'hows', 'are', 'is', 'it', 'you', 'u', 'doing', 'going', 'whats', 'what', 'up',
+  'im', 'i', 'm', 's', 'we', 'so',
+]);
+
+export function isBareGreeting(text: string): boolean {
+  const words = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  if (words.length === 0 || words.length > 6) return false;
+  return words.every((w) => GREETING_WORDS.has(w));
+}
+
 /** Questions ABOUT the session rather than about a subject: progress, what is next, what was
  *  covered. These must never unlock research. Their words look like topic words to topicTokens —
  *  "how far through my current goal am I" yields ["far","through","current","goal"] — so the gap
@@ -646,6 +673,9 @@ export async function vaultGap(
   // Asking about the session is not asking to be taught something: no subject means nothing to
   // research, and researching anyway writes pages nobody asked for (see PROGRESS_QUESTIONS).
   if (isProgressQuestion(text)) return null;
+  // Same reason: "hello" is not a subject, and searching for it finds nothing, which reads as a
+  // vault gap and unlocks research and write_page over a word the student used to say hello.
+  if (isBareGreeting(text)) return null;
   const tokens = topicTokens(text);
   // "ok", "next", "go on" — the student is continuing, not naming a subject. Continuing a lesson the
   // vault already holds is precisely the case that should stay grounded.
@@ -859,7 +889,7 @@ export function createTutorSession(
 ) {
   // Keep thread state here; resolve the configured model inside each respond call.
 
-  async function bootstrap(mode: Mode, slugs: string[]): Promise<string> {
+  async function bootstrap(mode: Mode, slugs: string[], greeting = false): Promise<string> {
     const activeGoal = readGoal(cfg.vault);
     const [state, lessonsRes] = await Promise.all([
       lw.call('get_student_state', { student: cfg.student }),
@@ -889,7 +919,7 @@ export function createTutorSession(
     }
     const ctx = buildBootstrapContext({
       voice: cfg.voice,
-      mode, state,
+      mode, state, greeting,
       lessons,
       reviewsDue: lessons.filter((l: any) => l.reason === 'review-due').map((l: any) => l.slug),
       ankiLapses: recentLapses(cfg.vault),
@@ -1164,12 +1194,13 @@ export function createTutorSession(
         // the natural head of a brand-new transcript.
         const leading: ChatMessage[] = [];
         const trailing: ChatMessage[] = [];
-        if (isFirstTurn) leading.push(userTurn(await bootstrap(mode, slugs)));
+        const openedWithGreeting = isBareGreeting(lastUserText(messages));
+        if (isFirstTurn) leading.push(userTurn(await bootstrap(mode, slugs, openedWithGreeting)));
         else if (modeSwitched) trailing.push(userTurn(
           `HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
           + 'Fresh session context follows — trust it over anything earlier in this conversation '
           + '(mastery and due reviews may have changed since the conversation started).\n\n'
-          + await bootstrap(mode, slugs),
+          + await bootstrap(mode, slugs, openedWithGreeting),
         ));
         // The thread's stance (/beginner|/intermediate|/advanced — stanceStore.ts) rides EVERY
         // turn while set, as a tail note under the same Tier-2 cache-prefix rule as the notes
@@ -1181,7 +1212,10 @@ export function createTutorSession(
         // note fixed: an abstract directive ("stage a block") does little, naming the tool works.
         // Skipped on a grading turn — 1a owns that one, and it must end on the offer, not a block —
         // and on a bare command turn, which has no words to teach about yet.
-        if (!gradingOnly && !readingSource && lastUserText(messages).trim()) trailing.push(userTurn(
+        // ...and on a bare greeting, which has no subject to produce anything about. Forcing a
+        // block there is what made "hi" open with an exercise on last session's topic.
+        if (!gradingOnly && !readingSource && lastUserText(messages).trim()
+          && !isBareGreeting(lastUserText(messages))) trailing.push(userTurn(
           'HARNESS: end this turn on something the student PRODUCES, not on prose. If nothing more '
           + 'specific fits, call `writing_draft` asking them to put the idea in their own words with '
           + 'a 2-4 point rubric; use `quick_check` only as a first-contact calibration. A turn that '
@@ -1195,6 +1229,7 @@ export function createTutorSession(
         // carries it.
         const namedTopic = !gradingOnly && !readingSource
           && !isProgressQuestion(lastUserText(messages))
+          && !isBareGreeting(lastUserText(messages))
           && topicTokens(lastUserText(messages)).length > 0;
         if (namedTopic) trailing.push(userTurn(
           'HARNESS: the student named a subject in this message. Teach THAT — every block this turn '
