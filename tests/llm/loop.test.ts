@@ -469,4 +469,62 @@ describe('runLoop', () => {
       serverTool,
     ]);
   });
+
+  // A provider whose tool-call arguments do not parse (truncated at the output cap, or simply
+  // malformed) used to throw inside the adapter's stream generator, before the call ever reached
+  // this loop — so the whole turn died. These pin the recovery path instead.
+  it('answers a malformed tool call with an error result instead of executing it', async () => {
+    let ran = false;
+    const { model } = scriptedModel([
+      [
+        { type: 'tool-call', toolCallId: 't1', toolName: 'lookup', input: {},
+          inputError: 'Unexpected end of JSON input — received: {"q": "un' },
+        finish('tool-calls'),
+      ],
+      [{ type: 'text-start', id: '0' }, { type: 'text-delta', id: '0', text: 'ok' },
+        { type: 'text-end', id: '0' }, finish('stop')],
+    ]);
+    const out = await runLoop({
+      model,
+      messages: START,
+      tools: [{ name: 'lookup', description: 'd', inputSchema: {}, execute: async () => { ran = true; return null; } }],
+      maxSteps: 5,
+    });
+    expect(ran).toBe(false);
+    expect(out.stopReason).toBe('end');
+    const result = out.messages.flatMap((m) => m.content as any[])
+      .find((p) => p.type === 'tool-result');
+    expect(result.isError).toBe(true);
+    expect(result.output).toContain('malformed JSON');
+    expect(result.output).toContain('Re-issue the call');
+  });
+
+  it('does not halt on a block tool when a sibling call in the step is malformed', async () => {
+    const { model } = scriptedModel([
+      [
+        { type: 'tool-call', toolCallId: 't1', toolName: 'lookup', input: {},
+          inputError: 'Unexpected token' },
+        call('b1', 'show_block', { kind: 'quiz' }),
+        finish('tool-calls'),
+      ],
+      [{ type: 'text-start', id: '0' }, { type: 'text-delta', id: '0', text: 'ok' },
+        { type: 'text-end', id: '0' }, finish('stop')],
+    ]);
+    const out = await runLoop({
+      model,
+      messages: START,
+      tools: [
+        { name: 'show_block', description: 'block tool', inputSchema: {} },
+        { name: 'lookup', description: 'd', inputSchema: {}, execute: async () => null },
+      ],
+      maxSteps: 5,
+    });
+    // Both calls are answered — the wire demands a result per call — and neither stages a block.
+    expect(out.stopReason).toBe('end');
+    const results = out.messages.flatMap((m) => m.content as any[])
+      .filter((p) => p.type === 'tool-result');
+    expect(results.map((r) => r.toolCallId)).toEqual(['t1', 'b1']);
+    expect(results.every((r) => r.isError)).toBe(true);
+    expect(results[1].output).toContain('was not staged');
+  });
 });

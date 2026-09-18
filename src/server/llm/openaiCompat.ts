@@ -1,7 +1,7 @@
 // OpenAI chat-completions adapter over plain fetch: Ollama, OpenRouter, Nous, and a LiteLLM
 // proxy all speak this one wire format.
 import {
-  errorFromResponse, isServerTool, zeroUsage, LlmHttpError,
+  errorFromResponse, isServerTool, parseToolArguments, zeroUsage, LlmHttpError,
   type ChatModel, type ChatRequest, type FinishReason, type GenerateResult,
   type StreamEvent, type ThinkingPart, type ToolCallPart, type Usage,
 } from './types.js';
@@ -283,10 +283,6 @@ function mapFinish(reason: string | null | undefined): FinishReason {
   }
 }
 
-function parseArgs(args: string): unknown {
-  return args ? JSON.parse(args) : {};
-}
-
 // ---- small-model output parsing: <think> and <tool_call> tags inside content ------------------
 //
 // Qwen3-class models inline their reasoning as a leading <think>…</think> block in
@@ -560,7 +556,7 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
       type: 'tool-call',
       toolCallId: c.id,
       toolName: c.function.name,
-      input: parseArgs(c.function.arguments),
+      ...parseToolArguments(c.function.arguments),
     }));
     let text = choice?.message?.content ?? '';
     const reasoning = choice?.message?.reasoning_content;
@@ -705,7 +701,7 @@ export function openaiCompatModel(opts: OpenAICompatModelOptions): ChatModel {
       if (reasoningOpen) yield { type: 'thinking-end', id: REASONING_ID, text: reasoningText };
       if (textOpen) yield { type: 'text-end', id: TEXT_ID };
       for (const [, st] of [...calls.entries()].sort(([a], [b]) => a - b)) {
-        yield { type: 'tool-call', toolCallId: st.id, toolName: st.name, input: parseArgs(st.args) };
+        yield { type: 'tool-call', toolCallId: st.id, toolName: st.name, ...parseToolArguments(st.args) };
       }
       yield { type: 'finish', reason: mapFinish(finishReason), usage };
     },

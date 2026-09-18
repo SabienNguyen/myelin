@@ -23,6 +23,11 @@ export interface ToolCallPart {
   toolCallId: string;
   toolName: string;
   input: unknown;
+  /** Set when the provider sent arguments that are not valid JSON — truncated mid-object (the
+   *  model hit its output cap inside a call), or simply malformed. `input` is then `{}` and the
+   *  loop answers with an isError result instead of executing, so the model gets one chance to
+   *  re-issue the call. Absent on every well-formed call. */
+  inputError?: string;
 }
 
 export interface ToolResultPart {
@@ -152,7 +157,7 @@ export type StreamEvent =
   | { type: 'tool-input-start'; toolCallId: string; toolName: string }
   | { type: 'tool-input-delta'; toolCallId: string; delta: string }
   // Assembled from input deltas; fires at block end.
-  | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
+  | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown; inputError?: string }
   | { type: 'server-tool-call'; toolCallId: string; toolName: string; input: unknown }
   | { type: 'server-tool-result'; toolCallId: string; toolName: string; output: unknown }
   | { type: 'finish'; reason: FinishReason; usage: Usage };
@@ -229,4 +234,23 @@ export function retryAfterMs(res: Response, message: string): number | undefined
     if (Number.isFinite(n)) return m[2].toLowerCase() === 'ms' ? n : n * 1000;
   }
   return undefined;
+}
+
+/** A provider's tool-call `arguments` string, parsed defensively.
+ *
+ * A bare JSON.parse here is a DEAD TURN: the parse runs inside the adapter's stream generator,
+ * before the call ever reaches the tool loop, so the loop's own recovery (an isError result the
+ * model can read and retry) never gets a chance. The throw escapes runLoop and the learner is
+ * told the turn was lost — for what is usually just a call truncated at the output cap.
+ * Observed with nvidia/nemotron via OpenRouter; the Hermes <tool_call> text path (openaiCompat's
+ * parseHermesPayload) already degrades instead of throwing, and this is the same rule for the
+ * native tool_calls field. */
+export function parseToolArguments(args: string | undefined): { input: unknown; inputError?: string } {
+  if (!args) return { input: {} };
+  try {
+    return { input: JSON.parse(args) };
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    return { input: {}, inputError: `${why} — received: ${args.slice(0, 200)}` };
+  }
 }

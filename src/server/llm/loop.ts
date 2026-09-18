@@ -101,7 +101,10 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
           ...(ev.redacted !== undefined ? { redacted: ev.redacted } : {}),
         });
       } else if (ev.type === 'tool-call') {
-        toolCalls.push({ type: 'tool-call', toolCallId: ev.toolCallId, toolName: ev.toolName, input: ev.input });
+        toolCalls.push({
+          type: 'tool-call', toolCallId: ev.toolCallId, toolName: ev.toolName, input: ev.input,
+          ...(ev.inputError !== undefined ? { inputError: ev.inputError } : {}),
+        });
       } else if (ev.type === 'finish') {
         usage.inputTokens += ev.usage.inputTokens;
         usage.outputTokens += ev.usage.outputTokens;
@@ -130,10 +133,17 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       break;
     }
 
+    // A malformed call anywhere in the step cancels the halt below. A block tool's arguments ARE
+    // the block — a quick_check whose JSON truncated has no question — so halting would stage an
+    // empty card and wait forever for the learner to answer it. Falling through instead answers
+    // every call in the step with a result (the wire demands one per call) and lets the model
+    // re-issue.
+    const malformed = toolCalls.some((c) => c.inputError !== undefined);
+
     // A declared tool without execute pauses the WHOLE run after the assistant message: results
     // cannot be partially supplied (both wires demand a result for every call in the next
     // message), so nothing executes and the resubmit provides all outputs.
-    if (toolCalls.some((c) => {
+    if (!malformed && toolCalls.some((c) => {
       const t = byName.get(c.toolName);
       return t !== undefined && t.execute === undefined;
     })) {
@@ -154,7 +164,17 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
       const tool = byName.get(call.toolName);
       let output: unknown;
       let isError = false;
-      if (!tool) {
+      if (call.inputError) {
+        // The provider sent arguments that are not valid JSON — usually a call truncated at the
+        // output cap. Executing is impossible (there are no arguments), but so is continuing
+        // silently: every wire demands a result per call. Answering with the parse error gives
+        // the model the same one-step recovery the unknown-tool branch gives, instead of the
+        // adapter throwing and costing the learner the whole turn.
+        output = `invalid tool arguments: ${call.toolName} was called with malformed JSON `
+          + `(${call.inputError}). Re-issue the call with valid JSON arguments.`;
+        isError = true;
+        console.error(`[loop] ${call.toolName} sent unparseable arguments: ${call.inputError}`);
+      } else if (!tool) {
         // A hallucinated tool name is reported as a failed result so the model can recover,
         // rather than halting the run as if a client were going to answer it.
         //
@@ -168,9 +188,16 @@ export async function runLoop(opts: RunLoopOptions): Promise<LoopResult> {
         output = `unknown tool: ${call.toolName} is not available on this turn. Available: ${offered}`;
         isError = true;
         console.error(`[loop] model called ${call.toolName}, which this turn does not offer (offered: ${offered})`);
+      } else if (!tool.execute) {
+        // Reached only when a SIBLING call in this step was malformed (see `malformed` above):
+        // the halt was cancelled, so this block tool never went to the client. Say that, rather
+        // than let it vanish with no result at all.
+        output = `${call.toolName} was not staged: another tool call in the same step had `
+          + 'malformed JSON arguments. Re-issue both calls.';
+        isError = true;
       } else {
         try {
-          output = await tool.execute!(call.input);
+          output = await tool.execute(call.input);
         } catch (e) {
           output = e instanceof Error ? e.message : String(e);
           isError = true;

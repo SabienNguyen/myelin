@@ -1,7 +1,7 @@
 // Anthropic Messages API adapter over plain fetch. Native rather than via a proxy so prompt-cache
 // placement and cache-hit accounting stay first-party (the Tier-2 efficiency program).
 import {
-  errorFromResponse, isServerTool, zeroUsage, LlmHttpError,
+  errorFromResponse, isServerTool, parseToolArguments, zeroUsage, LlmHttpError,
   type ChatModel, type ChatRequest, type ContentPart, type FinishReason,
   type GenerateResult, type StreamEvent, type ThinkingPart, type ToolCallPart, type Usage,
 } from './types.js';
@@ -362,10 +362,12 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
                 };
               } else {
                 // A no-argument tool streams no input_json_delta at all: empty accumulation is {}.
-                const input: unknown = st.json ? JSON.parse(st.json) : {};
+                // Truncated/malformed JSON rides as inputError rather than throwing — see
+                // parseToolArguments; a dead turn is the worse answer on every provider.
+                const parsed = parseToolArguments(st.json);
                 yield st.kind === 'tool'
-                  ? { type: 'tool-call', toolCallId: st.id, toolName: st.name, input }
-                  : { type: 'server-tool-call', toolCallId: st.id, toolName: st.name, input };
+                  ? { type: 'tool-call', toolCallId: st.id, toolName: st.name, ...parsed }
+                  : { type: 'server-tool-call', toolCallId: st.id, toolName: st.name, input: parsed.input };
               }
               break;
             }
