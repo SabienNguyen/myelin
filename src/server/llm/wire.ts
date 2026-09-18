@@ -67,8 +67,16 @@ export interface CreateUiStreamOptions {
    * assistant message, merged into the continued message on a resubmit) — the server-side
    * saveThread hook. */
   onEnd?: (result: { messages: UIMessage[]; responseMessage: UIMessage }) => void;
-  /** Maps an execute() throw to the errorText the client shows. Defaults to the message. */
+  /** Maps an execute() throw to the errorText the client shows, and to the text note the turn
+   * closes on. Defaults to the message. */
   onError?: (error: unknown) => string;
+  /** The note a turn closes on when it ends having produced NOTHING the learner can see — no
+   * text, no block — and did not throw. See the closing guarantee in createUiStream. */
+  emptyText?: string;
+  /** Given the abort reason, the note an ABORTED turn closes on — or undefined to stay silent,
+   * which is the default and the right answer for the learner's own Stop or a superseding send.
+   * A stalled provider killed by an idle watchdog is the case that needs words. */
+  abortText?: (reason: unknown) => string | undefined;
 }
 
 export function createUiStream(opts: CreateUiStreamOptions): Response {
@@ -76,6 +84,8 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
   const messageId = last?.role === 'assistant' ? last.id : generateMessageId();
   const assembler = new MessageAssembler(opts.originalMessages, messageId);
   const onError = opts.onError ?? ((e: unknown) => (e instanceof Error ? e.message : String(e)));
+  const emptyText = opts.emptyText
+    ?? 'The model returned nothing for this turn. Nothing was lost — send again to retry.';
   const encoder = new TextEncoder();
   let finishReason: UiFinishReason | undefined;
 
@@ -184,16 +194,62 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
       // 'start' opens the stream immediately so the client flips to "running" before any slow
       // turn work (grading, bootstrap) begins inside execute.
       emit({ type: 'start', messageId });
+      // THE CLOSING GUARANTEE: a turn never ends silently.
+      //
+      // The 'error' chunk alone does not survive: the reducer drops it (uiMessageReducer's
+      // `case 'error'`), so it is live UI only — reload the thread and the failed turn is simply
+      // gone, leaving the learner's own message with nothing after it. A turn that produced no
+      // text and no block is the same hole reached without an exception.
+      //
+      // So whatever happened, the assistant message ends on a TEXT PART saying so. It rides the
+      // normal text chunks, which means it persists through the assembler into onEnd's
+      // saveThread exactly like any other prose, and reads as the tutor speaking rather than as
+      // a bubble that disappears.
+      const closeWith = (text: string) => {
+        const id = generateMessageId();
+        // Assembled first, enqueued best-effort: a turn ended by the idle watchdog has already
+        // had its reader cancelled, so the enqueue throws while the note still has to reach the
+        // saved thread. Splitting them is what makes the note survive a client that is gone.
+        for (const chunk of [
+          { type: 'text-start', id },
+          { type: 'text-delta', id, delta: text },
+          { type: 'text-end', id },
+        ] as UiChunk[]) {
+          assembler.apply(chunk);
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+          } catch { /* client gone; onEnd below still persists the note */ }
+        }
+      };
+      // Anything the learner can actually see. Reasoning and step markers do not count: a turn
+      // whose only output was thinking is a silent turn from where they sit.
+      const producedSomething = () => assembler.message.parts.some(
+        (p) => (p.type === 'text' && p.text.trim() !== '') || isToolUIPart(p),
+      );
       void (async () => {
         try {
           await opts.execute(writer, abort.signal);
+          if (!abort.signal.aborted && !producedSomething()) closeWith(emptyText);
         } catch (e) {
           // No error chunk on an aborted turn: the client is gone, and were it somehow still
-          // reading, "aborted" is not a turn failure worth an error bubble.
-          if (!abort.signal.aborted) {
-            try {
-              emit({ type: 'error', errorText: onError(e) });
-            } catch { /* the controller already failed; the finally below still runs onEnd */ }
+          // reading, "aborted" is not a turn failure worth an error bubble. The closing note is
+          // withheld for the same reason, and because an abort is usually the learner's own Stop
+          // or a superseding send — neither is a failure to report.
+          if (abort.signal.aborted) {
+            // Aborts are silent by default — Stop and a superseding send need no words. The one
+            // that does is a stall the watchdog ended, which abortText recognizes by reason.
+            const note = opts.abortText?.(abort.signal.reason);
+            if (note !== undefined && !producedSomething()) closeWith(note);
+          } else {
+            closeWith(onError(e));
+            // No 'error' chunk beside the note: the client renders one as an ⚠ bubble UNDER the
+            // message's own parts, so emitting both showed the learner the same sentence twice.
+            // The finish reason carries the failure instead — it is what the client needs the
+            // error state for (blocking the auto-resubmit of a graded block, which would
+            // otherwise retry a failing turn in a loop). The 'error' chunk stays the signal for
+            // failures with no stream to write into: an HTTP refusal, a dead fetch, a dropped
+            // connection — see the client's consumeChatStream.
+            finishReason = 'error';
           }
         }
         try {

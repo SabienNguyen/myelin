@@ -1,4 +1,4 @@
-import { explainTurnError } from './turnError.js';
+import { explainTurnError, stalledText } from './turnError.js';
 // Rails mode, phase 1 (docs/superpowers/specs/2026-07-30-rails-mode.md): the HARNESS decides what
 // happens next and the model does only narrow generation — plan → assemble → generate → stage →
 // (on resubmit) grade + harness-recorded evidence → feedback → next plan. A rails turn never gives
@@ -473,6 +473,12 @@ export function createRailsSession(
         console.error('[rails-turn-error]', msg);
         return explainTurnError(e);
       },
+      // Rails falls back deterministically at every generation step, so reaching here means the
+      // harness itself could not assemble an item — engram unreachable, or a vault with nothing
+      // left to drill. Either way the learner gets a sentence, not an empty turn.
+      emptyText: 'Nothing could be staged for this turn — the vault could not be read, or there is '
+        + 'nothing due to drill right now. Send again, or add material from the library.',
+      abortText: stalledText,
       signal,
       execute: async (writer, runSignal) => {
         const say = (text: string) => {

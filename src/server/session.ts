@@ -29,7 +29,7 @@ import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated, tutorReport } from './gap/generated.js';
-import { explainTurnError } from './turnError.js';
+import { explainTurnError, stalledText } from './turnError.js';
 import { builtinPatterns, patternChoices } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { zodTool } from './zodTool.js';
@@ -965,6 +965,14 @@ export function createTutorSession(
       // request instead of streaming tokens nobody will see.
       signal,
       onError: turnError,
+      // A turn the idle watchdog ended because the provider went quiet says so; Stop and a
+      // superseding send stay silent.
+      abortText: stalledText,
+      // A model that answered with neither prose nor a block has still ended the turn, and
+      // silence reads as the app breaking. Say what happened and what to do about it.
+      emptyText: `${cfg.models?.tutor?.model ?? 'The tutor model'} returned nothing for this turn — `
+        + 'no answer and no block staged. Nothing you did was lost. Send your message again, or '
+        + 'point the tutor role at a different model from the model badge in the top bar.',
       execute: async (writer, runSignal) => {
         // A passage the learner selected in the reader and asked about: the document is open and
         // that text is on their screen. See turnBlockTools — open_source is withheld for the turn.

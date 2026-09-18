@@ -35,9 +35,13 @@ export interface ConsumeChatStreamOptions {
    * REFERENCE (a WeakMap), so mutating in place would render nothing. */
   onUpdate: (messages: UIMessage[]) => void;
   /** Fires only on clean termination ([DONE] seen) — the server terminates cleanly even when
-   * the turn itself errored, so an error chunk still reaches onFinish and persistence. A cut
-   * connection never does. */
-  onFinish: (finalMessages: UIMessage[]) => void;
+   * the turn itself errored, so a failed turn still reaches onFinish and persistence. A cut
+   * connection never does.
+   *
+   * `failed` is the stream's own finishReason: the server writes its explanation into the
+   * message as text and marks the turn 'error' rather than emitting an error chunk the client
+   * would render a second time. The caller needs it to hold back the auto-resubmit. */
+  onFinish: (finalMessages: UIMessage[], info: { failed: boolean }) => void;
   onError: (errorText: string) => void;
   /** Test seam; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
@@ -49,6 +53,7 @@ export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise
   // message's id on a block resubmit) and overwrites this placeholder via apply().
   const assembler = new MessageAssembler(opts.body.messages, generateMessageId());
   let terminated = false;
+  let failed = false;
 
   const snapshot = (): UIMessage[] => {
     const messages = assembler.finalMessages();
@@ -93,6 +98,7 @@ export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise
         }
         const chunk = JSON.parse(payload) as UiChunk;
         if (chunk.type === 'error') opts.onError(chunk.errorText);
+        if (chunk.type === 'finish' && chunk.finishReason === 'error') failed = true;
         assembler.apply(chunk);
         opts.onUpdate(snapshot());
       }
@@ -103,7 +109,7 @@ export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise
     return 'done';
   }
   if (opts.signal.aborted) return 'aborted';
-  if (terminated) opts.onFinish(assembler.finalMessages());
+  if (terminated) opts.onFinish(assembler.finalMessages(), { failed });
   else opts.onError('The connection to the tutor dropped mid-turn.');
   return 'done';
 }

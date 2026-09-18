@@ -1,3 +1,25 @@
+/** The abort reason the idle watchdog uses.
+ *
+ * Stop, a superseding send and a stalled provider all reach the turn as the same abort, and the
+ * first two are not failures — nobody needs to be told they pressed Stop. A stall IS one: the
+ * provider went quiet mid-turn and the watchdog ended it, which without a word looks exactly like
+ * the app dying. Naming the reason is what lets the stream tell them apart. */
+export class TurnStalled extends Error {
+  constructor(ms: number) {
+    const minutes = Math.round(ms / 60_000);
+    super(`The tutor stopped responding — nothing arrived for ${minutes} minutes, so this turn was `
+      + 'ended rather than left hanging. Nothing you did was lost: send your message again, and if '
+      + 'it keeps stalling, try a different model from the model badge in the top bar.');
+    this.name = 'TurnStalled';
+  }
+}
+
+/** The note a stalled turn closes on, or undefined for an abort that needs no explanation.
+ *  Passed to createUiStream as `abortText`. */
+export function stalledText(reason: unknown): string | undefined {
+  return reason instanceof TurnStalled ? reason.message : undefined;
+}
+
 /** What the learner is told when a turn dies. One phrasing for the agentic loop and rails. */
 export function explainTurnError(e: unknown): string {
   const msg = e instanceof Error ? e.message : String(e);
