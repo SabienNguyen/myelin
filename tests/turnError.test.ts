@@ -11,7 +11,7 @@ describe('explainTurnError', () => {
     expect(out).toContain('11,417');
     expect(out).toContain('8,000');
     expect(out).toMatch(/retrying will not help/);
-    expect(out).toMatch(/rails/);
+    expect(out).toMatch(/higher per-minute limit/);
     expect(out).not.toContain('org_01abc'); // an account id has no place in the transcript
   });
 

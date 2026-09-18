@@ -567,8 +567,8 @@ export function buildCompilePrompt(
 //
 // The agentic compile above expects the model to DRIVE write_page — which a 7-9B model reliably
 // cannot do (it narrates instead of calling tools; observed live: every chapter erroring with
-// "no write_page calls — try a stronger compile model"). Same medicine as rails mode: when the
-// loop comes back empty, the HARNESS does the orchestration and the model does one narrow
+// "no write_page calls — try a stronger compile model"). So: when the loop comes back empty,
+// the HARNESS does the orchestration and the model does one narrow
 // structured generation per part (title + distilled body, constrained decoding + one retry); if
 // even that fails, the deterministic floor writes the source text itself as a draft page, honestly
 // labeled. Material always lands in the vault; only an unreachable endpoint still fails the entry —

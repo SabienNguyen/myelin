@@ -30,12 +30,6 @@ const roleSchema = z.object({
   concurrency: z.number().int().positive().optional(),
 });
 
-// Rails mode (docs/superpowers/specs/2026-07-30-rails-mode.md): the harness drives the teaching
-// loop and the tutor model only generates — for small local models that cannot hold the full
-// agentic loop. Applies to learn/review/quiz; freeform always runs agentic. Default off, and off
-// means zero behavior change.
-const tutorRoleSchema = roleSchema.extend({ rails: z.boolean().optional() });
-
 export const DEFAULT_MODEL = 'openrouter:openrouter/free';
 
 // `~` for the home dir, and `${VAR}` for an environment variable — the latter so a config that
@@ -149,10 +143,10 @@ const configSchema = z.object({
   models: z.object({
     // Every role defaults to OpenRouter's free router, so a fresh install costs nothing to try: one
     // free key, no card, no local model to pull. That router picks among free models, which are
-    // small — so the tutor defaults to rails (the harness drives the loop; see tutorRoleSchema
-    // above), the same pairing the first-run OpenRouter card saves. Anyone with an Anthropic key or
-    // a strong local model overrides per role in the models dialog or harness.config.json.
-    tutor: tutorRoleSchema.default({ model: DEFAULT_MODEL, rails: true }),
+    // small, and the tutor now always runs the full agentic loop — so a free-router tutor is the
+    // weakest supported setup, not a recommended one. Anyone with an Anthropic key or a strong
+    // local model overrides per role in the models dialog or harness.config.json.
+    tutor: roleSchema.default({ model: DEFAULT_MODEL }),
     grader: roleSchema.default({ model: DEFAULT_MODEL }),
     // Retained so existing settings files still load, but nothing calls it: quiz blocks are staged
     // by the tutor as a block tool, and there is no separate quiz model. Not offered in the model

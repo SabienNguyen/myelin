@@ -1,10 +1,13 @@
-// A deliberately weak "7B-class" model behind the OpenAI-compat wire — the manual twin of
-// tests/fixtures/weakModel.ts (same pathology cycles; keep them in step). Use it to exercise the
-// eval and the app against small-model failure modes with no GPU, no weights, no network:
+// A deliberately weak "7B-class" model behind the OpenAI-compat wire. Use it to drive the app
+// against small-model failure modes with no GPU, no weights, no network — chiefly to check that
+// a degenerate model still leaves the learner with a turn that says something (the closing
+// guarantee in src/server/llm/wire.ts):
 //
 //   npm run weak:model                    # pathology mode on :4901
 //   WEAK_MODE=reject-rf npm run weak:model
-//   OPENAI_COMPAT_BASE_URL=http://127.0.0.1:4901/v1 npm run eval:model -- openai:weak-7b --n 6
+//
+// Then point the app at it: OPENAI_COMPAT_BASE_URL=http://127.0.0.1:4901/v1 and a model id of
+// openai:weak-7b in the models dialog.
 //
 // pathology  — accepts response_format but emits the classic small-model failure cycle:
 //              fenced JSON with chatter, invalid JSON, expected∉choices, prose refusals
@@ -17,7 +20,6 @@ const MODE = process.env.WEAK_MODE ?? 'pathology';
 const PORT = Number(process.env.WEAK_PORT ?? 4901);
 let calls = 0;
 let contentCalls = 0;
-let feedbackCalls = 0;
 let toolCalls = 0;
 
 const validCheck = JSON.stringify({
@@ -34,7 +36,6 @@ const violationCheck = JSON.stringify({
   expected: 'the prior probability', // schema-valid but not one of choices — the classic 7B slip
   framing: 'Let’s check the basics.',
 });
-const validFeedback = JSON.stringify({ feedback: 'You picked "P(A)" — that is the prior.', next: 'continue' });
 
 const CHECK_CYCLE = [
   validCheck,                                                   // clean → first try
@@ -48,7 +49,6 @@ const CHECK_CYCLE = [
   'Sure! Let me think about that question instead.',            // refusal again → fallback
   validCheck,                                                   // clean → first try
 ];
-const FEEDBACK_CYCLE = [validFeedback, 'Great job!! Keep going :)'];
 
 const server = createServer((req, res) => {
   if (req.method !== 'POST' || !req.url.endsWith('/chat/completions')) {
@@ -70,7 +70,7 @@ const server = createServer((req, res) => {
 
     if (body.tool_choice && body.tools?.length) {
       const name = body.tools[0].function.name;
-      const good = name === 'rails_feedback' ? validFeedback : validCheck;
+      const good = validCheck;
       toolCalls++;
       const bad = toolCalls === 2;
       console.error(`[weak] call ${calls}: tool_call ${name} (${bad ? 'MALFORMED args' : 'valid'})`);
@@ -86,10 +86,7 @@ const server = createServer((req, res) => {
       }));
     }
 
-    const name = body.response_format?.json_schema?.name ?? body.tools?.[0]?.function?.name ?? '';
-    const content = name === 'rails_feedback'
-      ? FEEDBACK_CYCLE[feedbackCalls++ % FEEDBACK_CYCLE.length]
-      : CHECK_CYCLE[contentCalls++ % CHECK_CYCLE.length];
+    const content = CHECK_CYCLE[contentCalls++ % CHECK_CYCLE.length];
     console.error(`[weak] call ${calls}: content reply (${content.startsWith('{') ? 'json-ish' : 'pathological'})`);
     return res.end(JSON.stringify({
       choices: [{ message: { content }, finish_reason: 'stop' }],

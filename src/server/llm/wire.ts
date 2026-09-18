@@ -136,9 +136,9 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
             case 'tool-call': {
               // Validate a BLOCK's args here, where the input is COMPLETE. (Never on
               // tool-input-delta: a streaming input is partial by definition and would fail every
-              // schema mid-flight.) Rails parses its own blocks; the agentic path used to forward
-              // raw model args straight to the client, so a `speak` with no `lang` threw out of
-              // pickVoice and white-screened the page. Checked against 38 real block inputs from
+              // schema mid-flight.) The loop used to forward raw model args straight to the
+              // client, so a `speak` with no `lang` threw out of pickVoice and white-screened the
+              // page. Checked against 38 real block inputs from
               // live sessions: only genuinely broken ones fail.
               emit({
                 type: 'tool-input-available',

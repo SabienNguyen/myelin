@@ -8,9 +8,8 @@ import { join } from 'node:path';
 import { atomicWrite } from './atomicWrite.js';
 import { isStance, type Stance } from '../shared/commands.js';
 
-/** What each stance means, in the tutor's operating terms. One source of truth: session.ts's
- * tail HARNESS note and rails' generation prompts both read from here, so the agentic and rails
- * paths can never describe the same stance differently. */
+/** What each stance means, in the tutor's operating terms. One source of truth, read by
+ * session.ts's tail HARNESS note. */
 export const STANCE_INSTRUCTIONS: Record<Stance, string> = {
   beginner: 'explain from zero — define every term on first use, give a concrete analogy before '
     + 'any formalism, keep steps short, and drop in a quick check every few steps; when '

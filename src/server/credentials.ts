@@ -17,9 +17,9 @@ import { join } from 'node:path';
  * Where credentials (and settings.json) live when they did not come from the environment.
  *
  * MYELIN_CONFIG_DIR overrides the OS location wholesale. The e2e suite sets it: the fixture
- * backends must not read the developer's real settings.json, whose saved model ids and
- * tutorRails flag silently overrode the fixture config (rails.config.json's scripted models
- * became gpt-5.6-luna mid-suite — CI never saw it because CI has no ~/.config/myelin).
+ * backends must not read the developer's real settings.json, whose saved model ids silently
+ * overrode the fixture config (a fixture's scripted models became gpt-5.6-luna mid-suite — CI
+ * never saw it because CI has no ~/.config/myelin).
  */
 export function credentialsPath(home = homedir(), os = platform()): string {
   if (process.env.MYELIN_CONFIG_DIR) return join(process.env.MYELIN_CONFIG_DIR, 'credentials.json');

@@ -1,3 +1,9 @@
+> **REMOVED.** Rails mode shipped, was used, and was taken out again: the lessons it produced
+> were weak enough that nobody chose it, so carrying a second teaching loop bought complexity and
+> no teaching. The tutor now always runs the agentic loop. This spec is kept as the record of what
+> was built and why — it is not a description of the current harness. See the removal commit for
+> what a small model gets instead.
+
 # Rails mode: a harness-driven loop for small models
 
 The agentic tutor loop asks a lot of a model: pick the next thing to teach across a whole vault,

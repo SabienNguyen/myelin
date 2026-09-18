@@ -34,8 +34,8 @@ describe('pickVoice — BCP-47 matching for the speak control', () => {
  * A `speak` block whose `lang` is missing used to white-screen the page:
  * "Cannot read properties of undefined (reading 'toLowerCase')" thrown out of pickVoice, caught
  * live while asking a PyTorch tutor for a Vietnamese word. The schema marks lang required, but
- * nothing validates a model-staged block before it reaches the client (rails parses its own
- * blocks; the agentic path does not), so bad model output became a React crash. A missing voice
+ * nothing validated a model-staged block before it reached the client, so bad model output
+ * became a React crash. A missing voice
  * tag must degrade to "no voice", which is already the no-matching-voice behaviour.
  */
 describe('pickVoice with a missing language tag', () => {

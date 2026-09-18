@@ -2668,9 +2668,6 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .models-row input { font-size: 0.85rem; min-width: 0; }
 .models-row input:disabled { color: var(--text-muted); background: var(--bg-inset); }
 .models-shadow-note { grid-column: 2; font-size: 0.72rem; color: var(--text-muted); }
-/* The rails checkbox rides the tutor row's grid; the checkbox must not stretch to the column. */
-.models-rails { display: flex; align-items: center; gap: 0.4rem; }
-.models-rails input { width: auto; accent-color: var(--accent); }
 /* Discovery: installed models as compact chips that fill the last-focused role input, and the
    one-row local preset. Chip padding is deliberately tighter than the global button default —
    these are suggestions riding a dense dialog, not primary actions. */
