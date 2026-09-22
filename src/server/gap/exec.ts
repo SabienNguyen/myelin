@@ -177,11 +177,14 @@ export function runtimeFor(id: string): Runtime | undefined {
 }
 
 export async function availableRuntimes(): Promise<string[]> {
-  const out: string[] = [];
-  for (const rt of RUNTIMES) {
-    if (await runtimeAvailable(rt.id)) out.push(rt.id);
-  }
-  return out;
+  // Probed in parallel, like runtimeStatuses below. Sequentially this is the SUM of every probe,
+  // and a container runtime's probe is up to three docker invocations — `docker info` on a cold
+  // machine takes seconds, and the image-missing verdict is deliberately not cached, so it pays
+  // that again on every call. A machine WITH docker but WITHOUT the images (a fresh CI runner,
+  // or a learner who has never pulled one) was the slow case: locally docker is usually absent,
+  // `docker --version` fails at once, and the sequential cost stays invisible.
+  const ok = await Promise.all(RUNTIMES.map((rt) => runtimeAvailable(rt.id)));
+  return RUNTIMES.filter((_, i) => ok[i]).map((rt) => rt.id);
 }
 
 /** Every runtime with its status — the /api/gap/environments payload, reasons included. */
