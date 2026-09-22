@@ -98,23 +98,26 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
         return c.json({ error: 'The previous turn is still shutting down — try again in a moment.' }, 409);
       }
     }
-    // A stance command persists BEFORE the turn runs, so session.ts's tail note already carries
-    // the new stance on this very turn — a bare "/beginner" with no text still runs a turn, and
-    // the tutor answers it already teaching at the new level.
-    if (isStance(command)) setStance(cfg.vault, threadId, command);
-    saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
-    // A page reload only drops delivery; the server still completes and persists the turn.
-    const controller = new AbortController();
-    let finish!: () => void;
-    const entry = { controller, lastUserId, done: new Promise<void>((resolve) => { finish = resolve; }) };
-    runs.set(threadId, entry);
-    // Only this turn's own entry: a superseding turn may already have registered under the id.
-    const end = () => { if (runs.get(threadId) === entry) runs.delete(threadId); finish(); };
+    // The two pre-stream writes below sat outside this try: an unwritable or full vault made them
+    // throw past the handler, reaching the client as exactly the unparseable 500 it exists to kill.
+    let end: (() => void) | undefined;
     try {
+      // A stance command persists BEFORE the turn runs, so session.ts's tail note already carries
+      // the new stance on this very turn — a bare "/beginner" with no text still runs a turn, and
+      // the tutor answers it already teaching at the new level.
+      if (isStance(command)) setStance(cfg.vault, threadId, command);
+      saveThread(cfg.vault, threadId, body.messages); // persist request-side; response side saved by client PUT
+      // A page reload only drops delivery; the server still completes and persists the turn.
+      const controller = new AbortController();
+      let finish!: () => void;
+      const entry = { controller, lastUserId, done: new Promise<void>((resolve) => { finish = resolve; }) };
+      runs.set(threadId, entry);
+      // Only this turn's own entry: a superseding turn may already have registered under the id.
+      end = () => { if (runs.get(threadId) === entry) runs.delete(threadId); finish(); };
       return detachedResponse(await respond(body.messages, effectiveMode, threadId, controller.signal),
         end, { ms: IDLE_MS, onIdle: () => controller.abort(new TurnStalled(IDLE_MS)) });
     } catch (error) {
-      end();
+      end?.(); // a write may have thrown before the run was registered — nothing to unregister then
       // A throw BEFORE the stream exists is the one failure the closing guarantee in
       // createUiStream cannot cover — there is no response to write a note into. Hono would turn
       // it into a bare 500 whose body the client cannot parse, which shows up as the dead

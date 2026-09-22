@@ -55,6 +55,15 @@ export const getStatus = () => getJson<any>('/api/status', 'the harness status')
 // conversation with real history saw a blank chat and no sign anything had gone wrong.
 export const getThread = (threadId: string) => getJson<any[]>(`/api/thread/${threadId}`, 'this conversation');
 
+// The review queue (restRoutes.ts /api/due): pages already slipped or close to it, slipped first,
+// list capped — `total` is the count BEFORE the cap.
+export interface DueRow {
+  slug: string; title: string; effective: string; level: string;
+  daysLeft: number | null; slipped: boolean;
+}
+export interface DuePayload { due: DueRow[]; total: number }
+export const getDue = () => getJson<DuePayload>('/api/due', 'your review queue');
+
 // Honest progress (restRoutes.ts /api/progress): what you know now by decayed level, positive
 // graded evidence earned in the last 7 days, and how many pages are slipping (a review opportunity).
 export interface Progress {

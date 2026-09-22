@@ -68,6 +68,18 @@ describe('FirstRun — two ways through the gate', () => {
     expect(body.env).toEqual({ OPENROUTER_API_KEY: 'test-router-key' });
   });
 
+  // The card kept advertising "guided exercises enabled" after PR #51 deleted rails: the free path
+  // runs the same agentic tutor loop as every other model now, and a first screen promising a mode
+  // the app cannot enter is a lie the learner only discovers mid-lesson.
+  it('the free-router card does not promise the rails mode PR #51 deleted', async () => {
+    stubFetch();
+    render(<FirstRun><p>the app</p></FirstRun>);
+    const note = (await screen.findByLabelText('OpenRouter API key'))
+      .closest('form')!.textContent ?? '';
+    expect(note).not.toMatch(/guided exercise|rails/i);
+    expect(note).toMatch(/free router for every learning role/);
+  });
+
   // Every role defaults to OpenRouter now, so a saved Anthropic key alone satisfies nothing: the
   // roles still route to OpenRouter, the gate stays up, and the card re-renders with no message.
   // Choosing the Anthropic card has to mean "run on Claude", not just "store this key".

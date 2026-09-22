@@ -5,7 +5,10 @@ const quickCheck = {
     question: z.string(),
     mode: z.enum(['text', 'choice']),
     choices: z.array(z.string()).optional(),
-    expected: z.string().optional(), // exact-match target for mechanical grading
+    // Exact-match target for mechanical grading. `.min(1)` because an empty string is not a
+    // target: an unanswered quick_check also submits '', and the two compared equal and minted
+    // applied-correctly. Omit the field instead — the block then grades as an open answer.
+    expected: z.string().min(1).optional(),
     // BCP-47 tag when the ANSWER should be typed in a specific language — the text field then
     // offers that language's input method (e.g. "vi" → Vietnamese Telex, ImeInput.tsx) so the
     // learner can type diacritics from an ASCII keyboard. Per-block, not a sticky global, so a
@@ -24,7 +27,7 @@ const quiz = {
       type: z.enum(['choice', 'short', 'cloze']),
       prompt: z.string(),
       choices: z.array(z.string()).optional(),
-      expected: z.string().optional(),
+      expected: z.string().min(1).optional(), // '' matches an unanswered item — see quickCheck above
       pageSlug: z.string(),
     })).min(1),
   }),

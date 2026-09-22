@@ -83,6 +83,10 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
   const last = opts.originalMessages[opts.originalMessages.length - 1];
   const messageId = last?.role === 'assistant' ? last.id : generateMessageId();
   const assembler = new MessageAssembler(opts.originalMessages, messageId);
+  // How many parts the assembler was SEEDED with. On a block resubmit it clones the assistant
+  // message being continued, so message.parts already holds the previous turn's text and block
+  // before this turn has emitted anything — see producedSomething below.
+  const seededParts = assembler.message.parts.length;
   const onError = opts.onError ?? ((e: unknown) => (e instanceof Error ? e.message : String(e)));
   const emptyText = opts.emptyText
     ?? 'The model returned nothing for this turn. Nothing was lost — send again to retry.';
@@ -221,9 +225,15 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
           } catch { /* client gone; onEnd below still persists the note */ }
         }
       };
-      // Anything the learner can actually see. Reasoning and step markers do not count: a turn
-      // whose only output was thinking is a silent turn from where they sit.
-      const producedSomething = () => assembler.message.parts.some(
+      // Anything the learner can actually see, counting only what THIS turn appended. Judging the
+      // whole message made the guarantee dead on every grading turn: the seeded block tool part
+      // answered producedSomething before the model had said a word, so a resubmit that came back
+      // empty ended silently — the exact hole, on the most common turn in the app. A count is the
+      // right test rather than a compare of parts: the pre-model grading write PATCHES the seeded
+      // block part in place (session.ts) and pushes nothing, which is not new content, and the
+      // reducer only ever appends. Reasoning and step markers do not count either: a turn whose
+      // only output was thinking is a silent turn from where they sit.
+      const producedSomething = () => assembler.message.parts.slice(seededParts).some(
         (p) => (p.type === 'text' && p.text.trim() !== '') || isToolUIPart(p),
       );
       void (async () => {

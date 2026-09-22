@@ -70,10 +70,15 @@ describe('runProgram (node runtime)', () => {
 });
 
 describe('runtime detection', () => {
+  // Explicit timeout: this shells out to every runtime's probe, and on a machine that HAS docker
+  // but has not pulled the images, `docker info` plus a per-image `docker image inspect` are
+  // seconds of real work that no cache absorbs (the image-missing verdict is deliberately not
+  // cached). It timed out at vitest's 5s default on a cold CI runner while taking 184ms on a
+  // machine with no docker at all — the probes are parallel now, but they still talk to a daemon.
   it('node is always available; the list always contains it', async () => {
     expect(await runtimeAvailable('node')).toBe(true);
     expect(await availableRuntimes()).toContain('node');
-  });
+  }, 30_000);
 });
 
 describe('exec verification gates', () => {

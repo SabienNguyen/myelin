@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -168,5 +168,29 @@ describe('an absent mode is derived, not defaulted', () => {
 
   it('still lets a slash command override the derivation for its turn', async () => {
     expect(await send('teach me tensors', { command: 'freeform' })).toBe('freeform');
+  });
+});
+
+describe('POST /api/chat — a vault that cannot be written', () => {
+  it('answers a failed pre-stream save with a JSON error, not a 500 the client cannot parse', async () => {
+    const vault = mkdtempSync(join(tmpdir(), 'lwh-unwritable-'));
+    // .harness/sessions as a FILE makes saveThread's mkdirSync throw ENOTDIR — a stand-in for the
+    // read-only or full vault that used to throw past the route's guard, since those two writes
+    // sat just outside the try. Hono then returned a bare 500 and the client showed "unreachable".
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    writeFileSync(join(vault, '.harness', 'sessions'), 'not a directory');
+    const app = buildChatRoute({} as any, makeCfg(vault));
+    const res = await app.request('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }], threadId: 't' }),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const body = await res.json(); // the point of the fix: this parses at all
+    expect(typeof body.error).toBe('string');
+    expect(body.error).toMatch(/could not be started/);
+    // …and the failed turn left nothing registered, so the retry isn't refused with a 409.
+    const run = await (await app.request('/api/thread/t/run')).json();
+    expect(run.running).toBe(false);
   });
 });

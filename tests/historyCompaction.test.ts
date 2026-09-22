@@ -168,6 +168,21 @@ describe('compactHistory', () => {
     expect((second.messages[0]!.parts[0] as any).text).toContain(blocks[0]!.summary);
   });
 
+  // The header states its count to the model as fact, inside the message that stands in for
+  // everything it replaced. Summing block.messages double-counted every earlier block: an
+  // 80-message thread was reported as 96 compacted, a count that cannot exist.
+  it('counts each compacted message once after a second block, not once per block', async () => {
+    const { deps } = summarizer();
+    await compactHistory({ vault, threadId: 't', messages: thread(20), budgetTokens: 10_000, deps });
+    const grown = thread(40);
+    const second = await compactHistory({ vault, threadId: 't', messages: grown, budgetTokens: 10_000, deps });
+    expect(readBlocks(vault, 't')).toHaveLength(2);
+    const text = (second.messages[0]!.parts[0] as any).text;
+    const stated = Number(/first (\d+) messages/.exec(text)![1]);
+    expect(stated).toBe(second.compacted);
+    expect(stated).toBeLessThanOrEqual(grown.length);
+  });
+
   it('falls back to a mechanical summary when the summarizer throws, and stores it', async () => {
     const deps: CompactionDeps = {
       summarize: async () => { throw new Error('model refused'); },
@@ -234,6 +249,15 @@ describe('the summarizer\'s inputs and the fallback', () => {
     expect(out.summary).toContain('explain the chain rule');
     expect(out.summary).toContain('derivatives → incorrect');
     expect(out.openThreads).toEqual([]);
+  });
+
+  it('reads the last block\'s cumulative count, so stacked blocks do not inflate the header', () => {
+    const msg = blocksToMessage([
+      { throughId: 'a9', messages: 18, summary: 'S1', openThreads: [], createdAt: 'now' },
+      { throughId: 'a20', messages: 40, summary: 'S2', openThreads: [], createdAt: 'now' },
+    ]);
+    // 40 is the whole covered prefix; 18 + 40 would claim 58 messages of a 40-message thread.
+    expect((msg.parts[0] as any).text).toContain('first 40 messages');
   });
 
   it('the synthetic message tells the tutor the vault outranks the precis', () => {

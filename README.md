@@ -30,8 +30,9 @@ exactly why.
 
 ![A graded math derivation on the scratchpad](docs/screenshots/math-graded.png)
 
-**A miss stays a miss.** Quizzes mark every item mechanically and never round up — the score is the
-truth, and a ✗ stays a ✗.
+**A miss stays a miss.** Multiple-choice items are exact-matched; a short answer that doesn't match
+its expected string goes to the grader model, and the card marks which items were checked and which
+were judged. Neither path rounds up — a ✗ stays a ✗.
 
 ![A graded quiz with honest per-item verdicts](docs/screenshots/quiz.png)
 
@@ -153,12 +154,18 @@ and belongs on the strongest model you have. Structured generations are
 schema-constrained at the decoder on providers that support `response_format` (Ollama, LiteLLM,
 OpenRouter); others fall back to forced tool calls automatically.
 
-For OpenRouter, set `OPENAI_COMPAT_BASE_URL=https://openrouter.ai/api/v1`, put your OpenRouter key
-in `OPENAI_COMPAT_API_KEY`, and use their model ids: `"grader": { "model":
-"openai:deepseek/deepseek-chat" }`. Nous Portal works the same way with
-`https://inference-api.nousresearch.com/v1`; any other OpenAI-compatible provider works with the
-base URL from its docs. An `openai:` role with no `OPENAI_COMPAT_BASE_URL` fails at call time with
-a message naming the variable — there is no localhost fallback to guess wrong.
+For OpenRouter, use the `openrouter:` prefix and put your key in `OPENROUTER_API_KEY`: `"grader":
+{ "model": "openrouter:deepseek/deepseek-chat" }`. The endpoint is pinned, so there is no base URL
+to set. Route it through `openai:` instead and three things stop recognising the setup — catalog
+validation on save, the free-model chips in the models dialog, and the first-run presence check —
+and it spends the single `OPENAI_COMPAT_BASE_URL` slot that a genuinely custom endpoint needs.
+Groq is the same shape: `groq:` plus `GROQ_API_KEY`.
+
+The `openai:` route is for an endpoint with no prefix of its own — Nous Portal
+(`https://inference-api.nousresearch.com/v1`), a self-hosted server, anything whose base URL comes
+from its own docs. Set `OPENAI_COMPAT_BASE_URL` and, if it wants one, `OPENAI_COMPAT_API_KEY`. An
+`openai:` role with no `OPENAI_COMPAT_BASE_URL` fails at call time with a message naming the
+variable — there is no localhost fallback to guess wrong.
 
 **LiteLLM (100+ providers through one endpoint).** The `openai:` route is also how a
 [LiteLLM proxy](https://docs.litellm.ai/docs/simple_proxy) plugs in — no dedicated prefix needed,
@@ -173,6 +180,12 @@ litellm --model gemini/gemini-2.5-flash --port 4000
 # then, for myelin:
 export OPENAI_COMPAT_BASE_URL=http://localhost:4000/v1
 ```
+
+**Prompt caching** is one of the Anthropic-route settings the models dialog does not carry
+(`models.<role>.effort` is the other). `cacheTtl` (`"5m"`, the wire default, or `"1h"`) lives in
+`harness.config.json` only and takes a restart; `"1h"` costs more per cache write and survives a
+learner who reads for twenty minutes between turns. The dialog's usage lines report the cache read
+and write tokens it moves. Local and compat routes have no explicit cache and ignore it.
 
 with roles like `"grader": { "model": "openai:gemini/gemini-2.5-flash" }`. A
 [config.yaml](https://docs.litellm.ai/docs/proxy/configs) serves several models from the one
@@ -269,10 +282,11 @@ second one leaves the first one's bytes alone.
 
 The budget is `models.tutor.contextTokens` minus 16k of headroom for the system prompt and the
 answer, or 48k tokens when no window is declared — roughly fifty turns, so an ordinary sitting
-never reaches it. Set `contextTokens` on the tutor role if your model's window is smaller than
-64k. Compaction logs one line when it fires (`[compaction] thread …`); if the summarizing call
-fails, a mechanical summary naming the topics and verdicts is stored instead, because a thread
-being saved from overflow is the wrong moment to fail the turn.
+never reaches it. Declare the tutor's window if your model's is smaller than 64k — in the models
+dialog beside the model id, or as `contextTokens` on the role in `harness.config.json`. Compaction
+logs one line when it fires (`[compaction] thread …`); if the summarizing call fails, a mechanical
+summary naming the topics and verdicts is stored instead, because a thread being saved from
+overflow is the wrong moment to fail the turn.
 
 <details>
 <summary><b>Ollama caveats: context length and leaked chat-template tokens</b></summary>
@@ -397,7 +411,9 @@ warning saying why.
    model's rubric judgment on produced work — its own kind, so it never launders into applied
    evidence), `struggled`, `misconception` (with a note) — and a machine check outranks a
    model's opinion.
-4. Anki reviews have a ceiling: a review maps to `exposed` (refreshes the decay clock, never
-   promotes); a lapse maps to `struggled`. Flashcards alone can never mint `applied-correctly`.
+4. Anki reviews have a ceiling: a review maps to `exposed`, which never promotes — and, because an
+   `exposed` that raises no level counts as an encounter rather than a confirmation, never resets
+   the decay clock either, so a flashcard streak buys a `practicing` page no extra days. A lapse
+   maps to `struggled`. Flashcards alone can never mint `applied-correctly`.
 5. If a graded block isn't followed by a `record_evidence` call, the guardrail nudges the tutor
    once, then logs to `vault/.harness/guardrail.log`.

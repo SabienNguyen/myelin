@@ -163,7 +163,11 @@ function sampledEqual(amA: string, amB: string, vars?: string | string[], eps = 
     let ra: number, rb: number;
     try { ra = fa.evaluate(scopeAt(names, k)); rb = fb.evaluate(scopeAt(names, k)); } catch { continue; }
     if (typeof ra !== 'number' || typeof rb !== 'number') continue; // matrices/units — not sampled
-    if (Number.isNaN(ra) && Number.isNaN(rb)) continue;
+    // Either side leaving its real domain makes the point uninformative, exactly as
+    // residualsProportional treats it. With `&&`, a one-sided NaN fell through to the tolerance
+    // test — where `Math.abs(NaN - rb) > eps` is FALSE — so sqrt(x-4) vs x+1 "agreed" at every
+    // sample below 4 and minted applied-correctly for an unrelated answer.
+    if (Number.isNaN(ra) || Number.isNaN(rb)) continue;
     sawPoint = true;
     if (Math.abs(ra - rb) > eps * Math.max(1, Math.abs(ra), Math.abs(rb))) return false;
   }
@@ -595,7 +599,13 @@ export async function gradeBlockOutput(
     // deliberately said, and the block result is not schema-validated.
     const conf = result.confidence === 'sure' || result.confidence === 'unsure'
       ? ` · felt ${result.confidence}` : '';
-    if (input.expected != null) {
+    // `?.trim()` gates the BRANCH, not just the comparison: an `expected` of '' is not an
+    // exact-match target, and an unanswered quick_check defaults to '' — so `'' != null` sent a
+    // blank answer down the exact-match path, matched it against a blank target and minted
+    // applied-correctly. A block that arrives malformed falls through to gradeOpenAnswer instead,
+    // whose blank guard catches the empty answer and whose grade capApplied caps. Not correct:false
+    // here — that charges a harness bug to the learner as 'struggled'.
+    if (input.expected?.trim()) {
       const ok = answer.trim().toLowerCase() === input.expected.trim().toLowerCase();
       if (ok) {
         return {
@@ -674,6 +684,16 @@ export async function gradeBlockOutput(
     const perItem = await Promise.all(input.items.map(async (item: any) => {
       const answer = submitted.find((a: any) => a.id === item.id)?.answer ?? '';
       if (item.type !== 'short' && item.expected != null) {
+        // '' is not an exact-match target, but an unanswered item ALSO defaults to '' — so
+        // `expected != null` compared blank against blank and minted applied-correctly for an item
+        // nobody answered. Unlike quick_check there is no open-answer path to fall through to, so
+        // the item is a miss; the id is logged because a harness bug the learner cannot see is the
+        // worse failure of the two.
+        if (!item.expected.trim()) {
+          console.error(`quiz: item "${item.id}" (${item.pageSlug}) carries a blank expected`
+            + ' — nothing to match against, so it is graded wrong');
+          return { id: item.id, source: 'mechanical' as GradeSource, correct: false };
+        }
         return {
           id: item.id, source: 'mechanical' as GradeSource,
           correct: answer.trim().toLowerCase() === item.expected.trim().toLowerCase(),
@@ -682,8 +702,10 @@ export async function gradeBlockOutput(
       // Short items follow the quick_check discipline: an exact match on `expected` is
       // mechanically correct and never consults a model — the audit caught a short answer that
       // WAS the expected string verbatim marked ✗ by the judge. Only a miss goes to the model,
-      // with `expected` as context so right-but-rephrased still earns credit.
-      if (item.expected != null
+      // with `expected` as context so right-but-rephrased still earns credit. Same blank gate as
+      // the choice branch above — a blank `expected` would match an unanswered item here too, and
+      // this branch mints MECHANICAL credit; falling through sends it to the model's blank guard.
+      if (item.expected?.trim()
         && answer.trim().toLowerCase() === item.expected.trim().toLowerCase()) {
         return { id: item.id, source: 'mechanical' as GradeSource, correct: true };
       }
@@ -737,7 +759,29 @@ export async function gradeBlockOutput(
         evidence: [],
       };
     }
+    // gradeChemEquation skips its identity check unless BOTH reactants and products are pinned, so
+    // an unpinned block accepted "H2 + H2 -> 2H2" — any balanced string — as applied practice for
+    // whatever reaction was asked. The fix lives here rather than in the checker: returning
+    // ok:false there would read as 'struggled' and demote a learner who balanced correctly, and
+    // the schema stays wide on purpose (blocks.ts's chem_equation note).
+    //
+    // Unlike the two backstops above, this one still RUNS the checker. The balance check is a real
+    // machine result the learner earned — "not balanced: C, H differ between the sides" is the
+    // whole feedback on an unbalanced answer, and `grading.detail` is all the card and the tutor
+    // ever see. Returning early swapped that diagnosis for a sentence about block authoring and
+    // left the tutor model's opinion as the only account of whether it balanced, which is the
+    // thing this change exists to distrust. So: report the balance, mint nothing.
+    const unpinnedChem = mc?.kind === 'chem_equation' && !(mc.reactants && mc.products);
     const g = gradeStructured(input.checker, result.values ?? []);
+    if (unpinnedChem) {
+      return {
+        verdict: 'reviewed',
+        source: 'mechanical',
+        evidence: [],
+        detail: `${g.detail} — but this block pinned no reactants/products, so any balanced `
+          + 'equation would pass; it needs the reaction named to count as applied practice.',
+      };
+    }
     // `ungraded` (an unparseable answer — see gradeStructured's vector path) must not mint
     // evidence or a verdict color: a parse failure says nothing about the learner's grasp.
     if (g.detail.startsWith('could not interpret')) {

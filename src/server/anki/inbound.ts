@@ -25,10 +25,16 @@ const localDay = (reviewTimeMs: number): string => new Date(reviewTimeMs).toISOS
  * Pulls reviews of Engram-tagged Anki cards since the stored cursor, aggregates them
  * per-slug-per-day, and records evidence through Engram's `record_evidence` tool.
  *
- * Maintain-never-promote ceiling: a day's reviews for a slug map to 'exposed' (refreshes
- * `last_reinforced`, can never raise mastery level) unless any review that day was ease=1
- * (Again), in which case the day maps to 'struggled' instead, and a line is appended to
- * `anki-lapses.jsonl` for `recentLapses()` to surface at session bootstrap.
+ * Ceiling: a day's reviews for a slug map to 'exposed' (can never raise mastery level) unless any
+ * review that day was ease=1 (Again), in which case the day maps to 'struggled' instead, and a
+ * line is appended to `anki-lapses.jsonl` for `recentLapses()` to surface at session bootstrap.
+ *
+ * This used to be called "maintain-never-promote" and documented as refreshing `last_reinforced`.
+ * It does not. engram (student/model.ts, `reconfirmsStanding`) treats an 'exposed' that raises no
+ * level as an ENCOUNTER, not a confirmation, and so deliberately keeps the existing clock — which
+ * is exactly the practicing/mastered case, the only levels that HAVE a clock. So a clean Anki
+ * review appends an evidence row and moves nothing: no promotion, no decay reprieve. Whether it
+ * SHOULD maintain is a live question about the mastery model, and changing it belongs in engram.
  *
  * Anki unreachable, or nothing in the outbound ledger yet -> resolves `{recorded: 0}` cleanly,
  * never throws.
@@ -114,13 +120,20 @@ export async function syncInbound(
 
     // Advance the cursor only after every group's evidence has been recorded — a crash mid-loop
     // leaves the cursor untouched so the next run re-pulls (record_evidence is itself idempotent
-    // enough here: a repeat is just another maintain-never-promote 'exposed'/'struggled' entry).
+    // enough here: a repeat is just another ceilinged 'exposed'/'struggled' entry).
     ledger._cursor = maxReviewTime;
     return result;
   });
 }
 
-/** Lapse counts per slug over the trailing `days` (default 7) — feeds session bootstrap. */
+/** Lapse counts per slug over the trailing `days` (default 7) — feeds session bootstrap.
+ *
+ *  Parsed a line at a time, not a file at a time: bootstrap is the FIRST TURN OF EVERY THREAD, so a
+ *  single line torn by a crash mid-append (or a disk-full) must cost that line's count and nothing
+ *  else — an unparseable telemetry sidecar 500ing the learner's turn, forever, is the failure this
+ *  guard exists for. Same graceful-read policy as every other store here (queueStore, provenance,
+ *  the anki ledger next door), and SAYS SO on stderr for the same reason the ledger does: a file
+ *  quietly rotting line by line looks exactly like "no recent lapses" from the outside. */
 export function recentLapses(vault: string, days = 7): { slug: string; count: number }[] {
   const p = lapsePath(vault);
   if (!existsSync(p)) return [];
@@ -128,10 +141,32 @@ export function recentLapses(vault: string, days = 7): { slug: string; count: nu
   cutoff.setDate(cutoff.getDate() - days);
   const cutoffStr = cutoff.toISOString().slice(0, 10);
   const counts = new Map<string, number>();
-  for (const line of readFileSync(p, 'utf8').split('\n')) {
+  let unparseable = 0;
+  // The READ is inside the guard too, not just the parse. existsSync above is a check, not a
+  // promise: the file can be a directory, be unreadable, or vanish between the two calls — and an
+  // EACCES here throws out of bootstrap and 500s the first turn of every thread, which is the
+  // same failure the per-line guard exists to close, reached through a narrower door. The
+  // neighbours (queueStore, provenance, anki/ledger) all wrap the read for this reason.
+  let raw = '';
+  try {
+    raw = readFileSync(p, 'utf8');
+  } catch (e) {
+    console.error(`[anki] lapse log unreadable (${(e as Error)?.message ?? e}) — treating as no lapses`);
+    return [];
+  }
+  for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
-    const { date, slug } = JSON.parse(line) as { date: string; slug: string };
-    if (date >= cutoffStr) counts.set(slug, (counts.get(slug) ?? 0) + 1);
+    try {
+      const { date, slug } = JSON.parse(line) as { date: string; slug: string };
+      if (date >= cutoffStr) counts.set(slug, (counts.get(slug) ?? 0) + 1);
+    } catch {
+      unparseable++;
+    }
+  }
+  // One line per read, not per bad line: this runs every bootstrap, and a file with a thousand torn
+  // lines must not be a thousand stderr rows.
+  if (unparseable > 0) {
+    console.error(`[anki] lapse log: skipped ${unparseable} unparseable line(s) in ${p}`);
   }
   // Worst-forgotten first. These arrive in file order otherwise, which is the order Anki happened
   // to review them in — so a page lapsed twice could lead a page lapsed four times, and the tutor,

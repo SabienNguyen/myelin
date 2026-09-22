@@ -9,13 +9,17 @@ import { TopbarStatus } from '../../src/client/components/TopbarStatus.js';
 
 type EnvOverrides = Partial<Record<string, object>>;
 type Available = { ollama?: string[]; openaiCompat?: string[] };
-function modelsState(env: EnvOverrides = {}, roles: Record<string, string> = {}, available: Available = {}) {
+function modelsState(
+  env: EnvOverrides = {}, roles: Record<string, string> = {}, available: Available = {},
+  windows: Record<string, number> = {},
+) {
   const effective = {
     tutor: 'claude-sonnet-5', grader: 'claude-haiku-4-5', quiz_gen: 'claude-sonnet-5',
     card_gen: 'claude-haiku-4-5', compile: 'claude-sonnet-5', ...roles,
   };
   return {
-    roles: Object.fromEntries(Object.entries(effective).map(([r, m]) => [r, { effective: m, saved: null }])),
+    roles: Object.fromEntries(Object.entries(effective).map(([r, m]) =>
+      [r, { effective: m, saved: null, contextTokens: windows[r] ?? null }])),
     env: {
       OLLAMA_BASE_URL: { value: '', shadowed: false },
       OLLAMA_API_KEY: { set: false, shadowed: false },
@@ -82,6 +86,35 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
     await screen.findByText(/saved — takes effect/);
     const put = mock.mock.calls.find(([, init]) => init?.method === 'PUT');
     expect(JSON.parse(String(put?.[1]?.body)).models).toEqual({ tutor: 'openrouter:vendor/model:free' });
+  });
+
+  // The window used to be reachable from harness.config.json alone, which left a learner on a
+  // small-window model no supported way to tune what protects them from overflow.
+  it('prefills each role context window and sends a changed one as a number', async () => {
+    const mock = stubFetch(modelsState({}, {}, {}, { tutor: 8192 }));
+    await openPopover();
+    const tutorWindow = await screen.findByLabelText('tutor context') as HTMLInputElement;
+    await waitFor(() => expect(tutorWindow.value).toBe('8192'));
+    // The field, not a JS check, is what refuses a fraction or a zero: the save handler sends
+    // whatever survives submit, and the PUT refuses anything that still gets past.
+    expect([tutorWindow.type, tutorWindow.min, tutorWindow.step]).toEqual(['number', '1', '1']);
+    expect((screen.getByLabelText('grader context') as HTMLInputElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('grader context'), { target: { value: '32768' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect/);
+    const put = mock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(String(put?.[1]?.body)).contextTokens).toEqual({ grader: 32768 });
+  });
+
+  it('an emptied window sends null, so a save can take a declared window back off', async () => {
+    const mock = stubFetch(modelsState({}, {}, {}, { tutor: 8192 }));
+    await openPopover();
+    await waitFor(() => expect((screen.getByLabelText('tutor context') as HTMLInputElement).value).toBe('8192'));
+    fireEvent.change(screen.getByLabelText('tutor context'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect/);
+    const put = mock.mock.calls.find(([, init]) => init?.method === 'PUT');
+    expect(JSON.parse(String(put?.[1]?.body)).contextTokens).toEqual({ tutor: null });
   });
 
   it('shows catalog discovery errors distinctly from an empty free list', async () => {
@@ -157,6 +190,7 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
     expect(putCall?.[0]).toBe('/api/setup/models');
     expect(JSON.parse(String(putCall?.[1]?.body))).toEqual({
       models: { grader: 'openai:test/model' },
+      contextTokens: {}, // no window touched, so the group carries nothing
       env: { OPENAI_COMPAT_BASE_URL: 'https://x.example/v1' },
     });
   });

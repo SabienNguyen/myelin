@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { DEFAULT_MODEL, loadConfig } from '../src/server/config.js';
+import { DEFAULT_MODEL, defaultVaultPath, loadConfig } from '../src/server/config.js';
 
 const valid = {
   vault: '/tmp/vault', student: 'sabien',
@@ -136,5 +137,36 @@ describe('loadConfig', () => {
     expect(cfg.models.compile.contextTokens).toBe(32768);
     expect(cfg.models.compile.concurrency).toBe(2);
     expect(cfg.models.tutor.contextTokens).toBeUndefined();
+  });
+});
+
+// The README tells a new user to copy this file, so a field in it that disagrees with the code is
+// not a stale comment — it is a silent relocation of the learner's vault on first boot.
+describe('harness.config.example.json, the file the README says to copy', () => {
+  const examplePath = fileURLToPath(new URL('../harness.config.example.json', import.meta.url));
+  const example = () => JSON.parse(readFileSync(examplePath, 'utf8'));
+
+  it('names the vault the code would have picked anyway', () => {
+    const home = mkdtempSync(join(tmpdir(), 'lwh-home-'));
+    try {
+      mkdirSync(join(home, 'Documents'));
+      expect(example().vault.replace('~', home)).toBe(defaultVaultPath(home));
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('loads: every field it sets is one the schema still accepts', () => {
+    const cfg = loadConfig(examplePath);
+    expect(cfg.cacheTtl).toBe('5m');
+    expect(cfg.student).toBe('your-name');
+  });
+
+  it('names all five model routes, so nobody reaches OpenRouter through the compat slot', () => {
+    const note = example()._modelRoutes as string;
+    for (const route of ['openrouter:', 'groq:', 'ollama:', 'openai:', 'ANTHROPIC_API_KEY']) {
+      expect(note).toContain(route);
+    }
+    expect(note).toContain('OPENROUTER_API_KEY');
   });
 });

@@ -6,12 +6,16 @@ import type { HarnessConfig, ModelRole } from './config.js';
 import { removedRouteMessage } from './config.js';
 
 /**
- * What the in-app models popover saves: per-role model ids and the provider-endpoint variables
- * models.ts reads from process.env. Lives beside credentials.json (same directory, same reasons —
- * the env group can hold API keys, so it stays out of the vault and is written 0600).
+ * What the in-app models popover saves: per-role model ids and context windows, and the
+ * provider-endpoint variables models.ts reads from process.env. Lives beside credentials.json
+ * (same directory, same reasons — the env group can hold API keys, so it stays out of the vault
+ * and is written 0600).
  */
 export interface Settings {
   models?: Partial<Record<ModelRole, string>>;
+  // Its own group rather than a field on `models`, because every settings.json written before this
+  // maps a role straight to an id string and must keep loading unchanged.
+  contextTokens?: Partial<Record<ModelRole, number>>;
   env?: Partial<Record<ProviderEnvKey, string>>;
 }
 
@@ -82,6 +86,17 @@ export function applySettings(cfg: HarnessConfig, path = settingsPath()): void {
       continue;
     }
     cfg.models[role as ModelRole].model = id.trim();
+  }
+  for (const [role, tokens] of Object.entries(saved.contextTokens ?? {})) {
+    if (!(role in cfg.models)) continue;
+    if (!Number.isInteger(tokens) || (tokens as number) <= 0) {
+      // The PUT route refuses these, so only a hand edit gets here. Saying so out loud beats
+      // running the role on the default budget while the file looks like it declares one.
+      console.error(`${path}: contextTokens.${role} must be a whole number of tokens above zero, `
+        + `not ${JSON.stringify(tokens)} — ignoring it`);
+      continue;
+    }
+    cfg.models[role as ModelRole].contextTokens = tokens as number;
   }
   applyEnvValues(saved.env ?? {});
 }

@@ -1,8 +1,32 @@
-import { describe, it, expect } from 'vitest';
-import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { atomicWrite } from '../src/server/atomicWrite.js';
+
+// Durability is not observable from a passing process — a missing fsync only shows up as a
+// zero-length file after the power actually goes out. Recording the syscall order is the only way
+// to pin the guarantee the header comment makes, so these two are deliberately white-box.
+const { syscalls } = vi.hoisted(() => ({ syscalls: [] as string[] }));
+vi.mock('node:fs', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...real,
+    default: real,
+    fsyncSync: (fd: number) => {
+      syscalls.push('fsync');
+      return real.fsyncSync(fd);
+    },
+    renameSync: (from: string, to: string) => {
+      syscalls.push('rename');
+      return real.renameSync(from, to);
+    },
+  };
+});
+
+beforeEach(() => {
+  syscalls.length = 0;
+});
 
 describe('atomicWrite', () => {
   it('writes the file and it reads back exactly', () => {
@@ -45,5 +69,33 @@ describe('atomicWrite', () => {
     atomicWrite(p, 'secret', 0o600);
     expect(statSync(p).mode & 0o777).toBe(0o600);
     expect(readFileSync(p, 'utf8')).toBe('secret');
+  });
+
+  // Without this the graceful-read policy in the header is a lie: after power loss the rename can
+  // be on disk while the bytes are not, the store reads back as "empty", and the next write
+  // persists the emptiness as the learner's new history.
+  it('flushes the temp file to disk BEFORE the rename publishes it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atomic-write-'));
+    atomicWrite(join(dir, 'store.json'), '{"a":1}');
+    expect(syscalls).toContain('rename');
+    expect(syscalls.indexOf('fsync')).toBeLessThan(syscalls.indexOf('rename'));
+  });
+
+  // A rename is not durable until the directory entry naming it is.
+  it.skipIf(process.platform === 'win32')('flushes the parent directory after the rename', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atomic-write-'));
+    atomicWrite(join(dir, 'store.json'), '{"a":1}');
+    expect(syscalls).toEqual(['fsync', 'rename', 'fsync']);
+  });
+
+  // These stores sit inside the learner's Obsidian vault, where a leftover `store.json.tmp-1234`
+  // shows up in the file explorer as a second, stale copy of their notes.
+  it('leaves no .tmp sibling behind when the rename fails', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'atomic-write-'));
+    const p = join(dir, 'store.json');
+    mkdirSync(p); // renaming a file onto an existing directory fails, after the temp file exists
+
+    expect(() => atomicWrite(p, '{"a":1}')).toThrow();
+    expect(readdirSync(dir).filter((f) => f.includes('.tmp-'))).toEqual([]);
   });
 });

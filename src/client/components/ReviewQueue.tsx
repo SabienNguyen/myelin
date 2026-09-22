@@ -11,39 +11,54 @@ import { useEffect, useState } from 'react';
 import { Collapsible } from './Collapsible.js';
 import { useThreadRuntime } from '@assistant-ui/react';
 import { ClockCountdownIcon as Hourglass } from '@phosphor-icons/react';
+import { getDue, type DueRow } from '../lib/api.js';
 
-interface DueRow {
-  slug: string;
-  title: string;
-  effective: string;
-  level: string;
-  daysLeft: number | null;
-  slipped: boolean;
-}
+const Section = ({ children }: { children: React.ReactNode }) => (
+  <Collapsible id="review" level={3} label="Review" className="review-queue" title={<><Hourglass size={16} weight="duotone" /> Review</>}>
+    {children}
+  </Collapsible>
+);
 
 export function ReviewQueue({ visible = true }: { visible?: boolean }) {
   const [due, setDue] = useState<DueRow[] | null>(null);
   const [total, setTotal] = useState(0);
+  // Three states, not two. A swallowed fetch rendered the same nothing an empty queue does, so a
+  // learner whose pages were decaying read the silence as "all clear".
+  const [failed, setFailed] = useState<string | null>(null);
   const threadRuntime = useThreadRuntime();
 
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
-    fetch('/api/due')
-      .then((r) => (r.ok ? r.json() : null))
+    getDue()
       .then((d) => {
-        if (cancelled || !d) return;
-        setDue(d.due ?? []);
-        setTotal(d.total ?? (d.due ?? []).length);
+        if (cancelled) return;
+        const rows = Array.isArray(d.due) ? d.due : [];
+        setDue(rows);
+        setTotal(d.total ?? rows.length);
+        setFailed(null);
       })
-      .catch(() => { /* no queue is a quiet state, not an error banner — the Library still works */ });
+      .catch((e: unknown) => {
+        if (!cancelled) setFailed(e instanceof Error ? e.message : String(e));
+      });
     return () => { cancelled = true; };
   }, [visible]);
 
+  // The heading stays, so the section's absence never means "you are done". No prefix on the
+  // message — lib/api.ts already names the subject (PathsSection makes the same argument).
+  if (failed !== null) {
+    return (
+      <Section>
+        <p className="panel-error" role="status">
+          {failed} Nothing is listed because the queue could not be read, not because nothing is due.
+        </p>
+      </Section>
+    );
+  }
   if (!due || due.length === 0) return null;
 
   return (
-    <Collapsible id="review" level={3} label="Review" className="review-queue" title={<><Hourglass size={16} weight="duotone" /> Review</>}>
+    <Section>
       <p className="review-queue-lede">
         {due.some((d) => d.slipped)
           ? 'Some of what you earned has started to slip — a quick rep brings it back.'
@@ -69,6 +84,6 @@ export function ReviewQueue({ visible = true }: { visible?: boolean }) {
           </li>
         ))}
       </ul>
-    </Collapsible>
+    </Section>
   );
 }

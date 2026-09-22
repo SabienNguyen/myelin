@@ -31,16 +31,39 @@ export function saveThread(vault: string, threadId: string, messages: unknown[])
   // before the question asked minutes earlier. A merge that can reorder recorded history is worse
   // than one that occasionally appends in an odd place, so: keep the file's order, let the writer
   // refresh messages it also knows about IN PLACE, and append only genuinely new ones at the end.
+  //
+  // Only a STRING id identifies a message, exactly as dedupeById defines it. Both writers hand
+  // this unvalidated client JSON (chatRoute's POST body and its PUT body), and shared/messages.ts
+  // supports id-less messages, so `undefined` used to be a real map key here: every id-less
+  // message in one write collapsed onto the last of them, and an id-less message already on disk
+  // was overwritten by whichever id-less message the writer happened to send — the exact erasure
+  // this merge exists to prevent, on the one artifact the learner cannot regenerate. An id-less
+  // message is therefore never matched against anything; it is kept where it is and appended
+  // unconditionally. That can duplicate one, which is visible in the transcript and recoverable.
+  // Losing it is neither.
   const incoming = dedupeById(messages) as any[];
-  const byId = new Map(incoming.map((m) => [m?.id, m]));
+  const idOf = (m: any): string | undefined => (typeof m?.id === 'string' ? m.id : undefined);
+  const byId = new Map<string, any>();
+  for (const m of incoming) {
+    const id = idOf(m);
+    if (id !== undefined) byId.set(id, m);
+  }
   const onDisk = loadThread(vault, threadId) as any[];
-  const seen = new Set<unknown>();
+  const seen = new Set<string>();
   const merged: any[] = [];
   for (const m of onDisk) {
-    merged.push(byId.get(m?.id) ?? m); // fresher version if the writer has one, same position
-    seen.add(m?.id);
+    const id = idOf(m);
+    if (id === undefined) {
+      merged.push(m);
+      continue;
+    }
+    merged.push(byId.get(id) ?? m); // fresher version if the writer has one, same position
+    seen.add(id);
   }
-  for (const m of incoming) if (!seen.has(m?.id)) merged.push(m);
+  for (const m of incoming) {
+    const id = idOf(m);
+    if (id === undefined || !seen.has(id)) merged.push(m);
+  }
   atomicWrite(join(dir(vault), `${threadId}.json`), JSON.stringify(merged));
 }
 /** Restores a persisted thread. A corrupt file (invalid JSON, or JSON that isn't an array) must
