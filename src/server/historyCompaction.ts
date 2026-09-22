@@ -68,7 +68,9 @@ export interface CompactionBlock {
   /** id of the LAST message this block covers. The stable key: everything from the start of the
    *  transcript through this message is what the summary stands for. */
   throughId: string;
-  /** How many messages it replaces — reported to the learner and used by the tests. */
+  /** Messages covered from the START of the transcript through `throughId` — cumulative, like
+   *  throughId itself, not this block's own share. Every block file on disk already holds it that
+   *  way, so the last block alone is the whole count and old files stay readable. */
   messages: number;
   summary: string;
   openThreads: string[];
@@ -245,7 +247,10 @@ export interface CompactionDeps {
 /** The synthetic message that stands in for every compacted turn. One message however many blocks
  *  there are, so the transcript shape does not change as a thread ages. */
 export function blocksToMessage(blocks: CompactionBlock[]): UIMessage {
-  const total = blocks.reduce((n, b) => n + b.messages, 0);
+  // The last block, never a sum: each block's count already covers the blocks before it, so
+  // summing claimed 96 compacted messages of an 80-message thread. This number is stated to the
+  // model as fact inside the one message whose whole job is to stand in for what it replaced.
+  const total = blocks[blocks.length - 1]!.messages;
   const body = blocks.map((b) => b.summary).join('\n\n');
   const open = [...new Set(blocks.flatMap((b) => b.openThreads))];
   const text = [

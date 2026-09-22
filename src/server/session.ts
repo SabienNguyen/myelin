@@ -178,12 +178,21 @@ export function slugListLine(slugs: string[], relevant: string[] = []): string {
  * are logged server-side so journalctl shows WHY a tool chip went ⚠. */
 export function guardMcpTools(
   tools: LoopTool[], student: string, knownSlugs: string[],
-  // Evidence THIS TURN's grading actually produced. The proving kinds are refused unless they
-  // appear here — see PROVING_KINDS below.
+  // Evidence THIS TURN's grading actually produced — one entry per graded block. The proving
+  // kinds are refused unless an entry here pays for them; see PROVING_KINDS and `credits` below.
   earned: { slug: string; kind: string }[] = [],
   vault?: string,
 ): LoopTool[] {
-  const earnedKeys = new Set(earned.map((e) => `${e.slug}|${e.kind}`));
+  // CREDITS, not membership. record_evidence is in INVALIDATING_TOOLS so it is never turn-cached,
+  // and engram's applyEvidence steps one rung per accepted call — so against a Set one genuine
+  // grade recorded three times walked unseen -> mastered, and appliedGradeBypass stayed quiet
+  // because the slug really was graded. Duplicates in `earned` are COUNTED, not collapsed: two
+  // graded blocks on one page earn two credits, and collapsing would refuse the honest second one.
+  const credits = new Map<string, number>();
+  for (const e of earned) {
+    const key = `${e.slug}|${e.kind}`;
+    credits.set(key, (credits.get(key) ?? 0) + 1);
+  }
   // One cache per guardMcpTools call, and guardMcpTools is called once per turn — so its lifetime
   // is exactly the turn, with no cross-turn staleness to reason about.
   const readCache = new Map<string, unknown>();
@@ -192,11 +201,34 @@ export function guardMcpTools(
     execute: t.execute
       ? async (args: unknown) => {
         const clean = sanitizeToolArgs(args, t.name, student, knownSlugs);
+        // Set only for a proving-kind record that passed the guard: the credit to spend once the
+        // call actually lands. Spent after execute, never before — see below.
+        let spendKey: string | null = null;
         if (t.name === 'record_evidence') {
           const a = clean as { slug?: unknown; kind?: unknown };
           const kind = String(a?.kind ?? '');
           const slug = String(a?.slug ?? '');
-          if (PROVING_KINDS.has(kind) && !earnedKeys.has(`${slug}|${kind}`)) {
+          const key = `${slug}|${kind}`;
+          const left = PROVING_KINDS.has(kind) ? credits.get(key) : undefined;
+          if (PROVING_KINDS.has(kind) && left !== undefined && left <= 0) {
+            // The grade was real and is already recorded; this call would walk the learner a
+            // second rung for one piece of work. It needs its own words — the "nothing graded
+            // this" refusal below is false here, and its advice (stage a block) is the opposite
+            // of what the tutor should do.
+            const why = `refused duplicate ${kind} for "${slug}" — this turn's grade is already recorded`;
+            console.error(`[evidence-guard] ${why}`);
+            if (vault) logGuardrail(vault, why);
+            return {
+              isError: true,
+              content: [{
+                type: 'text',
+                text: `refused: "${kind}" for "${slug}" is already recorded for this turn's grade. `
+                  + 'One machine grade is one piece of evidence; recording it again would move the '
+                  + 'learner a rung they did not earn. Move on, or grade fresh work.',
+              }],
+            };
+          }
+          if (PROVING_KINDS.has(kind) && left === undefined) {
             // A learner talked a tutor into eight pages of `applied-correctly` with three
             // messages — one a fake "SYSTEM:" line — staging no block and grading nothing; two
             // pages reached `mastered` on the strength of a note reading "System-provided
@@ -217,6 +249,7 @@ export function guardMcpTools(
               }],
             };
           }
+          if (PROVING_KINDS.has(kind)) spendKey = key;
         }
         const cacheKey = CACHEABLE_TOOLS.has(t.name)
           ? `${t.name}|${JSON.stringify(clean ?? null)}`
@@ -253,6 +286,13 @@ export function guardMcpTools(
               result = await t.execute!(clean);
             }
           }
+        }
+
+        // Spent only once the evidence LANDED. Decrementing before the call would have the
+        // stub-repair retry above — or any retry the model makes after a write failure — hit a
+        // spent credit, and the learner's earned evidence would be refused out of existence.
+        if (spendKey && !(result as any)?.isError) {
+          credits.set(spendKey, (credits.get(spendKey) ?? 1) - 1);
         }
 
         // create_path requires every stop to EXIST. A tutor that has just sketched a six-stop
@@ -1404,6 +1444,24 @@ export function createTutorSession(
         // exist would train it to invent some.
         let recordedCalls: any[] = [];
         let guardrailLogged = false;
+        // The learner has to SEE that graded work went unrecorded: the data-guardrail chunk is
+        // telemetry the client never renders (same reason the pseudo-block note below speaks in
+        // text), so on its own this degraded silently — their page just quietly did not move.
+        const warnUnrecorded = () => {
+          // No wire chunk when the client is already gone — same rule wire.ts uses for the error
+          // chunk itself: nothing is left to show it to.
+          if (runSignal.aborted) return;
+          writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true });
+          const noteId = generateMessageId();
+          writer.write({ type: 'text-start', id: noteId });
+          writer.write({
+            type: 'text-delta', id: noteId,
+            delta: '\n\n— Myelin: your answer was graded, but the tutor did not record the result, '
+              + 'so this work has not moved your standing on the page. The graded card stays in '
+              + 'this thread; ask the tutor to record it, or answer another block on the page.',
+          });
+          writer.write({ type: 'text-end', id: noteId });
+        };
         try {
           recordedCalls = await run(model_messages);
           if (grades.some((g) => g.evidence.length > 0) && recordedCalls.length === 0) {
@@ -1414,7 +1472,7 @@ export function createTutorSession(
             recordedCalls.push(...nudged);
             if (nudged.length === 0) {
               logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
-              writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true });
+              warnUnrecorded();
               guardrailLogged = true;
             }
           }
@@ -1427,11 +1485,7 @@ export function createTutorSession(
           // abort after the real work landed) is not double-logged.
           if (!guardrailLogged && grades.some((g) => g.evidence.length > 0) && recordedCalls.length === 0) {
             logGuardrail(cfg.vault, `unrecorded evidence for ${pending.map((p) => p.tool).join(',')}`);
-            // No wire chunk when the client is already gone — same rule wire.ts uses for the
-            // error chunk itself: nothing is left to show it to.
-            if (!runSignal.aborted) {
-              writer.write({ type: 'data-guardrail', data: { warning: 'evidence not recorded' }, transient: true });
-            }
+            warnUnrecorded();
           }
         }
         // Recording-integrity detection (DETECTION ONLY): capApplied guarantees the machine grade,

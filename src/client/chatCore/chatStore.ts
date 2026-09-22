@@ -149,7 +149,16 @@ export class ChatStore {
     try {
       while (!signal.aborted && generation === this.recoveryGeneration) {
         const res = await this.fetchImpl(`/api/thread/${this.opts.threadId}/run`, { signal });
-        if (!res.ok) return;
+        // A non-ok RESPONSE took neither the throw path below nor any state change, so the poll's
+        // answer was simply discarded. After a poll has already reported running that leaves the
+        // spinner up forever; on the first poll of a cold mount it leaves the thread's real state
+        // unknown. Either way the learner is owed the status rather than silence.
+        if (!res.ok) {
+          if (!signal.aborted && generation === this.recoveryGeneration) {
+            this.setState({ isRunning: false, error: `Could not reconnect to the running turn: the harness answered ${res.status}.` });
+          }
+          return;
+        }
         const status = await res.json() as { running: boolean; messages: UIMessage[] };
         if (signal.aborted || generation !== this.recoveryGeneration || this.inflight) return;
         if (!Array.isArray(status.messages)) return;

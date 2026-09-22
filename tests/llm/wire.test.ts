@@ -236,8 +236,10 @@ describe('createUiStream wire shape', () => {
     const part = message.parts.find((p) => (p as any).toolCallId === 'tc1') as any;
     expect(part.state).toBe('output-available');
     expect(part.output.grading.verdict).toBe('correct');
-    // The turn-1 content is still there — merged in place, never duplicated.
-    expect(message.parts.filter((p) => p.type === 'text')).toHaveLength(1);
+    // The turn-1 content is still there — merged in place, never duplicated. The note after it is
+    // the closing guarantee: this execute patched the seeded block and produced nothing of its own.
+    const texts = (message.parts.filter((p) => p.type === 'text') as any[]).map((t) => t.text);
+    expect(texts).toEqual(["Let's warm up.", expect.stringContaining('returned nothing')]);
   });
 
   it('excludes transient data parts from persistence while keeping non-transient ones', async () => {
@@ -351,6 +353,74 @@ describe('createUiStream wire shape', () => {
       const text = finalMessages.at(-1)!.parts
         .filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
       expect(text).toBe('');
+    });
+
+    // The resubmit trio. producedSomething() used to read the WHOLE assembled message, and on a
+    // resubmit the assembler is seeded with the message being continued — so the previous turn's
+    // block answered it before this turn emitted anything, and the guarantee could never fire on
+    // a grading turn.
+    it('closes a resubmit that produced nothing — the seeded block is last turn\'s output, not this turn\'s', async () => {
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: resubmitHistory(),
+        execute: async () => {},
+        emptyText: 'the model returned nothing',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      const { chunks } = await collect(res);
+      const texts = finalMessages.at(-1)!.parts.filter((p: any) => p.type === 'text') as any[];
+      expect(texts.at(-1)!.text).toBe('the model returned nothing');
+      // Merged into a1, so turn 1's prose is still there and was not counted as this turn's.
+      expect(texts.map((t) => t.text)).toEqual(["Let's warm up.", 'the model returned nothing']);
+      expectValidChunks(chunks);
+    });
+
+    it('closes a grading turn whose only write was the block\'s output patch', async () => {
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: resubmitHistory(),
+        // Exactly the pre-model write session.ts makes before the model runs: it patches the
+        // seeded part in place and pushes nothing, so it is not content this turn produced.
+        execute: async (writer) => {
+          writer.write({
+            type: 'tool-output-available', toolCallId: 'tc1',
+            output: { answer: '4', grading: { verdict: 'correct', detail: 'mechanical' } },
+          });
+        },
+        emptyText: 'the model returned nothing',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      const { chunks } = await collect(res);
+      const message = finalMessages.at(-1)!;
+      const part = message.parts.find((p: any) => p.toolCallId === 'tc1') as any;
+      expect(part.state).toBe('output-available');
+      expect(part.output.grading.verdict).toBe('correct');
+      const texts = message.parts.filter((p: any) => p.type === 'text') as any[];
+      expect(texts.at(-1)!.text).toBe('the model returned nothing');
+      expectValidChunks(chunks);
+    });
+
+    it('adds no note when the resubmit turn wrote real prose after the grading patch', async () => {
+      let finalMessages: UIMessage[] = [];
+      const res = createUiStream({
+        originalMessages: resubmitHistory(),
+        execute: async (writer) => {
+          writer.write({ type: 'tool-output-available', toolCallId: 'tc1', output: { answer: '4' } });
+          forwardAll(writer, [
+            { type: 'step-start' },
+            { type: 'text-start', id: '0' },
+            { type: 'text-delta', id: '0', text: 'Right — on to fractions.' },
+            { type: 'text-end', id: '0' },
+            { type: 'step-finish' },
+          ]);
+        },
+        emptyText: 'the model returned nothing',
+        onEnd: ({ messages }) => { finalMessages = messages; },
+      });
+      await collect(res);
+      const texts = (finalMessages.at(-1)!.parts.filter((p: any) => p.type === 'text') as any[])
+        .map((t) => t.text);
+      expect(texts).toEqual(["Let's warm up.", 'Right — on to fractions.']);
     });
 
     it('speaks when an abort carries a reason abortText recognizes — the stalled-provider case', async () => {

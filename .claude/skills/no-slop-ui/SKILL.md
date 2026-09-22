@@ -1,6 +1,6 @@
 ---
 name: no-slop-ui
-description: UI and visual-design standards for the myelin client — use before creating or editing anything under src/client (components, CSS, blocks, UI copy), and when reviewing a UI diff. This app has a deliberate warm-paper design language with its own token set, serif type stack, and real ARIA patterns; the job of this skill is to keep new work inside that language instead of regressing to generic AI-default UI (Tailwind, Inter, indigo gradients, emoji icons, glassmorphism).
+description: UI and visual-design standards for the myelin client — use before creating or editing anything under src/client (components, CSS, blocks, UI copy), and when reviewing a UI diff. This app has a deliberate restrained developer-tool design language — dark by default, blue-tinted neutrals, one blue accent, system-ui with JetBrains Mono for technical chrome — with its own token set and real ARIA patterns; the job of this skill is to keep new work inside that language instead of regressing to generic AI-default UI (Tailwind, Inter, indigo gradients, emoji icons, glassmorphism).
 ---
 
 # No-Slop UI (harness client)
@@ -8,9 +8,13 @@ description: UI and visual-design standards for the myelin client — use before
 The client is plain CSS (~994 lines in `src/client/styles.css`) plus React 19. There is no Tailwind,
 no shadcn, no component library. That is a choice, not an omission.
 
-The design language is a **warm paper study**: cream ground, ink text, one muted blue accent, serif
-display type. Default AI-generated UI is the opposite of this — cool grey, Inter, indigo-to-purple
-gradient, rounded-2xl cards, emoji. Producing that here is the slop this skill exists to prevent.
+The design language is a **restrained developer tool** (design.md): dark by default with an explicit
+OS light counterpart, neutrals carrying a slight blue tint, a single blue accent, system-ui for
+reading and JetBrains Mono for code and technical chrome. Default AI-generated UI misses in a
+specific direction — Inter, indigo-to-purple gradients, rounded-2xl cards, glass, emoji. Producing
+that here is the slop this skill exists to prevent.
+
+When this file and `src/client/styles.css` disagree, styles.css wins: it is what ships.
 
 Read `src/client/styles.css` `:root` before writing a single rule.
 
@@ -36,21 +40,24 @@ the difference.
 
 ## Tokens: never hardcode a value
 
-Every color, radius, shadow, and font goes through a custom property. All of them already have a
-`@media (prefers-color-scheme: dark)` override, so using tokens *is* how dark mode works.
+Every color, radius, shadow, and font goes through a custom property. Dark is the default and the
+light values live in the one `@media (prefers-color-scheme: light)` override, so using tokens *is*
+how the light theme works.
 
 ```
---bg  --bg-panel  --bg-inset          surfaces (ground, raised, recessed)
+--bg  --bg-panel  --bg-inset          surfaces (window ground, raised canvas, recessed)
 --text  --text-muted                  type
 --border                              hairlines
 --accent  --accent-soft  --accent-text single accent + its wash + type on accent
 --good  --bad  --warn                 semantic status only
---radius (10px)  --radius-sm (6px)    corners
---shadow                              one subtle elevation, that's it
---font-serif   Fraunces Variable      display, headings, block titles
---font-prose   Newsreader Variable    long-form reading and drafts
---font-mono    JetBrains Mono         code and editors
-system-ui                             chrome, controls, labels
+--mastery-unseen  --mastery-exposed
+--mastery-practicing  --mastery-mastered  the graph's mastery scale, separate from verdict colors
+--radius-shell (14px)  --radius (10px)
+--radius-sm (7px)                     corners, stepping down as surfaces nest
+--shadow                              `none` — surfaces separate by fill and hairline, not elevation
+--font-mono    JetBrains Mono         code, technical headings, the wordmark
+--font-prose   system-ui sans         long-form reading and drafts
+--font-serif   alias of --font-mono   compatibility only, not a second type system
 ```
 
 - A raw hex in a component or new CSS rule is a bug. If you need a shade that does not exist, add a

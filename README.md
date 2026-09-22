@@ -30,8 +30,9 @@ exactly why.
 
 ![A graded math derivation on the scratchpad](docs/screenshots/math-graded.png)
 
-**A miss stays a miss.** Quizzes mark every item mechanically and never round up — the score is the
-truth, and a ✗ stays a ✗.
+**A miss stays a miss.** Multiple-choice items are exact-matched; a short answer that doesn't match
+its expected string goes to the grader model, and the card marks which items were checked and which
+were judged. Neither path rounds up — a ✗ stays a ✗.
 
 ![A graded quiz with honest per-item verdicts](docs/screenshots/quiz.png)
 
@@ -397,7 +398,9 @@ warning saying why.
    model's rubric judgment on produced work — its own kind, so it never launders into applied
    evidence), `struggled`, `misconception` (with a note) — and a machine check outranks a
    model's opinion.
-4. Anki reviews have a ceiling: a review maps to `exposed` (refreshes the decay clock, never
-   promotes); a lapse maps to `struggled`. Flashcards alone can never mint `applied-correctly`.
+4. Anki reviews have a ceiling: a review maps to `exposed`, which never promotes — and, because an
+   `exposed` that raises no level counts as an encounter rather than a confirmation, never resets
+   the decay clock either, so a flashcard streak buys a `practicing` page no extra days. A lapse
+   maps to `struggled`. Flashcards alone can never mint `applied-correctly`.
 5. If a graded block isn't followed by a `record_evidence` call, the guardrail nudges the tutor
    once, then logs to `vault/.harness/guardrail.log`.

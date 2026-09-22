@@ -75,6 +75,30 @@ describe('evidence guardrail', () => {
     expect(readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8')).toMatch(/quick_check/);
   }, 30_000);
 
+  // Degrade loudly. The only signal that graded work never reached the record used to be the
+  // data-guardrail chunk, and session.ts's own comment says that channel is telemetry the client
+  // never renders — so the learner saw a graded card and a page that quietly did not move.
+  it('says in the transcript that graded work went unrecorded, not just on the telemetry channel', async () => {
+    const { model } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
+      { model, now: () => new Date('2026-07-12') });
+    // A pristine history: earlier tests merge `grading` into the shared fixture's output in place,
+    // and an already-graded output is not re-graded — which would leave nothing to go unrecorded.
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [{
+          type: 'tool-quick_check', toolCallId: 'tc-unrecorded', state: 'output-available',
+          input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+          output: { answer: '4' },
+        }],
+      },
+    ] as any;
+    const body = await (await session.respond(history, 'learn', 'unrecorded-thread')).text();
+    expect(body).toMatch(/did not record the result/);
+    expect(body).toMatch(/"type":"data-guardrail"/); // telemetry kept, not replaced
+  }, 30_000);
+
   it('registers and stages quick_check on a plain teaching turn over a covered page', async () => {
     const calls: ChatRequest[] = [];
     const model = streamModel((req) => {
@@ -557,14 +581,14 @@ describe('pseudo-block prose detection', () => {
  * observations, not claims of proof.
  */
 describe('proving evidence cannot be talked into existence', () => {
-  const evidenceTool = (earned: { slug: string; kind: string }[]) => {
+  const evidenceTool = (earned: { slug: string; kind: string }[], vaultDir?: string) => {
     const calls: any[] = [];
     const raw = [{
       name: 'record_evidence',
       description: 'record',
       execute: async (a: unknown) => { calls.push(a); return { ok: true }; },
     }] as any;
-    return { tools: guardMcpTools(raw, 'kid', ['arith'], earned), calls };
+    return { tools: guardMcpTools(raw, 'kid', ['arith'], earned, vaultDir), calls };
   };
 
   it('refuses applied-correctly when the machine graded nothing this turn', async () => {
@@ -579,6 +603,61 @@ describe('proving evidence cannot be talked into existence', () => {
     const { tools, calls } = evidenceTool([{ slug: 'arith', kind: 'applied-correctly' }]);
     await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'graded' });
     expect(calls).toHaveLength(1);
+  });
+
+  // The earned evidence was a Set, i.e. a membership test that nothing ever consumed. engram's
+  // applyEvidence steps ONE rung per accepted call and record_evidence is never turn-cached, so
+  // one honest grade recorded three times walked a page unseen -> mastered — and
+  // appliedGradeBypass stayed quiet, because the slug really had been graded.
+  it('refuses a second record of the same grade in one turn', async () => {
+    const { tools, calls } = evidenceTool([{ slug: 'arith', kind: 'applied-correctly' }], vault);
+    await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'graded' });
+    const res: any = await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'graded, again' });
+    expect(res.isError).toBe(true);
+    expect(String(res.content?.[0]?.text ?? '')).toMatch(/already recorded/i);
+    // The "nothing was graded" advice is false for a duplicate, and telling the tutor to stage
+    // another block for work already graded is the wrong instruction.
+    expect(String(res.content?.[0]?.text ?? '')).not.toMatch(/stage a block/i);
+    expect(calls).toHaveLength(1);
+    expect(readFileSync(join(vault, '.harness', 'guardrail.log'), 'utf8'))
+      .toMatch(/refused duplicate applied-correctly for "arith"/);
+  });
+
+  // Two blocks on one page legitimately earn two credits — collapsing `earned` to a Set would
+  // refuse the honest second record and lose evidence the learner worked for.
+  it('two graded blocks on one page pay for two records, and only two', async () => {
+    const { tools, calls } = evidenceTool([
+      { slug: 'arith', kind: 'applied-correctly' },
+      { slug: 'arith', kind: 'applied-correctly' },
+    ]);
+    await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'block one' });
+    await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'block two' });
+    const third: any = await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'block three' });
+    expect(third.isError).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  // The credit is spent by a record that LANDS. Spending it on the attempt would have the
+  // harness's own stub-repair retry (and any model retry after a write failure) refused, and the
+  // learner's earned evidence would disappear into a guardrail line.
+  it('a record that fails keeps its credit for the retry', async () => {
+    const calls: any[] = [];
+    const raw = [{
+      name: 'record_evidence',
+      description: 'record',
+      execute: async (a: unknown) => {
+        calls.push(a);
+        return calls.length === 1
+          ? { isError: true, content: [{ type: 'text', text: 'vault write failed' }] }
+          : { ok: true };
+      },
+    }] as any;
+    const tools = guardMcpTools(raw, 'kid', ['arith'], [{ slug: 'arith', kind: 'applied-correctly' }]);
+    const failed: any = await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'graded' });
+    expect(failed.isError).toBe(true);
+    const retried: any = await tools[0].execute!({ student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'graded' });
+    expect(retried.isError).toBeUndefined();
+    expect(calls).toHaveLength(2);
   });
 
   it('still lets the tutor record observations it is entitled to make', async () => {

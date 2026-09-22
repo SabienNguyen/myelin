@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { rejectedValues, appliedGradeBypass, untouchedSlugEvidence, extractAnswerNumber, freeVariables, gradeBlockOutput, gradeStructured, mathEquivalent } from '../src/server/grading.js';
 import { textModel } from './mockModel.js';
 
@@ -65,6 +65,25 @@ describe('mathEquivalent (numeric sampling)', () => {
   });
   it('handles ln via rewrite', () => {
     expect(mathEquivalent('\\ln(x)', '\\ln(x)', 'x')).toBe(true);
+  });
+
+  // Honesty regression, twin of the blank-answer one above: the NaN skip used `&&` where its
+  // equation counterpart uses `||`, so a point where only ONE side left its real domain fell
+  // through to the tolerance test — and `Math.abs(NaN - rb) > eps` is false. Every sample "agreed",
+  // and an unrelated answer minted applied-correctly with source 'mechanical'.
+  it('does not grade an answer correct when only one side is NaN across the whole sample', () => {
+    expect(mathEquivalent('\\sqrt{x-4}', 'x+1', 'x')).toBe(false);
+    expect(mathEquivalent('\\log(x-10)', '2x', 'x')).toBe(false);
+    expect(mathEquivalent('\\sqrt{-1}', '4', 'x')).toBe(false);
+  });
+
+  // The other half of that same `continue`, and why it cannot become `return false`: predictable:true
+  // makes ln/sqrt yield NaN outside their real domain, so a both-NaN point carries no information
+  // and must be skipped, not treated as disagreement. These two are the guard against "fixing"
+  // the line above into rejecting any NaN and failing correct answers.
+  it('still grades functions that are NaN on part of the sample range', () => {
+    expect(mathEquivalent('\\ln(x)', '\\ln(x)', 'x')).toBe(true);
+    expect(mathEquivalent('\\sqrt{x}\\cdot\\sqrt{x}', 'x', 'x')).toBe(true);
   });
 
   // Equations are how students actually write algebra ("2x+3=11 → 2x=8 → x=4"). mathjs reads '='
@@ -1049,6 +1068,136 @@ describe('a blank submission is never graded correct', () => {
     );
     expect(g.verdict).toBe('incorrect');
     expect(g.evidence[0].kind).toBe('struggled');
+  });
+});
+
+/**
+ * A blank `expected` is a malformed block, not an answer key — and an unanswered item submits ''
+ * too, so `expected != null` compared blank against blank and called it an exact match: verdict
+ * correct, source 'mechanical', applied-correctly, the one evidence kind that reaches 'mastered'.
+ * The schema now rejects '' (blocks.ts), but replayed history is never re-validated — session.ts
+ * hands part.input straight to gradeBlockOutput — so the grader has to hold the line for threads
+ * that already exist.
+ */
+describe('a blank expected never mints mechanical evidence', () => {
+  const cfg = { models: { grader: { model: 'claude-haiku-4-5' } } } as any;
+  // Every stubbed reply below is CORRECT, so a 'mechanical' source would mean the exact-match
+  // branch graded it anyway, and a 'model' source proves the fallthrough ran.
+  const yesMan = () => textModel('CORRECT — looks right');
+
+  it('does not exact-match an unanswered quick_check against a blank expected', async () => {
+    const { model, prompts } = yesMan();
+    const g = await gradeBlockOutput('quick_check',
+      { question: 'q?', mode: 'text', expected: '', pageSlug: 'page-a' } as any,
+      { answer: '' } as any, cfg, { model });
+    expect(g.verdict).toBe('incorrect');
+    expect(g.source).toBe('model');   // fell through to gradeOpenAnswer, not exact-matched
+    expect(g.evidence[0].kind).toBe('struggled');
+    expect(prompts).toHaveLength(0);  // ...and its blank guard answered before the model was asked
+  });
+
+  it('charges the malformed block to the model grader, not to the learner who answered', async () => {
+    // A real answer against a malformed block still gets judged — it just cannot mint applied
+    // evidence, because no machine checked it. capApplied does the demotion.
+    const { model } = yesMan();
+    const g = await gradeBlockOutput('quick_check',
+      { question: 'q?', mode: 'text', expected: '', pageSlug: 'page-a' } as any,
+      { answer: 'a buffer' } as any, cfg, { model });
+    expect(g.verdict).toBe('correct');
+    expect(g.source).toBe('model');
+    expect(g.evidence[0].kind).toBe('explained-correctly');
+  });
+
+  it('marks a blank-expected quiz item wrong and names it in the log', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { model } = yesMan();
+      const g = await gradeBlockOutput('quiz',
+        { title: 'q', items: [
+          { id: 'item-1', type: 'choice', prompt: 'Pick one', choices: ['a', 'b'], expected: '', pageSlug: 'page-a' },
+        ] } as any,
+        { answers: [{ id: 'item-1', answer: '' }] } as any, cfg, { model });
+      expect(g.verdict).toBe('incorrect');
+      expect(g.evidence[0].kind).toBe('struggled');
+      // quiz has no open-answer path to fall through to, so the learner eats a miss — that must at
+      // least be audible to whoever can fix the block.
+      expect(String(err.mock.calls[0]?.[0])).toContain('item-1');
+    } finally { err.mockRestore(); }
+  });
+
+  // THE case the bug actually minted on: both sides blank, so '' === '' matched and the item came
+  // back mechanical/applied-correctly for an answer nobody wrote. A non-blank answer never matched
+  // blank-to-blank, so testing with one pins nothing.
+  it('does not match a blank SHORT answer to a blank expected and call it mechanical', async () => {
+    const { model, prompts } = yesMan();
+    const g = await gradeBlockOutput('quiz',
+      { title: 'q', items: [
+        { id: 'item-1', type: 'short', prompt: 'Explain A', expected: '', pageSlug: 'page-a' },
+      ] } as any,
+      { answers: [{ id: 'item-1', answer: '' }] } as any, cfg, { model });
+    expect(g.source).toBe('model');
+    expect(g.evidence[0].kind).toBe('struggled');
+    // gradeOpenAnswer's blank guard answers first — an empty submission is never worth a grader call.
+    expect(prompts).toHaveLength(0);
+  });
+
+  it('falls through to the model when a SHORT item carries a blank expected', async () => {
+    const { model } = yesMan();
+    const g = await gradeBlockOutput('quiz',
+      { title: 'q', items: [
+        { id: 'item-1', type: 'short', prompt: 'Explain A', expected: '', pageSlug: 'page-a' },
+      ] } as any,
+      { answers: [{ id: 'item-1', answer: 'because of the buffer' }] } as any, cfg, { model });
+    expect(g.source).toBe('model');
+    expect(g.evidence[0].kind).toBe('explained-correctly');
+  });
+});
+
+/**
+ * gradeChemEquation only checks WHICH reaction was written when both reactants and products are
+ * pinned, and the schema leaves both optional on purpose (models send partial checkers, and a
+ * narrower schema turned working blocks into error cards). So an unpinned block accepted any
+ * balanced string — "H2 + H2 -> 2H2" — as applied practice for whatever was asked. Backstopped
+ * where the evidence is minted, not in the checker: ok:false there reads as 'struggled' and would
+ * demote a learner who balanced correctly.
+ */
+describe('chem_equation mints applied evidence only when the reaction is pinned', () => {
+  const cfg = {} as any; // no model may be consulted on this path
+  const grade = (checker: any, values: string[]) => gradeBlockOutput('structured_check',
+    { prompt: 'Balance the combustion of methane', pageSlug: 'stoichiometry', checker }, { values }, cfg);
+
+  it('refuses to grade an unpinned equation, and says why in words the tutor can act on', async () => {
+    const g = await grade({ kind: 'chem_equation' }, ['2H2 + O2 -> 2H2O']);
+    expect(g.verdict).toBe('reviewed');
+    expect(g.evidence).toEqual([]);
+    expect(g.detail).toMatch(/reactants\/products/);
+  });
+
+  // The backstop still RUNS the checker. A first cut returned before gradeStructured, which swapped
+  // the learner's actual diagnosis for a sentence about block authoring — and `grading.detail` is
+  // all the card and the tutor ever see, so the imbalance became invisible and the tutor model's
+  // opinion was the only account left of whether it balanced.
+  it('still reports the balance result on an unpinned block, while minting nothing', async () => {
+    const g = await grade({ kind: 'chem_equation' }, ['CH4 + O2 -> CO2 + H2O']);
+    expect(g.evidence).toEqual([]);
+    expect(g.detail).toMatch(/not balanced/i);
+    expect(g.detail).toMatch(/reactants\/products/);
+  });
+
+  it('refuses when only one side is pinned — the identity check needs both', async () => {
+    expect((await grade({ kind: 'chem_equation', reactants: ['CH4', 'O2'] }, ['2H2 + O2 -> 2H2O'])).evidence)
+      .toEqual([]);
+    expect((await grade({ kind: 'chem_equation', products: ['CO2', 'H2O'] }, ['2H2 + O2 -> 2H2O'])).evidence)
+      .toEqual([]);
+  });
+
+  it('still mints applied-correctly for the pinned reaction, balanced correctly', async () => {
+    const pin = { kind: 'chem_equation', reactants: ['CH4', 'O2'], products: ['CO2', 'H2O'] };
+    const g = await grade(pin, ['CH4 + 2O2 -> CO2 + 2H2O']);
+    expect(g.verdict).toBe('correct');
+    expect(g.evidence[0]).toMatchObject({ slug: 'stoichiometry', kind: 'applied-correctly' });
+    // …and a different balanced equation against the same pin is still a miss, not a pass.
+    expect((await grade(pin, ['2H2 + O2 -> 2H2O'])).verdict).toBe('incorrect');
   });
 });
 

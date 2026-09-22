@@ -597,6 +597,9 @@ button.badge:hover { color: var(--text); }
 /* A parse failure is not a grade: the learner's answer simply could not be read. Neutral ink,
    not the red of a wrong answer — red here would assert the work was judged and failed. */
 .verdict.ungraded { color: var(--text-muted); }
+/* Provenance, never in the verdict's colour: "checked mechanically" is not good news or bad news,
+   it is how the news was reached, and a green one reads as part of the praise. */
+.verdict-source { font-weight: 400; color: var(--text-muted); }
 
 .quick-check form { display: flex; gap: 0.6rem; margin-top: 0.55rem; align-items: center; }
 .quick-check form input { flex: 1; }

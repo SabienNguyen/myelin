@@ -60,6 +60,23 @@ describe('ChatStore', () => {
     expect(fetchImpl.mock.calls.every(([url]) => String(url).endsWith('/run'))).toBe(true);
   });
 
+  it('clears the spinner when a recovery poll answers non-ok, instead of polling into silence', async () => {
+    // The thrown-fetch path always reported itself; a 502 from the dev proxy took neither branch,
+    // so the client kept showing a turn the server had already finished.
+    const initial: UIMessage[] = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Explain' }] }];
+    let polls = 0;
+    const fetchImpl = vi.fn(async () => (++polls === 1
+      ? Response.json({ running: true, messages: initial })
+      : new Response('', { status: 502 })));
+    const store = new ChatStore({ threadId: 't1', initialMessages: initial,
+      requestContext: () => ({ mode: 'learn', writeUp: false }), fetchImpl });
+    const recovered = store.recover(new AbortController().signal);
+    await vi.waitFor(() => expect(store.getState().isRunning).toBe(true));
+    await recovered;
+    expect(store.getState().isRunning).toBe(false);
+    expect(store.getState().error).toContain('502');
+  });
+
   it('retries only an ungraded result, preserving the answer and other grades', async () => {
     const history = pausedBlockHistory();
     const part = history[1].parts[2] as ToolUIPart;

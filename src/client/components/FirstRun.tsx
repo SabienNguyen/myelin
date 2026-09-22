@@ -172,7 +172,8 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             </button>
           </div>
           <p className="firstrun-note">
-            Uses OpenRouter’s free router for every learning role, with guided exercises enabled.
+            Uses OpenRouter’s free router for every learning role — the same tutor loop as any
+            other model, on whichever free model the router picks.
             No paid fallback. Free models have rate limits and variable availability.
             Your lesson content is sent to OpenRouter and its selected provider; the key stays on this device.
           </p>
