@@ -996,6 +996,12 @@ export function createTutorSession(
   // failure.
   const lastModeByThread = new Map<string, Mode>();
 
+  // Pages a thread has already been told are ungrounded. vaultGap re-derives the same gap on every
+  // turn until the page is rewritten, and a warning repeated under every answer is one the learner
+  // learns to read past. In-memory like lastModeByThread: after a restart they are told once more,
+  // which is the harmless direction to be wrong in.
+  const groundingToldByThread = new Map<string, Set<string>>();
+
   async function respond(
     messages: UIMessage[], mode: Mode, threadId = 'default', signal?: AbortSignal,
   ): Promise<Response> {
@@ -1399,7 +1405,16 @@ export function createTutorSession(
         let loopToolCalls = 0;
         let loopText = '';
         // Which pages this turn actually touched — the provenance the evidence check below needs.
-        const touched = { read: [] as string[], staged: [] as string[], written: [] as string[] };
+        // Seeded with the pages of the blocks being graded: a learner answering a block staged on
+        // a page IS this turn touching it, and the tutor has no reason to re-read that page to
+        // record a grade the harness already handed it. Without the seed the most ordinary honest
+        // turn in the system — quick_check answered, machine grade recorded — logged
+        // "record_evidence named pages this turn never read, staged or wrote", burying real hits.
+        const touched = {
+          read: [] as string[],
+          staged: pending.map((p) => String(p.input?.pageSlug ?? '')).filter(Boolean),
+          written: [] as string[],
+        };
         const run = async (msgs: ChatMessage[]) => {
           // Usage tracks the loop's own running total (loop.ts's onUsage), not just runLoop's
           // return value: a model call can reject or be aborted AFTER real spend already landed
@@ -1492,6 +1507,16 @@ export function createTutorSession(
         // but record_evidence's kind is the model's own argument. Flag — never block — a turn where
         // the tutor recorded 'applied-correctly' for a page whose machine grade this turn was
         // lesser. Wrapped so a telemetry slip can never break the turn.
+        //
+        // Neither reaches the learner's transcript, deliberately. The unrecorded-evidence note
+        // above speaks because "nothing was recorded" is a fact about the learner's own standing.
+        // These two are facts about the MODEL, and both can be wrong about the record: an unearned
+        // proving kind is refused by guardMcpTools before it lands (its `left === undefined` branch
+        // is exactly this case), so appliedGradeBypass now flags attempts rather than graph moves;
+        // untouchedSlugEvidence sees one turn of provenance, so a page read earlier in the thread
+        // reads as untouched. Telling a learner a page was unearned when it was in fact blocked,
+        // or when the detector merely could not see the read, teaches them to distrust a sound
+        // record — which costs more than the silence does.
         try {
           // A page the turn never read, staged, or wrote has no business gaining mastery. Seen
           // live: an FSDP2 question on a vault with no FSDP page recorded 'exposed' against
@@ -1507,7 +1532,9 @@ export function createTutorSession(
             recordedCalls.map((c) => ({ slug: String(c?.slug ?? ''), kind: c?.kind })),
           );
           if (laundered.length) {
-            logGuardrail(cfg.vault, `record_evidence claimed applied-correctly past the machine grade for: ${laundered.join(', ')}`);
+            // "attempted": the evidence guard refuses an unearned proving kind before it lands, so
+            // this line is a record of a tutor that tried, not of a graph that moved.
+            logGuardrail(cfg.vault, `record_evidence attempted applied-correctly past the machine grade for: ${laundered.join(', ')}`);
           }
         } catch { /* detection is telemetry; it must never affect the turn */ }
 
@@ -1531,6 +1558,37 @@ export function createTutorSession(
               + 'stronger model (the model badge in the top bar).',
           });
           writer.write({ type: 'text-end', id: noteId });
+        }
+
+        // The vault's own verdict on the page under this lesson — no sources, a stub, too thin to
+        // teach from — reached the TUTOR (the gap directive above) and the guardrail log, and the
+        // learner never heard it. They are the one standing on it: the page panel shows a Sources
+        // section only when there ARE sources, so "written from memory, never checked" reads as a
+        // blank space, and the mastery they earn lands on that page all the same.
+        //
+        // It is a file the harness read, not a judgement about anyone, so unlike the two detectors
+        // above it can be said plainly. Only for the reasons that name an existing page — no-page
+        // and empty-vault have no slug to stand on — and never when the turn rewrote that page,
+        // because a rewrite re-grounds it and the warning would then be the false statement. That
+        // last test reads the write CALL, not its result: confirming would mean re-reading the
+        // page after every gap turn, and a rejected write_page returns its error to the tutor,
+        // which is where the retry belongs.
+        if (gap?.slug && !touched.written.includes(gap.slug) && !runSignal.aborted) {
+          const told = groundingToldByThread.get(threadId) ?? new Set<string>();
+          if (!told.has(gap.slug)) {
+            told.add(gap.slug);
+            groundingToldByThread.set(threadId, told);
+            const noteId = generateMessageId();
+            writer.write({ type: 'text-start', id: noteId });
+            writer.write({
+              type: 'text-delta', id: noteId,
+              delta: '\n\n— Myelin: the page under this lesson is not solid ground. '
+                + `${gap.detail}. What you learn here is still recorded against it, so ask the `
+                + 'tutor to research and rewrite that page before you trust what your graph says '
+                + 'about it.',
+            });
+            writer.write({ type: 'text-end', id: noteId });
+          }
         }
       },
     });

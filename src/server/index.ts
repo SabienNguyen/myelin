@@ -34,6 +34,10 @@ const cfg = loadConfig();
 // rule applyCredentials enforces for ANTHROPIC_API_KEY.
 applySettings(cfg);
 
+// preflight's explanation for a missing engram entry point, kept so a degraded boot can hand it to
+// the UI: in the desktop packaging the terminal it was printed to belongs to nobody.
+let engramEntryHelp: string | null = null;
+
 /**
  * Boot preflight. Everything a first run needs that can be done without asking, done — and
  * everything it needs that CANNOT be defaulted, said out loud before the server starts serving.
@@ -52,10 +56,11 @@ function preflight(): void {
   // there as an opaque transport error, so name it here where the fix is obvious.
   const entry = cfg.engram.args[cfg.engram.args.length - 1];
   if (!entry || !existsSync(entry)) {
-    console.error(`\nCannot find the Engram MCP server at:\n  ${entry}\n`
+    engramEntryHelp = `Cannot find the Engram MCP server at:\n  ${entry}\n`
       + 'Fix by any one of: installing it as a dependency, putting a `engram` checkout beside '
       + 'this one, setting ENGRAM_ENTRY, or setting `engram.command`/`args` in '
-      + 'harness.config.json.\n');
+      + 'harness.config.json.';
+    console.error(`\n${engramEntryHelp}\n`);
   } else {
     console.log(`memory: ${cfg.engram.command} ${cfg.engram.args.join(' ')}`);
   }
@@ -76,17 +81,33 @@ function preflight(): void {
 applyCredentials(); // saved key -> env, before anything constructs a model. The env always wins.
 preflight();
 
-const lw = await Engram.connect(cfg);
-// I3: seed the sandbox's ladder patterns as vault pages (idempotent, mechanical content — see
-// seedPatternPages.ts for the single-writer rationale). Unconditional now that the sandbox ships
-// built-in: there is always at least one ladder to give a page to.
-await seedPatternPages(lw, cfg);
+// A connect failure used to throw right here — eighty lines before serve() — so the setup UI that
+// exists to explain a missing engram never got a port to bind to, and the whole explanation went to
+// a terminal the desktop packaging does not have. Boot degraded instead: bind, serve setup, and say
+// why at every route that would need the client.
+let connected: Engram | null = null;
+let engramFailure: string | null = null;
+try {
+  connected = await Engram.connect(cfg);
+} catch (e) {
+  engramFailure = `The memory server (engram) did not start: ${e instanceof Error ? e.message : String(e)}`
+    + (engramEntryHelp ? `\n\n${engramEntryHelp}` : '');
+  console.error(`\n${engramFailure}\n`);
+}
+const lw = connected; // const, so `if (lw)` narrows it inside the closures below
+
 const anki = new AnkiClient();
-startScheduler(lw, cfg);
 sweepInterruptedConversions(cfg.vault); // restarts orphan in-flight conversions — mark them honestly
-// Drain any chapters left 'pending' from a previous run (e.g. converted but not yet compiled
-// before a restart) — no button press required.
-if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg);
+if (lw) {
+  // I3: seed the sandbox's ladder patterns as vault pages (idempotent, mechanical content — see
+  // seedPatternPages.ts for the single-writer rationale). Unconditional now that the sandbox ships
+  // built-in: there is always at least one ladder to give a page to.
+  await seedPatternPages(lw, cfg);
+  startScheduler(lw, cfg);
+  // Drain any chapters left 'pending' from a previous run (e.g. converted but not yet compiled
+  // before a restart) — no button press required.
+  if (cfg.autoCompile !== false) ensureCompileDrain(lw, cfg);
+}
 
 // ISO 8601 week key (e.g. "2026-W28") — used to nudge about an Anki backlog at most once/week,
 // sharing the same once-per-event ledger file the daily digest scheduler writes to.
@@ -136,19 +157,23 @@ export async function runAnkiTick(lw: Engram, anki: AnkiClient, cfg: HarnessConf
   }
 }
 
-cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => runAnkiTick(lw, anki, cfg), { noOverlap: true });
-runAnkiTick(lw, anki, cfg).catch(console.error); // once at boot
+if (lw) {
+  cron.schedule(`*/${cfg.schedule.ankiSyncMinutes} * * * *`, () => runAnkiTick(lw, anki, cfg), { noOverlap: true });
+  runAnkiTick(lw, anki, cfg).catch(console.error); // once at boot
+}
 
 const app = new Hono();
 // First, so nothing below is reachable from another site's page — see localOnly.ts.
 app.use('*', localOnly());
 // `tutor` is deliberately NOT in this snapshot — restRoutes reads it from cfg per request, so the
 // status badge always names what the app is actually using.
-app.route('/', buildRestRoutes(lw, cfg, {
-  student: cfg.student, autoCompile: cfg.autoCompile,
-}, anki));
-app.route('/', buildChatRoute(lw, cfg));
-app.route('/', buildIngestRoutes(lw, cfg));
+if (lw) {
+  app.route('/', buildRestRoutes(lw, cfg, {
+    student: cfg.student, autoCompile: cfg.autoCompile,
+  }, anki));
+  app.route('/', buildChatRoute(lw, cfg));
+  app.route('/', buildIngestRoutes(lw, cfg));
+}
 // The coding sandbox runs in-process — no external sidecar to route to (see docs/superpowers/
 // plans/2026-07-20-gap-integration.md for the retired external design).
 app.route('/', buildBuiltinGapRoutes({
@@ -156,10 +181,17 @@ app.route('/', buildBuiltinGapRoutes({
   generate: compileGenerate(cfg),
   modelName: cfg.models.compile.model,
 }));
-app.route('/', buildGapHelpRoute(lw, cfg));
+if (lw) app.route('/', buildGapHelpRoute(lw, cfg));
 // First-run readiness + the one thing a first run must supply. Mounted last so it is reachable
 // even if a feature route above is disabled.
 app.route('/', buildSetupRoutes(cfg));
+// Whether the memory server came up, and if not, the same words the terminal got. 200 either way:
+// a probe that cannot be read is no better than the console line this replaces.
+app.get('/api/engram', (c) => c.json({ ok: !engramFailure, error: engramFailure }));
+// Degraded boot: the engram-backed routes above were never mounted, so answer every one of them
+// with the reason instead of the SPA fallback's index.html. Closes over the message only — there is
+// no client here to be null.
+if (engramFailure) app.all('/api/*', (c) => c.json({ error: engramFailure }, 503));
 // Built client last of all, because its SPA fallback answers everything that did not match an API
 // route above. Absent in dev (Vite owns the client then) — see staticRoutes.ts.
 const staticFiles = buildStaticRoutes();
@@ -172,3 +204,4 @@ serve({ fetch: app.fetch, port: cfg.port, hostname: '127.0.0.1' });
 console.log(staticFiles.found
   ? `Myelin is running — open http://127.0.0.1:${cfg.port}`
   : `myelin API on 127.0.0.1:${cfg.port} (no built client; run \`npm run dev:client\`)`);
+if (engramFailure) console.error('Running without memory: setup is reachable, everything else answers 503.');

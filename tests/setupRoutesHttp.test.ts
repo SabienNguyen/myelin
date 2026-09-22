@@ -135,7 +135,7 @@ describe('GET/PUT /api/setup/models', () => {
     const app = buildSetupRoutes(cfgWith(plainModels()));
     const state = await (await app.request('/api/setup/models')).json();
     expect(Object.keys(state.roles)).toEqual(['tutor', 'grader', 'quiz_gen', 'card_gen', 'compile']);
-    expect(state.roles.grader).toEqual({ effective: 'claude-haiku-4-5', saved: null });
+    expect(state.roles.grader).toEqual({ effective: 'claude-haiku-4-5', saved: null, contextTokens: null });
     expect(state.savedAt).toContain('settings.json');
   });
 
@@ -174,7 +174,8 @@ describe('GET/PUT /api/setup/models', () => {
     });
     expect(ok.status).toBe(200);
     const state = await ok.json();
-    expect(state.roles.grader).toEqual({ effective: 'openai:test/model', saved: 'openai:test/model' });
+    expect(state.roles.grader)
+      .toEqual({ effective: 'openai:test/model', saved: 'openai:test/model', contextTokens: null });
     expect(state.env.OPENAI_COMPAT_BASE_URL).toEqual({ value: 'https://x.example/v1', shadowed: false });
     // Persisted, and live in the environment models.ts reads per call.
     expect(readSettings().models?.grader).toBe('openai:test/model');
@@ -229,6 +230,63 @@ describe('GET/PUT /api/setup/models', () => {
     const res = await put(app, { env: { PATH: '/tmp' } });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/unknown env field: "PATH".*OLLAMA_BASE_URL/);
+  });
+
+  // contextTokens is the only lever over history compaction, the compile chunk size and the
+  // ledger's truncation warning; until this it could be set from harness.config.json alone.
+  describe('per-role context window', () => {
+    it('saves a window, persists it beside the ids, and serves it live from the same cfg', async () => {
+      const cfg = cfgWith(plainModels());
+      const app = buildSetupRoutes(cfg);
+      const res = await put(app, { contextTokens: { tutor: 8192 } });
+      expect(res.status).toBe(200);
+      expect((await res.json()).roles.tutor)
+        .toEqual({ effective: 'claude-sonnet-5', saved: null, contextTokens: 8192 });
+      expect(readSettings().contextTokens).toEqual({ tutor: 8192 });
+      // The object session.ts and grading.ts read per turn, so the next call uses it without a restart.
+      expect(cfg.models.tutor.contextTokens).toBe(8192);
+      expect(cfg.models.grader.contextTokens).toBeUndefined();
+    });
+
+    it('a window and a model id ride the same save without clobbering each other', async () => {
+      const cfg = cfgWith(plainModels());
+      const app = buildSetupRoutes(cfg);
+      await put(app, { models: { tutor: 'ollama:qwen3:8b' }, contextTokens: { tutor: 32768 } });
+      expect(cfg.models.tutor).toMatchObject({ model: 'ollama:qwen3:8b', contextTokens: 32768 });
+      expect(readSettings()).toMatchObject({
+        models: { tutor: 'ollama:qwen3:8b' }, contextTokens: { tutor: 32768 },
+      });
+    });
+
+    it('null clears a saved window, so a learner can move back to the defaults', async () => {
+      const cfg = cfgWith(plainModels());
+      const app = buildSetupRoutes(cfg);
+      await put(app, { contextTokens: { tutor: 8192 } });
+      const res = await put(app, { contextTokens: { tutor: null } });
+      expect(res.status).toBe(200);
+      expect((await res.json()).roles.tutor.contextTokens).toBeNull();
+      expect(readSettings().contextTokens).toEqual({});
+      expect(cfg.models.tutor.contextTokens).toBeUndefined();
+    });
+
+    it('a fraction, a zero or a string is a 400 — a bad window would silently shrink the budget', async () => {
+      const cfg = cfgWith(plainModels());
+      const app = buildSetupRoutes(cfg);
+      for (const bad of [0, -1, 1.5, '32768']) {
+        const res = await put(app, { contextTokens: { tutor: bad } });
+        expect(res.status).toBe(400);
+        expect((await res.json()).error).toMatch(/contextTokens for tutor must be a whole number/);
+      }
+      expect(cfg.models.tutor.contextTokens).toBeUndefined();
+      expect(readSettings()).toEqual({});
+    });
+
+    it('a window for a role that does not exist is refused by name', async () => {
+      const app = buildSetupRoutes(cfgWith(plainModels()));
+      const res = await put(app, { contextTokens: { paint_mixer: 4096 } });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/unknown model role: "paint_mixer"/);
+    });
   });
 
   describe('model discovery on GET', () => {

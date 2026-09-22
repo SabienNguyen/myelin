@@ -461,6 +461,52 @@ describe('anthropic streaming', () => {
       },
     ]);
   });
+
+  it('closes open blocks and finishes as other when the body ends without message_stop', async () => {
+    // A proxy that terminates the response cleanly mid-turn: no error, just a missing terminator.
+    // Without a flush this reads as a clean short answer, which is the silent failure.
+    respond = sse([[
+      frame('message_start', { type: 'message_start', message: { usage: { input_tokens: 9 } } }),
+      frame('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Half a ' } }),
+      frame('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'The answer is' } }),
+      frame('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 12 } }),
+    ].join('')]);
+
+    const events = await collect(model().stream({ messages: USER_Q }));
+    expect(events).toEqual([
+      { type: 'thinking-start', id: '0' },
+      { type: 'thinking-delta', id: '0', text: 'Half a ' },
+      { type: 'text-start', id: '1' },
+      { type: 'text-delta', id: '1', text: 'The answer is' },
+      // Flushed in wire order, so the loop assembles the partial turn instead of dropping it.
+      { type: 'thinking-end', id: '0', text: 'Half a ' },
+      { type: 'text-end', id: '1' },
+      // 'other', not the 'stop' that message_delta claimed: the terminator never arrived, so a
+      // truncated turn must never present as a completed one.
+      {
+        type: 'finish', reason: 'other',
+        usage: { inputTokens: 9, outputTokens: 12, cacheReadTokens: 0, cacheWriteTokens: 0 },
+      },
+    ]);
+  });
+
+  it('flushes a tool call cut mid-arguments as an inputError rather than dropping it', async () => {
+    respond = sse([[
+      frame('message_start', { type: 'message_start', message: { usage: { input_tokens: 4 } } }),
+      frame('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_9', name: 'lookup', input: {} } }),
+      frame('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"topic":"deriv' } }),
+    ].join('')]);
+
+    const events = await collect(model().stream({ messages: USER_Q }));
+    const call = events.find((e) => e.type === 'tool-call');
+    // The call survives the truncation so the loop can report a failed tool step; half-parsed
+    // arguments must not be passed off as the model's input.
+    expect(call).toMatchObject({ toolCallId: 'tu_9', toolName: 'lookup' });
+    expect((call as { inputError?: string }).inputError).toBeTruthy();
+    expect(events.at(-1)).toMatchObject({ type: 'finish', reason: 'other' });
+  });
 });
 
 describe('anthropic abort listener lifecycle', () => {

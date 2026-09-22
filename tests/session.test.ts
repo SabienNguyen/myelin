@@ -1101,3 +1101,94 @@ describe('a missing page does not swallow earned evidence', () => {
     expect(calls).toHaveLength(0); // a transport failure is not a missing page
   });
 });
+
+/**
+ * The vault knows when a page is guesswork — no sources, a stub, too thin — and until now it told
+ * only the tutor (the HARNESS gap directive) and the guardrail log. The learner is the one being
+ * taught from it, and the mastery they earn lands on it. The page panel cannot carry this by
+ * itself: it renders a Sources section only when sources exist, so "written from memory, never
+ * checked" shows up as a missing section, which is not a thing anyone reads.
+ */
+describe('the learner hears what the vault knows about the page under the lesson', () => {
+  const ask = (text: string) =>
+    [{ id: `u-${text.length}`, role: 'user', parts: [{ type: 'text', text }] }] as any;
+
+  it('names the page and why it is not solid ground', async () => {
+    const { model } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(ask('tell me about photosynthesis'), 'learn', 'ground-1')).text();
+    expect(body).toMatch(/not solid ground/);
+    expect(body).toMatch(/photosynthesis/);
+    expect(body).toMatch(/cites no sources/); // the vault's own words, not a paraphrase
+  }, 30_000);
+
+  it('says it once per thread — a warning under every answer is one nobody reads', async () => {
+    const { model } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const first = await (await session.respond(ask('tell me about photosynthesis'), 'learn', 'ground-2')).text();
+    expect(first).toMatch(/not solid ground/);
+    const second = await (await session.respond(ask('more about photosynthesis please'), 'learn', 'ground-2')).text();
+    expect(second).not.toMatch(/not solid ground/);
+    // A different thread has not been told, so it still is.
+    const other = await (await session.respond(ask('tell me about photosynthesis'), 'learn', 'ground-3')).text();
+    expect(other).toMatch(/not solid ground/);
+  }, 30_000);
+
+  it('leaves a solid sourced page alone', async () => {
+    const { model } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(ask('remind me how arithmetic works'), 'learn', 'ground-4')).text();
+    expect(body).not.toMatch(/not solid ground/);
+  }, 30_000);
+
+  // Last of these on purpose: the rewrite is the point, and it leaves `photosynthesis` sourced —
+  // so nothing after it may depend on that page still being the unsourced fixture.
+  it('stays quiet when the turn rewrote the page — the ground changed under the warning', async () => {
+    const model = turnsModel([
+      { toolCalls: [{ toolName: 'write_page', input: {
+        slug: 'photosynthesis', title: 'Photosynthesis',
+        body: `Light-dependent and light-independent reactions. ${'Checked prose. '.repeat(40)}`,
+        sources: ['https://example.edu/photosynthesis'],
+      } }] },
+      { text: 'Rewrote it from what I read, then taught from that.' },
+    ]);
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const body = await (await session.respond(ask('tell me about photosynthesis'), 'learn', 'ground-5')).text();
+    expect(body).not.toMatch(/not solid ground/);
+    // …and the silence is honest only because the write LANDED. Without this the test would also
+    // pass on a rejected write_page, which is the one case the learner most needs telling about.
+    expect(readFileSync(join(vault, 'pages', 'photosynthesis.md'), 'utf8')).toMatch(/example\.edu/);
+  }, 30_000);
+});
+
+/**
+ * untouchedSlugEvidence flags evidence recorded against a page the turn never touched — the FSDP2
+ * incident, where a real-but-unrelated slug gained mastery. `touched` is built from the turn's own
+ * tool calls, and a grade turn makes none against the graded page: the harness hands the tutor the
+ * machine's evidence and it records it, with no reason to re-read. So the single most ordinary
+ * honest turn in the system tripped the detector, and a log full of those hides the real ones.
+ */
+describe('the stray-evidence detector does not fire on the turn it is meant to bless', () => {
+  it('counts the block the learner just answered as touching its page', async () => {
+    const logPath = join(vault, '.harness', 'guardrail.log');
+    const before = existsSync(logPath) ? readFileSync(logPath, 'utf8') : '';
+    const model = turnsModel([
+      { toolCalls: [{ toolName: 'record_evidence', input: {
+        student: 'kid', slug: 'arith', kind: 'applied-correctly', note: 'answered 2+2 correctly',
+      } }] },
+      { text: 'Right.' },
+    ]);
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me' }] },
+      { id: 'a1', role: 'assistant', parts: [{
+        type: 'tool-quick_check', toolCallId: 'tc-stray-1', state: 'output-available',
+        input: { question: '2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' },
+        output: { answer: '4' },
+      }] },
+    ] as any;
+    await (await session.respond(history, 'learn', 'stray-thread')).text();
+    const logged = readFileSync(logPath, 'utf8').slice(before.length);
+    expect(logged).not.toMatch(/never read, staged or wrote/);
+  }, 30_000);
+});

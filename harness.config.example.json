@@ -1,8 +1,8 @@
 {
-  "_thisFileIsOptional": "Every field below has a working default, and the app starts with no config file at all — copy this to harness.config.json only to change something. See src/server/config.ts for the defaults: the vault goes in ~/Documents/Engram, the student id is your OS username, and the Engram MCP server is found automatically (installed dependency, then a sibling checkout, or ENGRAM_ENTRY).",
-  "_modelRoutes": "models.*.model supports three routes, mixable per role: a plain id (e.g. \"claude-sonnet-5\") routes through the Anthropic API and needs ANTHROPIC_API_KEY — the app will ask for one on first run and save it outside the vault; \"ollama:<model>\" routes to a local Ollama model (OLLAMA_BASE_URL to move it, OLLAMA_API_KEY if yours sits behind an authenticated proxy); \"openai:<model>\" (e.g. \"openai:deepseek/deepseek-chat\") routes to any OpenAI-compatible provider — set OPENAI_COMPAT_BASE_URL and, if the provider requires a key, OPENAI_COMPAT_API_KEY. See README 'Model routes' for the full writeup. All of it is also editable in-app — click the model badge in the top bar; those saves land in settings.json beside credentials.json and override this file.",
+  "_thisFileIsOptional": "Every field below has a working default, and the app starts with no config file at all — copy this to harness.config.json only to change something. See src/server/config.ts for the defaults: the vault goes in ~/Documents/Myelin (~/myelin-vault where there is no Documents folder), the student id is your OS username, and the Engram MCP server is found automatically (installed dependency, then a sibling checkout, or ENGRAM_ENTRY).",
+  "_modelRoutes": "models.*.model supports five routes, mixable per role. A plain id (e.g. \"claude-sonnet-5\") routes through the Anthropic API and needs ANTHROPIC_API_KEY — the app will ask for one on first run and save it outside the vault. \"openrouter:<vendor/model>\" routes to OpenRouter on a pinned endpoint and needs OPENROUTER_API_KEY (a free key works); this is the default route. \"groq:<model>\" routes to Groq, also pinned, and needs GROQ_API_KEY. \"ollama:<model>\" routes to a local Ollama model (OLLAMA_BASE_URL to move it, OLLAMA_API_KEY if yours sits behind an authenticated proxy). \"openai:<model>\" is the fallback for an endpoint with no prefix of its own — set OPENAI_COMPAT_BASE_URL and, if the provider requires a key, OPENAI_COMPAT_API_KEY. Do not send OpenRouter or Groq through it: that spends the one compat slot and leaves catalog validation, the free-model chips and the key presence check blind to the setup. See README 'Model routes' for the full writeup. All of it is also editable in-app — click the model badge in the top bar; those saves land in settings.json beside credentials.json and override this file.",
   "_search": "Only needed for an ollama: tutor. An Anthropic-routed tutor researches via Anthropic's server-side web search with nothing to install.",
-  "vault": "~/Documents/Engram",
+  "vault": "~/Documents/Myelin",
   "student": "your-name",
   "models": {
     "tutor":   { "model": "claude-sonnet-5" },
@@ -12,7 +12,7 @@
     "compile": { "model": "claude-sonnet-5" }
   },
   "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
-  "_cacheTtl": "Prompt-cache entry lifetime on Anthropic-routed roles: '5m' (the wire default) or '1h' — the long TTL survives a learner's twenty-minute pause between turns at a higher cache-write cost. Local/compat routes ignore it.",
+  "_cacheTtl": "File-only — the models dialog does not carry it, so changing it means editing this file and restarting. Prompt-cache entry lifetime on Anthropic-routed roles: '5m' (the wire default) or '1h' — the long TTL survives a learner's twenty-minute pause between turns at a higher cache-write cost. Local/compat routes ignore it.",
   "cacheTtl": "5m",
   "port": 4820,
   "autoCompile": true

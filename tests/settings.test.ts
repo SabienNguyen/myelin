@@ -48,8 +48,13 @@ describe('settings.json placement and shape', () => {
   });
 
   it('round-trips, is written 0600, and a corrupt file reads as empty', () => {
-    writeSettings({ models: { grader: 'ollama:qwen' }, env: { OLLAMA_API_KEY: 'k' } });
-    expect(readSettings()).toEqual({ models: { grader: 'ollama:qwen' }, env: { OLLAMA_API_KEY: 'k' } });
+    const saved = {
+      models: { grader: 'ollama:qwen' },
+      contextTokens: { grader: 32_768 },
+      env: { OLLAMA_API_KEY: 'k' },
+    };
+    writeSettings(saved);
+    expect(readSettings()).toEqual(saved);
     expect(statSync(settingsPath()).mode & 0o777).toBe(0o600);
     writeFileSync(settingsPath(), '{not json');
     expect(readSettings()).toEqual({});
@@ -68,6 +73,25 @@ describe('merge precedence: defaults < harness.config.json < settings.json', () 
     expect(cfg.models.tutor.model).toBe('ollama:saved-tutor');    // saved beats default
     expect(cfg.models.card_gen.model).toBe('ollama:file-card');   // file beats default
     expect(cfg.models.compile.model).toBe(DEFAULT_MODEL);         // default untouched
+  });
+
+  it('a saved context window beats the file; a hand-edited nonsense one is ignored OUT LOUD', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const cfgPath = bareConfig({ models: { compile: { model: 'ollama:x', contextTokens: 16_384 } } });
+      writeSettings({ contextTokens: { compile: 32_768, grader: 0, tutor: '8192' as unknown as number } });
+      const cfg = loadConfig(cfgPath);
+      applySettings(cfg);
+      expect(cfg.models.compile.contextTokens).toBe(32_768);
+      // Everything downstream — budgetChars, historyBudgetTokens, the ledger's truncation warning
+      // — reads 0 or a string as "no window declared", so these would look configured and do
+      // nothing. The learner hears about it instead.
+      expect(cfg.models.grader.contextTokens).toBeUndefined();
+      expect(cfg.models.tutor.contextTokens).toBeUndefined();
+      expect(err.mock.calls.map(String).join('\n')).toMatch(/contextTokens\.grader.*\n.*contextTokens\.tutor/s);
+    } finally {
+      err.mockRestore();
+    }
   });
 
   it('a hand-edited claude-sdk: id in settings.json is skipped, not applied, and named', () => {

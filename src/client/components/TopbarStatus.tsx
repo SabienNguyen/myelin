@@ -224,7 +224,7 @@ type EnvKey = (typeof URL_FIELDS | typeof KEY_FIELDS)[number]['key'];
 type Available = { ollama?: string[]; openaiCompat?: string[] };
 
 type ModelsState = {
-  roles: Record<string, { effective: string; saved: string | null }>;
+  roles: Record<string, { effective: string; saved: string | null; contextTokens?: number | null }>;
   env: Record<EnvKey, { value?: string; set?: boolean; shadowed: boolean }>;
   available?: Available;
 };
@@ -286,6 +286,9 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [roles, setRoles] = useState<Record<RoleName, string>>(Object.fromEntries(ROLE_ORDER.map((r) => [r, ''])) as Record<RoleName, string>);
+  // Held as the typed string, not a number: '' is the state "no window declared", which is
+  // distinct from any number the field could hold and is what a save sends as null.
+  const [windows, setWindows] = useState<Record<RoleName, string>>(Object.fromEntries(ROLE_ORDER.map((r) => [r, ''])) as Record<RoleName, string>);
   // What the server reported at load — a save only sends what changed against this.
   const [loaded, setLoaded] = useState<ModelsState | null>(null);
   const [env, setEnv] = useState<Record<EnvKey, string>>({
@@ -320,6 +323,10 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   const takeState = (d: ModelsState) => {
     setLoaded(d);
     setRoles(Object.fromEntries(ROLE_ORDER.map((r) => [r, d.roles[r]?.effective ?? ''])) as Record<RoleName, string>);
+    setWindows(Object.fromEntries(ROLE_ORDER.map((r) => {
+      const t = d.roles[r]?.contextTokens;
+      return [r, typeof t === 'number' ? String(t) : ''];
+    })) as Record<RoleName, string>);
     if (d.available) setAvailable(d.available);
     // Key inputs stay empty — the value never leaves the server; base URLs are not secrets.
     setEnv((e) => ({
@@ -379,6 +386,15 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       const v = roles[r].trim();
       if (v && v !== (loaded?.roles[r]?.effective ?? '')) models[r] = v;
     }
+    // An emptied field sends null — that is how a declared window gets taken back off. No integer
+    // check here: the number input's own min/step refuses a fraction or a zero before submit, and
+    // the PUT refuses anything that still gets past.
+    const contextTokens: Record<string, number | null> = {};
+    for (const r of ROLE_ORDER) {
+      const typed = windows[r].trim();
+      const next = typed === '' ? null : Number(typed);
+      if (next !== (loaded?.roles[r]?.contextTokens ?? null)) contextTokens[r] = next;
+    }
     const envOut: Record<string, string> = {};
     for (const f of URL_FIELDS) {
       const v = env[f.key].trim();
@@ -394,7 +410,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       const res = await fetch('/api/setup/models', {
         method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          models, env: envOut,
+          models, contextTokens, env: envOut,
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -497,6 +513,16 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                   }}
                 />
               </span>
+              <span className="models-row">
+                <label htmlFor={`models-context-${r}`}>{r} context</label>
+                <input
+                  id={`models-context-${r}`} type="number" min={1} step={1} inputMode="numeric"
+                  autoComplete="off" placeholder="model default"
+                  value={windows[r]}
+                  onFocus={() => { lastRole.current = r; }}
+                  onChange={(e) => setWindows((s) => ({ ...s, [r]: e.target.value }))}
+                />
+              </span>
             </Fragment>
           ))}
           {PROVIDERS.map((p) => (
@@ -506,6 +532,15 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                 .map((m) => <option key={m.model} value={m.model} />)}
             </datalist>
           ))}
+          {/* The window is the only lever over compaction and the truncation warning, and it used
+              to be reachable from harness.config.json alone — a learner on a small-window model
+              had no supported way to protect themselves from overflow. */}
+          <span className="models-hint">
+            context is the model's window in tokens: it sets how much history a turn may carry
+            before compaction, and how large a chunk compile sends. blank falls back to the
+            built-in defaults — unless harness.config.json declares one, which the file reapplies
+            at the next restart.
+          </span>
           {/* The no-cost on-ramp: every id here is verified zero-priced AND tool-capable by the
               server, so a tutor that needs block tools never lands on a model that can't run them. */}
           <span className="models-group">free models (OpenRouter)</span>

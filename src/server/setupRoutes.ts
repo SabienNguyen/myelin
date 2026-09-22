@@ -236,6 +236,10 @@ export function buildSetupRoutes(
       roles: Object.fromEntries(roleNames().map((r) => [r, {
         effective: cfg.models[r].model,
         saved: saved.models?.[r] ?? null,
+        // The live window, from whichever layer set it — the dialog prefills and diffs against
+        // this exactly as it does for the id, so a value from harness.config.json is editable
+        // rather than invisible.
+        contextTokens: cfg.models[r].contextTokens ?? null,
       }])),
       // The live value, not the saved one — harness.config.json can set it too, and the checkbox
       // should show what the next turn will actually do.
@@ -394,6 +398,21 @@ export function buildSetupRoutes(
         return c.json({ error: `unknown env field: "${key}" — fields are ${PROVIDER_ENV_KEYS.join(', ')}` }, 400);
       }
     }
+    const windows = Object.entries((body?.contextTokens ?? {}) as Record<string, unknown>);
+    for (const [role, tokens] of windows) {
+      if (!roleNames().includes(role as ModelRole)) {
+        return c.json({ error: `unknown model role: "${role}" — roles are ${roleNames().join(', ')}` }, 400);
+      }
+      // null is how an emptied field says "no window declared". Without it a window set once could
+      // never be taken back off, and the role would stay pinned to a budget the learner outgrew.
+      if (tokens === null) continue;
+      if (typeof tokens !== 'number' || !Number.isInteger(tokens) || tokens <= 0) {
+        return c.json({
+          error: `contextTokens for ${role} must be a whole number of tokens above zero `
+            + `(e.g. 32768), or null to clear it`,
+        }, 400);
+      }
+    }
     const ids = models as [string, string][];
     const removed = ids.filter(([, id]) => id.trim().startsWith('claude-sdk:'))
       .map(([role, id]) => `${role}: "${id}"`);
@@ -446,11 +465,19 @@ export function buildSetupRoutes(
       const v = env[k];
       if (typeof v === 'string' && v.trim()) nextEnv[k] = v.trim();
     }
-    writeSettings({ ...saved, models: nextModels, env: nextEnv });
+    const nextWindows = { ...saved.contextTokens };
+    for (const [role, tokens] of windows) {
+      if (tokens === null) delete nextWindows[role as ModelRole];
+      else nextWindows[role as ModelRole] = tokens as number;
+    }
+    writeSettings({ ...saved, models: nextModels, env: nextEnv, contextTokens: nextWindows });
 
     // Live, no restart: cfg.models is the object every route and chatModelFor call reads, and
     // models.ts resolves the provider env per call.
     for (const [role, id] of ids) cfg.models[role as ModelRole].model = id.trim();
+    for (const [role, tokens] of windows) {
+      cfg.models[role as ModelRole].contextTokens = tokens === null ? undefined : tokens as number;
+    }
     applyEnvValues(nextEnv as Partial<Record<ProviderEnvKey, string>>);
     return c.json(modelsState());
   });

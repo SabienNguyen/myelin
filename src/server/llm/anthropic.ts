@@ -221,6 +221,37 @@ function mapStop(reason: string | null | undefined): FinishReason {
   }
 }
 
+/** Per-index state for an open content block. tool_use input arrives as string fragments and is
+ * only parseable once the block stops, so it accumulates here — as do a thinking block's text and
+ * signature fragments, since thinking-end promises the assembled block. */
+interface OpenBlock {
+  kind: 'text' | 'tool' | 'server-tool' | 'thinking';
+  id: string; name: string; json: string;
+  thinking: string; signature?: string; redacted?: { data: string };
+}
+
+/** The events that close one open block. Shared by content_block_stop and the truncated-stream
+ * flush so a block the wire never closed reaches the loop in exactly the same shape. */
+function* closeBlock(st: OpenBlock): Generator<StreamEvent> {
+  if (st.kind === 'text') {
+    yield { type: 'text-end', id: st.id };
+  } else if (st.kind === 'thinking') {
+    yield {
+      type: 'thinking-end', id: st.id, text: st.thinking,
+      ...(st.signature !== undefined ? { signature: st.signature } : {}),
+      ...(st.redacted !== undefined ? { redacted: st.redacted } : {}),
+    };
+  } else {
+    // A no-argument tool streams no input_json_delta at all: empty accumulation is {}.
+    // Truncated/malformed JSON rides as inputError rather than throwing — see
+    // parseToolArguments; a dead turn is the worse answer on every provider.
+    const parsed = parseToolArguments(st.json);
+    yield st.kind === 'tool'
+      ? { type: 'tool-call', toolCallId: st.id, toolName: st.name, ...parsed }
+      : { type: 'server-tool-call', toolCallId: st.id, toolName: st.name, input: parsed.input };
+  }
+}
+
 export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
   return {
     async generate(req: ChatRequest): Promise<GenerateResult> {
@@ -267,14 +298,7 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
         if (!res.body) throw new LlmHttpError(PROVIDER, res.status, 'response had no body');
         const usage = zeroUsage();
         let stopReason: string | null | undefined;
-        // Per-index state for open content blocks. tool_use input arrives as string fragments and
-        // is only parseable once the block stops, so it accumulates here — as do a thinking block's
-        // text and signature fragments, since thinking-end promises the assembled block.
-        const blocks = new Map<number, {
-          kind: 'text' | 'tool' | 'server-tool' | 'thinking';
-          id: string; name: string; json: string;
-          thinking: string; signature?: string; redacted?: { data: string };
-        }>();
+        const blocks = new Map<number, OpenBlock>();
         const serverToolNames = new Map<string, string>();
 
         for await (const frame of sseFrames(res.body)) {
@@ -352,23 +376,7 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
               const st = blocks.get(ev.index);
               if (!st) break;
               blocks.delete(ev.index);
-              if (st.kind === 'text') {
-                yield { type: 'text-end', id: st.id };
-              } else if (st.kind === 'thinking') {
-                yield {
-                  type: 'thinking-end', id: st.id, text: st.thinking,
-                  ...(st.signature !== undefined ? { signature: st.signature } : {}),
-                  ...(st.redacted !== undefined ? { redacted: st.redacted } : {}),
-                };
-              } else {
-                // A no-argument tool streams no input_json_delta at all: empty accumulation is {}.
-                // Truncated/malformed JSON rides as inputError rather than throwing — see
-                // parseToolArguments; a dead turn is the worse answer on every provider.
-                const parsed = parseToolArguments(st.json);
-                yield st.kind === 'tool'
-                  ? { type: 'tool-call', toolCallId: st.id, toolName: st.name, ...parsed }
-                  : { type: 'server-tool-call', toolCallId: st.id, toolName: st.name, input: parsed.input };
-              }
+              yield* closeBlock(st);
               break;
             }
             case 'message_delta': {
@@ -389,6 +397,19 @@ export function anthropicModel(opts: AnthropicModelOptions): ChatModel {
             }
           }
         }
+        // Only reachable when the body ended without message_stop — undici throws on a truly
+        // premature close, so this is an intermediary (proxy, or a baseUrl shim) ending the
+        // response cleanly mid-turn. The generator used to just return: open text, assembled tool
+        // calls and usage vanished and the turn read as a clean short answer. Flush them and
+        // finish as 'other' — the terminator never arrived, so a stop_reason from message_delta is
+        // not completeness this adapter can vouch for, and 'other' is the one member of the union
+        // that asserts nothing about how the turn ended. Nothing downstream branches on it
+        // (wire.ts's closing guarantee keys on whether parts were produced, not on the reason), so
+        // the stderr line below is the loud channel here; the flush is what makes the partial turn
+        // reach the learner at all.
+        console.error('anthropic: SSE stream ended without message_stop; flushing a partial turn');
+        for (const [, st] of [...blocks].sort(([a], [b]) => a - b)) yield* closeBlock(st);
+        yield { type: 'finish', reason: 'other', usage };
       } finally {
         release();
       }

@@ -120,6 +120,58 @@ describe('saveThread — concurrent-writer merge', () => {
   });
 });
 
+// shared/messages.ts deliberately supports messages without a string `id` — dedupeById never
+// matches one against anything. The merge above used to key its map on the raw `m?.id`, so
+// `undefined` was a live key: every id-less message in a write folded onto the last of them, and
+// an id-less message already on disk was replaced by whichever one the writer happened to send.
+// The writers hand saveThread unvalidated client JSON, and the thread file is the one artifact
+// the learner cannot regenerate.
+describe('saveThread — id-less messages are never merged onto each other', () => {
+  it('keeps every id-less message in a single write instead of folding them into the last one', () => {
+    const vault = makeVault();
+    const idless = [{ role: 'user', v: 'first' }, { role: 'assistant', v: 'second' }];
+    saveThread(vault, 't', idless);
+    saveThread(vault, 't', idless); // the same view re-persisted, as a second tab or a retry does
+
+    // Pinned exactly, not with toContain: an id-less message cannot be matched against the file,
+    // so re-persisting the same view appends rather than updating in place. That duplication is
+    // the accepted cost of never folding two distinct messages into one, and a loose assertion
+    // would let a regression back to folding slip through.
+    const out = loadThread(vault, 't') as any[];
+    expect(out.map((m) => m.v)).toEqual(['first', 'second', 'first', 'second']);
+  });
+
+  it('does not let an id-less message from the writer overwrite a different one on disk', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ role: 'user', v: 'the question the learner actually asked' }]);
+    saveThread(vault, 't', [{ role: 'assistant', v: 'a later turn, also id-less' }]);
+
+    const out = loadThread(vault, 't') as any[];
+    expect(out.map((m) => m.v)).toEqual([
+      'the question the learner actually asked',
+      'a later turn, also id-less',
+    ]);
+  });
+
+  it('treats a non-string id as id-less, exactly as dedupeById does', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ id: 7, v: 'numeric id on disk' }]);
+    saveThread(vault, 't', [{ id: 7, v: 'unrelated message, same numeric id' }]);
+
+    const out = loadThread(vault, 't') as any[];
+    expect(out.map((m) => m.v)).toEqual(['numeric id on disk', 'unrelated message, same numeric id']);
+  });
+
+  it('still merges string ids in place, with id-less neighbours present', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ v: 'id-less opener' }, { id: 'a1', v: 'streaming…' }]);
+    saveThread(vault, 't', [{ id: 'a1', v: 'final text' }]);
+
+    const out = loadThread(vault, 't') as any[];
+    expect(out.map((m) => m.v)).toEqual(['id-less opener', 'final text']);
+  });
+});
+
 describe('listThreads', () => {
   it('returns [] when no sessions dir exists yet', () => {
     const vault = makeVault();
