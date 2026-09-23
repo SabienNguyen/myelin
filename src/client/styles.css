@@ -3243,7 +3243,8 @@ button.nb-delete:hover { background: var(--bg-inset); }
 .nb-studio { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.4rem; }
 .nb-studio ul {
   list-style: none; margin: 0; padding: 0;
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.5rem;
+  /* 10rem lets a phone fit two a row; one column of four cards filled most of a 390px screen. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 0.5rem;
 }
 .nb-studio button {
   width: 100%; height: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem;
