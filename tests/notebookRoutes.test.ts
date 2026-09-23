@@ -96,6 +96,22 @@ describe('notebook routes', () => {
     expect(bad.status).toBe(400);
     expect((await bad.json()).error).toMatch(/no such source: ghost/);
     expect(readNotebooks(vault)[0].sources).toEqual([]);
+    // A valid rename riding the same request is not applied either.
+    const both = await app.request(`/api/notebooks/${id}`, json('PATCH', { title: 'Renamed', sources: ['ghost'] }));
+    expect(both.status).toBe(400);
+    expect(readNotebooks(vault)[0].title).toBe('A');
+  });
+
+  it('survives a malformed conversation file in a notebook — the view and the list still load', async () => {
+    const { id } = await create('A');
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    mkdirSync(join(vault, '.harness', 'sessions'), { recursive: true });
+    writeFileSync(join(vault, '.harness', 'sessions', 't-bad.json'), JSON.stringify([null, { id: 'x', role: 'assistant', parts: [{}, null] }]));
+    await app.request(`/api/notebooks/${id}/threads/t-bad`, { method: 'PUT' });
+    expect((await app.request('/api/notebooks')).status).toBe(200);
+    const detail = await app.request(`/api/notebooks/${id}`);
+    expect(detail.status).toBe(200);
+    expect((await detail.json()).topics).toEqual([]);
   });
 
   it('answers 404 for a missing notebook and 400 for a bad request, changing nothing', async () => {

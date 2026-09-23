@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import { NotebookCrumb, NotebookView, NotebooksHome } from '../../src/client/components/Notebooks.js';
+import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, notebookStarters } from '../../src/client/components/Notebooks.js';
 
 const now = new Date().toISOString();
 const summary = {
@@ -150,6 +150,12 @@ describe('NotebookView', () => {
     await waitFor(() => expect(location.hash).toBe('#/notebooks'));
   });
 
+  it('says a deleted notebook is gone rather than "nothing written yet"', async () => {
+    routes['GET /api/notebooks/nb-calc'] = () => ({ status: 404, body: { error: 'no notebook "nb-calc"' } });
+    render(<NotebookView id="nb-calc" />);
+    expect((await screen.findByRole('alert')).textContent).toBe('This notebook no longer exists — it may have been deleted.');
+  });
+
   it('renames in place', async () => {
     routes['PATCH /api/notebooks/nb-calc'] = (c) => ({ body: { id: 'nb-calc', title: c.body.title } });
     render(<NotebookView id="nb-calc" />);
@@ -173,5 +179,38 @@ describe('NotebookCrumb', () => {
     render(<NotebookCrumb threadId="t-loose" />);
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(screen.getAllByRole('link').map((a) => a.textContent)).toEqual(['Notebooks']);
+  });
+});
+
+describe('notebookStarters', () => {
+  it('offers what is due first, then quizzes on half-learned topics, then new ones, at most four', () => {
+    const starters = notebookStarters({
+      sources: [],
+      topics: [
+        { slug: 'a', title: 'Limits', level: 'mastered', due: false },
+        { slug: 'b', title: 'Continuity', level: 'unseen', due: false },
+        { slug: 'c', title: 'Derivative', level: 'exposed', due: false },
+        { slug: 'd', title: 'Chain rule', level: 'practicing', due: true },
+        { slug: 'e', title: 'Epsilon–delta', level: 'unseen', due: false },
+        { slug: 'f', title: 'Product rule', level: 'unseen', due: false },
+      ],
+    });
+    expect(starters.map((s) => s.text)).toEqual([
+      'Review Chain rule with me', 'Quiz me on Derivative', 'Teach me Continuity', 'Teach me Epsilon–delta',
+    ]);
+  });
+  it('falls back to the sources when no page is covered yet', () => {
+    const starters = notebookStarters({ topics: [], sources: [{ book: 's', title: 'Spivak, Calculus', authors: [] }] });
+    expect(starters).toEqual([{ text: 'What are the main ideas in Spivak, Calculus?', kind: 'new' }]);
+  });
+});
+
+describe('NotebookIntro', () => {
+  it('names the notebook and sends a starter as the first message', () => {
+    const onAsk = vi.fn();
+    render(<NotebookIntro detail={detail as any} onAsk={onAsk} />);
+    expect(screen.getByRole('link', { name: 'Calculus I' }).getAttribute('href')).toBe('#/notebooks/nb-calc');
+    fireEvent.click(screen.getByRole('button', { name: /Review Derivative with me/ }));
+    expect(onAsk).toHaveBeenCalledWith('Review Derivative with me');
   });
 });

@@ -8,8 +8,8 @@ import { pagesTouched } from './session.js';
 import type { UIMessage } from '../shared/uiMessages.js';
 import {
   NotebookNotFound, attachThread, createNotebook, deleteNotebook, getNotebook,
-  isDue, levelOf, notebookForThread, notebookTopics, readNotebooks, renameNotebook,
-  setNotebookSources, summarizeNotebook, type Level, type Notebook, type StudentEntry,
+  isDue, levelOf, notebookForThread, notebookTopics, readNotebooks, summarizeNotebook,
+  updateNotebook, type Level, type Notebook, type StudentEntry,
 } from './notebookStore.js';
 
 export interface NotebookTopic { slug: string; title: string; level: Level; due: boolean }
@@ -110,10 +110,7 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
       return c.json({ error: 'nothing to change — send a title or sources' }, 400);
     }
     try {
-      let nb: Notebook | undefined;
-      if (body.title !== undefined) nb = renameNotebook(cfg.vault, id, body.title);
-      if (body.sources !== undefined) nb = setNotebookSources(cfg.vault, id, body.sources, readSources(cfg.vault));
-      return c.json(nb);
+      return c.json(updateNotebook(cfg.vault, id, body, readSources(cfg.vault)));
     } catch (e) {
       return fail(c, e);
     }

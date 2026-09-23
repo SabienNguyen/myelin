@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { NotebookIcon as NotebookGlyph } from '@phosphor-icons/react/dist/csr/Notebook';
 import {
-  createNotebook, deleteNotebook, fileThread, getNotebook, getNotebooks, getThreadNotebook,
+  ApiError, createNotebook, deleteNotebook, fileThread, getNotebook, getNotebooks, getThreadNotebook,
   renameNotebook, setNotebookSources,
   type NotebookDetail, type NotebookLevel, type NotebookRef, type NotebookSummary, type NotebooksPayload,
 } from '../lib/api.js';
@@ -269,7 +269,11 @@ export function NotebookView({ id }: { id: string }) {
 
   function load() {
     getNotebook(id).then((d) => { setDetail(d); setError(null); })
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      // getJson's 404 copy ("Nothing written for … yet") is about pages; a notebook that 404s was
+      // deleted, or the link is stale.
+      .catch((e) => setError(e instanceof ApiError && e.status === 404
+        ? 'This notebook no longer exists — it may have been deleted.'
+        : e instanceof Error ? e.message : String(e)));
   }
   useEffect(() => { setDetail(null); load(); }, [id]);
 
@@ -414,7 +418,7 @@ export function NotebookCrumb({ threadId }: { threadId: string }) {
   return (
     <nav className="notebook-crumb" aria-label="Notebook">
       <a href={notebookHash()} className="notebook-crumb-link">
-        <NotebookGlyph size={16} weight="duotone" aria-hidden="true" />Notebooks
+        <NotebookGlyph size={16} weight="duotone" aria-hidden="true" /><span className="notebook-crumb-label">Notebooks</span>
       </a>
       {nb && (
         <>
@@ -423,5 +427,82 @@ export function NotebookCrumb({ threadId }: { threadId: string }) {
         </>
       )}
     </nav>
+  );
+}
+
+export interface Starter { text: string; kind: 'review' | 'quiz' | 'new' }
+
+/**
+ * Up to four ways into a notebook's material for its empty conversation, the way NotebookLM offers
+ * suggested questions from a notebook's sources. Ordered by what the learner most needs: what is
+ * due, then what is half-learned (a quiz proves it), then what has not been started. With no
+ * topics yet, the sources themselves are the way in. Pure, so the order is testable.
+ */
+export function notebookStarters(detail: Pick<NotebookDetail, 'topics' | 'sources'>, max = 4): Starter[] {
+  const out: Starter[] = [];
+  const add = (s: Starter) => { if (out.length < max) out.push(s); };
+  for (const t of detail.topics) if (t.due) add({ text: `Review ${t.title} with me`, kind: 'review' });
+  for (const t of detail.topics) {
+    if (!t.due && (t.level === 'exposed' || t.level === 'practicing')) add({ text: `Quiz me on ${t.title}`, kind: 'quiz' });
+  }
+  for (const t of detail.topics) if (!t.due && t.level === 'unseen') add({ text: `Teach me ${t.title}`, kind: 'new' });
+  if (detail.topics.length === 0) {
+    for (const s of detail.sources) add({ text: `What are the main ideas in ${s.title}?`, kind: 'new' });
+  }
+  return out;
+}
+
+/** The notebook an open conversation is filed under, with its detail: `undefined` while looking,
+ *  `null` for a conversation outside every notebook (or when the lookup failed — logged, and the
+ *  empty state falls back to the general one rather than blocking the chat). */
+export function useConversationNotebook(threadId: string | undefined): NotebookDetail | null | undefined {
+  const [detail, setDetail] = useState<NotebookDetail | null | undefined>(undefined);
+  useEffect(() => {
+    if (!threadId) { setDetail(null); return; }
+    let cancelled = false;
+    setDetail(undefined);
+    getThreadNotebook(threadId)
+      .then((ref) => (ref ? getNotebook(ref.id) : null))
+      .then((d) => { if (!cancelled) setDetail(d); })
+      .catch((e) => {
+        console.error('[notebooks] could not load this conversation’s notebook:', e);
+        if (!cancelled) setDetail(null);
+      });
+    return () => { cancelled = true; };
+  }, [threadId]);
+  return detail;
+}
+
+const STARTER_LABEL: Record<Starter['kind'], string> = { review: 'due', quiz: 'quiz', new: 'new' };
+
+/** The notebook's own opening for an empty conversation: whose material this is, how far along
+ *  it is, and a few ways in. `onAsk` sends a starter as the learner's first message. */
+export function NotebookIntro({ detail, onAsk }: { detail: NotebookDetail; onAsk: (text: string) => void }) {
+  const nb = detail.notebook;
+  const starters = notebookStarters(detail);
+  return (
+    <div className="nb-intro">
+      <a className="nb-intro-name" href={notebookHash(nb.id)}>
+        <NotebookGlyph size={16} weight="duotone" aria-hidden="true" />{nb.title}
+      </a>
+      <h2>What do you want to explore?</h2>
+      <p>
+        Answers draw on this notebook first: {plural(nb.sources, 'source')} and {plural(nb.topics, 'page')} so
+        far{nb.due > 0 ? `, ${plural(nb.due, 'review')} due` : ''}.
+      </p>
+      {nb.topics > 0 && <MasteryBar mastery={nb.mastery} topics={nb.topics} />}
+      {starters.length > 0 && (
+        <ul className="nb-starters" aria-label="Ways to start">
+          {starters.map((s) => (
+            <li key={s.text}>
+              <button type="button" onClick={() => onAsk(s.text)}>
+                <span className={`nb-starter-kind nb-starter-kind--${s.kind}`}>{STARTER_LABEL[s.kind]}</span>
+                {s.text}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }

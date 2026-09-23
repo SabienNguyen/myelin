@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   attachThread, createNotebook, deleteNotebook, forgetThread, getNotebook, isDue,
-  notebookForThread, notebookTopics, readNotebooks, renameNotebook, setNotebookSources,
-  summarizeNotebook, NotebookNotFound, type Notebook,
+  notebookForThread, notebookTopics, readNotebooks, summarizeNotebook, updateNotebook,
+  NotebookNotFound, type Notebook,
 } from '../src/server/notebookStore.js';
 import { pagesTouched, threadTopic } from '../src/server/session.js';
 import type { SourceRecord } from '../src/server/provenance.js';
@@ -25,7 +25,7 @@ describe('notebookStore — the grouping itself', () => {
     expect(nb.title).toBe('Calculus I');
     expect(nb.createdAt).toBe('2026-09-23T10:00:00.000Z');
     expect(readNotebooks(vault)).toEqual([nb]);
-    expect(renameNotebook(vault, nb.id, 'Calculus 1').title).toBe('Calculus 1');
+    expect(updateNotebook(vault, nb.id, { title: 'Calculus 1' }, []).title).toBe('Calculus 1');
     expect(getNotebook(vault, nb.id)?.title).toBe('Calculus 1');
   });
 
@@ -61,7 +61,7 @@ describe('notebookStore — the grouping itself', () => {
 
   it('names the missing notebook instead of creating one', () => {
     expect(() => attachThread(vault, 'nb-nope', 't-1')).toThrow(NotebookNotFound);
-    expect(() => renameNotebook(vault, 'nb-nope', 'x')).toThrow(NotebookNotFound);
+    expect(() => updateNotebook(vault, 'nb-nope', { title: 'x' }, [])).toThrow(NotebookNotFound);
     expect(() => deleteNotebook(vault, 'nb-nope')).toThrow(NotebookNotFound);
     expect(readNotebooks(vault)).toEqual([]);
   });
@@ -69,10 +69,32 @@ describe('notebookStore — the grouping itself', () => {
   it('only points at sources that exist', () => {
     const a = createNotebook(vault, 'A');
     const known = [source('spivak'), source('notes')];
-    expect(setNotebookSources(vault, a.id, ['spivak', 'spivak'], known).sources).toEqual(['spivak']);
-    expect(() => setNotebookSources(vault, a.id, ['ghost'], known)).toThrow(/no such source: ghost/);
-    expect(() => setNotebookSources(vault, a.id, 'spivak', known)).toThrow(/list of source names/);
-    expect(setNotebookSources(vault, a.id, ['spivak', 'notes'], known).sources).toEqual(['spivak', 'notes']);
+    expect(updateNotebook(vault, a.id, { sources: ['spivak', 'spivak'] }, known).sources).toEqual(['spivak']);
+    expect(() => updateNotebook(vault, a.id, { sources: ['ghost'] }, known)).toThrow(/no such source: ghost/);
+    expect(() => updateNotebook(vault, a.id, { sources: 'spivak' }, known)).toThrow(/list of source names/);
+    expect(updateNotebook(vault, a.id, { sources: ['spivak', 'notes'] }, known).sources).toEqual(['spivak', 'notes']);
+  });
+
+  it('applies a rename and a source change together or not at all', () => {
+    const a = createNotebook(vault, 'A');
+    const known = [source('spivak')];
+    expect(() => updateNotebook(vault, a.id, { title: 'B', sources: ['ghost'] }, known)).toThrow(/no such source/);
+    expect(getNotebook(vault, a.id)).toMatchObject({ title: 'A', sources: [] });
+    expect(updateNotebook(vault, a.id, { title: 'B', sources: ['spivak'] }, known)).toMatchObject({ title: 'B', sources: ['spivak'] });
+  });
+
+  it('refuses to write over a notebooks file it cannot parse, and keeps entries it cannot read', () => {
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    const p = join(vault, '.harness', 'notebooks.json');
+    writeFileSync(p, '{ torn');
+    expect(() => createNotebook(vault, 'New')).toThrow();
+    expect(readFileSync(p, 'utf8')).toBe('{ torn');
+    const broken = { id: 'nb-hand', title: 42, threads: [], sources: [] };
+    writeFileSync(p, JSON.stringify([broken]));
+    createNotebook(vault, 'New');
+    const onDisk = JSON.parse(readFileSync(p, 'utf8'));
+    expect(onDisk).toContainEqual(broken);
+    expect(onDisk.map((n: any) => n.title)).toContain('New');
   });
 
   it('deleting a notebook keeps its threads out of it and nothing else', () => {

@@ -463,11 +463,17 @@ export function pagesTouched(messages: UIMessage[]): string[] {
   return [...new Set(topicSlugs(messages))];
 }
 
+// Runs on thread files read back from disk (notebook topics), not only on a request's validated
+// messages — and saveThread stores unvalidated client JSON, so a null message or a part with no
+// type is possible there. One bad file must not take down every notebook view or chat turn that
+// reads it, so anything that is not message-shaped is skipped.
 function topicSlugs(messages: UIMessage[]): string[] {
   const slugs: string[] = [];
-  for (const m of messages) {
-    for (const p of m.parts ?? []) {
-      if (!isToolUIPart(p) || !TOPIC_TOOLS.has(getToolName(p))) continue;
+  for (const m of messages as unknown[]) {
+    const parts = (m as { parts?: unknown } | null)?.parts;
+    if (!Array.isArray(parts)) continue;
+    for (const p of parts) {
+      if (typeof p?.type !== 'string' || !isToolUIPart(p) || !TOPIC_TOOLS.has(getToolName(p))) continue;
       const slug = (p.input as { slug?: unknown } | undefined)?.slug;
       if (typeof slug === 'string') slugs.push(slug);
     }
@@ -1006,14 +1012,23 @@ export function createTutorSession(
     // The notebook this conversation is filed under, if any: its title, its sources' titles and
     // the pages it already covers, so the tutor draws on the learner's own material first. Derived
     // the same way the notebook view derives it (notebookTopics), so the two cannot disagree.
-    const nb = notebookForThread(cfg.vault, threadId);
-    const known = new Set(slugs);
-    const sources = nb ? readSources(cfg.vault) : [];
-    const notebook = nb && {
-      title: nb.title,
-      sources: sources.filter((s) => nb.sources.includes(s.book)).map((s) => s.title),
-      topics: notebookTopics(nb, (t) => pagesTouched(loadThread(cfg.vault, t) as UIMessage[]), sources, (s) => known.has(s)),
-    };
+    // Notebook context is an aid, never a precondition: failing to build it logs and the turn runs
+    // without it rather than failing the learner's first message.
+    let notebook: { title: string; sources: string[]; topics: string[] } | undefined;
+    try {
+      const nb = notebookForThread(cfg.vault, threadId);
+      if (nb) {
+        const known = new Set(slugs);
+        const sources = readSources(cfg.vault);
+        notebook = {
+          title: nb.title,
+          sources: sources.filter((s) => nb.sources.includes(s.book)).map((s) => s.title),
+          topics: notebookTopics(nb, (t) => pagesTouched(loadThread(cfg.vault, t) as UIMessage[]), sources, (s) => known.has(s)),
+        };
+      }
+    } catch (e) {
+      console.error('[notebooks] could not build notebook context, continuing without it:', e);
+    }
     const [state, lessonsRes] = await Promise.all([
       lw.call('get_student_state', { student: cfg.student }),
       // A page-kind goal narrows next_lessons to the prerequisite walk toward it (queries.ts's
@@ -1057,7 +1072,9 @@ export function createTutorSession(
     const relevant = [
       ...lessons.map((l: any) => l.slug),
       ...(goalCtx?.pages ?? []),
-      ...(notebook?.topics ?? []),
+      // Same cap as the Notebook line itself (prompt.ts): a source can span hundreds of pages, and
+      // an uncapped list here is the scale problem slugListLine's own cap exists to prevent.
+      ...(notebook?.topics.slice(0, 30) ?? []),
       ...readBank(cfg.vault).map((p) => `course-${p.source}`),
     ];
     return `${ctx}\n${slugListLine(slugs, relevant)}`;

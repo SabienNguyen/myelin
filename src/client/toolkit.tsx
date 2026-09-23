@@ -23,9 +23,11 @@ import { WatchVideo } from './components/blocks/WatchVideo.js';
 const errorNote = (name: string, result: any) => {
   const text = typeof result === 'string' ? result : JSON.stringify(result ?? '');
   const malformed = /invalid|validation|schema|expected .* received/i.test(text);
+  // A skip is the learner moving on, not a fault, so it wears neither the failure colour nor the
+  // done tick — it reads like a folded card, the way a skipped exercise does in any study app.
   return malformed
-    ? `✗ ${name.replace('_', ' ')} could not be shown — the tutor sent it malformed`
-    : `— ${name.replace('_', ' ')} skipped; the conversation moved on`;
+    ? <span className="tool-note failed" title={name}>✗ {name.replace('_', ' ')} could not be shown — the tutor sent it malformed</span>
+    : <span className="tool-note skipped" title={name}>{name.replace('_', ' ')} skipped · the conversation moved on</span>;
 };
 
 const malformedNote = (name: string) => (
@@ -62,7 +64,7 @@ const human = (name: keyof typeof BLOCK_TOOLS, description: string, Component: a
   // block used to produce a done-looking card claiming the learner answered "(blank)" — a
   // fabricated submission. Same honesty rule as ToolStatusChip's failed column.
   render: ({ args, result, addResult, isError }: any) => {
-    if (isError) return <span className="tool-note failed" title={name}>{errorNote(name, result)}</span>;
+    if (isError) return errorNote(name, result);
     // Re-validate against the same schema the server uses: a malformed tool call must render as
     // a note, never mount a block over garbage args — and the parsed value applies schema
     // defaults, so components see canonical args.

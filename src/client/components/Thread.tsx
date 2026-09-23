@@ -8,6 +8,7 @@ import { askAside } from '../lib/api.js';
 import { AsidePart } from './AsidePart.js';
 import { CommandEditor, type CommandEditorHandle } from './CommandEditor.js';
 import { MarkdownText } from './MarkdownText.js';
+import { NotebookIntro, useConversationNotebook } from './Notebooks.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
 
@@ -344,7 +345,9 @@ function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
  * decides both, and the hero renders nothing until it resolves, so the copy never flashes from one
  * audience to the other.
  */
-function EmptyHero() {
+function EmptyHero({ threadId }: { threadId?: string }) {
+  const composer = useComposerRuntime();
+  const notebook = useConversationNotebook(threadId);
   const [plan, setPlan] = useState<PlanItem[] | null>(null); // null = still deciding
   useEffect(() => {
     let cancelled = false;
@@ -354,7 +357,20 @@ function EmptyHero() {
       .catch(() => { if (!cancelled) setPlan([]); }); // no plan is the newcomer state, not an error
     return () => { cancelled = true; };
   }, []);
-  if (plan === null) return null;
+  // Both lookups decide the copy, so nothing renders until both resolve — no flash from the
+  // general welcome to the notebook's own.
+  if (plan === null || notebook === undefined) return null;
+
+  // A conversation filed under a notebook opens on that notebook: its material, its progress, and
+  // ways in drawn from its own topics. The session plan still sits below — it spans every notebook.
+  if (notebook) {
+    return (
+      <div className="thread-empty">
+        <NotebookIntro detail={notebook} onAsk={(text) => { composer.setText(text); composer.send(); }} />
+        <SessionPlanCta plan={plan} />
+      </div>
+    );
+  }
 
   const returning = plan.length > 0;
   return (
@@ -579,11 +595,13 @@ export function Composer({ mode = '', onEndMode, onDraftingChange, testEditorHan
   );
 }
 
-export function Thread({ mode = '', onModeChange }: {
+export function Thread({ mode = '', onModeChange, threadId }: {
   /** The sticky mode App holds: '' is chat (the harness derives each turn), anything else a study
    *  session a /study-family command started. */
   mode?: string;
   onModeChange?: (mode: string) => void;
+  /** The open conversation, so its empty state can open on the notebook it is filed under. */
+  threadId?: string;
 } = {}) {
   // The viewport's autoScroll pins to the bottom on mount — correct for a conversation, wrong for
   // the empty state: in a short window the pitch overflows and a brand-new thread opened with
@@ -609,7 +627,7 @@ export function Thread({ mode = '', onModeChange }: {
             deliberately across different SUBJECTS: the thing most worth conveying in the first
             three seconds is that this is not a programming tutor, it is a tutor. */}
         <ThreadPrimitive.Empty>
-          <EmptyHero />
+          <EmptyHero threadId={threadId} />
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
         {mode === '' && <FollowUps drafting={drafting} />}

@@ -94,7 +94,7 @@ export function App() {
 
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
-  const brand = <h1><BookOpenText size={20} weight="duotone" /> Myelin</h1>;
+  const brand = <h1><BookOpenText size={20} weight="duotone" aria-hidden="true" /> <span className="brand-word">Myelin</span></h1>;
 
   if (notebookRoute) {
     return (
@@ -135,7 +135,7 @@ export function App() {
         <main className="workspace">
           <div className="thread-column">
             <FocusRail peek={peek} onTogglePeek={() => setPeek((p) => !p)} />
-            <Thread mode={mode} onModeChange={setMode} />
+            <Thread mode={mode} onModeChange={setMode} threadId={threadId} />
           </div>
           <SidePanel />
         </main>

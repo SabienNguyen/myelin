@@ -42,30 +42,48 @@ const notebooksPath = (vault: string) => join(vault, '.harness', 'notebooks.json
  *  for the same reason. */
 export function readNotebooks(vault: string): Notebook[] {
   if (!vault) return [];
-  const p = notebooksPath(vault);
-  if (!existsSync(p)) return [];
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(p, 'utf8'));
+    return readForWrite(vault).notebooks;
   } catch (e) {
     console.error('[notebooks] unreadable notebooks.json, treating as empty:', e instanceof Error ? e.message : e);
     return [];
   }
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter((n: any): n is Notebook =>
-    typeof n?.id === 'string' && ID.test(n.id) && typeof n.title === 'string'
-    && Array.isArray(n.threads) && Array.isArray(n.sources))
-    .map((n) => ({
+}
+
+const isNotebook = (n: any): boolean =>
+  typeof n?.id === 'string' && ID.test(n.id) && typeof n.title === 'string'
+  && Array.isArray(n.threads) && Array.isArray(n.sources);
+
+/**
+ * The strict read every mutation starts from. Reads degrade (readNotebooks above) but writes must
+ * not: a file that will not parse would otherwise read as [] and the next click would overwrite
+ * every notebook in it with one. So an unparseable file THROWS here, and an entry that fails
+ * validation is carried through untouched (`kept`) and written back as it was — a hand edit that
+ * broke one notebook costs that notebook's visibility, never the others' existence.
+ */
+function readForWrite(vault: string): { notebooks: Notebook[]; kept: unknown[] } {
+  const p = notebooksPath(vault);
+  if (!existsSync(p)) return { notebooks: [], kept: [] };
+  const parsed: unknown = JSON.parse(readFileSync(p, 'utf8'));
+  if (!Array.isArray(parsed)) throw new Error('notebooks.json is not a list — fix or remove it before changing notebooks');
+  return {
+    notebooks: parsed.filter(isNotebook).map((n: any) => ({
       id: n.id,
       title: n.title,
       createdAt: typeof n.createdAt === 'string' ? n.createdAt : '',
-      threads: n.threads.filter((t): t is string => typeof t === 'string' && ID.test(t)),
-      sources: n.sources.filter((s): s is string => typeof s === 'string'),
-    }));
+      threads: n.threads.filter((t: unknown): t is string => typeof t === 'string' && ID.test(t)),
+      sources: n.sources.filter((s: unknown): s is string => typeof s === 'string'),
+    })),
+    kept: parsed.filter((n) => !isNotebook(n)),
+  };
 }
 
-function write(vault: string, notebooks: Notebook[]): void {
-  atomicWrite(notebooksPath(vault), JSON.stringify(notebooks, null, 2));
+/** Read strictly, apply `fn`, write the result plus any entries the read could not validate. */
+function mutate<T>(vault: string, fn: (notebooks: Notebook[]) => { next: Notebook[]; result: T }): T {
+  const { notebooks, kept } = readForWrite(vault);
+  const { next, result } = fn(notebooks);
+  atomicWrite(notebooksPath(vault), JSON.stringify([...next, ...kept], null, 2));
+  return result;
 }
 
 function cleanTitle(title: unknown): string {
@@ -84,22 +102,12 @@ export function notebookForThread(vault: string, threadId: string): Notebook | u
 }
 
 export function createNotebook(vault: string, title: unknown, now = new Date()): Notebook {
-  const notebooks = readNotebooks(vault);
+  const clean = cleanTitle(title);
   // Base-36 time plus a short random tail: two notebooks created in the same millisecond (a
   // double-clicked button) must not collide on id.
   const id = `nb-${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const nb: Notebook = { id, title: cleanTitle(title), createdAt: now.toISOString(), threads: [], sources: [] };
-  write(vault, [...notebooks, nb]);
-  return nb;
-}
-
-function update(vault: string, id: string, fn: (nb: Notebook) => Notebook): Notebook {
-  const notebooks = readNotebooks(vault);
-  const i = notebooks.findIndex((n) => n.id === id);
-  if (i === -1) throw new NotebookNotFound(id);
-  notebooks[i] = fn(notebooks[i]);
-  write(vault, notebooks);
-  return notebooks[i];
+  const nb: Notebook = { id, title: clean, createdAt: now.toISOString(), threads: [], sources: [] };
+  return mutate(vault, (notebooks) => ({ next: [...notebooks, nb], result: nb }));
 }
 
 export class NotebookNotFound extends Error {
@@ -109,50 +117,72 @@ export class NotebookNotFound extends Error {
   }
 }
 
-export function renameNotebook(vault: string, id: string, title: unknown): Notebook {
-  const t = cleanTitle(title);
-  return update(vault, id, (nb) => ({ ...nb, title: t }));
-}
-
-/** Replaces the notebook's source list. Unknown books are refused rather than stored: a pointer
- *  to a source that does not exist would show as a source nobody can open. */
-export function setNotebookSources(vault: string, id: string, books: unknown, known: SourceRecord[]): Notebook {
-  if (!Array.isArray(books) || books.some((b) => typeof b !== 'string')) {
-    throw new Error('sources must be a list of source names');
+/**
+ * Renames and/or replaces the source list in ONE write. Both fields are validated before anything
+ * is written, so a request whose title is fine but whose sources name a missing book changes
+ * nothing — never a rename that half-happened under a 400. Unknown books are refused rather than
+ * stored: a pointer to a source that does not exist would show as a source nobody can open.
+ */
+export function updateNotebook(
+  vault: string, id: string,
+  change: { title?: unknown; sources?: unknown },
+  known: SourceRecord[],
+): Notebook {
+  const title = change.title === undefined ? undefined : cleanTitle(change.title);
+  let sources: string[] | undefined;
+  if (change.sources !== undefined) {
+    const books = change.sources;
+    if (!Array.isArray(books) || books.some((b) => typeof b !== 'string')) {
+      throw new Error('sources must be a list of source names');
+    }
+    const knownBooks = new Set(known.map((s) => s.book));
+    const unknown = books.filter((b) => !knownBooks.has(b));
+    if (unknown.length) throw new Error(`no such source: ${unknown.join(', ')}`);
+    sources = [...new Set(books as string[])];
   }
-  const knownBooks = new Set(known.map((s) => s.book));
-  const unknown = books.filter((b) => !knownBooks.has(b));
-  if (unknown.length) throw new Error(`no such source: ${unknown.join(', ')}`);
-  return update(vault, id, (nb) => ({ ...nb, sources: [...new Set(books as string[])] }));
+  return mutate(vault, (notebooks) => {
+    const i = notebooks.findIndex((n) => n.id === id);
+    if (i === -1) throw new NotebookNotFound(id);
+    const updated = { ...notebooks[i], ...(title !== undefined && { title }), ...(sources && { sources }) };
+    return { next: notebooks.map((n, j) => (j === i ? updated : n)), result: updated };
+  });
 }
 
 /** Files a thread under a notebook. A thread lives in one notebook at most, so it leaves any other
  *  first; filing it where it already is changes nothing. */
 export function attachThread(vault: string, id: string, threadId: string): Notebook {
   assertThreadId(threadId);
-  const notebooks = readNotebooks(vault);
-  if (!notebooks.some((n) => n.id === id)) throw new NotebookNotFound(id);
-  const next = notebooks.map((n) => {
-    const others = n.threads.filter((t) => t !== threadId);
-    return n.id === id ? { ...n, threads: [...others, threadId] } : { ...n, threads: others };
+  return mutate(vault, (notebooks) => {
+    if (!notebooks.some((n) => n.id === id)) throw new NotebookNotFound(id);
+    const next = notebooks.map((n) => {
+      const others = n.threads.filter((t) => t !== threadId);
+      return n.id === id ? { ...n, threads: [...others, threadId] } : { ...n, threads: others };
+    });
+    return { next, result: next.find((n) => n.id === id)! };
   });
-  write(vault, next);
-  return next.find((n) => n.id === id)!;
 }
 
 /** Removes the grouping only. Its conversations and sources stay where they always were, and show
  *  up again under history and the Library. */
 export function deleteNotebook(vault: string, id: string): void {
-  const notebooks = readNotebooks(vault);
-  if (!notebooks.some((n) => n.id === id)) throw new NotebookNotFound(id);
-  write(vault, notebooks.filter((n) => n.id !== id));
+  mutate(vault, (notebooks) => {
+    if (!notebooks.some((n) => n.id === id)) throw new NotebookNotFound(id);
+    return { next: notebooks.filter((n) => n.id !== id), result: undefined };
+  });
 }
 
-/** What a thread deletion leaves behind: its id in whichever notebook held it. */
+/** What a thread deletion leaves behind: its id in whichever notebook held it. Best-effort: the
+ *  thread is already gone, so an unwritable notebooks file is logged, not thrown at the caller. */
 export function forgetThread(vault: string, threadId: string): void {
-  const notebooks = readNotebooks(vault);
-  if (!notebooks.some((n) => n.threads.includes(threadId))) return;
-  write(vault, notebooks.map((n) => ({ ...n, threads: n.threads.filter((t) => t !== threadId) })));
+  if (!readNotebooks(vault).some((n) => n.threads.includes(threadId))) return;
+  try {
+    mutate(vault, (notebooks) => ({
+      next: notebooks.map((n) => ({ ...n, threads: n.threads.filter((t) => t !== threadId) })),
+      result: undefined,
+    }));
+  } catch (e) {
+    console.error('[notebooks] could not drop a deleted thread from its notebook:', e);
+  }
 }
 
 // ── derived view ───────────────────────────────────────────────────────────────────────────────

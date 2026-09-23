@@ -178,10 +178,14 @@ describe('errored block copy tells the right story', () => {
     const render1 = (toolkit as any).quick_check.render({
       args: {}, result: 'Invalid input: expected string, received undefined', addResult: vi.fn(), isError: true,
     });
-    expect(render1.props.children).toContain('could not be shown');
+    const { container: c1 } = render(render1);
+    expect(c1.querySelector('.tool-note.failed')?.textContent).toContain('could not be shown');
     const render2 = (toolkit as any).quick_check.render({
       args: {}, result: 'tool call was aborted', addResult: vi.fn(), isError: true,
     });
-    expect(render2.props.children).toContain('skipped; the conversation moved on');
+    const { container: c2 } = render(render2);
+    // A cancellation is the learner's choice: neutral styling, never the failure class.
+    expect(c2.querySelector('.tool-note.failed')).toBeNull();
+    expect(c2.querySelector('.tool-note.skipped')?.textContent).toBe('quick check skipped · the conversation moved on');
   });
 });

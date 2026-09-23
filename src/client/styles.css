@@ -818,6 +818,8 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note::before { content: "\2713\00a0"; color: var(--good); }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
+.tool-note.skipped { font-weight: 500; letter-spacing: 0.04em; }
+.tool-note.skipped::before { content: "\2013\00a0"; color: var(--text-muted); }
 
 /* ── model thinking: collapsed by default, quiet like the tool chips ── */
 .reasoning-part { margin: 0.15rem 0; font-size: 0.8rem; color: var(--text-muted); }
@@ -3124,3 +3126,43 @@ button.nb-delete:hover { background: var(--bg-inset); }
   .nb-page { padding-inline: 0.9rem; }
   .notebook-crumb-link { max-width: 9rem; }
 }
+
+/* ── Phone-width top bar: one row ─────────────────────────────────────────────────────────────
+   At 390px the bar used to wrap into two rows (brand and history, then badges and Add material),
+   spending a sixth of the screen on chrome before the conversation starts. Labels that have an
+   icon beside them collapse to the icon; their text stays in the DOM as the accessible name. */
+.add-material-trigger { display: inline-flex; align-items: center; gap: 0.35rem; }
+@media (max-width: 640px) {
+  .topbar { flex-wrap: nowrap; gap: 0.3rem; padding: 0.45rem 0.5rem; }
+  .topbar h1 { font-size: 0.9rem; padding-left: 0.1rem; }
+  .topbar h1 svg { flex: none; }
+  .add-material-label, .notebook-crumb-label, .brand-word {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .add-material-trigger { padding: 0.4rem 0.55rem; }
+  .notebook-crumb-link { max-width: 6.5rem; }
+  .topbar-status { gap: 0.25rem; min-width: 0; }
+  .topbar-status .badge { padding-inline: 0.45rem; max-width: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ── A notebook's own opening (Notebooks.tsx NotebookIntro) ─────────────────────────────────── */
+.nb-intro { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.nb-intro-name {
+  display: inline-flex; align-items: center; gap: 0.35rem; margin-bottom: 0.6rem;
+  padding: 0.2rem 0.7rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; text-decoration: none;
+}
+.nb-intro-name:hover { filter: brightness(1.08); }
+.nb-intro .nb-meter { width: 100%; max-width: 22rem; margin: -0.4rem 0 1.1rem; }
+.nb-starters { list-style: none; margin: 0 0 1.2rem; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 0.4rem; }
+.nb-starters button {
+  width: 100%; display: flex; align-items: center; gap: 0.6rem; text-align: left;
+  font-family: var(--font-prose); font-size: 0.9rem; padding: 0.5rem 0.75rem;
+}
+.nb-starter-kind {
+  flex: none; min-width: 3.2rem; text-align: center; font-family: var(--font-mono); font-size: 0.68rem;
+  font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.1rem 0.4rem; border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--text-muted);
+}
+.nb-starter-kind--review { color: var(--warn); }
+.nb-starter-kind--quiz { color: var(--mastery-practicing); }
