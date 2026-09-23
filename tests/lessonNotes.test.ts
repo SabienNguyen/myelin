@@ -65,6 +65,26 @@ describe('isTeachingTurn', () => {
     const turn = baseTurn({ tutorText: prose, exchanges: [{ prompt, answer: 'irrelevant' }] });
     expect(isTeachingTurn(turn, { gradingOnly: false, bareGreeting: false, progressQuestion: false })).toBe(false);
   });
+
+  // Chat answers from memory all day; compiling each long answer would fill the vault with
+  // unsourced pages nobody asked for. A chat turn becomes pages only when it researched something
+  // or put the learner to work.
+  describe('in chat', () => {
+    const chat = { gradingOnly: false, bareGreeting: false, progressQuestion: false, chat: true };
+    it('is false for a long answer from memory', () => {
+      expect(isTeachingTurn(baseTurn(), chat)).toBe(false);
+    });
+    it('is true when the turn researched', () => {
+      expect(isTeachingTurn(baseTurn({ sources: [{ url: 'https://example.org/a' }] }), chat)).toBe(true);
+    });
+    it('is true when the turn used a block', () => {
+      expect(isTeachingTurn(baseTurn({ exchanges: [{ prompt: 'why?', answer: '' }] }), chat)).toBe(true);
+    });
+    it('still needs enough to say', () => {
+      const turn = baseTurn({ tutorText: 'short', sources: [{ url: 'https://example.org/a' }] });
+      expect(isTeachingTurn(turn, chat)).toBe(false);
+    });
+  });
 });
 
 describe('lessonTurnFromParts', () => {

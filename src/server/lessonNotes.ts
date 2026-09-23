@@ -49,12 +49,17 @@ export const MIN_LESSON_CHARS = 400;
  *  in rather than recomputed here because session.ts already has
  *  isBareGreeting/isProgressQuestion/resubmitPending in hand at the point it calls this —
  *  recomputing them here would mean importing session.ts from a module session.ts itself imports,
- *  a needless cycle for logic that already exists. */
+ *  a needless cycle for logic that already exists.
+ *
+ *  `chat` turns must also have researched (sources) or used a block (exchanges): chat answers from
+ *  memory all day, and compiling every long answer would fill the vault with unsourced pages
+ *  nobody asked for. */
 export function isTeachingTurn(
   turn: LessonTurn,
-  flags: { gradingOnly: boolean; bareGreeting: boolean; progressQuestion: boolean },
+  flags: { gradingOnly: boolean; bareGreeting: boolean; progressQuestion: boolean; chat?: boolean },
 ): boolean {
   if (flags.gradingOnly || flags.bareGreeting || flags.progressQuestion) return false;
+  if (flags.chat && turn.sources.length === 0 && turn.exchanges.length === 0) return false;
   const teachingChars = turn.tutorText.trim().length
     + turn.exchanges.reduce((sum, e) => sum + e.prompt.trim().length, 0);
   return teachingChars >= MIN_LESSON_CHARS;

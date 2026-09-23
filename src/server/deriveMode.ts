@@ -30,11 +30,17 @@ export function lastUserText(messages: UIMessage[]): string {
  * Deliberately keyword-based rather than model-judged: this runs before the turn, on every turn,
  * and a wrong guess must be cheap and predictable. An explicit command still wins over everything
  * here (chatRoute applies commandMode first), so the escape hatch is never more than a slash away.
+ *
+ * The default is `chat`, not `learn`. Nearly every harness bug seen on 2026-09-22 came from the
+ * tutor's per-turn forcing: "hi" resumed the last topic and greeted twice, research and write_page
+ * stayed locked on "sure", blocks were forced into turns that only wanted an answer. Chat follows
+ * the learner and keeps every tool; the structured tutor is `/study`, and "quiz me" or "let's
+ * review" still reach their modes by name.
  */
 
-/** Asking for the vault to be RESTRUCTURED — a syllabus built, material added. These are the only
- *  capabilities with no automatic trigger: writing a page already unlocks on a vault gap, so this
- *  is all that is left of what `freeform` used to mean. */
+/** Asking for the vault to be RESTRUCTURED — a syllabus built, material added. Chat can do all of
+ *  it, so this no longer picks a different mode; it still outranks the quiz/review patterns and the
+ *  plan, because a learner asking to build something is not asking to be tested. */
 const AUTHORING = [
   /\b(build|make|create|set ?up|design|plan)\b[^.?!]{0,40}\b(path|syllabus|curriculum|course|roadmap|track)\b/i,
   /\b(add|ingest|import|compile|pull in)\b[^.?!]{0,40}\b(this|these|book|paper|repo|repository|video|pdf|page|site|url|material|source)\b/i,
@@ -88,12 +94,13 @@ export function deriveMode({ text, planKinds = [], emptyVault = false }: DeriveI
 
   // An explicit ask always wins — this is the half of the selector worth keeping, expressed in the
   // learner's own words rather than as a control they have to find first.
-  if (AUTHORING.some((re) => re.test(t))) return 'freeform';
+  if (AUTHORING.some((re) => re.test(t))) return 'chat';
   if (QUIZ.some((re) => re.test(t))) return 'quiz';
   if (REVIEW.some((re) => re.test(t))) return 'review';
 
-  // Nothing to teach from: research-and-write is the only thing a turn can usefully be.
-  if (emptyVault) return 'freeform';
+  // Nothing to teach from: research-and-write is the only thing a turn can usefully be, and chat
+  // does both.
+  if (emptyVault) return 'chat';
 
   // Otherwise follow the plan's own leading item. A continuation ("ok", "next") carries no ask, so
   // this is what decides — and it is exactly the signal rule 2c says should never be OVERRIDDEN by
@@ -101,5 +108,5 @@ export function deriveMode({ text, planKinds = [], emptyVault = false }: DeriveI
   if (planKinds[0] === 'quiz') return 'quiz';
   if (planKinds[0] === 'review' || planKinds[0] === 'misconception') return 'review';
 
-  return 'learn';
+  return 'chat';
 }

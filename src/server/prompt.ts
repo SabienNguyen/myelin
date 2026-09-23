@@ -153,7 +153,12 @@ vocabulary — it changes HOW you teach, never what counts as evidence.`] : []),
   // Cold start. Without this the tutor is silently unable to act: `learn`/`review`/`quiz` expose no
   // write_page, no search and no ingest (freeform only — session.ts's TEACH_TOOLS), so against an
   // empty vault it can neither teach an existing page nor create one, and nothing tells it why.
-  if (a.emptyVault) {
+  // Chat has freeform's tools but not its brief: the teaching-mode line below would call ingest and
+  // create_path missing, and freeform's pushes a curriculum at a learner who has not asked for one.
+  if (a.emptyVault && a.mode === 'chat') {
+    lines.push('COLD START: the vault has no pages yet. When the student asks about something, research '
+      + 'it and save what is worth keeping as pages (write_page) with the sources you actually read.');
+  } else if (a.emptyVault) {
     lines.push(a.mode === 'freeform'
       ? 'COLD START: the vault has no pages yet. Research the subject the student names, then write '
         + 'its first pages (write_page) and a curated path (create_path) before teaching.'

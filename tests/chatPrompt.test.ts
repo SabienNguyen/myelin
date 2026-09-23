@@ -156,6 +156,23 @@ describe('chat bootstrap', () => {
   });
 });
 
+describe('chat bootstrap on an empty vault', () => {
+  // Chat has freeform's tools (session.ts's openMode), so the teaching-mode cold-start line — which
+  // says ingest and create_path are missing and tells the tutor to suggest switching to freeform —
+  // would be false. And freeform's line ("research ... and a curated path before teaching") pushes
+  // a curriculum at a learner who has not asked for one.
+  it('says the tools are there, without telling the model to build anything unasked', () => {
+    const ctx = buildBootstrapContext({
+      mode: 'chat', state: {}, lessons: [], reviewsDue: [], ankiLapses: [], emptyVault: true,
+    });
+    expect(ctx).toMatch(/COLD START/);
+    expect(ctx).toMatch(/write_page/);
+    expect(ctx).not.toMatch(/switch to freeform/);
+    expect(ctx).not.toMatch(/do NOT have/);
+    expect(ctx).not.toMatch(/before teaching/);
+  });
+});
+
 describe('non-chat bootstrap: byte-identical to before this change', () => {
   // Captured from buildBootstrapContext on the pre-chat code, then hand-verified against its
   // source line by line. If this ever fails, some other mode's harness-visible context changed.

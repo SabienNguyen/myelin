@@ -37,7 +37,7 @@ import { compileGenerate } from './gap/generateSeam.js';
 import { zodTool } from './zodTool.js';
 import { enqueueLessonNotes, isTeachingTurn, lessonTurnFromParts } from './lessonNotes.js';
 
-// Tools the tutor may use per mode; write/link/compile only in freeform (spec §5).
+// Tools the tutor may use in learn/review/quiz; write/link/compile only in freeform and chat (spec §5).
 const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidence',
   'next_lessons', 'find_analogies', 'list_paths', 'read_path'];
 
@@ -564,7 +564,7 @@ export function blockTools(patterns: string[] = [], canGenerate = false): LoopTo
       + '(structured_check, math_scratchpad, writing_draft) instead.'
     : 'Present a code_exercise block to the student and wait for their work. NONE AVAILABLE right '
       + 'now: no exercises exist in this vault, so do not call this tool — use another instrument '
-      + '(writing_draft, structured_check, math_scratchpad) or generate_exercise in freeform.';
+      + '(writing_draft, structured_check, math_scratchpad), or generate_exercise where it is on offer.';
   // The list above was read when the turn began, so it cannot name what this turn creates.
   const generatedHelp = canGenerate
     ? '\nALSO VALID: the `pattern` that generate_exercise returned with status "approved" earlier in '
@@ -695,7 +695,7 @@ export type GapReason =
   | 'stub'             // the on-topic page is a stub (usually auto-created from a dangling link)
   | 'unsourced'        // the page exists but cites nothing — written from model memory
   | 'thin'             // the page exists and says almost nothing
-  | 'freeform';        // not a gap: freeform mode researches by design
+  | 'freeform';        // not a gap: freeform and chat research by design
 
 export interface VaultGap { reason: GapReason; slug?: string; detail: string }
 
@@ -742,7 +742,9 @@ interface GapDeps {
  * Where the tutor's memory falls short of what the student just asked — and therefore when it may
  * go and research.
  *
- * Freeform: always, as before. That is where a subject gets researched, sourced and compiled.
+ * Freeform and chat: always. Those are where a subject gets researched, sourced and compiled —
+ * the reason stays `freeform` for both, so the tutor is never told it has a "gap" it merely chose
+ * to look into.
  *
  * Teaching modes (`learn`/`review`/`quiz`): whenever there is a real GAP. That word is doing work.
  * The first version of this only unlocked when the vault had no page at all, which missed the more
@@ -770,7 +772,7 @@ export async function vaultGap(
   slugs: string[],
   deps: GapDeps,
 ): Promise<VaultGap | null> {
-  if (mode === 'freeform') return { reason: 'freeform', detail: 'freeform mode researches by design' };
+  if (mode === 'freeform' || mode === 'chat') return { reason: 'freeform', detail: `${mode} mode researches by design` };
   if (slugs.length === 0) {
     return { reason: 'empty-vault', detail: 'the vault has no pages at all' };
   }
@@ -1113,6 +1115,7 @@ export function createTutorSession(
             gradingOnly: resubmitPending,
             bareGreeting: isBareGreeting(lastUserText(finalMessages)),
             progressQuestion: isProgressQuestion(lastUserText(finalMessages)),
+            chat: mode === 'chat',
           });
           if (teaching) {
             void enqueueLessonNotes(cfg.vault, turn, { lw, cfg })
@@ -1173,9 +1176,9 @@ export function createTutorSession(
         const mcpTools = guardMcpTools(
           await lw.tools(), cfg.student, slugs, grades.flatMap((g) => g.evidence), cfg.vault,
         );
-        // Research rides with the vault-writing tools in freeform, and unlocks in teaching modes
-        // wherever the vault has a GAP — no page, a stub, an unsourced page, a page too thin to
-        // teach from. See vaultGap above for why each of those counts.
+        // Research rides with the vault-writing tools in freeform and chat, and unlocks in teaching
+        // modes wherever the vault has a GAP — no page, a stub, an unsourced page, a page too thin
+        // to teach from. See vaultGap above for why each of those counts.
         //
         // NOT on a grade turn: vaultGap keys off the last USER text, which on a block submission is
         // the already-answered message that staged the block — re-running it re-issues the same
@@ -1201,21 +1204,24 @@ export function createTutorSession(
         // the tutor just grounded in real sources becomes the page the evidence attaches to.
         // The single-writer rule is untouched: write_page IS Engram's tool, so Engram still does
         // every write.
-        const canWrite = mode === 'freeform' || gap !== null;
-        const activeMcp = mcpTools.filter((t) => mode === 'freeform'
+        // Chat has every capability freeform has; what separates them is the prompt (see
+        // chat-system-prompt.md) and the forcing notes below, which chat never gets.
+        const openMode = mode === 'freeform' || mode === 'chat';
+        const canWrite = openMode || gap !== null;
+        const activeMcp = mcpTools.filter((t) => openMode
           || TEACH_TOOLS.includes(t.name)
           || (canWrite && t.name === 'write_page'));
 
         const webTools = gap ? buildWebTools(cfg, searchModelId) : { tools: [], serverTools: [] };
         const hasWebSearch = [...webTools.tools, ...webTools.serverTools].some((t) => t.name === 'web_search');
         // ingest_paper needs cfg (to queue) AND lw (to kick a background compile) — same
-        // freeform-only gate as webTools: a subject gets researched, sourced, and compiled in
-        // freeform; teaching modes stay grounded in the vault.
-        const ingestTools = mode === 'freeform' ? buildIngestTools(lw, cfg) : [];
-        // Freeform-only, like every other content-creating tool: the tutor can commission a NEW
+        // open-mode gate as writing: a subject gets researched, sourced, and compiled in freeform
+        // or chat; teaching modes stay grounded in the vault.
+        const ingestTools = openMode ? buildIngestTools(lw, cfg) : [];
+        // Open modes only, like every other content-creating tool: the tutor can commission a NEW
         // coding exercise when a learner wants practice no ladder covers. The result is pending
         // review — the tutor must say so, not promise the exercise for this session.
-        const generateTool: LoopTool[] = mode !== 'freeform' ? [] : [
+        const generateTool: LoopTool[] = !openMode ? [] : [
           zodTool('generate_exercise', {
             description: 'Author a new coding exercise — for subjects where CODE IS THE SKILL: '
               + 'programming itself, or a domain the student chose to practice through code (data '
@@ -1295,19 +1301,23 @@ export function createTutorSession(
           // stageable in the very next turn.
           ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource,
             topicTokens(lastUserText(messages)), generateTool.length > 0),
-        ].filter((tool) => !greetingOnly && toolFitsTurn(tool.name, {
-          language: isLanguageSubject(messages, slugs),
-          used: toolsUsed(messages),
-          research: gap !== null || mode === 'freeform',
-          hasSources: sources.length > 0,
-          hasVideoSources: sources.some((s) => s.origin?.kind === 'video'),
-          lastUserText: lastUserText(messages),
-        }));
+        ].filter((tool) => !greetingOnly
+          // A one-click "write this up" exists for modes that cannot write. In an open mode it is
+          // a button that does what the model could just do.
+          && !(openMode && tool.name === 'offer_write')
+          && toolFitsTurn(tool.name, {
+            language: isLanguageSubject(messages, slugs),
+            used: toolsUsed(messages),
+            research: gap !== null || openMode,
+            hasSources: sources.length > 0,
+            hasVideoSources: sources.some((s) => s.origin?.kind === 'video'),
+            lastUserText: lastUserText(messages),
+          }));
         const system = `${buildInstructions(turnFacts({
           tools: [...tools, ...serverTools].map((t) => t.name), mode, messages,
           emptyVault: slugs.length === 0, bankSize: readBank(cfg.vault).length,
           sources, readingSource, slugs,
-        }))}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
+        }), mode === 'chat' ? 'chat' : 'tutor')}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
           + (gradingOnly
             ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
             : greetingOnly
@@ -1349,7 +1359,9 @@ export function createTutorSession(
         // and on a bare command turn, which has no words to teach about yet.
         // ...and on a bare greeting, which has no subject to produce anything about. Forcing a
         // block there is what made "hi" open with an exercise on last session's topic.
-        if (!gradingOnly && !readingSource && lastUserText(messages).trim()
+        // ...and never in chat, where the learner decides what a turn is for (chat-system-prompt.md
+        // rule 3: a check is offered, not forced).
+        if (mode !== 'chat' && !gradingOnly && !readingSource && lastUserText(messages).trim()
           && !isBareGreeting(lastUserText(messages))) trailing.push(userTurn(
           'HARNESS: end this turn on something the student PRODUCES, not on prose. If nothing more '
           + 'specific fits, call `writing_draft` asking them to put the idea in their own words with '
@@ -1362,7 +1374,8 @@ export function createTutorSession(
         // SSE-stream exercise instead, because stream-consumer happened to be due; the asked-for
         // topic only appeared in a second block. Prose 40 lines up did not stop it, so the turn
         // carries it.
-        const namedTopic = !gradingOnly && !readingSource
+        // Not in chat either: there is no lesson plan for a named topic to override.
+        const namedTopic = mode !== 'chat' && !gradingOnly && !readingSource
           && !isProgressQuestion(lastUserText(messages))
           && !isBareGreeting(lastUserText(messages))
           && topicTokens(lastUserText(messages)).length > 0;
@@ -1390,13 +1403,17 @@ export function createTutorSession(
           + 'evidence — evidence attaches to a page, so a topic with no page loses the student\'s '
           + 'work entirely. Write the page first, then grade, then record against that slug.',
         ));
-        if (readingSource) trailing.push(userTurn(
-          'HARNESS: this came from the reader — the source is ALREADY open beside the conversation '
-          + 'and the quoted passage is on the student\'s screen. Do not re-open it (open_source is '
-          + 'withheld this turn). Explain the passage, then END THE TURN ON A BLOCK about it: '
-          + '`writing_draft` asking them to put the passage in their own words (with a rubric), or '
-          + '`quick_check` on the one claim it makes that they could get wrong. Naming the '
-          + 'instrument is not optional — a turn that only explains is a turn they read.',
+        if (readingSource) trailing.push(userTurn(mode === 'chat'
+          ? 'HARNESS: this came from the reader — the source is ALREADY open beside the conversation '
+            + 'and the quoted passage is on the student\'s screen. Do not re-open it (open_source is '
+            + 'withheld this turn). Explain the passage, grounded in it and the rest of the source; '
+            + 'offer a quick check on it only if one would help.'
+          : 'HARNESS: this came from the reader — the source is ALREADY open beside the conversation '
+            + 'and the quoted passage is on the student\'s screen. Do not re-open it (open_source is '
+            + 'withheld this turn). Explain the passage, then END THE TURN ON A BLOCK about it: '
+            + '`writing_draft` asking them to put the passage in their own words (with a rubric), or '
+            + '`quick_check` on the one claim it makes that they could get wrong. Naming the '
+            + 'instrument is not optional — a turn that only explains is a turn they read.',
         ));
         if (grades.length) trailing.push(userTurn(
           `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
