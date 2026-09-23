@@ -129,7 +129,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   top: calc(100% + 0.4rem);
   left: 0;
   z-index: 10;
-  width: 20rem;
+  /* Wide enough for a title AND its notebook tag; capped to the viewport on a phone. */
+  width: min(25rem, calc(100vw - 1rem));
   max-height: 22rem;
   overflow-y: auto;
   display: flex;
@@ -162,6 +163,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
    clears 4.5:1 on that background in both themes. */
 .history-row.active .history-time { color: inherit; }
 .history-empty { padding: 0.5rem 0.6rem; color: var(--text-muted); font-size: 0.85rem; }
+.history-notebook {
+  flex: none; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);
+  padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); background: var(--bg-inset);
+}
+.history-row.active .history-notebook { color: inherit; background: transparent; }
 
 .topbar-status { display: flex; gap: 0.4rem; align-items: center; }
 .badge {

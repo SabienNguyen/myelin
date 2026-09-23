@@ -77,12 +77,16 @@ describe('notebook routes', () => {
 
     const detail = await (await app.request(`/api/notebooks/${id}`)).json();
     expect(detail.topics).toEqual([
-      { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true },
-      { slug: 'limits', title: 'Limits', level: 'mastered', due: false },
+      { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true, daysLeft: null },
+      { slug: 'limits', title: 'Limits', level: 'mastered', due: false, daysLeft: 30 },
     ]);
     expect(detail.threads.map((t: any) => t.id)).toEqual(['t-1']);
     expect(detail.sources).toEqual([{ book: 'spivak', title: 'Spivak, Calculus', authors: ['Michael Spivak'] }]);
     expect(detail.library.map((s: any) => s.book)).toEqual(['spivak']);
+
+    const threads = await (await app.request('/api/threads')).json();
+    expect(threads.find((t: any) => t.id === 't-1').notebook).toEqual({ id, title: 'Calculus I' });
+    expect(threads.find((t: any) => t.id === 't-loose').notebook).toBeNull();
 
     const of = await (await app.request('/api/thread/t-1/notebook')).json();
     expect(of).toEqual({ id, title: 'Calculus I' });

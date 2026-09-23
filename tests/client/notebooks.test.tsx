@@ -23,7 +23,7 @@ const detail = {
   ],
   topics: [
     { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true },
-    { slug: 'limits', title: 'Limits', level: 'mastered', due: false },
+    { slug: 'limits', title: 'Limits', level: 'mastered', due: false, daysLeft: 23 },
   ],
 };
 
@@ -102,6 +102,7 @@ describe('NotebookView', () => {
     expect(links.map((a) => a.textContent)).toEqual(['Derivative', 'Limits']);
     expect(links[0].getAttribute('href')).toBe('#/t/t-new/page/derivative');
     expect(within(topics).getByText('due')).toBeTruthy();
+    expect(within(topics).getByText('mastered · holds 23d')).toBeTruthy();
   });
 
   it('starts a conversation already filed under the notebook', async () => {

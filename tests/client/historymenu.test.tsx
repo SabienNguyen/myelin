@@ -5,7 +5,7 @@ import { HistoryMenu } from '../../src/client/components/HistoryMenu.js';
 
 const threads = [
   { id: 'default', title: 'Fractions review', updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), messages: 4 },
-  { id: 't-abc', title: 'Derivatives intro', updatedAt: new Date().toISOString(), messages: 2 },
+  { id: 't-abc', title: 'Derivatives intro', updatedAt: new Date().toISOString(), messages: 2, notebook: { id: 'nb-1', title: 'Calculus I' } },
 ];
 
 describe('HistoryMenu', () => {
@@ -25,6 +25,9 @@ describe('HistoryMenu', () => {
     expect(await screen.findByText('Fractions review')).toBeTruthy();
     expect(screen.getByText('Derivatives intro')).toBeTruthy();
     expect(fetch).toHaveBeenCalledWith('/api/threads');
+    // A filed conversation names its notebook; a loose one does not.
+    expect(screen.getByRole('menuitem', { name: /Derivatives intro/ }).textContent).toContain('Calculus I');
+    expect(screen.getByRole('menuitem', { name: /Fractions review/ }).textContent).not.toContain('Calculus I');
   });
 
   it('clicking a row calls onSelect with that thread id and closes the panel', async () => {

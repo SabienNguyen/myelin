@@ -153,7 +153,7 @@ export interface NotebookSummary {
 export interface ThreadRow { id: string; title: string; updatedAt: string; messages: number }
 export interface NotebooksPayload { notebooks: NotebookSummary[]; unfiled: ThreadRow[] }
 export interface NotebookSource { book: string; title: string; authors: string[] }
-export interface NotebookTopic { slug: string; title: string; level: NotebookLevel; due: boolean }
+export interface NotebookTopic { slug: string; title: string; level: NotebookLevel; due: boolean; daysLeft?: number | null }
 export interface NotebookDetail {
   notebook: NotebookSummary;
   threads: ThreadRow[];

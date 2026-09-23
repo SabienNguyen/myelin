@@ -377,7 +377,12 @@ export function NotebookView({ id }: { id: string }) {
                       ? <a href={threadHref(latest, t.slug)} className="nb-row-title">{t.title}</a>
                       : <span className="nb-row-title">{t.title}</span>}
                     {t.due && <span className="nb-pill nb-pill--due">due</span>}
-                    <span className="nb-row-time">{LEVEL_LABEL[t.level]}</span>
+                    <span className="nb-row-time">
+                      {LEVEL_LABEL[t.level]}
+                      {/* Anki shows when a card comes back; this shows when a level would start
+                          to slip — the reason to come back before it does. */}
+                      {!t.due && typeof t.daysLeft === 'number' && ` · holds ${t.daysLeft}d`}
+                    </span>
                   </li>
                 ))}
               </ul>

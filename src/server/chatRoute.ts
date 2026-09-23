@@ -7,7 +7,7 @@ import { createTutorSession } from './session.js';
 import { deriveMode, lastUserText } from './deriveMode.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { clearStance, setStance } from './stanceStore.js';
-import { forgetThread } from './notebookStore.js';
+import { forgetThread, readNotebooks } from './notebookStore.js';
 import { MODES, type Mode } from './prompt.js';
 import { detachedResponse } from './detachedResponse.js';
 import { TurnStalled } from './turnError.js';
@@ -146,7 +146,13 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
       return c.json({ error: error?.message ?? String(error) }, 400);
     }
   });
-  app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
+  // Each row names the notebook it is filed under, so history reads like a project list rather than
+  // one undifferentiated stream of conversations.
+  app.get('/api/threads', (c) => {
+    const owner = new Map<string, { id: string; title: string }>();
+    for (const nb of readNotebooks(cfg.vault)) for (const t of nb.threads) owner.set(t, { id: nb.id, title: nb.title });
+    return c.json(listThreads(cfg.vault).map((t) => ({ ...t, notebook: owner.get(t.id) ?? null })));
+  });
   // loadThread/saveThread/deleteThread throw on a threadId that fails sessionStore's filename
   // allowlist (assertThreadId) — a real client bug (nothing legitimate sends one), but it must
   // read as a 400 naming the problem, not a bare 500 with no message.

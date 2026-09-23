@@ -12,7 +12,11 @@ import {
   updateNotebook, type Level, type Notebook, type StudentEntry,
 } from './notebookStore.js';
 
-export interface NotebookTopic { slug: string; title: string; level: Level; due: boolean }
+export interface NotebookTopic {
+  slug: string; title: string; level: Level; due: boolean;
+  /** Days until the level decays, when it is on a clock (the student ledger's days_left). */
+  daysLeft: number | null;
+}
 
 export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
@@ -89,7 +93,10 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const [f, names] = await Promise.all([facts(), titles()]);
     const order: Record<Level, number> = { practicing: 0, exposed: 1, mastered: 2, unseen: 3 };
     const topics: NotebookTopic[] = f.topicsOf(nb)
-      .map((slug) => ({ slug, title: names.get(slug) ?? slug, level: levelOf(f.state[slug]), due: isDue(f.state[slug]) }))
+      .map((slug) => ({
+        slug, title: names.get(slug) ?? slug, level: levelOf(f.state[slug]), due: isDue(f.state[slug]),
+        daysLeft: typeof f.state[slug]?.days_left === 'number' ? f.state[slug]!.days_left! : null,
+      }))
       // Due first (the thing to do next), then by level, then by name.
       .sort((a, b) => Number(b.due) - Number(a.due) || order[a.level] - order[b.level] || a.title.localeCompare(b.title));
     const bySource = (s: SourceRecord) => ({ book: s.book, title: s.title, authors: s.authors });
