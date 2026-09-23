@@ -832,9 +832,14 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 
 /* ── inline asides: select a tutor passage, ask about just that, without derailing the lesson ── */
 .aside-ask-region { position: relative; }
+/* The selection toolbar: "ask aside" and "quiz me on this", side by side under the selection. */
 .aside-ask {
   position: absolute;
   z-index: 5;
+  display: flex;
+  gap: 0.35rem;
+}
+.aside-ask button {
   padding: 0.2rem 0.6rem;
   font-size: 0.78rem;
   background: var(--bg-inset);
@@ -842,7 +847,40 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   border-radius: var(--radius-sm);
   color: var(--accent);
 }
-.aside-ask:hover { border-color: var(--accent); }
+.aside-ask button:hover:not(:disabled) { border-color: var(--accent); }
+.aside-ask button:disabled { opacity: 0.45; cursor: default; }
+
+/* ── chat first: quiet ways into study, and the chip that says a study session is on ── */
+.follow-ups { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: -0.4rem 0 1.1rem; }
+.follow-ups button {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.follow-ups button:hover { color: var(--text); border-color: var(--accent); }
+.composer-mode {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.composer .composer-mode button {
+  padding: 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 400;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.composer .composer-mode button:hover { filter: none; color: var(--text); border-color: var(--accent); background: transparent; }
 .aside-form {
   margin: 0.4rem 0;
   padding: 0.6rem 0.75rem;

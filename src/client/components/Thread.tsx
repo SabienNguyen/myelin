@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useMessage, useThread, useThreadRuntime } from '@assistant-ui/react';
 import { ArrowUpIcon as ArrowUp, FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, XIcon as X } from '@phosphor-icons/react';
-import type { FileUIPart } from '../../shared/uiMessages.js';
+import { BLOCK_TOOL_NAMES } from '../../shared/blocks.js';
+import { getToolName, isToolUIPart, type FileUIPart, type UIMessage } from '../../shared/uiMessages.js';
 import { useChatStore } from '../chatCore/index.js';
 import { askAside } from '../lib/api.js';
 import { AsidePart } from './AsidePart.js';
@@ -88,6 +89,7 @@ const MAX_ASIDE_QUOTE = 600;
  */
 function AsideAsk({ messageId, children }: { messageId: string; children: ReactNode }) {
   const store = useChatStore();
+  const running = useThread((s) => s.isRunning);
   const bodyRef = useRef<HTMLDivElement>(null);
   const [pick, setPick] = useState<{ text: string; x: number; y: number } | null>(null);
   const [form, setForm] = useState<{ quote: string } | null>(null);
@@ -128,6 +130,16 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
   };
   const cancel = () => { setForm(null); setQuestion(''); setError(null); };
 
+  // A turn, not an aside: the learner asked to be tested on exactly this passage. The message's
+  // own words ("Quiz me") are what route it (deriveMode's QUIZ patterns), so no command rides it.
+  const quizOnPick = () => {
+    if (!pick) return;
+    const quoted = pick.text.split('\n').map((line) => `> ${line}`).join('\n');
+    setPick(null);
+    window.getSelection()?.removeAllRanges();
+    store.sendMessage(`Quiz me on this:\n\n${quoted}`);
+  };
+
   const submit = async () => {
     if (!form) return;
     setStatus('pending');
@@ -158,14 +170,10 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
     <div ref={bodyRef} className="aside-ask-region">
       {children}
       {pick && !form && (
-        <button
-          type="button"
-          className="aside-ask"
-          style={{ left: pick.x, top: pick.y + 8 }}
-          onClick={openForm}
-        >
-          ask aside
-        </button>
+        <div className="aside-ask" style={{ left: pick.x, top: pick.y + 8 }}>
+          <button type="button" onClick={openForm}>ask aside</button>
+          <button type="button" onClick={quizOnPick} disabled={running}>quiz me on this</button>
+        </div>
       )}
       {form && (
         <form
@@ -275,14 +283,14 @@ interface PlanItem {
 }
 
 /**
- * "Start today's session" — the interleaved plan (/api/session-plan) as the empty thread's primary
- * action once there is anything to plan. Spacing and interleaving are the system's job; the CTA is
- * where the system does the deciding and the learner just sits down. The whole plan travels in the
- * message so the tutor works through it in order — the same delegation shape as every other row
- * that hands the composer a request.
+ * "Start today's session" — the interleaved plan (/api/session-plan) on the empty thread, once there
+ * is anything to plan. Spacing and interleaving are the system's job; the button is where the system
+ * does the deciding and the learner just sits down. A secondary action since chat became the
+ * default: the heading asks what to explore, and this is one answer. The whole plan travels in the
+ * message so the tutor works through it in order.
  */
 function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
-  const composer = useComposerRuntime();
+  const store = useChatStore();
   if (plan.length === 0) return null;
 
   const KIND_LABEL: Record<string, string> = {
@@ -303,16 +311,18 @@ function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
         : `"${p.slug}"`;
       return `${i + 1}. [${p.kind}] ${what} — ${p.why}${p.transfer ? ` — ${p.transfer}` : ''}`;
     }).join('\n');
-    composer.setText(
+    // A session is study, not chat: /study puts this turn and the ones after it on the structured
+    // tutor (chatStore flips the sticky mode), which is what works a plan row by row.
+    store.sendMessage(
       `Run today's session, in this order, one item at a time:\n${lines}\n`
       + 'For reviews and misconceptions, probe or set an exercise before any reteaching; for new items, teach then check. '
       + 'A [quiz] row is a single quiz covering every page it names — the row itself says so.',
+      [], { command: 'study' },
     );
-    composer.send();
   };
   return (
     <div className="session-plan">
-      <button type="button" className="primary session-plan-start" onClick={start}>
+      <button type="button" className="session-plan-start" onClick={start}>
         Start today’s session ({plan.length} {plan.length === 1 ? 'item' : 'items'})
       </button>
       <ol className="session-plan-preview">
@@ -328,11 +338,11 @@ function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
 }
 
 /**
- * The empty thread's hero, which knows who it is talking to. A brand-new learner gets the pitch
- * and the cross-subject example asks; a RETURNING learner with a session plan gets "pick up where
- * you left off" and the plan — not a headline asking what they want to learn above a card that
- * already knows. One fetch decides both (plan lives here, SessionPlanCta just renders it), and the
- * hero renders nothing until it resolves, so the copy never flashes from one audience to the other.
+ * The empty thread's hero. Chat is the default (deriveMode.ts), so the question is what to explore,
+ * for everyone; a returning learner's session plan sits beneath it as the way into study, rather
+ * than as the headline. A brand-new learner gets the cross-subject example asks instead. One fetch
+ * decides both, and the hero renders nothing until it resolves, so the copy never flashes from one
+ * audience to the other.
  */
 function EmptyHero() {
   const [plan, setPlan] = useState<PlanItem[] | null>(null); // null = still deciding
@@ -349,13 +359,12 @@ function EmptyHero() {
   const returning = plan.length > 0;
   return (
     <div className="thread-empty">
-      <h2>{returning ? 'Pick up where you left off' : 'What do you want to learn?'}</h2>
-      {!returning && (
-        <p>
-          Ask for anything — a topic, a paper, a book you are stuck in. Your tutor writes pages
-          as you go, links them into a graph, and tracks what you have actually shown you know.
-        </p>
-      )}
+      <h2>What do you want to explore?</h2>
+      <p>
+        Ask anything, research a topic, read a paper or book you added. What you research becomes
+        linked pages in your vault. Study tools are here when you want them: /study starts a
+        tutor session.
+      </p>
       <SessionPlanCta plan={plan} />
       {/* The example asks taught their lesson (any subject works) on day one; for a returner they
           are noise beside the plan, and the composer is right below for anything new. */}
@@ -363,6 +372,49 @@ function EmptyHero() {
     </div>
   );
 }
+
+/** A reply shorter than this is conversation (a greeting back, a one-line answer), not an
+ *  explanation worth checking yourself on. */
+const MIN_FOLLOW_UP_CHARS = 200;
+
+/** A block on this message still waiting for the learner's answer. */
+function awaitsAnswer(message: UIMessage): boolean {
+  return message.parts.some((p) => isToolUIPart(p)
+    && (BLOCK_TOOL_NAMES as readonly string[]).includes(getToolName(p))
+    && p.state !== 'output-available' && p.state !== 'output-error');
+}
+
+/**
+ * Chat's two ways into study, under the newest answer: one quick check on it, or the structured
+ * tutor on what was just discussed. Chat never forces a block (chat-system-prompt.md rule 3), so
+ * these are the learner's one-click version of asking for one. They step aside while a block is
+ * waiting, while a turn runs, after a turn that failed (its note is no answer to check), and once
+ * the learner starts typing their own next message.
+ */
+function FollowUps({ drafting }: { drafting: boolean }) {
+  const store = useChatStore();
+  const { messages, isRunning, error, lastTurnFailed } = useSyncExternalStore(store.subscribe, store.getState);
+  const last = messages[messages.length - 1];
+  if (drafting || isRunning || error !== undefined || lastTurnFailed
+    || last?.role !== 'assistant' || awaitsAnswer(last)) return null;
+  const said = last.parts.map((p) => (p.type === 'text' ? p.text : '')).join('').trim();
+  if (said.length < MIN_FOLLOW_UP_CHARS) return null;
+  return (
+    <div className="follow-ups">
+      <button type="button" onClick={() => store.sendMessage('Check my understanding of this with one quick question.')}>
+        check my understanding
+      </button>
+      <button type="button" onClick={() => store.sendMessage('Teach me what we were just discussing, properly.', [], { command: 'study' })}>
+        study this
+      </button>
+    </div>
+  );
+}
+
+/** What the composer says a sticky mode is doing. Chat ('') has no chip: it is the default. */
+const MODE_CHIP: Record<string, string> = {
+  learn: 'studying', review: 'reviewing', quiz: 'quizzing', freeform: 'writing',
+};
 
 // What the attach button admits: the image types both provider wires accept, plus PDF (Anthropic
 // document blocks; dropped with a stub on the compat wire). Everything else stays unpickable.
@@ -385,7 +437,14 @@ const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
  * input even when it was a textarea (setText+send is synchronous; nothing renders in between).
  * Two send paths, one store method, no editor/composer state syncing to get wrong.
  */
-export function Composer({ testEditorHandleRef }: { testEditorHandleRef?: RefObject<CommandEditorHandle | null> } = {}) {
+export function Composer({ mode = '', onEndMode, onDraftingChange, testEditorHandleRef }: {
+  /** The sticky mode ('' is chat); anything else shows as a chip the learner can end. */
+  mode?: string;
+  onEndMode?: () => void;
+  /** Whether the learner has started typing — FollowUps steps aside while they do. */
+  onDraftingChange?: (drafting: boolean) => void;
+  testEditorHandleRef?: RefObject<CommandEditorHandle | null>;
+} = {}) {
   const store = useChatStore();
   const [files, setFiles] = useState<FileUIPart[]>([]);
   const [note, setNote] = useState<string | null>(null);
@@ -501,22 +560,36 @@ export function Composer({ testEditorHandleRef }: { testEditorHandleRef?: RefObj
           hidden
           onChange={(e) => { addFiles(e.currentTarget.files); e.currentTarget.value = ''; }}
         />
-        <CommandEditor handleRef={editorRef} onEnter={doSubmit} onEmptyChange={setEditorEmpty} />
+        <CommandEditor handleRef={editorRef} onEnter={doSubmit}
+          onEmptyChange={(empty) => { setEditorEmpty(empty); onDraftingChange?.(!empty); }} />
         {/* Not ComposerPrimitive.Send: its disabled state reads assistant-ui's canSend, which
             knows nothing of the local editor or files and would stay disabled on both. */}
         <button type="submit" className="composer-send" aria-label="Send" disabled={editorEmpty && files.length === 0}>
           <ArrowUp size={16} weight="bold" aria-hidden="true" />
         </button>
       </div>
+      {MODE_CHIP[mode] !== undefined && (
+        <div className="composer-mode">
+          <span>{MODE_CHIP[mode]}</span>
+          <span aria-hidden="true">·</span>
+          <button type="button" aria-label="end study session" onClick={onEndMode}>end</button>
+        </div>
+      )}
     </ComposerPrimitive.Root>
   );
 }
 
-export function Thread() {
+export function Thread({ mode = '', onModeChange }: {
+  /** The sticky mode App holds: '' is chat (the harness derives each turn), anything else a study
+   *  session a /study-family command started. */
+  mode?: string;
+  onModeChange?: (mode: string) => void;
+} = {}) {
   // The viewport's autoScroll pins to the bottom on mount — correct for a conversation, wrong for
   // the empty state: in a short window the pitch overflows and a brand-new thread opened with
-  // "What do you want to learn?" scrolled out of view (caught in an audit's 900×800 screenshot).
+  // "What do you want to explore?" scrolled out of view (caught in an audit's 900×800 screenshot).
   const empty = useThread((s) => s.messages.length === 0);
+  const [drafting, setDrafting] = useState(false);
   return (
     <ThreadPrimitive.Root className="thread">
       <AskTutorBridge />
@@ -539,6 +612,7 @@ export function Thread() {
           <EmptyHero />
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+        {mode === '' && <FollowUps drafting={drafting} />}
         <ThreadPrimitive.If running>
           <div className="working" role="status">
             <span className="dot" /><span className="dot" /><span className="dot" />
@@ -546,7 +620,7 @@ export function Thread() {
           </div>
         </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
-      <Composer />
+      <Composer mode={mode} onEndMode={() => onModeChange?.('')} onDraftingChange={setDrafting} />
     </ThreadPrimitive.Root>
   );
 }

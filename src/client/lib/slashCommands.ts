@@ -14,8 +14,11 @@ export interface CommandSpec {
   hint: string;
 }
 
-/** Menu order: stances first (they persist), then the one-shot machinery routes. */
+/** Menu order: the chat/study pair first (the one choice most turns care about), then stances
+ *  (they persist), then the machinery routes. */
 export const COMMAND_SPECS: CommandSpec[] = [
+  { command: 'study', hint: 'a focused tutor session on a topic' },
+  { command: 'chat', hint: 'back to open chat' },
   { command: 'beginner', hint: 'explain from zero — every term defined, analogies before formalism' },
   { command: 'intermediate', hint: 'assume foundations — connect new ideas to what you know' },
   { command: 'advanced', hint: 'assume fluency — papers first, edge cases up front' },

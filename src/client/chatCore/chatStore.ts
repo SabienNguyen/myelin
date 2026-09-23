@@ -3,7 +3,7 @@
 // chat state machine inside the bundled ai@6 (AbstractChat) — every behavior here ports a rule
 // that machine enforced, called out inline.
 import { generateMessageId } from '../../shared/uiMessageReducer.js';
-import { MODE_COMMANDS, type Command } from '../../shared/commands.js';
+import { commandMode, type Command } from '../../shared/commands.js';
 import { isToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage, type UIPart } from '../../shared/uiMessages.js';
 import { blockOutputsComplete } from './blockOutputsComplete.js';
 import { consumeChatStream } from './streamConsumer.js';
@@ -12,6 +12,10 @@ export interface ChatState {
   messages: UIMessage[];
   isRunning: boolean;
   error?: string;
+  /** The last turn ended failed but explained itself in the message (the server's own note, e.g.
+   *  "returned nothing for this turn") rather than raising `error`. Only the live stream knows:
+   *  the note is plain text, so a reloaded thread cannot tell. */
+  lastTurnFailed?: boolean;
 }
 
 export interface ChatStoreOptions {
@@ -28,9 +32,10 @@ export interface ChatStoreOptions {
     planKinds?: string[];
     emptyVault?: boolean;
   };
-  /** A mode slash command (/learn, /review, /quiz, /freeform) must flip the topbar selector too —
-   * the server only overrides the ONE turn the command rides, and it is this callback that makes
-   * the following turns keep the new mode (requestContext reads the selector per request). */
+  /** A mode slash command (/study, /learn, /review, /quiz, /freeform, /chat) must set the sticky
+   * mode too — the server only overrides the ONE turn the command rides, and it is this callback
+   * that makes the following turns keep the new mode (requestContext reads it per request). /study
+   * arrives as 'learn'; /chat arrives as '' — see sendMessage. */
   onModeCommand?: (mode: string) => void;
   /** Test seam; defaults to the global fetch. */
   fetchImpl?: typeof fetch;
@@ -120,9 +125,11 @@ export class ChatStore {
     if (text !== '' || (files.length === 0 && opts.command === undefined)) parts.push({ type: 'text', text });
     const user: UIMessage = { id: generateMessageId(), role: 'user', parts };
     this.pendingCommand = opts.command;
-    if (opts.command !== undefined && (MODE_COMMANDS as readonly string[]).includes(opts.command)) {
-      this.opts.onModeCommand?.(opts.command);
-    }
+    const mode = opts.command !== undefined ? commandMode(opts.command) : undefined;
+    // Chat is what the harness derives when a request carries no mode, so returning to chat means
+    // sending none from here on. An explicit 'chat' would outrank derivation (chatRoute), and
+    // "quiz me" would stop reaching quiz.
+    if (mode !== undefined) this.opts.onModeCommand?.(mode === 'chat' ? '' : mode);
     this.setState({ messages: [...messages, user] });
     void this.run();
   }
@@ -231,7 +238,7 @@ export class ChatStore {
     // caches per message reference and an explicit error status is sticky in that cache, so
     // without a fresh identity the error bubble would survive into the retry.
     const messages = this.state.error !== undefined ? refreshLast(this.state.messages) : this.state.messages;
-    this.setState({ messages, isRunning: true, error: undefined });
+    this.setState({ messages, isRunning: true, error: undefined, lastTurnFailed: undefined });
 
     let finished: UIMessage[] | null = null;
     let turnFailed = false;
@@ -265,7 +272,7 @@ export class ChatStore {
       return;
     }
     const settled = this.withMidRunOutputs(finished);
-    this.setState({ messages: settled, isRunning: false });
+    this.setState({ messages: settled, isRunning: false, lastTurnFailed: turnFailed });
     // Response-side persistence: the server's chatRoute only saves the REQUEST side; the
     // assembled response is saved here. Fire-and-forget, same as the runtime it replaces.
     void this.fetchImpl(`/api/thread/${this.opts.threadId}`, {
