@@ -3281,3 +3281,13 @@ p.quiz-expected { margin: 0.3rem 0 0; }
   padding: 0.3rem 0.75rem; border-radius: 999px;
 }
 .nb-picker-due { color: var(--warn); }
+
+/* Phone-width tab strip: one line. At 390px "Library" and its due badge wrapped onto two rows,
+   making that tab twice as tall as its neighbours. */
+@media (max-width: 640px) {
+  .tabs { padding-inline: 0.5rem; }
+  .tabs button {
+    padding-inline: 0.35rem; white-space: nowrap;
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
+  }
+}
