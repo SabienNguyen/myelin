@@ -26,6 +26,10 @@ const threadHref = (threadId: string, pageSlug: string | null = null) =>
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** How many of a notebook's conversations show before "show all" — the recent ones are where the
+ *  learner picks up; a long notebook's full history would push Sources and Topics off screen. */
+const RECENT_THREADS = 6;
+
 /** Opens a fresh conversation already filed under the notebook, so its first turn's bootstrap
  *  (session.ts) knows which notebook it is in. With `firstMessage`, the conversation opens by
  *  sending it (lib/pendingAsk.ts). */
@@ -354,6 +358,7 @@ export function NotebookView({ id }: { id: string }) {
   const [renaming, setRenaming] = useState(false);
   const [picking, setPicking] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [allThreads, setAllThreads] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   function load() {
@@ -450,8 +455,8 @@ export function NotebookView({ id }: { id: string }) {
           {detail.threads.length === 0
             ? <p className="empty">No conversations yet. Start one and it stays in this notebook.</p>
             : (
-              <ul className="nb-list">
-                {detail.threads.map((t) => (
+              <ul className="nb-list" id="nb-conv-list">
+                {(allThreads ? detail.threads : detail.threads.slice(0, RECENT_THREADS)).map((t) => (
                   <li key={t.id} className="nb-row">
                     <a href={threadHref(t.id)} className="nb-row-title">{t.title}</a>
                     <span className="nb-row-time">{relativeTime(t.updatedAt)}</span>
@@ -459,6 +464,12 @@ export function NotebookView({ id }: { id: string }) {
                 ))}
               </ul>
             )}
+          {detail.threads.length > RECENT_THREADS && (
+            <button type="button" className="ghost-btn nb-small" aria-expanded={allThreads}
+              aria-controls="nb-conv-list" onClick={() => setAllThreads((v) => !v)}>
+              {allThreads ? 'show recent only' : `show all ${detail.threads.length}`}
+            </button>
+          )}
         </section>
 
         <section className="nb-section" aria-labelledby="nb-src-h">

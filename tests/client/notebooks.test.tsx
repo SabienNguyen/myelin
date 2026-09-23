@@ -166,6 +166,17 @@ describe('NotebookView', () => {
     expect(location.hash).toBe('');
   });
 
+  it('shows the six most recent conversations, and all of them on request', async () => {
+    const threads = Array.from({ length: 8 }, (_, i) => ({ id: `t-${i}`, title: `conversation ${i}`, updatedAt: now, messages: 2 }));
+    routes['GET /api/notebooks/nb-calc'] = () => ({ body: { ...detail, threads } });
+    render(<NotebookView id="nb-calc" />);
+    const region = await screen.findByRole('region', { name: 'Conversations' });
+    expect(within(region).getAllByRole('link')).toHaveLength(6);
+    fireEvent.click(within(region).getByRole('button', { name: 'show all 8' }));
+    expect(within(region).getAllByRole('link')).toHaveLength(8);
+    expect(within(region).getByRole('button', { name: 'show recent only' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('chooses sources from the Library and saves the whole list', async () => {
     routes['PATCH /api/notebooks/nb-calc'] = () => ({ body: { id: 'nb-calc', title: 'Calculus I' } });
     render(<NotebookView id="nb-calc" />);
