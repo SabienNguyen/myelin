@@ -3233,3 +3233,16 @@ button.nb-delete:hover { background: var(--bg-inset); }
   .palette-trigger-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .palette-panel { top: 3.2rem; }
 }
+
+/* ── A notebook's Studio (Notebooks.tsx studioActions) ─────────────────────────────────────── */
+.nb-studio { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.4rem; }
+.nb-studio ul {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); gap: 0.5rem;
+}
+.nb-studio button {
+  width: 100%; height: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem;
+  text-align: left; padding: 0.6rem 0.75rem; border-radius: var(--radius);
+}
+.nb-studio-label { font-weight: 600; }
+.nb-studio-hint { font-size: 0.78rem; color: var(--text-muted); }

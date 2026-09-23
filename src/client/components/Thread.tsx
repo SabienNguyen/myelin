@@ -269,12 +269,14 @@ function ExampleAsks() {
  */
 /** Sends the first message another screen left for this conversation (lib/pendingAsk.ts), once. */
 function PendingAsk({ threadId }: { threadId?: string }) {
-  const composer = useComposerRuntime();
+  const store = useChatStore();
   useEffect(() => {
     if (!threadId) return;
-    const text = takePendingAsk(threadId);
-    if (text) { composer.setText(text); composer.send(); }
-  }, [threadId, composer]);
+    const ask = takePendingAsk(threadId);
+    // The store's own send, not the composer's: it carries a slash command as structured data
+    // (a Studio quiz rides /quiz), the same path SessionPlanCta uses.
+    if (ask) store.sendMessage(ask.text, [], ask.command !== undefined ? { command: ask.command } : {});
+  }, [threadId, store]);
   return null;
 }
 

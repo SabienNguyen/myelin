@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, notebookStarters, studyNowMessage } from '../../src/client/components/Notebooks.js';
+import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
 import { takePendingAsk } from '../../src/client/lib/pendingAsk.js';
 
 const now = new Date().toISOString();
@@ -139,8 +139,21 @@ describe('NotebookView', () => {
     await waitFor(() => expect(location.hash).toMatch(/^#\/t\/t-[a-z0-9]+$/));
     const threadId = location.hash.slice('#/t/'.length);
     expect(calls.at(-1)).toMatchObject({ method: 'PUT', url: `/api/notebooks/nb-calc/threads/${threadId}` });
-    expect(takePendingAsk(threadId)).toBe('Review what is due in Calculus I: Derivative. Check me on each before reteaching anything.');
+    expect(takePendingAsk(threadId)).toEqual({ text: 'Review what is due in Calculus I: Derivative. Check me on each before reteaching anything.' });
     expect(takePendingAsk(threadId)).toBeNull(); // sent once, never twice
+  });
+
+  it('a Studio action opens a filed conversation asking for that material, with its command', async () => {
+    render(<NotebookView id="nb-calc" />);
+    await screen.findByRole('heading', { name: 'Calculus I' });
+    (fetch as any).mockImplementationOnce(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: undefined });
+      return { ok: true, status: 200, json: async () => ({ id: 'nb-calc', title: 'Calculus I' }) } as Response;
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Quiz me/ }));
+    await waitFor(() => expect(location.hash).toMatch(/^#\/t\/t-[a-z0-9]+$/));
+    const ask = takePendingAsk(location.hash.slice('#/t/'.length));
+    expect(ask).toEqual({ text: 'Quiz me across Calculus I: Derivative, Limits. One question per page, mixed in order.', command: 'quiz' });
   });
 
   it('does not open a conversation when filing it failed, and says why', async () => {
@@ -245,5 +258,23 @@ describe('studyNowMessage', () => {
   it('names every due topic and nothing else, and offers nothing when none is due', () => {
     expect(studyNowMessage(detail as any)).toBe('Review what is due in Calculus I: Derivative. Check me on each before reteaching anything.');
     expect(studyNowMessage({ ...detail, topics: detail.topics.map((t) => ({ ...t, due: false })) } as any)).toBeNull();
+  });
+});
+
+describe('studioActions', () => {
+  it('grounds every action in the notebook’s own pages, and offers none before it covers a page', () => {
+    const actions = studioActions(detail as any);
+    expect(actions.map((a) => a.label)).toEqual(['Study guide', 'Quiz me', 'Glossary', 'How it connects']);
+    for (const a of actions) expect(a.ask.text).toContain('Derivative, Limits');
+    expect(studioActions({ ...detail, topics: [] } as any)).toEqual([]);
+  });
+});
+
+describe('pendingAsk', () => {
+  it('drops a stored value that is not a message instead of sending it', () => {
+    sessionStorage.setItem('myelin.pendingAsk.t-x', 'plain old string');
+    expect(takePendingAsk('t-x')).toBeNull();
+    sessionStorage.setItem('myelin.pendingAsk.t-y', JSON.stringify({ text: 'hi', command: 'not-a-command' }));
+    expect(takePendingAsk('t-y')).toEqual({ text: 'hi' });
   });
 });

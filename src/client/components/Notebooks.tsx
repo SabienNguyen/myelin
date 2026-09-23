@@ -14,7 +14,7 @@ import {
 } from '../lib/api.js';
 import { notebookHash, serializeHash } from '../lib/urlState.js';
 import { relativeTime } from './HistoryMenu.js';
-import { setPendingAsk } from '../lib/pendingAsk.js';
+import { setPendingAsk, type PendingAsk } from '../lib/pendingAsk.js';
 
 const LEVELS: NotebookLevel[] = ['mastered', 'practicing', 'exposed', 'unseen'];
 const LEVEL_LABEL: Record<NotebookLevel, string> = {
@@ -29,11 +29,44 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 /** Opens a fresh conversation already filed under the notebook, so its first turn's bootstrap
  *  (session.ts) knows which notebook it is in. With `firstMessage`, the conversation opens by
  *  sending it (lib/pendingAsk.ts). */
-async function startConversation(notebookId: string, firstMessage?: string): Promise<void> {
+async function startConversation(notebookId: string, first?: PendingAsk): Promise<void> {
   const threadId = `t-${Date.now().toString(36)}`;
   await fileThread(notebookId, threadId);
-  if (firstMessage) setPendingAsk(threadId, firstMessage);
+  if (first) setPendingAsk(threadId, first);
   location.hash = threadHref(threadId);
+}
+
+export interface StudioAction { label: string; hint: string; ask: PendingAsk }
+
+/**
+ * NotebookLM's Studio, done by the tutor: each action opens a conversation in this notebook that
+ * asks for one kind of study material, grounded in the notebook's own pages by name — so what comes
+ * back is built from the learner's material, with the tutor's usual rules (cite pages, check before
+ * crediting) rather than a one-shot generator's. Empty for a notebook that covers no page yet:
+ * there is nothing of its own to build from. Pure.
+ */
+export function studioActions(detail: Pick<NotebookDetail, 'notebook' | 'topics'>): StudioAction[] {
+  if (detail.topics.length === 0) return [];
+  const title = detail.notebook.title;
+  const pages = detail.topics.map((t) => t.title).join(', ');
+  return [
+    {
+      label: 'Study guide', hint: 'key ideas, an example and a common mistake per page',
+      ask: { text: `Write a study guide for ${title} from its pages: ${pages}. For each page give the key idea, one worked example and one common mistake, and name the page each part comes from.` },
+    },
+    {
+      label: 'Quiz me', hint: 'one quiz across the whole notebook',
+      ask: { text: `Quiz me across ${title}: ${pages}. One question per page, mixed in order.`, command: 'quiz' },
+    },
+    {
+      label: 'Glossary', hint: 'the terms these pages use, defined',
+      ask: { text: `Make a glossary for ${title}: the terms its pages use (${pages}), each with a one-line definition and the page it comes from.` },
+    },
+    {
+      label: 'How it connects', hint: 'which ideas build on which',
+      ask: { text: `Explain how the ideas in ${title} connect: ${pages}. Which build on which, and why does the order matter?` },
+    },
+  ];
 }
 
 /** The "study now" message: what is due, by name, so the tutor starts where the ledger says. */
@@ -333,10 +366,10 @@ export function NotebookView({ id }: { id: string }) {
   }
   useEffect(() => { setDetail(null); load(); }, [id]);
 
-  async function newConversation(firstMessage?: string) {
+  async function newConversation(first?: PendingAsk) {
     setActionError(null);
     try {
-      await startConversation(id, firstMessage);
+      await startConversation(id, first);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     }
@@ -360,6 +393,7 @@ export function NotebookView({ id }: { id: string }) {
   // notebook with no conversation yet lists them as plain text.
   const latest = detail.threads[0]?.id ?? null;
   const studyNow = studyNowMessage(detail);
+  const studio = studioActions(detail);
 
   return (
     <div className="nb-page">
@@ -377,7 +411,7 @@ export function NotebookView({ id }: { id: string }) {
           {/* Anki's "Study now": one click from the deck to the reviews it is waiting on. Offered
               only when something is due, so it never starts a session with nothing to do. */}
           {studyNow && (
-            <button type="button" className="primary" onClick={() => newConversation(studyNow)}>
+            <button type="button" className="primary" onClick={() => newConversation({ text: studyNow })}>
               Review {plural(detail.topics.filter((t) => t.due).length, 'due topic')}
             </button>
           )}
@@ -393,6 +427,22 @@ export function NotebookView({ id }: { id: string }) {
       <MasteryBar mastery={nb.mastery} topics={nb.topics} />
       {nb.topics > 0 && <MasteryLegend />}
       {actionError && <p className="panel-error" role="alert">{actionError}</p>}
+
+      {studio.length > 0 && (
+        <section className="nb-studio" aria-labelledby="nb-studio-h">
+          <h3 id="nb-studio-h" className="nb-subheading">Studio</h3>
+          <ul>
+            {studio.map((a) => (
+              <li key={a.label}>
+                <button type="button" onClick={() => newConversation(a.ask)}>
+                  <span className="nb-studio-label">{a.label}</span>
+                  <span className="nb-studio-hint">{a.hint}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="nb-columns">
         <section className="nb-section" aria-labelledby="nb-conv-h">
