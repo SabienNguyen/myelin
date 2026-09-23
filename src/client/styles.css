@@ -1259,7 +1259,10 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .library-book li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 .q-status {
   display: inline-block;
-  min-width: 4.6em;
+  /* Wide enough for "compiling" in spaced capitals, with its own gap: the title after it is a
+     button whose leading space collapses, so "PENDINGLesson notes" ran together at 4.6em. */
+  min-width: 6.6em;
+  margin-right: 0.4em;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.07em;
