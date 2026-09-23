@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, PageNotebooks, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
+import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, NotebooksSection, PageNotebooks, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
 import { takePendingAsk } from '../../src/client/lib/pendingAsk.js';
 
 const now = new Date().toISOString();
@@ -299,5 +299,17 @@ describe('PageNotebooks', () => {
     expect(link.getAttribute('href')).toBe('#/notebooks/nb-calc');
     rerender(<PageNotebooks slug="alkanes" />);
     await waitFor(() => expect(screen.queryByRole('link')).toBeNull());
+  });
+});
+
+describe('NotebooksSection', () => {
+  it('lists each notebook with its due count and bar, and fetches only while visible', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [summary], unfiled: [] } });
+    const { rerender } = render(<NotebooksSection visible={false} />);
+    expect(calls).toHaveLength(0);
+    rerender(<NotebooksSection visible />);
+    expect((await screen.findByRole('link', { name: 'Calculus I' })).getAttribute('href')).toBe('#/notebooks/nb-calc');
+    expect(screen.getByText('2 due')).toBeTruthy();
+    expect(screen.getByRole('img').getAttribute('aria-label')).toBe('Topics: 1 mastered, 1 practicing, 1 not started');
   });
 });

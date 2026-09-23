@@ -9,6 +9,7 @@ import { PathsSection } from './PathsSection.js';
 import { CoursePractice } from './CoursePractice.js';
 import { Collapsible } from './Collapsible.js';
 import { LinkDirectory } from './LinkDirectory.js';
+import { NotebooksSection } from './Notebooks.js';
 
 type Entry = {
   book: string; chapter: string; title: string; status: string; error?: string; startedAt?: string;
@@ -258,6 +259,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
         {/* Review first in BOTH branches — what is about to slip outranks adding new material,
             which is the whole argument of spaced repetition. */}
         <ReviewQueue visible={visible} />
+        <NotebooksSection visible={visible} />
         {/* Paths belong in BOTH branches. This one — an empty compile queue — is the new learner's
             state, and it is exactly when a syllabus matters most: they may have a path and no books
             at all. Omitting it here hid the whole feature for the default case. */}
@@ -280,6 +282,7 @@ export function LibraryPanel({ visible = true }: { visible?: boolean }) {
       <ProgressCard visible={visible} />
       <DecayHorizon visible={visible} />
       <ReviewQueue visible={visible} />
+      <NotebooksSection visible={visible} />
       {/* Paths next — the syllabus is the frame the books and practice rows sit inside. */}
       <PathsSection visible={visible} />
       <div className="library-actions">

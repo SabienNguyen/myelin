@@ -14,6 +14,7 @@ import {
 } from '../lib/api.js';
 import { notebookHash, serializeHash } from '../lib/urlState.js';
 import { relativeTime } from './HistoryMenu.js';
+import { Collapsible } from './Collapsible.js';
 import { setPendingAsk, type PendingAsk } from '../lib/pendingAsk.js';
 
 const LEVELS: NotebookLevel[] = ['mastered', 'practicing', 'exposed', 'unseen'];
@@ -665,5 +666,47 @@ export function PageNotebooks({ slug }: { slug: string }) {
         </a>
       ))}
     </>
+  );
+}
+
+/** The Library's per-subject progress: each notebook's mastery bar and what is due, one click from
+ *  the notebook itself. The Library's own progress card is the whole vault; this is the same read
+ *  split by the subjects the learner named. Fetches only while the Library is on screen. */
+export function NotebooksSection({ visible = true }: { visible?: boolean }) {
+  const [data, setData] = useState<NotebookSummary[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    getNotebooks()
+      .then((d) => { if (!cancelled) { setData(Array.isArray(d.notebooks) ? d.notebooks : []); setError(null); } })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { cancelled = true; };
+  }, [visible]);
+  if (error) return <p className="panel-error" role="status">{error}</p>;
+  if (!data) return null;
+  return (
+    <Collapsible id="notebooks" className="nb-library" title="Notebooks">
+      {data.length === 0
+        ? (
+          <p className="empty">
+            No notebooks yet. <a href={notebookHash()}>Group a subject’s conversations and sources</a> to see its progress here.
+          </p>
+        )
+        : (
+          <ul className="nb-library-list">
+            {data.map((nb) => (
+              <li key={nb.id}>
+                <div className="nb-library-head">
+                  <a href={notebookHash(nb.id)} className="nb-row-title">{nb.title}</a>
+                  {nb.due > 0 && <span className="nb-pill nb-pill--due">{nb.due} due</span>}
+                  <span className="nb-row-time">{plural(nb.topics, 'topic')}</span>
+                </div>
+                <MasteryBar mastery={nb.mastery} topics={nb.topics} />
+              </li>
+            ))}
+          </ul>
+        )}
+    </Collapsible>
   );
 }

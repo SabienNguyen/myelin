@@ -3263,3 +3263,8 @@ button.nb-delete:hover { background: var(--bg-inset); }
 /* The right answer under a ✗ (Quiz.tsx, QuickCheck.tsx): quiet, but there. */
 .quiz-expected { color: var(--text-muted); font-size: 0.9em; }
 p.quiz-expected { margin: 0.3rem 0 0; }
+
+/* The Library's per-notebook progress (Notebooks.tsx NotebooksSection). */
+.nb-library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.nb-library-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; font-size: 0.9rem; }
+.nb-library { margin-bottom: 1.5rem; }
