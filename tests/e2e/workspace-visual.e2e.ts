@@ -7,8 +7,11 @@ for (const colorScheme of ['dark', 'light'] as const) {
     page.on('pageerror', e => errors.push(e.message));
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto(`/#/t/visual-${colorScheme}/page/stream-consumer`);
-    await expect(page.locator('.page-panel h2')).toHaveText('Consuming SSE token streams');
+    // Anchored on global-setup's own hub page, not the boot-seeded 'stream-consumer' stub: /api/graph
+    // hides an untouched built-in stub, so this spec only passed after gap-exercise.e2e.ts had
+    // recorded evidence on it, and failed run alone — the same fix graph-contextual.e2e.ts got.
+    await page.goto(`/#/t/visual-${colorScheme}/page/stream-basics`);
+    await expect(page.locator('.page-panel h2')).toHaveText('Stream Basics');
     await page.getByRole('tab', {name:'graph', exact:true}).click();
     // sigma mounts SEVERAL layered canvases (edges/nodes/labels/hovers/mouse…) into .graph-canvas —
     // .first() picks one deterministically rather than a strict-mode violation on all of them.
@@ -23,7 +26,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
     // "the graph tab rendered real, coherent content" rather than an empty or broken canvas.
     const topics = page.getByRole('region', { name: 'Topics in this view' });
     await expect(topics).toBeVisible();
-    await expect(topics.getByRole('button', { name: /^Open Consuming SSE token streams/ })).toBeVisible();
+    await expect(topics.getByRole('button', { name: /^Open Stream Basics/ })).toBeVisible();
     await page.screenshot({path:`test-results/workspace-${colorScheme}.png`, fullPage:true});
     const graph = page.getByRole('tab', {name:'graph',exact:true});
     await graph.focus();
