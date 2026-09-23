@@ -8,6 +8,7 @@ import {
   createTutorSession, guardMcpTools, isProgressQuestion, isSelectedPassage, relatedPattern,
   turnBlockTools,
 } from '../src/server/session.js';
+import { attachThread, createNotebook } from '../src/server/notebookStore.js';
 import { streamModel, turnsModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
 import { readQueue } from '../src/server/queueStore.js';
@@ -164,6 +165,20 @@ describe('evidence guardrail', () => {
   // breakpoints reuse, so per-turn HARNESS notes go at the TAIL (after the history) and only the
   // first turn's bootstrap leads. A prepended note would shift every byte of the history and
   // force a full input re-read on that turn and the next.
+  it('tells the tutor which notebook a filed conversation belongs to, and only that one', async () => {
+    const nb = createNotebook(vault, 'Arithmetic drills');
+    attachThread(vault, nb.id, 'nb-filed');
+    const filed = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model: filed.model });
+    await (await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn', 'nb-filed')).text();
+    expect(JSON.stringify(filed.calls[0].messages)).toMatch(/notebook \\"Arithmetic drills\\"/);
+
+    const loose = textOnly();
+    const other = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model: loose.model });
+    await (await other.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn', 'nb-loose')).text();
+    expect(JSON.stringify(loose.calls[0].messages)).not.toMatch(/Notebook:/);
+  });
+
   it('puts per-turn harness notes at the tail of the transcript, bootstrap at the head', async () => {
     const { model, calls } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,

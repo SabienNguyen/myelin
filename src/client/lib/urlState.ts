@@ -50,3 +50,18 @@ export function serializeHash(state: Omit<UrlState, 'tabExplicit'>): string {
   if (state.tab !== 'stage' && state.tab !== 'page') return `${base}/${state.tab}`;
   return base;
 }
+
+/** The notebooks screens live outside the thread scheme: `#/notebooks` is the home grid and
+ *  `#/notebooks/<id>` one notebook. Returns null for any hash that is not one of them, so a thread
+ *  hash still goes through parseHash untouched. An id that fails the allowlist is treated as the
+ *  home grid rather than a notebook nobody can load. */
+export function parseNotebookRoute(hash: string): { notebookId: string | null } | null {
+  const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  if (parts[0] !== 'notebooks') return null;
+  const id = parts[1];
+  return { notebookId: id && THREAD_ID_RE.test(id) ? id : null };
+}
+
+export function notebookHash(notebookId?: string | null): string {
+  return notebookId && THREAD_ID_RE.test(notebookId) ? `#/notebooks/${notebookId}` : '#/notebooks';
+}

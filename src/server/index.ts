@@ -16,6 +16,7 @@ import { Engram } from './mcp.js';
 import { buildRestRoutes } from './restRoutes.js';
 import { buildChatRoute } from './chatRoute.js';
 import { buildIngestRoutes } from './ingestRoutes.js';
+import { buildNotebookRoutes } from './notebookRoutes.js';
 import { buildBuiltinGapRoutes } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { buildGapHelpRoute } from './gapHelp.js';
@@ -176,6 +177,7 @@ if (lw) {
   }, anki));
   app.route('/', buildChatRoute(lw, cfg));
   app.route('/', buildIngestRoutes(lw, cfg));
+  app.route('/', buildNotebookRoutes(lw, cfg));
 }
 // The coding sandbox runs in-process — no external sidecar to route to (see docs/superpowers/
 // plans/2026-07-20-gap-integration.md for the retired external design).

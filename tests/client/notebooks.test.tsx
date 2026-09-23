@@ -1,0 +1,177 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { NotebookCrumb, NotebookView, NotebooksHome } from '../../src/client/components/Notebooks.js';
+
+const now = new Date().toISOString();
+const summary = {
+  id: 'nb-calc', title: 'Calculus I', createdAt: now,
+  sources: 1, chats: 2, topics: 3,
+  mastery: { mastered: 1, practicing: 1, exposed: 0, unseen: 1 },
+  due: 2, lastActive: now,
+};
+const detail = {
+  notebook: summary,
+  threads: [
+    { id: 't-new', title: 'why is the derivative a limit?', updatedAt: now, messages: 4 },
+    { id: 't-old', title: 'limits from scratch', updatedAt: now, messages: 6 },
+  ],
+  sources: [{ book: 'spivak', title: 'Spivak, Calculus', authors: ['Michael Spivak'] }],
+  library: [
+    { book: 'spivak', title: 'Spivak, Calculus', authors: ['Michael Spivak'] },
+    { book: 'notes', title: 'Lecture notes, week 3', authors: [] },
+  ],
+  topics: [
+    { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true },
+    { slug: 'limits', title: 'Limits', level: 'mastered', due: false },
+  ],
+};
+
+type Call = { url: string; method: string; body: any };
+let calls: Call[];
+let routes: Record<string, (c: Call) => { status?: number; body: unknown }>;
+
+beforeEach(() => {
+  calls = [];
+  routes = {};
+  location.hash = '';
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const call = { url, method: init?.method ?? 'GET', body: init?.body ? JSON.parse(String(init.body)) : undefined };
+    calls.push(call);
+    const handler = routes[`${call.method} ${url}`];
+    if (!handler) throw new Error(`unexpected ${call.method} ${url}`);
+    const { status = 200, body } = handler(call);
+    return { ok: status < 400, status, json: async () => body } as Response;
+  }));
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+describe('NotebooksHome', () => {
+  it('shows each notebook with what is due, its counts and its mastery, and lists loose conversations', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [summary], unfiled: [{ id: 't-loose', title: 'something unrelated', updatedAt: now, messages: 2 }] } });
+    render(<NotebooksHome />);
+    const card = await screen.findByRole('link', { name: /Calculus I/ });
+    expect(card.getAttribute('href')).toBe('#/notebooks/nb-calc');
+    expect(within(card).getByText('2 reviews due')).toBeTruthy();
+    expect(within(card).getByText('1 source · 2 conversations · 3 topics')).toBeTruthy();
+    expect(within(card).getByRole('img').getAttribute('aria-label')).toBe('Topics: 1 mastered, 1 practicing, 1 not started');
+    expect(screen.getByRole('link', { name: 'something unrelated' }).getAttribute('href')).toBe('#/t/t-loose');
+  });
+
+  it('files a loose conversation under a notebook and refreshes', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [summary], unfiled: [{ id: 't-loose', title: 'something unrelated', updatedAt: now, messages: 2 }] } });
+    routes['PUT /api/notebooks/nb-calc/threads/t-loose'] = () => ({ body: { id: 'nb-calc', title: 'Calculus I' } });
+    render(<NotebooksHome />);
+    fireEvent.change(await screen.findByLabelText('File “something unrelated” under a notebook'), { target: { value: 'nb-calc' } });
+    await waitFor(() => expect(calls.filter((c) => c.url === '/api/notebooks')).toHaveLength(2));
+    expect(calls.some((c) => c.method === 'PUT' && c.url === '/api/notebooks/nb-calc/threads/t-loose')).toBe(true);
+  });
+
+  it('creates a notebook and opens it', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [], unfiled: [] } });
+    routes['POST /api/notebooks'] = (c) => ({ status: 201, body: { id: 'nb-new', title: c.body.title } });
+    render(<NotebooksHome />);
+    expect(await screen.findByText(/No notebooks yet/)).toBeTruthy();
+    const create = screen.getByRole('button', { name: 'Create' }) as HTMLButtonElement;
+    expect(create.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('New notebook'), { target: { value: 'Organic chemistry' } });
+    fireEvent.click(create);
+    await waitFor(() => expect(location.hash).toBe('#/notebooks/nb-new'));
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ title: 'Organic chemistry' });
+  });
+
+  it('says what failed when the notebooks cannot load', async () => {
+    routes['GET /api/notebooks'] = () => ({ status: 500, body: {} });
+    render(<NotebooksHome />);
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Couldn’t load your notebooks/);
+  });
+});
+
+describe('NotebookView', () => {
+  beforeEach(() => {
+    routes['GET /api/notebooks/nb-calc'] = () => ({ body: detail });
+  });
+
+  it('lists conversations, sources and topics, due first, with topics opening in the latest conversation', async () => {
+    render(<NotebookView id="nb-calc" />);
+    expect(await screen.findByRole('heading', { name: 'Calculus I' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'limits from scratch' }).getAttribute('href')).toBe('#/t/t-old');
+    expect(screen.getByText('Spivak, Calculus')).toBeTruthy();
+    const topics = screen.getByRole('region', { name: 'Topics' });
+    const links = within(topics).getAllByRole('link');
+    expect(links.map((a) => a.textContent)).toEqual(['Derivative', 'Limits']);
+    expect(links[0].getAttribute('href')).toBe('#/t/t-new/page/derivative');
+    expect(within(topics).getByText('due')).toBeTruthy();
+  });
+
+  it('starts a conversation already filed under the notebook', async () => {
+    render(<NotebookView id="nb-calc" />);
+    await screen.findByRole('heading', { name: 'Calculus I' });
+    (fetch as any).mockImplementationOnce(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: undefined });
+      return { ok: true, status: 200, json: async () => ({ id: 'nb-calc', title: 'Calculus I' }) } as Response;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
+    await waitFor(() => expect(location.hash).toMatch(/^#\/t\/t-[a-z0-9]+$/));
+    const threadId = location.hash.slice('#/t/'.length);
+    expect(calls.at(-1)).toMatchObject({ method: 'PUT', url: `/api/notebooks/nb-calc/threads/${threadId}` });
+  });
+
+  it('does not open a conversation when filing it failed, and says why', async () => {
+    render(<NotebookView id="nb-calc" />);
+    await screen.findByRole('heading', { name: 'Calculus I' });
+    (fetch as any).mockImplementationOnce(async () =>
+      ({ ok: false, status: 404, json: async () => ({ error: 'no notebook "nb-calc"' }) }) as Response);
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Couldn’t file the conversation: no notebook "nb-calc".');
+    expect(location.hash).toBe('');
+  });
+
+  it('chooses sources from the Library and saves the whole list', async () => {
+    routes['PATCH /api/notebooks/nb-calc'] = () => ({ body: { id: 'nb-calc', title: 'Calculus I' } });
+    render(<NotebookView id="nb-calc" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'choose sources' }));
+    const spivak = screen.getByRole('checkbox', { name: /Spivak, Calculus/ }) as HTMLInputElement;
+    expect(spivak.checked).toBe(true);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Lecture notes, week 3/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save sources' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ sources: ['spivak', 'notes'] });
+  });
+
+  it('deletes only after the confirmation, then returns to the home grid', async () => {
+    routes['DELETE /api/notebooks/nb-calc'] = () => ({ body: { deleted: 'nb-calc' } });
+    render(<NotebookView id="nb-calc" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'delete notebook' }));
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog.textContent).toMatch(/Its conversations and sources are kept/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete notebook' }));
+    await waitFor(() => expect(location.hash).toBe('#/notebooks'));
+  });
+
+  it('renames in place', async () => {
+    routes['PATCH /api/notebooks/nb-calc'] = (c) => ({ body: { id: 'nb-calc', title: c.body.title } });
+    render(<NotebookView id="nb-calc" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'rename' }));
+    fireEvent.change(screen.getByLabelText('Notebook name'), { target: { value: 'Calculus 1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ title: 'Calculus 1' }));
+  });
+});
+
+describe('NotebookCrumb', () => {
+  it('names the notebook a conversation is filed under', async () => {
+    routes['GET /api/thread/t-new/notebook'] = () => ({ body: { id: 'nb-calc', title: 'Calculus I' } });
+    render(<NotebookCrumb threadId="t-new" />);
+    expect((await screen.findByRole('link', { name: 'Calculus I' })).getAttribute('href')).toBe('#/notebooks/nb-calc');
+    expect(screen.getByRole('link', { name: 'Notebooks' }).getAttribute('href')).toBe('#/notebooks');
+  });
+
+  it('shows only the way to the notebooks for a loose conversation', async () => {
+    routes['GET /api/thread/t-loose/notebook'] = () => ({ body: null });
+    render(<NotebookCrumb threadId="t-loose" />);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(screen.getAllByRole('link').map((a) => a.textContent)).toEqual(['Notebooks']);
+  });
+});

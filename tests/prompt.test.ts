@@ -68,6 +68,27 @@ describe('prompt assembly', () => {
     expect(ctx).toMatch(/3\/3 pages known, complete/);
     expect(ctx).not.toMatch(/resume at/);
   });
+  it('names the notebook, its sources and the pages it covers, in chat as in teaching modes', () => {
+    for (const mode of ['chat', 'learn'] as const) {
+      const ctx = buildBootstrapContext({
+        ...base, mode,
+        notebook: { title: 'Calculus I', sources: ['Spivak, Calculus'], topics: ['limits', 'derivative'] },
+      });
+      expect(ctx).toMatch(/notebook "Calculus I"/);
+      expect(ctx).toMatch(/Its sources: Spivak, Calculus\./);
+      expect(ctx).toMatch(/Pages it covers: limits, derivative\./);
+    }
+  });
+  it('caps a long notebook topic list and says how many were left out', () => {
+    const topics = Array.from({ length: 35 }, (_, i) => `p${i}`);
+    const ctx = buildBootstrapContext({ ...base, notebook: { title: 'Big', sources: [], topics } });
+    expect(ctx).toMatch(/p29 \(\+5 more\)/);
+    expect(ctx).not.toMatch(/p30/);
+    expect(ctx).toMatch(/Its sources: none yet/);
+  });
+  it('says nothing about notebooks for a conversation outside one', () => {
+    expect(buildBootstrapContext({ ...base })).not.toMatch(/Notebook:/);
+  });
   it('invites setting a goal when none is active', () => {
     const ctx = buildBootstrapContext({ ...base, goal: null });
     expect(ctx).toMatch(/Active goal: none/);

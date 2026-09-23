@@ -43,6 +43,11 @@ and decays it over time, so the picture moves down as well as up.
   <img src="docs/screenshots/graph.png" alt="The mastery graph after a real sitting" width="520">
 </p>
 
+**Notebooks keep a subject together.** A notebook holds one subject's conversations and the
+Library sources you pick for it. Its card shows what is due and how much of it you have proven, both
+worked out from your evidence every time you open it. A conversation started inside a notebook tells
+the tutor which material to draw on first. Open them from **Notebooks** in the top bar.
+
 ## Why it's different
 
 - **Every subject gets an applied check.** Mechanical checkers for science and structured answers

@@ -9,8 +9,9 @@ import { HistoryMenu } from './components/HistoryMenu.js';
 import { FocusRail } from './components/FocusRail.js';
 import { FirstRun } from './components/FirstRun.js';
 import { AddMaterial } from './components/AddMaterial.js';
+import { NotebookCrumb, NotebookView, NotebooksHome } from './components/Notebooks.js';
 import { panelBus } from './lib/panelBus.js';
-import { parseHash, serializeHash } from './lib/urlState.js';
+import { parseHash, parseNotebookRoute, serializeHash } from './lib/urlState.js';
 
 export function App() {
   // '' means "let the harness decide", which is chat (deriveMode.ts) — the mode selector is gone.
@@ -21,6 +22,9 @@ export function App() {
   // docs/superpowers/specs/2026-07-31-one-mode-design.html and plans/2026-09-22-chat-first.md.
   const [mode, setMode] = useState('');
   const [threadId, setThreadId] = useState(() => parseHash(location.hash).threadId);
+  // The notebooks screens (#/notebooks, #/notebooks/<id>) replace the chat workspace; null means
+  // a conversation is open. The thread id above is kept while they show, so Back returns to it.
+  const [notebookRoute, setNotebookRoute] = useState(() => parseNotebookRoute(location.hash));
   // A study session belongs to the conversation it was started in; another thread opens in chat.
   useEffect(() => { setMode(''); }, [threadId]);
 
@@ -74,6 +78,9 @@ export function App() {
 
   useEffect(() => {
     const onHashChange = () => {
+      const route = parseNotebookRoute(location.hash);
+      setNotebookRoute(route);
+      if (route) return;
       const parsed = parseHash(location.hash);
       setThreadId((prev) => (parsed.threadId !== prev ? parsed.threadId : prev));
     };
@@ -87,6 +94,27 @@ export function App() {
 
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
+  const brand = <h1><BookOpenText size={20} weight="duotone" /> Myelin</h1>;
+
+  if (notebookRoute) {
+    return (
+      <FirstRun>
+        <div className="app">
+          <header className="topbar">
+            {brand}
+            <TopbarStatus />
+            <AddMaterial />
+          </header>
+          <main className="notebooks-main">
+            {notebookRoute.notebookId
+              ? <NotebookView id={notebookRoute.notebookId} />
+              : <NotebooksHome />}
+          </main>
+        </div>
+      </FirstRun>
+    );
+  }
+
   return (
     // Setup gate first: with no API key there is no tutor, so a Runtime that cannot answer must not
     // mount and invite a question. Renders `children` untouched once the key is in place.
@@ -96,7 +124,8 @@ export function App() {
     <Runtime key={threadId} mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={setMode}>
       <div className={appClass}>
         <header className="topbar">
-          <h1><BookOpenText size={20} weight="duotone" /> Myelin</h1>
+          {brand}
+          <NotebookCrumb threadId={threadId} />
           <HistoryMenu activeId={threadId} onSelect={selectThread} />
           <TopbarStatus />
           {/* THE add entry point — one control for every kind of material (file, git URL, local

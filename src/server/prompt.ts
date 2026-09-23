@@ -88,6 +88,8 @@ export function buildBootstrapContext(a: {
   courseBank?: CourseProblem[];
   /** Free-text teaching-style preference from config (cfg.voice) — tone, pace, jargon level. */
   voice?: string;
+  /** The notebook this conversation is filed under (notebookStore.ts), when it is in one. */
+  notebook?: { title: string; sources: string[]; topics: string[] } | null;
 }): string {
   // A greeting carries no ask, so the mode framing must not read as one. Without this, "hi" on
   // a fresh thread met "Mode: LEARN. Teach the next suggested lesson." plus the suggestions
@@ -110,6 +112,21 @@ export function buildBootstrapContext(a: {
 vocabulary — it changes HOW you teach, never what counts as evidence.`] : []),
     `Student state: ${JSON.stringify(a.state)}`,
   ];
+
+  // A notebook is the learner saying "this conversation is about THIS material". Every mode gets
+  // it, chat included: it says where to look first, not what to teach, so it cannot become the
+  // forcing chat avoids. Topics are capped — a long-lived notebook can cover hundreds of pages,
+  // and the slug line below already grounds the ids that matter most.
+  if (a.notebook) {
+    const TOPIC_CAP = 30;
+    const shown = a.notebook.topics.slice(0, TOPIC_CAP).join(', ');
+    const more = a.notebook.topics.length > TOPIC_CAP ? ` (+${a.notebook.topics.length - TOPIC_CAP} more)` : '';
+    lines.push(`Notebook: this conversation is in the student's notebook "${a.notebook.title}". `
+      + `Its sources: ${a.notebook.sources.join('; ') || 'none yet'}. `
+      + `Pages it covers: ${shown ? shown + more : 'none yet'}. `
+      + 'When a question fits this material, ground the answer in these pages and sources first; '
+      + 'if the student goes somewhere else, follow them.');
+  }
 
   if (a.mode === 'chat') {
     // Chat is never forced toward what is due — the app surfaces suggestions, reviews and goals on

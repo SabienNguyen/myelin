@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseHash, serializeHash, type UrlState } from '../../src/client/lib/urlState.js';
+import { notebookHash, parseHash, parseNotebookRoute, serializeHash, type UrlState } from '../../src/client/lib/urlState.js';
 
 describe('parseHash', () => {
   it('defaults on an empty hash', () => {
@@ -111,5 +111,22 @@ describe('parseHash/serializeHash round-trip', () => {
 
   it.each(cases)('round-trips %j', (state) => {
     expect(parseHash(serializeHash(state))).toEqual(state);
+  });
+});
+
+describe('parseNotebookRoute / notebookHash', () => {
+  it('recognises the notebooks home and one notebook, and leaves thread hashes alone', () => {
+    expect(parseNotebookRoute('#/notebooks')).toEqual({ notebookId: null });
+    expect(parseNotebookRoute('#/notebooks/nb-abc')).toEqual({ notebookId: 'nb-abc' });
+    expect(parseNotebookRoute('#/t/default')).toBeNull();
+    expect(parseNotebookRoute('')).toBeNull();
+  });
+  it('treats an id outside the allowlist as the home grid, not a notebook', () => {
+    expect(parseNotebookRoute('#/notebooks/..%2Fetc')).toEqual({ notebookId: null });
+    expect(notebookHash('../x')).toBe('#/notebooks');
+  });
+  it('round-trips', () => {
+    expect(parseNotebookRoute(notebookHash('nb-1'))).toEqual({ notebookId: 'nb-1' });
+    expect(notebookHash()).toBe('#/notebooks');
   });
 });

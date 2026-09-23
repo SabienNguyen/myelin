@@ -25,7 +25,8 @@ import { readGoal, pathProgress } from './goalStore.js';
 import { buildBootstrapContext, buildInstructions, type Mode, type TurnFacts } from './prompt.js';
 import { readSources } from './provenance.js';
 import { lastUserText } from './deriveMode.js';
-import { logGuardrail, saveThread } from './sessionStore.js';
+import { loadThread, logGuardrail, saveThread } from './sessionStore.js';
+import { notebookForThread, notebookTopics } from './notebookStore.js';
 import { readStance, STANCE_INSTRUCTIONS } from './stanceStore.js';
 import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
@@ -453,15 +454,25 @@ const TOPIC_TOOLS = new Set(['record_evidence', 'write_page', 'read_page']);
  *  null. Pure. Lets vaultGap check the page a continuation turn ("ok", "lets go!") is actually
  *  continuing, instead of giving up because the turn itself names no topic. */
 export function threadTopic(messages: UIMessage[]): string | null {
-  let topic: string | null = null;
+  return topicSlugs(messages).at(-1) ?? null;
+}
+
+/** Every page this thread worked on, first-seen order, no repeats — a notebook's topics are the
+ *  union of these across its conversations (notebookStore.ts's notebookTopics). Pure. */
+export function pagesTouched(messages: UIMessage[]): string[] {
+  return [...new Set(topicSlugs(messages))];
+}
+
+function topicSlugs(messages: UIMessage[]): string[] {
+  const slugs: string[] = [];
   for (const m of messages) {
-    for (const p of m.parts) {
+    for (const p of m.parts ?? []) {
       if (!isToolUIPart(p) || !TOPIC_TOOLS.has(getToolName(p))) continue;
       const slug = (p.input as { slug?: unknown } | undefined)?.slug;
-      if (typeof slug === 'string') topic = slug;
+      if (typeof slug === 'string') slugs.push(slug);
     }
   }
-  return topic;
+  return slugs;
 }
 
 /** The first sentence of an aside's markdown answer, for the HARNESS note that tells the tutor
@@ -990,8 +1001,19 @@ export function createTutorSession(
 ) {
   // Keep thread state here; resolve the configured model inside each respond call.
 
-  async function bootstrap(mode: Mode, slugs: string[], greeting = false): Promise<string> {
+  async function bootstrap(mode: Mode, slugs: string[], threadId: string, greeting = false): Promise<string> {
     const activeGoal = readGoal(cfg.vault);
+    // The notebook this conversation is filed under, if any: its title, its sources' titles and
+    // the pages it already covers, so the tutor draws on the learner's own material first. Derived
+    // the same way the notebook view derives it (notebookTopics), so the two cannot disagree.
+    const nb = notebookForThread(cfg.vault, threadId);
+    const known = new Set(slugs);
+    const sources = nb ? readSources(cfg.vault) : [];
+    const notebook = nb && {
+      title: nb.title,
+      sources: sources.filter((s) => nb.sources.includes(s.book)).map((s) => s.title),
+      topics: notebookTopics(nb, (t) => pagesTouched(loadThread(cfg.vault, t) as UIMessage[]), sources, (s) => known.has(s)),
+    };
     const [state, lessonsRes] = await Promise.all([
       lw.call('get_student_state', { student: cfg.student }),
       // A page-kind goal narrows next_lessons to the prerequisite walk toward it (queries.ts's
@@ -1027,6 +1049,7 @@ export function createTutorSession(
       goal: goalCtx,
       emptyVault: slugs.length === 0,
       courseBank: readBank(cfg.vault),
+      notebook,
     });
     // Ground the model in the REAL page ids — small models otherwise invent slugs like
     // "derivatives-introduction" and every downstream slug-taking call fails. Capped at scale:
@@ -1034,6 +1057,7 @@ export function createTutorSession(
     const relevant = [
       ...lessons.map((l: any) => l.slug),
       ...(goalCtx?.pages ?? []),
+      ...(notebook?.topics ?? []),
       ...readBank(cfg.vault).map((p) => `course-${p.source}`),
     ];
     return `${ctx}\n${slugListLine(slugs, relevant)}`;
@@ -1340,12 +1364,12 @@ export function createTutorSession(
         const leading: ChatMessage[] = [];
         const trailing: ChatMessage[] = [];
         const openedWithGreeting = isBareGreeting(lastUserText(messages));
-        if (isFirstTurn) leading.push(userTurn(await bootstrap(mode, slugs, openedWithGreeting)));
+        if (isFirstTurn) leading.push(userTurn(await bootstrap(mode, slugs, threadId, openedWithGreeting)));
         else if (modeSwitched) trailing.push(userTurn(
           `HARNESS: the student just switched the tutor mode to ${mode.toUpperCase()}. `
           + 'Fresh session context follows — trust it over anything earlier in this conversation '
           + '(mastery and due reviews may have changed since the conversation started).\n\n'
-          + await bootstrap(mode, slugs, openedWithGreeting),
+          + await bootstrap(mode, slugs, threadId, openedWithGreeting),
         ));
         // The thread's stance (/beginner|/intermediate|/advanced — stanceStore.ts) rides EVERY
         // turn while set, as a tail note under the same Tier-2 cache-prefix rule as the notes

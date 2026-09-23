@@ -7,6 +7,7 @@ import { createTutorSession } from './session.js';
 import { deriveMode, lastUserText } from './deriveMode.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { clearStance, setStance } from './stanceStore.js';
+import { forgetThread } from './notebookStore.js';
 import { MODES, type Mode } from './prompt.js';
 import { detachedResponse } from './detachedResponse.js';
 import { TurnStalled } from './turnError.js';
@@ -173,6 +174,7 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
       return c.json({ error: e?.message ?? String(e) }, 400);
     }
     clearStance(cfg.vault, c.req.param('id'));
+    forgetThread(cfg.vault, c.req.param('id'));
     return c.body(null, 204);
   });
   return app;

@@ -10,6 +10,7 @@ import type { HarnessConfig } from './config.js';
 import { expand } from './config.js';
 import { getGraphCached, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
+import { isDue } from './notebookStore.js';
 import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
 import { readBank } from './courseBank.js';
 import { BUILTIN_PATTERN_SLUGS } from './seedPatternPages.js';
@@ -515,11 +516,11 @@ export function buildRestRoutes(
       .catch(() => slug);
 
   app.get('/api/due', async (c) => {
-    const DUE_SOON_DAYS = 5;
     const CAP = 12;
     const state = await lw.call('get_student_state', { student: cfg.student }) as Record<string, any>;
     const entries = Object.entries(state)
-      .filter(([, m]) => m && typeof m === 'object')
+      // isDue is shared with the notebook cards, so a notebook's "3 due" and this queue agree.
+      .filter(([, m]) => m && typeof m === 'object' && isDue(m))
       .map(([slug, m]) => ({
         slug,
         level: m.level as string,
@@ -527,7 +528,6 @@ export function buildRestRoutes(
         daysLeft: (m.days_left ?? null) as number | null,
         slipped: m.slipped === true,
       }))
-      .filter((e) => e.slipped || (e.daysLeft !== null && e.daysLeft <= DUE_SOON_DAYS))
       .sort((a, b) => (a.slipped === b.slipped ? (a.daysLeft ?? 0) - (b.daysLeft ?? 0) : a.slipped ? -1 : 1));
     // `total` before the cap: the cap keeps the LIST humane, but hiding that more exist — and a
     // badge reading 12 when 15 have slipped — is a silent lie the load test caught.
