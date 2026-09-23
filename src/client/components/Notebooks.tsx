@@ -14,6 +14,7 @@ import {
 } from '../lib/api.js';
 import { notebookHash, serializeHash } from '../lib/urlState.js';
 import { relativeTime } from './HistoryMenu.js';
+import { setPendingAsk } from '../lib/pendingAsk.js';
 
 const LEVELS: NotebookLevel[] = ['mastered', 'practicing', 'exposed', 'unseen'];
 const LEVEL_LABEL: Record<NotebookLevel, string> = {
@@ -26,11 +27,20 @@ const threadHref = (threadId: string, pageSlug: string | null = null) =>
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Opens a fresh conversation already filed under the notebook, so its first turn's bootstrap
- *  (session.ts) knows which notebook it is in. */
-async function startConversation(notebookId: string): Promise<void> {
+ *  (session.ts) knows which notebook it is in. With `firstMessage`, the conversation opens by
+ *  sending it (lib/pendingAsk.ts). */
+async function startConversation(notebookId: string, firstMessage?: string): Promise<void> {
   const threadId = `t-${Date.now().toString(36)}`;
   await fileThread(notebookId, threadId);
+  if (firstMessage) setPendingAsk(threadId, firstMessage);
   location.hash = threadHref(threadId);
+}
+
+/** The "study now" message: what is due, by name, so the tutor starts where the ledger says. */
+export function studyNowMessage(detail: Pick<NotebookDetail, 'notebook' | 'topics'>): string | null {
+  const due = detail.topics.filter((t) => t.due).map((t) => t.title);
+  if (due.length === 0) return null;
+  return `Review what is due in ${detail.notebook.title}: ${due.join(', ')}. Check me on each before reteaching anything.`;
 }
 
 function MasteryBar({ mastery, topics }: { mastery: Record<NotebookLevel, number>; topics: number }) {
@@ -277,10 +287,10 @@ export function NotebookView({ id }: { id: string }) {
   }
   useEffect(() => { setDetail(null); load(); }, [id]);
 
-  async function newConversation() {
+  async function newConversation(firstMessage?: string) {
     setActionError(null);
     try {
-      await startConversation(id);
+      await startConversation(id, firstMessage);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     }
@@ -303,6 +313,7 @@ export function NotebookView({ id }: { id: string }) {
   // Topics open in the notebook's most recent conversation, where the Page tab can show them; a
   // notebook with no conversation yet lists them as plain text.
   const latest = detail.threads[0]?.id ?? null;
+  const studyNow = studyNowMessage(detail);
 
   return (
     <div className="nb-page">
@@ -316,7 +327,18 @@ export function NotebookView({ id }: { id: string }) {
               <button type="button" className="ghost-btn nb-small" onClick={() => setRenaming(true)}>rename</button>
             </div>
           )}
-        <button type="button" className="primary" onClick={newConversation}>New conversation</button>
+        <div className="nb-actions">
+          {/* Anki's "Study now": one click from the deck to the reviews it is waiting on. Offered
+              only when something is due, so it never starts a session with nothing to do. */}
+          {studyNow && (
+            <button type="button" className="primary" onClick={() => newConversation(studyNow)}>
+              Review {plural(detail.topics.filter((t) => t.due).length, 'due topic')}
+            </button>
+          )}
+          <button type="button" className={studyNow ? '' : 'primary'} onClick={() => newConversation()}>
+            New conversation
+          </button>
+        </div>
       </div>
       <p className="nb-card-meta nb-stats">
         {nb.due > 0 && <span className="nb-pill nb-pill--due">{plural(nb.due, 'review')} due</span>}

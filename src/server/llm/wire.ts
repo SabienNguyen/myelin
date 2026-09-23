@@ -239,7 +239,14 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
       void (async () => {
         try {
           await opts.execute(writer, abort.signal);
-          if (!abort.signal.aborted && !producedSomething()) closeWith(emptyText);
+          // An empty turn is a failed turn, and says so in its finish reason as well as its note:
+          // with a plain 'stop' the client took the note for an answer — it offered "check my
+          // understanding" of "returned nothing", and a graded block's auto-resubmit could loop on
+          // a model that keeps returning nothing.
+          if (!abort.signal.aborted && !producedSomething()) {
+            closeWith(emptyText);
+            finishReason = 'error';
+          }
         } catch (e) {
           // No error chunk on an aborted turn: the client is gone, and were it somehow still
           // reading, "aborted" is not a turn failure worth an error bubble. The closing note is
@@ -249,7 +256,10 @@ export function createUiStream(opts: CreateUiStreamOptions): Response {
             // Aborts are silent by default — Stop and a superseding send need no words. The one
             // that does is a stall the watchdog ended, which abortText recognizes by reason.
             const note = opts.abortText?.(abort.signal.reason);
-            if (note !== undefined && !producedSomething()) closeWith(note);
+            if (note !== undefined && !producedSomething()) {
+              closeWith(note);
+              finishReason = 'error'; // a stall the watchdog ended is a failure, as above
+            }
           } else {
             closeWith(onError(e));
             // No 'error' chunk beside the note: the client renders one as an ⚠ bubble UNDER the

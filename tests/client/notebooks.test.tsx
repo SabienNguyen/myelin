@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, notebookStarters } from '../../src/client/components/Notebooks.js';
+import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, notebookStarters, studyNowMessage } from '../../src/client/components/Notebooks.js';
+import { takePendingAsk } from '../../src/client/lib/pendingAsk.js';
 
 const now = new Date().toISOString();
 const summary = {
@@ -118,6 +119,21 @@ describe('NotebookView', () => {
     expect(calls.at(-1)).toMatchObject({ method: 'PUT', url: `/api/notebooks/nb-calc/threads/${threadId}` });
   });
 
+  it('offers reviewing what is due, opening a filed conversation that asks for exactly those topics', async () => {
+    render(<NotebookView id="nb-calc" />);
+    await screen.findByRole('heading', { name: 'Calculus I' });
+    (fetch as any).mockImplementationOnce(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: undefined });
+      return { ok: true, status: 200, json: async () => ({ id: 'nb-calc', title: 'Calculus I' }) } as Response;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review 1 due topic' }));
+    await waitFor(() => expect(location.hash).toMatch(/^#\/t\/t-[a-z0-9]+$/));
+    const threadId = location.hash.slice('#/t/'.length);
+    expect(calls.at(-1)).toMatchObject({ method: 'PUT', url: `/api/notebooks/nb-calc/threads/${threadId}` });
+    expect(takePendingAsk(threadId)).toBe('Review what is due in Calculus I: Derivative. Check me on each before reteaching anything.');
+    expect(takePendingAsk(threadId)).toBeNull(); // sent once, never twice
+  });
+
   it('does not open a conversation when filing it failed, and says why', async () => {
     render(<NotebookView id="nb-calc" />);
     await screen.findByRole('heading', { name: 'Calculus I' });
@@ -213,5 +229,12 @@ describe('NotebookIntro', () => {
     expect(screen.getByRole('link', { name: 'Calculus I' }).getAttribute('href')).toBe('#/notebooks/nb-calc');
     fireEvent.click(screen.getByRole('button', { name: /Review Derivative with me/ }));
     expect(onAsk).toHaveBeenCalledWith('Review Derivative with me');
+  });
+});
+
+describe('studyNowMessage', () => {
+  it('names every due topic and nothing else, and offers nothing when none is due', () => {
+    expect(studyNowMessage(detail as any)).toBe('Review what is due in Calculus I: Derivative. Check me on each before reteaching anything.');
+    expect(studyNowMessage({ ...detail, topics: detail.topics.map((t) => ({ ...t, due: false })) } as any)).toBeNull();
   });
 });

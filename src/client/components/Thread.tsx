@@ -11,6 +11,7 @@ import { MarkdownText } from './MarkdownText.js';
 import { NotebookIntro, useConversationNotebook } from './Notebooks.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
+import { takePendingAsk } from '../lib/pendingAsk.js';
 
 // P1 FIX (docs/superpowers/plans/2026-07-20-gap-integration.md — post-review): these two must be
 // stable module-scope function references, NOT inline arrow functions inside Thread()'s render
@@ -265,6 +266,17 @@ function ExampleAsks() {
  * dropped, mirroring the composer's own rule (its Send control is disabled mid-run) — queueing a
  * second send behind a running turn is not something any send path here does.
  */
+/** Sends the first message another screen left for this conversation (lib/pendingAsk.ts), once. */
+function PendingAsk({ threadId }: { threadId?: string }) {
+  const composer = useComposerRuntime();
+  useEffect(() => {
+    if (!threadId) return;
+    const text = takePendingAsk(threadId);
+    if (text) { composer.setText(text); composer.send(); }
+  }, [threadId, composer]);
+  return null;
+}
+
 function AskTutorBridge() {
   const composer = useComposerRuntime();
   const thread = useThreadRuntime();
@@ -611,6 +623,7 @@ export function Thread({ mode = '', onModeChange, threadId }: {
   return (
     <ThreadPrimitive.Root className="thread">
       <AskTutorBridge />
+      <PendingAsk threadId={threadId} />
       {/* tabIndex + a name so the transcript can be SCROLLED by keyboard. It is its own scroll
           region (the side panel scrolls independently), and most turns are plain prose with no
           focusable element inside — so without a tab stop of its own, a keyboard-only user has no
