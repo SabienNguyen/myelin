@@ -151,7 +151,11 @@ export interface NotebookSummary {
   due: number; lastActive: string;
 }
 export interface ThreadRow { id: string; title: string; updatedAt: string; messages: number }
-export interface NotebooksPayload { notebooks: NotebookSummary[]; unfiled: ThreadRow[] }
+export interface NotebooksPayload {
+  notebooks: NotebookSummary[]; unfiled: ThreadRow[];
+  /** Library sources no notebook uses yet. Optional: an older server does not send it. */
+  looseSources?: NotebookSource[];
+}
 export interface NotebookSource { book: string; title: string; authors: string[] }
 export interface NotebookTopic { slug: string; title: string; level: NotebookLevel; due: boolean; daysLeft?: number | null }
 export interface NotebookDetail {
@@ -191,8 +195,8 @@ async function sendJson<T>(method: string, path: string, body: unknown, action: 
   return data as T;
 }
 
-export const createNotebook = (title: string) =>
-  sendJson<NotebookRef>('POST', '/api/notebooks', { title }, 'create the notebook');
+export const createNotebook = (title: string, sources?: string[]) =>
+  sendJson<NotebookRef>('POST', '/api/notebooks', sources ? { title, sources } : { title }, 'create the notebook');
 export const renameNotebook = (id: string, title: string) =>
   sendJson<NotebookRef>('PATCH', `/api/notebooks/${encodeURIComponent(id)}`, { title }, 'rename the notebook');
 export const setNotebookSources = (id: string, sources: string[]) =>

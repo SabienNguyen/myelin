@@ -93,6 +93,23 @@ describe('notebook routes', () => {
     expect(await (await app.request('/api/thread/t-loose/notebook')).json()).toBeNull();
   });
 
+  it('starts a notebook from a loose source in one request, and a bad source creates nothing', async () => {
+    recordSource(vault, { book: 'clayden', title: 'Clayden, Organic Chemistry', authors: ['Jonathan Clayden'], attribution: 'verified', origin: { kind: 'file' }, addedAt: '' });
+    const before = await (await app.request('/api/notebooks')).json();
+    expect(before.looseSources).toEqual([{ book: 'clayden', title: 'Clayden, Organic Chemistry', authors: ['Jonathan Clayden'] }]);
+
+    const bad = await app.request('/api/notebooks', json('POST', { title: 'X', sources: ['ghost'] }));
+    expect(bad.status).toBe(400);
+    expect(readNotebooks(vault)).toEqual([]);
+
+    const res = await app.request('/api/notebooks', json('POST', { title: 'Clayden, Organic Chemistry', sources: ['clayden'] }));
+    expect(res.status).toBe(201);
+    expect((await res.json()).sources).toEqual(['clayden']);
+    const after = await (await app.request('/api/notebooks')).json();
+    expect(after.looseSources).toEqual([]);
+    expect(after.notebooks[0]).toMatchObject({ title: 'Clayden, Organic Chemistry', sources: 1 });
+  });
+
   it('refuses a source list naming a source that does not exist', async () => {
     const { id } = await create('A');
     recordSource(vault, { book: 'notes', title: 'Notes', authors: [], attribution: 'unknown', origin: { kind: 'file' }, addedAt: '' });

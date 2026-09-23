@@ -71,17 +71,23 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const f = await facts();
     const notebooks = readNotebooks(cfg.vault);
     const filed = new Set(notebooks.flatMap((n) => n.threads));
+    const inNotebook = new Set(notebooks.flatMap((n) => n.sources));
     return c.json({
       notebooks: notebooks.map(f.summarize).sort((a, b) => b.lastActive.localeCompare(a.lastActive)),
       // Conversations outside every notebook still have a way back from the home screen.
       unfiled: withMessages(f.threads).filter((t) => !filed.has(t.id)).slice(0, 8),
+      // Library sources no notebook uses yet — each one a notebook waiting to be started.
+      looseSources: f.sources.filter((s) => !inNotebook.has(s.book))
+        .map((s) => ({ book: s.book, title: s.title, authors: s.authors })),
     });
   });
 
   app.post('/api/notebooks', async (c) => {
-    const body = await c.req.json().catch(() => null) as { title?: unknown } | null;
+    const body = await c.req.json().catch(() => null) as { title?: unknown; sources?: unknown } | null;
     try {
-      return c.json(createNotebook(cfg.vault, body?.title), 201);
+      return c.json(createNotebook(cfg.vault, body?.title, new Date(), {
+        sources: body?.sources, known: readSources(cfg.vault),
+      }), 201);
     } catch (e) {
       return fail(c, e);
     }

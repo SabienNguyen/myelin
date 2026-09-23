@@ -81,6 +81,15 @@ describe('NotebooksHome', () => {
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ title: 'Organic chemistry' });
   });
 
+  it('starts a notebook from a loose Library source with that source already in it', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [summary], unfiled: [], looseSources: [{ book: 'clayden', title: 'Clayden, Organic Chemistry', authors: ['Jonathan Clayden'] }] } });
+    routes['POST /api/notebooks'] = (c) => ({ status: 201, body: { id: 'nb-org', title: c.body.title } });
+    render(<NotebooksHome />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start a notebook from Clayden, Organic Chemistry' }));
+    await waitFor(() => expect(location.hash).toBe('#/notebooks/nb-org'));
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ title: 'Clayden, Organic Chemistry', sources: ['clayden'] });
+  });
+
   it('says what failed when the notebooks cannot load', async () => {
     routes['GET /api/notebooks'] = () => ({ status: 500, body: {} });
     render(<NotebooksHome />);

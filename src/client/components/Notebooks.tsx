@@ -118,6 +118,51 @@ function CreateNotebook() {
   );
 }
 
+/**
+ * Library sources no notebook uses yet, each one click from a notebook of its own — the way
+ * NotebookLM starts a notebook from what you give it. The notebook takes the source's title, which
+ * the learner can rename; the source is attached in the same request, so there is never an empty
+ * notebook left behind by a failure.
+ */
+function StartFromSource({ sources }: { sources: NonNullable<NotebooksPayload['looseSources']> }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  async function start(book: string, title: string) {
+    setBusy(book);
+    setError(null);
+    try {
+      const nb = await createNotebook(title, [book]);
+      location.hash = notebookHash(nb.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  }
+  return (
+    <section className="nb-section" aria-labelledby="nb-loose-h">
+      <h3 id="nb-loose-h" className="nb-subheading">Start from a source</h3>
+      <ul className="nb-list">
+        {sources.map((s) => (
+          <li key={s.book} className="nb-row">
+            <span className="nb-row-title">{s.title}</span>
+            {s.authors.length > 0 && <span className="nb-row-time">{s.authors.join(', ')}</span>}
+            <button
+              type="button"
+              className="ghost-btn nb-small nb-action"
+              disabled={busy !== null}
+              aria-label={`Start a notebook from ${s.title}`}
+              onClick={() => start(s.book, s.title)}
+            >
+              {busy === s.book ? 'starting…' : 'start a notebook'}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="panel-error" role="alert">{error}</p>}
+    </section>
+  );
+}
+
 /** A conversation outside every notebook, with a way to file it under one. */
 function UnfiledRow({ thread, notebooks, onFiled }: {
   thread: NotebooksPayload['unfiled'][number]; notebooks: NotebookSummary[]; onFiled: () => void;
@@ -183,6 +228,7 @@ export function NotebooksHome() {
                 <MasteryLegend />
               </>
             )}
+          {(data.looseSources?.length ?? 0) > 0 && <StartFromSource sources={data.looseSources!} />}
           {data.unfiled.length > 0 && (
             <section className="nb-section" aria-labelledby="nb-unfiled-h">
               <h3 id="nb-unfiled-h" className="nb-subheading">Conversations outside a notebook</h3>

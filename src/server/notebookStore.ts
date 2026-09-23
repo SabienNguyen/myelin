@@ -101,12 +101,31 @@ export function notebookForThread(vault: string, threadId: string): Notebook | u
   return readNotebooks(vault).find((n) => n.threads.includes(threadId));
 }
 
-export function createNotebook(vault: string, title: unknown, now = new Date()): Notebook {
+/** Validates a requested source list against the Library: a list of known book names, deduped.
+ *  Unknown books are refused rather than stored — a pointer to a source that does not exist would
+ *  show as a source nobody can open. */
+function validSources(books: unknown, known: SourceRecord[]): string[] {
+  if (!Array.isArray(books) || books.some((b) => typeof b !== 'string')) {
+    throw new Error('sources must be a list of source names');
+  }
+  const knownBooks = new Set(known.map((s) => s.book));
+  const unknown = books.filter((b) => !knownBooks.has(b));
+  if (unknown.length) throw new Error(`no such source: ${unknown.join(', ')}`);
+  return [...new Set(books as string[])];
+}
+
+/** Creates a notebook, optionally with its first sources — validated before the one write, so a
+ *  bad source list creates nothing rather than an empty notebook under a 400. */
+export function createNotebook(
+  vault: string, title: unknown, now = new Date(),
+  opts: { sources?: unknown; known?: SourceRecord[] } = {},
+): Notebook {
   const clean = cleanTitle(title);
+  const sources = opts.sources === undefined ? [] : validSources(opts.sources, opts.known ?? []);
   // Base-36 time plus a short random tail: two notebooks created in the same millisecond (a
   // double-clicked button) must not collide on id.
   const id = `nb-${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const nb: Notebook = { id, title: clean, createdAt: now.toISOString(), threads: [], sources: [] };
+  const nb: Notebook = { id, title: clean, createdAt: now.toISOString(), threads: [], sources };
   return mutate(vault, (notebooks) => ({ next: [...notebooks, nb], result: nb }));
 }
 
@@ -120,8 +139,7 @@ export class NotebookNotFound extends Error {
 /**
  * Renames and/or replaces the source list in ONE write. Both fields are validated before anything
  * is written, so a request whose title is fine but whose sources name a missing book changes
- * nothing — never a rename that half-happened under a 400. Unknown books are refused rather than
- * stored: a pointer to a source that does not exist would show as a source nobody can open.
+ * nothing — never a rename that half-happened under a 400.
  */
 export function updateNotebook(
   vault: string, id: string,
@@ -129,17 +147,7 @@ export function updateNotebook(
   known: SourceRecord[],
 ): Notebook {
   const title = change.title === undefined ? undefined : cleanTitle(change.title);
-  let sources: string[] | undefined;
-  if (change.sources !== undefined) {
-    const books = change.sources;
-    if (!Array.isArray(books) || books.some((b) => typeof b !== 'string')) {
-      throw new Error('sources must be a list of source names');
-    }
-    const knownBooks = new Set(known.map((s) => s.book));
-    const unknown = books.filter((b) => !knownBooks.has(b));
-    if (unknown.length) throw new Error(`no such source: ${unknown.join(', ')}`);
-    sources = [...new Set(books as string[])];
-  }
+  const sources = change.sources === undefined ? undefined : validSources(change.sources, known);
   return mutate(vault, (notebooks) => {
     const i = notebooks.findIndex((n) => n.id === id);
     if (i === -1) throw new NotebookNotFound(id);

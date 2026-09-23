@@ -3097,6 +3097,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .nb-back:hover { color: var(--accent); }
 .nb-title-row { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
 .nb-small { font-size: 0.8rem; color: var(--text-muted); padding: 0.2rem 0.5rem; }
+.nb-small.nb-action { color: var(--accent); }
 .nb-rename { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
 .nb-rename input { width: 18rem; max-width: 100%; }
 .nb-rename .panel-error { flex-basis: 100%; }
