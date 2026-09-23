@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { BLOCK_TOOLS, BLOCK_TOOL_NAMES, type BlockToolName } from '../shared/blocks.js';
 import { UI_TOOLS } from '../shared/uiTools.js';
-import type { UIMessage } from '../shared/uiMessages.js';
+import { isToolUIPart, getToolName, type UIMessage } from '../shared/uiMessages.js';
 import {
   createUiStream, generateMessageId, runLoop, uiMessagesToChatMessages, zeroUsage,
   type ChatMessage, type ChatModel, type LoopTool, type Usage,
@@ -31,9 +31,11 @@ import { recordUsage } from './usageLedger.js';
 import { buildWebTools } from './webTools.js';
 import { generateExercise, listGenerated, tutorReport } from './gap/generated.js';
 import { explainTurnError, stalledText } from './turnError.js';
+import { prepareKeysForBlock } from './answerKey.js';
 import { builtinPatterns, patternChoices } from './gap/service.js';
 import { compileGenerate } from './gap/generateSeam.js';
 import { zodTool } from './zodTool.js';
+import { enqueueLessonNotes, isTeachingTurn, lessonTurnFromParts } from './lessonNotes.js';
 
 // Tools the tutor may use per mode; write/link/compile only in freeform (spec §5).
 const TEACH_TOOLS = ['read_page', 'search', 'get_student_state', 'record_evidence',
@@ -442,6 +444,37 @@ export function toolFitsTurn(name: string, t: {
   return t.research || ASKS_FOR_LITERATURE.test(t.lastUserText);
 }
 
+/** Tool names whose `slug` input names the page a turn was actually working on — as opposed to
+ *  e.g. `search`, whose input is a query, not a page. */
+const TOPIC_TOOLS = new Set(['record_evidence', 'write_page', 'read_page']);
+
+/** The page this thread is currently about: the slug of the most recent record_evidence,
+ *  write_page or read_page tool part (by message order, last part wins) in the UI history, or
+ *  null. Pure. Lets vaultGap check the page a continuation turn ("ok", "lets go!") is actually
+ *  continuing, instead of giving up because the turn itself names no topic. */
+export function threadTopic(messages: UIMessage[]): string | null {
+  let topic: string | null = null;
+  for (const m of messages) {
+    for (const p of m.parts) {
+      if (!isToolUIPart(p) || !TOPIC_TOOLS.has(getToolName(p))) continue;
+      const slug = (p.input as { slug?: unknown } | undefined)?.slug;
+      if (typeof slug === 'string') topic = slug;
+    }
+  }
+  return topic;
+}
+
+/** The first sentence of an aside's markdown answer, for the HARNESS note that tells the tutor
+ *  what the student already knows — the WHOLE answer would double the tail note's length per
+ *  aside and the tutor only needs enough to recognize "already covered", not the full text. Falls
+ *  back to the first ~120 chars when the text has no sentence-ending punctuation at all. */
+export function firstSentence(text: string): string {
+  const trimmed = text.trim();
+  const match = /^[^.!?\n]*[.!?]/.exec(trimmed);
+  if (match) return match[0].trim();
+  return trimmed.length > 120 ? `${trimmed.slice(0, 120)}…` : trimmed;
+}
+
 /** Tool names this thread's assistant turns have already called. */
 export function toolsUsed(messages: UIMessage[]): Set<string> {
   return new Set(messages.filter((m) => m.role === 'assistant')
@@ -666,6 +699,39 @@ export type GapReason =
 
 export interface VaultGap { reason: GapReason; slug?: string; detail: string }
 
+/** The stub / unsourced / thin checks, shared by the search-hit path and the thread-topic
+ *  fallback below — the same page is "not worth teaching from" for the same reasons whichever
+ *  way vaultGap found it. `fallbackStatus` covers search hits, whose status can arrive on the
+ *  hit itself instead of the page's own frontmatter; `currentTopic` only changes the wording, so
+ *  the tutor knows this gap came from continuing a lesson rather than a fresh search. */
+function pageGap(
+  slug: string,
+  page: { meta: { sources?: string[]; status?: string }; body: string },
+  fallbackStatus: string | undefined,
+  currentTopic: boolean,
+): VaultGap | null {
+  const status = page.meta?.status ?? fallbackStatus;
+  const sources = page.meta?.sources ?? [];
+  const body = (page.body ?? '').trim();
+  const suffix = currentTopic ? ' — the lesson’s current topic' : '';
+  if (status === 'stub') {
+    return { reason: 'stub', slug, detail: `“${slug}” is only a stub${suffix}` };
+  }
+  if (sources.length === 0) {
+    return {
+      reason: 'unsourced', slug,
+      detail: `“${slug}” cites no sources — it was written from memory, not checked${suffix}`,
+    };
+  }
+  if (body.length < THIN_BODY_CHARS) {
+    return {
+      reason: 'thin', slug,
+      detail: `“${slug}” is too thin to teach from (${body.length} characters)${suffix}`,
+    };
+  }
+  return null; // a real page on the topic. Teach from it.
+}
+
 interface GapDeps {
   search: (query: string) => Promise<{ slug: string; score: number; status?: string }[]>;
   /** Only called for the single best-matching page, so this costs one file read per turn. */
@@ -717,42 +783,35 @@ export async function vaultGap(
   // vault gap and unlocks research and write_page over a word the student used to say hello.
   if (isBareGreeting(text)) return null;
   const tokens = topicTokens(text);
-  // "ok", "next", "go on" — the student is continuing, not naming a subject. Continuing a lesson the
-  // vault already holds is precisely the case that should stay grounded.
-  if (tokens.length === 0) return null;
 
   try {
-    const hits = await deps.search(tokens.join(' '));
-    const best = hits.find((h) => h.score >= COVERED_SCORE);
-    if (!best) {
-      return { reason: 'no-page', detail: 'no page covers what the student just asked about' };
+    let slug: string;
+    let fallbackStatus: string | undefined;
+    let currentTopic = false;
+    if (tokens.length === 0) {
+      // "ok", "next", "go on" — the turn itself names no subject. That used to mean "nothing to
+      // check", but a continuation is continuing SOMETHING: fall back to the page the thread's
+      // last record_evidence/write_page/read_page named, and apply the same checks to it. Only
+      // when the thread has no topic either (a fresh "hi") is there truly nothing to check.
+      const topic = threadTopic(messages);
+      if (!topic) return null;
+      slug = topic;
+      currentTopic = true;
+    } else {
+      const hits = await deps.search(tokens.join(' '));
+      const best = hits.find((h) => h.score >= COVERED_SCORE);
+      if (!best) {
+        return { reason: 'no-page', detail: 'no page covers what the student just asked about' };
+      }
+      slug = best.slug;
+      fallbackStatus = best.status;
     }
 
     // There IS an on-topic page. Whether it is worth teaching from is a different question.
-    const page = await deps.readPage(best.slug);
-    const status = page.meta?.status ?? best.status;
-    const sources = page.meta?.sources ?? [];
-    const body = (page.body ?? '').trim();
-
-    if (status === 'stub') {
-      return { reason: 'stub', slug: best.slug, detail: `“${best.slug}” is only a stub` };
-    }
-    if (sources.length === 0) {
-      return {
-        reason: 'unsourced',
-        slug: best.slug,
-        detail: `“${best.slug}” cites no sources — it was written from memory, not checked`,
-      };
-    }
-    if (body.length < THIN_BODY_CHARS) {
-      return {
-        reason: 'thin',
-        slug: best.slug,
-        detail: `“${best.slug}” is too thin to teach from (${body.length} characters)`,
-      };
-    }
-    return null; // a real page on the topic. Teach from it.
-  } catch {
+    const page = await deps.readPage(slug);
+    return pageGap(slug, page, fallbackStatus, currentTopic);
+  } catch (e) {
+    console.error('[vault-gap] check failed, treating the turn as covered:', e);
     return null;
   }
 }
@@ -1035,11 +1094,32 @@ export function createTutorSession(
       // ITS stream finishes, so a disconnect mid-answer lost the assistant turn the server had
       // completed. createUiStream mints response ids in the same format the client does, so this
       // save and the client's PUT converge in saveThread's union-by-id.
-      onEnd: ({ messages: finalMessages }) => {
+      onEnd: ({ messages: finalMessages, responseMessage }) => {
         try {
           saveThread(cfg.vault, threadId, finalMessages as unknown[]);
         } catch (e) {
           console.error('[server-side thread save]', e);
+        }
+        // Spec E: a teaching turn's concepts compile into vault pages in the background, through
+        // the existing compile pipeline (ingest.ts). Fire-and-forget and fully isolated from the
+        // save above — a broken lesson-notes queue must never touch the learner's turn, which has
+        // already been served and persisted by the time this runs.
+        try {
+          const turn = lessonTurnFromParts(
+            threadId, threadTopic(finalMessages), (opts.now?.() ?? new Date()).toISOString(),
+            responseMessage,
+          );
+          const teaching = isTeachingTurn(turn, {
+            gradingOnly: resubmitPending,
+            bareGreeting: isBareGreeting(lastUserText(finalMessages)),
+            progressQuestion: isProgressQuestion(lastUserText(finalMessages)),
+          });
+          if (teaching) {
+            void enqueueLessonNotes(cfg.vault, turn, { lw, cfg })
+              .catch((e) => console.error('[lesson-notes] could not queue this turn:', e));
+          }
+        } catch (e) {
+          console.error('[lesson-notes] could not queue this turn:', e);
         }
       },
       // Surface failures to the learner ("degrade loudly") — and to journalctl. A model throw
@@ -1073,7 +1153,7 @@ export function createTutorSession(
           // real cause goes to the log where it can be fixed.
           let grading: Awaited<ReturnType<typeof gradeBlockOutput>>;
           try {
-            grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg);
+            grading = await gradeBlockOutput(p.tool, p.input, p.output, cfg, { keyId: p.toolCallId });
           } catch (e) {
             const why = (e as Error)?.message ?? String(e);
             console.error(`[grade-error] ${p.tool}: ${why}`);
@@ -1196,6 +1276,13 @@ export function createTutorSession(
         // offer is the only possible ending, and the student's "yes" is a real user turn where
         // the tools return. open_source stays available: navigation is not staging work.
         const gradingOnly = resubmitPending;
+        // A greeting that opens the thread withholds EVERY tool: the bootstrap already carries all
+        // the reply needs (what is due, what is suggested). With tools on offer, a live GPT-6 turn
+        // answered from the bootstrap, called next_lessons to fetch the same list again, then wrote
+        // the whole greeting a second time from the result.
+        const greetingOnly = isBareGreeting(lastUserText(messages))
+          && !messages.some((m) => m.role === 'assistant');
+        const serverTools = greetingOnly ? [] : webTools.serverTools;
         const sources = readSources(cfg.vault);
         const tools: LoopTool[] = [
           ...activeMcp,
@@ -1208,7 +1295,7 @@ export function createTutorSession(
           // stageable in the very next turn.
           ...turnBlockTools(gradingOnly, patternChoices(cfg.vault), readingSource,
             topicTokens(lastUserText(messages)), generateTool.length > 0),
-        ].filter((tool) => toolFitsTurn(tool.name, {
+        ].filter((tool) => !greetingOnly && toolFitsTurn(tool.name, {
           language: isLanguageSubject(messages, slugs),
           used: toolsUsed(messages),
           research: gap !== null || mode === 'freeform',
@@ -1217,13 +1304,15 @@ export function createTutorSession(
           lastUserText: lastUserText(messages),
         }));
         const system = `${buildInstructions(turnFacts({
-          tools: [...tools, ...webTools.serverTools].map((t) => t.name), mode, messages,
+          tools: [...tools, ...serverTools].map((t) => t.name), mode, messages,
           emptyVault: slugs.length === 0, bankSize: readBank(cfg.vault).length,
           sources, readingSource, slugs,
         }))}\nThe student's id is "${cfg.student}" — always pass exactly this as the \`student\` argument.`
           + (gradingOnly
             ? '\nTHIS TURN: the block tools are withheld — it is a grading turn. Deliver the grade, record evidence, and END on your offer of the next step; the student will answer.'
-            : '');
+            : greetingOnly
+              ? '\nTHIS TURN: every tool is withheld — the student only greeted you, and the SESSION CONTEXT already holds what you need. Answer from it.'
+              : '');
 
         const isFirstTurn = messages.filter((m) => m.role === 'assistant').length === 0;
         // A mode switch mid-thread re-arms the context injection (see lastModeByThread above).
@@ -1312,6 +1401,22 @@ export function createTutorSession(
         if (grades.length) trailing.push(userTurn(
           `HARNESS: graded block results attached above: ${grades.map((g) => `${g.verdict} (${g.detail})`).join('; ')}. `
           + `You MUST now call record_evidence for: ${JSON.stringify(grades.flatMap((g) => g.evidence))} — then respond to the student.`,
+        ));
+
+        // Inline asides (spec's Approved design, "Afterwards"): the learner may have asked one or
+        // more aside questions about the LAST assistant message — a separate model call
+        // (asideRoute.ts) that never touches this thread's turn count and leaves the pending
+        // block still unanswered. Told here, at the tail like every other HARNESS note, so the
+        // tutor accounts for what the student already knows instead of re-explaining it or
+        // mistaking the aside's own question for the one it is actually waiting on.
+        const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+        const asideParts = ((lastAssistant?.parts ?? []) as any[])
+          .filter((p) => p?.type === 'data-aside' && p?.data);
+        if (asideParts.length) trailing.push(userTurn(
+          'HARNESS: while answering, the student asked aside questions about your last message: '
+          + asideParts.map((p) => `"${p.data.question}" → ${firstSentence(p.data.answer)}`).join('; ')
+          + '. They have that explanation already — build on it, do not repeat it, and still '
+          + 'expect their answer to your pending question.',
         ));
 
         // Rule 8 asks the tutor to pass `resolves` when a graded answer shows a recorded
@@ -1423,9 +1528,14 @@ export function createTutorSession(
           let usage: Usage = zeroUsage();
           try {
             const result = await runLoop({
-              model, system, messages: msgs, tools, serverTools: webTools.serverTools,
+              model, system, messages: msgs, tools, serverTools,
               maxSteps: 24, cache: true, cacheTtl: cfg.cacheTtl, signal: runSignal,
-              onEvent: (e) => writer.forward(e),
+              onEvent: (e) => {
+                // The question goes to the grader the moment it is staged: it decides the answer
+                // while the learner is thinking, and the reply is compared with it (answerKey.ts).
+                if (e.type === 'tool-call') prepareKeysForBlock(e.toolName, e.toolCallId, e.input, cfg);
+                writer.forward(e);
+              },
               onUsage: (u) => { usage = u; },
             });
             usage = result.usage;

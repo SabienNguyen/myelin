@@ -10,7 +10,7 @@ import {
 import { classifyConnectionError, detectOllama, type OllamaState } from './ollamaState.js';
 import {
   applyEnvValues, envShadow, PROVIDER_ENV_KEYS, readSettings, settingsPath, writeSettings,
-  type ProviderEnvKey,
+  type ProviderEnvKey, type RoleObject,
 } from './settings.js';
 
 /** A path as a person would say it. The absolute form of a vault path is four lines of monospace on
@@ -94,11 +94,23 @@ async function consumePull(model: string, job: PullJob, stream: AsyncIterable<Ui
 /** Model ids that need an Anthropic API key: only a plain id routes through the Anthropic API.
  *  `ollama:` is local and `openai:` rides OPENAI_COMPAT_BASE_URL with its own (optional) key —
  *  a setup running every role on a compat endpoint must not be walled at first run demanding an
- *  Anthropic key it will never use. (Found live: an all-openai: config booted into the key gate.) */
+ *  Anthropic key it will never use. (Found live: an all-openai: config booted into the key gate.)
+ *  `oai:` and `groq:` are the same story with their own keyed provider (OPENAI_API_KEY,
+ *  GROQ_API_KEY) — see the oai/groq checks in the PUT handler below for where THEIR key is
+ *  actually enforced, at save time rather than here. */
 export function needsApiKey(cfg: HarnessConfig): string[] {
   return Object.entries(cfg.models)
     .filter(([, r]) => modelRouteFor(r.model) === 'anthropic')
     .map(([role]) => role);
+}
+
+/** The role's saved id as a plain string, whichever form settings.json holds it in — a bare id
+ *  (the common case) or an object hand-tuned for a local model's sampler (settings.ts's
+ *  RoleObject). The GET/PUT contract for this field is `string | null` either way; the object's
+ *  other fields are reported separately (savedHasOverrides), not folded into this one. */
+function savedModelId(value: string | RoleObject | undefined): string | null {
+  if (typeof value === 'string') return value;
+  return value && typeof value.model === 'string' ? value.model : null;
 }
 
 /**
@@ -233,14 +245,24 @@ export function buildSetupRoutes(
     const saved = readSettings();
     const shadow = envShadow();
     return {
-      roles: Object.fromEntries(roleNames().map((r) => [r, {
-        effective: cfg.models[r].model,
-        saved: saved.models?.[r] ?? null,
-        // The live window, from whichever layer set it — the dialog prefills and diffs against
-        // this exactly as it does for the id, so a value from harness.config.json is editable
-        // rather than invisible.
-        contextTokens: cfg.models[r].contextTokens ?? null,
-      }])),
+      roles: Object.fromEntries(roleNames().map((r) => {
+        const rawSaved = saved.models?.[r];
+        const hasOverrides = Boolean(rawSaved) && typeof rawSaved === 'object';
+        return [r, {
+          effective: cfg.models[r].model,
+          // An object-form saved role (a hand-tuned sampler, see settings.ts's RoleObject) still
+          // reports its model id here — this field's contract is `string | null`, never the whole
+          // role object, so a raw object never reaches JSON as if it were an id.
+          saved: savedModelId(rawSaved),
+          // The live window, from whichever layer set it — the dialog prefills and diffs against
+          // this exactly as it does for the id, so a value from harness.config.json is editable
+          // rather than invisible.
+          contextTokens: cfg.models[r].contextTokens ?? null,
+          // Cheap (the raw value is already in hand above) and lets the menu show a small muted
+          // note instead of silently hiding that more than an id is saved for this role.
+          ...(hasOverrides ? { savedHasOverrides: true as const } : {}),
+        }];
+      })),
       // The live value, not the saved one — harness.config.json can set it too, and the checkbox
       // should show what the next turn will actually do.
       env: {
@@ -254,6 +276,7 @@ export function buildSetupRoutes(
         OPENAI_COMPAT_API_KEY: {
           set: Boolean(saved.env?.OPENAI_COMPAT_API_KEY), shadowed: shadow.OPENAI_COMPAT_API_KEY,
         },
+        OPENAI_API_KEY: { set: Boolean(saved.env?.OPENAI_API_KEY), shadowed: shadow.OPENAI_API_KEY },
       },
       savedAt: displayPath(settingsPath()),
     };
@@ -439,6 +462,16 @@ export function buildSetupRoutes(
       }, 400);
     }
 
+    // Same reasoning again for oai: — the endpoint is pinned to api.openai.com, so the key is the
+    // one thing that can be missing, and a keyless call is a 401 in the middle of a lesson.
+    const oaiRole = ids.find(([, id]) => modelRouteFor(id.trim()) === 'oai');
+    if (oaiRole && !(String(env.OPENAI_API_KEY ?? '').trim() || process.env.OPENAI_API_KEY)) {
+      return c.json({
+        error: `model "${oaiRole[1].trim()}" needs an openai api key — fill it in below `
+          + '(create one at https://platform.openai.com/api-keys) or set OPENAI_API_KEY',
+      }, 400);
+    }
+
     const routerIds = ids.filter(([, id]) => modelRouteFor(id.trim()) === 'openrouter');
     if (routerIds.length) {
       let catalog: any[];
@@ -456,10 +489,19 @@ export function buildSetupRoutes(
     }
 
     // Persist: merge over what is already saved, so a request that only touches one role or one
-    // endpoint leaves the rest of settings.json alone.
+    // endpoint leaves the rest of settings.json alone. A role saved as an OBJECT (settings.ts's
+    // RoleObject — a hand-tuned sampler) that this request does not mention is already untouched
+    // by this merge, since the initial spread copies whatever is there; a role this request DOES
+    // change keeps that object's other fields, updating only `model` — so a sampler tuned by hand
+    // survives a later model switch made through this menu instead of being flattened to a bare id.
     const saved = readSettings();
     const nextModels = { ...saved.models };
-    for (const [role, id] of ids) nextModels[role as ModelRole] = id.trim();
+    for (const [role, id] of ids) {
+      const trimmed = id.trim();
+      const prior = saved.models?.[role as ModelRole];
+      nextModels[role as ModelRole] = prior && typeof prior === 'object'
+        ? { ...prior, model: trimmed } : trimmed;
+    }
     const nextEnv = { ...saved.env };
     for (const k of PROVIDER_ENV_KEYS) {
       const v = env[k];

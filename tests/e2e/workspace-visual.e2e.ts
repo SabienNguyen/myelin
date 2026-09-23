@@ -10,14 +10,20 @@ for (const colorScheme of ['dark', 'light'] as const) {
     await page.goto(`/#/t/visual-${colorScheme}/page/stream-consumer`);
     await expect(page.locator('.page-panel h2')).toHaveText('Consuming SSE token streams');
     await page.getByRole('tab', {name:'graph', exact:true}).click();
-    await expect(page.locator('.graph-node').first()).toBeVisible();
-    // Regression (caught by the first light-scheme run): zoom-to-fit once magnified a still-hot
-    // simulation whose nodes were bunched near the origin, rendering overlapping giant blobs.
-    // A settled node circle is small; a degenerate 6x fit made them hundreds of px wide.
-    await expect(async () => {
-      const box = await page.locator('.graph-node circle').first().boundingBox();
-      expect(box!.width).toBeLessThan(60);
-    }).toPass({ timeout: 15_000 });
+    // sigma mounts SEVERAL layered canvases (edges/nodes/labels/hovers/mouse…) into .graph-canvas —
+    // .first() picks one deterministically rather than a strict-mode violation on all of them.
+    await expect(page.locator('.graph-canvas canvas').first()).toBeVisible();
+    // Regression (caught by the first light-scheme run of the old SVG graph): zoom-to-fit once
+    // magnified a still-hot simulation whose nodes were bunched near the origin, rendering
+    // overlapping giant blobs — a settled node circle is small, a degenerate 6x fit made them
+    // hundreds of px wide. The WebGL rewrite can't repeat that exact failure (GraphPanel.tsx's
+    // doFit freezes the camera's bbox until the layout actually settles, so there is no "fit a
+    // still-moving layout" step left to race), and individual node geometry is no longer a DOM
+    // element this test can measure directly. The topic list is the surviving, queryable proxy for
+    // "the graph tab rendered real, coherent content" rather than an empty or broken canvas.
+    const topics = page.getByRole('region', { name: 'Topics in this view' });
+    await expect(topics).toBeVisible();
+    await expect(topics.getByRole('button', { name: /^Open Consuming SSE token streams/ })).toBeVisible();
     await page.screenshot({path:`test-results/workspace-${colorScheme}.png`, fullPage:true});
     const graph = page.getByRole('tab', {name:'graph',exact:true});
     await graph.focus();

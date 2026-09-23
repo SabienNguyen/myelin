@@ -11,6 +11,8 @@
  * "GET /api/graph failed: 502" is neither. The method, path and status stay on the error object
  * for anyone logging it — they are diagnostics, not copy.
  */
+import type { AsideRequest, AsidePart, AsideResponse } from '../../shared/aside.js';
+
 export class ApiError extends Error {
   constructor(readonly path: string, readonly status: number, message: string) {
     super(message);
@@ -92,6 +94,31 @@ export interface Goal { kind: 'path' | 'page'; slug: string; setOn: string }
 export interface PathsPayload { goal: Goal | null; paths: PathRow[] }
 
 export const getPaths = (): Promise<PathsPayload> => getJson<PathsPayload>('/api/paths', 'your learning paths');
+
+// An inline aside: a separate small model call grounded in the anchored tutor message (never a
+// chat turn — see src/shared/aside.ts's wire contract and asideRoute.ts). Errors carry the
+// server's own message (validation / unknown message / model failure), matching getJson's rule
+// that a caught fetch failure gets its own text since there is no server response to read.
+export async function askAside(req: AsideRequest): Promise<AsidePart> {
+  let res: Response;
+  try {
+    res = await fetch('/api/aside', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+  } catch {
+    throw new Error('Can’t reach the harness — the aside wasn’t asked.');
+  }
+  let body: AsideResponse;
+  try {
+    body = await res.json() as AsideResponse;
+  } catch {
+    throw new Error(`Couldn’t ask that aside — the reply wasn’t readable (${res.status}).`);
+  }
+  if (!res.ok || 'error' in body) throw new Error('error' in body ? body.error : `Couldn’t ask that aside (${res.status}).`);
+  return body.part;
+}
 
 export const setGoal = async (goal: { kind: 'path' | 'page'; slug: string } | null): Promise<Goal | null> => {
   let res: Response;

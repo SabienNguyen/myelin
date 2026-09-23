@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { chatModelFor, modelRouteFor, withRequestDefaults } from '../src/server/models.js';
 import type { ChatModel, ChatRequest } from '../src/server/llm/index.js';
 
@@ -84,6 +84,45 @@ describe('chatModelFor (the model router)', () => {
     expect(modelRouteFor('openai:foo')).toBe('openai');
     expect(modelRouteFor('ollama:q')).toBe('ollama');
     expect(modelRouteFor('claude-sonnet-5')).toBe('anthropic');
+  });
+
+  // oai: is its own route, distinct from openai: — the openai: slot stays a configurable
+  // OpenAI-compatible endpoint (OPENAI_COMPAT_BASE_URL), while oai: is the pinned Responses API
+  // with built-in web search and reasoning-alongside-tools.
+  it('modelRouteFor classifies the oai: prefix, distinct from openai:', () => {
+    expect(modelRouteFor('oai:gpt-5.1')).toBe('oai');
+    expect(modelRouteFor('openai:gpt-5.1')).toBe('openai');
+  });
+
+  it('oai: resolves to a ChatModel, needing no key at resolve time', () => {
+    const m = chatModelFor('grader', { models: { grader: { model: 'oai:gpt-5.1' } } } as any);
+    expect(typeof m.generate).toBe('function');
+    expect(typeof m.stream).toBe('function');
+  });
+
+  it('oai: sends to the Responses API, reading OPENAI_API_KEY per call like the other routes', async () => {
+    const prevKey = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = 'sk-oai-test';
+    const seen: { url: string; auth: string | null; model: string }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      seen.push({ url: String(url), auth: new Headers(init.headers).get('authorization'), model: body.model });
+      const frame = `event: response.completed\ndata: ${JSON.stringify({
+        type: 'response.completed', response: { status: 'completed', usage: {} },
+      })}\n\n`;
+      return new Response(frame, { headers: { 'content-type': 'text/event-stream' } });
+    }));
+    try {
+      const model = chatModelFor('grader', { models: { grader: { model: 'oai:gpt-5.1' } } } as any);
+      await model.generate({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }] } as any);
+      expect(seen[0]).toEqual({
+        url: 'https://api.openai.com/v1/responses', auth: 'Bearer sk-oai-test', model: 'gpt-5.1',
+      });
+    } finally {
+      if (prevKey === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = prevKey;
+      vi.unstubAllGlobals();
+    }
   });
 
   it('withRequestDefaults injects the role\'s effort and sampler into every request without touching the rest', async () => {

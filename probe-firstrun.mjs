@@ -1,0 +1,16 @@
+import { chromium } from '@playwright/test';
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1100, height: 900 } });
+const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto('http://localhost:4301', { waitUntil: 'domcontentloaded' });
+await p.waitForTimeout(7000);
+const id = p.getByLabel(/local or OpenAI-compatible model/i);
+console.log('setup card shown:', await id.count() ? 'yes' : 'no');
+console.log('key field before typing:', await p.getByLabel('OpenAI-compatible API key').count());
+await id.fill('openai:gpt-5.6-luna');
+await p.waitForTimeout(400);
+console.log('key field after typing an openai id:', await p.getByLabel('OpenAI-compatible API key').count());
+console.log('base url field:', await p.getByLabel('OpenAI-compatible base URL').count());
+await p.screenshot({ path: 'shot-firstrun.png' });
+console.log('errors:', errs.slice(0,2).join(' | ') || 'none');
+await b.close();

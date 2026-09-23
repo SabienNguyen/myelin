@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Top Ten UI Mockups</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #101116; --bg-panel: #17191f; --bg-inset: #21242c;
+  --text: #edeef2; --text-muted: #a5a9b6; --border: #3a3e4a;
+  --accent: #93b4f7; --accent-soft: #1f2a44; --accent-text: #11131a;
+  --good: #85cba0; --bad: #f09c95; --warn: #e5c17e;
+  --m-unseen: #a6a9b0; --m-exposed: #e5c17e; --m-practicing: #8ebbee; --m-mastered: #85cba0;
+  --radius: 10px; --radius-sm: 7px; --radius-shell: 14px;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --prose: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #eeeef7; --bg-panel: #ffffff; --bg-inset: #e4e5f0;
+    --text: #1f2128; --text-muted: #565a68; --border: #c9cbd8;
+    --accent: #2b55c4; --accent-soft: #e3e9fb; --accent-text: #ffffff;
+    --good: #27613f; --bad: #9b3632; --warn: #765319;
+    --m-unseen: #626873; --m-exposed: #906619; --m-practicing: #366caa; --m-mastered: #27613f;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--prose); }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 2rem 16px 5rem; }
+h1 { font: 600 1.55rem/1.25 var(--mono); margin: 0 0 .4rem; }
+.lede { color: var(--text-muted); max-width: 72ch; margin: 0 0 1rem; }
+.meta { font: .78rem var(--mono); color: var(--text-muted); }
+nav.toc { display: flex; flex-wrap: wrap; gap: .35rem .5rem; margin: 1rem 0 2rem; }
+nav.toc a { font: .76rem var(--mono); color: var(--text-muted); text-decoration: none; border: 1px solid var(--border); border-radius: 99px; padding: .15rem .6rem; }
+nav.toc a:hover { color: var(--text); border-color: var(--accent); }
+code { font: .85em var(--mono); }
+
+/* page sections */
+section.mock { margin: 0 0 2.6rem; }
+.mock-head { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; margin-bottom: .2rem; }
+.mock-head .num { font: 600 .8rem var(--mono); color: var(--accent); }
+.mock-head h2 { font: 600 1.08rem/1.3 var(--mono); margin: 0; }
+.where { font: .74rem var(--mono); color: var(--text-muted); margin: 0 0 .75rem; }
+.notes { margin: .7rem 0 0; padding-left: 1.1rem; font-size: .85rem; color: var(--text-muted); max-width: 80ch; }
+.notes li { margin-bottom: .2rem; }
+.notes b { color: var(--text); font-weight: 600; }
+
+/* ---------- faithful app chrome ---------- */
+.app { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-shell); padding: .55rem .6rem .6rem; overflow: hidden; position: relative; }
+.topbar { display: flex; align-items: center; gap: .5rem; padding: .1rem .35rem .5rem; }
+.wordmark { display: flex; align-items: center; gap: .45rem; font: 600 .82rem var(--mono); letter-spacing: .08em; }
+.topbar .spacer { flex: 1; }
+.icon-btn { width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--text-muted); position: relative; background: none; border: 0; }
+.icon-btn.active { background: var(--accent-soft); color: var(--text); }
+.badge { position: absolute; top: -2px; right: -3px; min-width: 16px; height: 16px; border-radius: 99px; background: var(--accent); color: var(--accent-text); font: 600 .6rem/16px var(--mono); text-align: center; padding: 0 3px; }
+.pill { display: inline-flex; align-items: center; gap: .3rem; font: .72rem var(--mono); color: var(--text-muted); background: var(--bg-inset); border-radius: 99px; padding: .15rem .6rem; }
+.pill.active { color: var(--text); box-shadow: inset 0 0 0 1px var(--accent); }
+.btn { font: .8rem var(--prose); color: var(--text); background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .3rem .75rem; white-space: nowrap; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+.btn.ghost { background: none; }
+.btn.small { font-size: .74rem; padding: .18rem .55rem; }
+.canvas { background: var(--bg-panel); border-radius: var(--radius-shell); display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); min-height: 300px; }
+.canvas.single { grid-template-columns: 1fr; }
+.transcript { padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: .7rem; min-width: 0; }
+.panel { border-left: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; }
+.tabs { display: flex; border-bottom: 1px solid var(--border); padding: 0 .5rem; }
+.tab { flex: 1; text-align: center; font-size: .82rem; color: var(--text-muted); padding: .55rem 0 .45rem; }
+.tab.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); font-weight: 600; }
+.panel-body { padding: .9rem 1rem; display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+@media (max-width: 760px) { .canvas { grid-template-columns: 1fr; } .panel { border-left: 0; border-top: 1px solid var(--border); } }
+
+.user-bubble { align-self: flex-end; max-width: 80%; background: var(--accent-soft); border-radius: var(--radius); padding: .38rem .75rem; font-size: .9rem; }
+.tutor p { margin: 0 0 .55rem; font-size: .92rem; line-height: 1.7; }
+.tutor code { background: var(--bg-inset); padding: .05rem .3rem; border-radius: 4px; }
+.tool-note { display: inline-block; margin: 0 .8rem .1rem 0; color: var(--text-muted); font-size: .7rem; }
+.tool-note::before { content: "\2713\00a0"; color: var(--good); }
+.composer { margin-top: auto; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell); padding: .55rem .7rem .45rem; }
+.composer .ph { color: var(--text-muted); font-size: .9rem; padding: .1rem 0 .45rem; }
+.composer .row { display: flex; align-items: center; gap: .7rem; font-size: .74rem; color: var(--text-muted); }
+.send { margin-left: auto; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); display: grid; place-items: center; color: var(--accent-text); }
+.kbd { font: .66rem var(--mono); color: var(--text-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 .3rem; }
+
+/* blocks */
+.block { background: var(--bg-inset); border-radius: var(--radius); padding: .75rem .85rem; font-size: .88rem; }
+.block-kind { font: 600 .66rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin-bottom: .35rem; }
+.opt { display: flex; align-items: center; gap: .55rem; padding: .32rem .55rem; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: .35rem; background: var(--bg-panel); }
+.opt.sel { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.opt .k { font: .68rem var(--mono); color: var(--text-muted); width: 1rem; }
+
+/* popovers (no shadows per design.md: border + fill) */
+.popover { position: absolute; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell); padding: .7rem .8rem; z-index: 3; }
+.pop-title { font: 600 .68rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); margin: 0 0 .45rem; }
+.dim-behind { opacity: .35; }
+
+/* 2 key doctor */
+.keyrow { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr) auto; gap: .5rem; align-items: center; padding: .35rem 0; border-top: 1px solid var(--border); font-size: .8rem; }
+.keyrow:first-of-type { border-top: 0; }
+.keyrow .name { font-weight: 600; }
+.stat { font: .72rem var(--mono); }
+.stat.ok { color: var(--good); } .stat.bad { color: var(--bad); } .stat.warn { color: var(--warn); }
+.shadow-warn { margin-top: .55rem; border-left: 3px solid var(--warn); background: var(--bg-inset); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: .5rem .65rem; font-size: .78rem; }
+.shadow-warn code { background: var(--bg-panel); padding: .05rem .3rem; border-radius: 4px; }
+.shadow-warn .acts { display: flex; gap: .4rem; margin-top: .45rem; flex-wrap: wrap; }
+
+/* 9 resume */
+.resume { max-width: 460px; margin: .6rem auto; text-align: left; }
+.resume h3 { font: 600 1.1rem var(--prose); text-align: center; margin: .4rem 0 .9rem; }
+.resume-card { background: var(--bg-inset); border-radius: var(--radius-shell); padding: .85rem .9rem; }
+.resume-card .thread { display: flex; justify-content: space-between; gap: .6rem; font-size: .84rem; }
+.resume-card .pending { margin: .55rem 0 .7rem; background: var(--bg-panel); border-radius: var(--radius-sm); padding: .5rem .6rem; font-size: .82rem; }
+.resume-card .btn.primary { width: 100%; padding: .5rem; font-size: .88rem; }
+.resume .also { display: flex; justify-content: space-between; margin-top: .6rem; font-size: .8rem; color: var(--text-muted); }
+.resume .also a { color: var(--accent); text-decoration: none; }
+
+/* 12 quick replies */
+.quick { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin-top: -.15rem; }
+.qr { font: .76rem var(--prose); color: var(--text); background: var(--bg-inset); border: 1px solid transparent; border-radius: 99px; padding: .18rem .7rem; }
+.qr:hover, .qr.focus { border-color: var(--accent); }
+.cmd-chip { font: .72rem var(--mono); color: var(--accent); background: var(--accent-soft); border-radius: 99px; padding: .05rem .5rem; margin-right: .35rem; }
+
+/* 22 confidence */
+.conf { margin-top: .75rem; display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.conf-label { font-size: .78rem; color: var(--text-muted); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label { font-size: .78rem; padding: .22rem .7rem; cursor: pointer; color: var(--text-muted); border-left: 1px solid var(--border); background: var(--bg-panel); }
+.seg label:first-of-type { border-left: 0; }
+.seg input:checked + label { background: var(--accent-soft); color: var(--text); }
+.seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -2px; }
+.calib { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr) 2.6rem; gap: .35rem .6rem; align-items: center; font-size: .78rem; }
+.bar { height: 8px; border-radius: 4px; background: var(--bg-panel); position: relative; overflow: hidden; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 4px; }
+.bar b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text-muted); }
+
+/* 31 graph */
+.graph-box { background: var(--bg-inset); border-radius: var(--radius); position: relative; }
+.graph-box svg { width: 100%; height: auto; display: block; }
+.legend { display: flex; flex-wrap: wrap; gap: .3rem .9rem; font-size: .72rem; color: var(--text-muted); }
+.legend span { display: inline-flex; align-items: center; gap: .3rem; }
+.swatch { width: .6rem; height: .6rem; border-radius: 50%; display: inline-block; }
+.hovercard { position: absolute; left: 10px; top: 10px; width: 240px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); padding: .55rem .65rem; font-size: .78rem; }
+.hovercard b { font-size: .82rem; }
+
+/* 41 today lane */
+.today { background: var(--bg-inset); border-radius: var(--radius-shell); padding: .7rem .8rem; }
+.today-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.today-head .t { font: 600 .74rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); }
+.today-head .sum { font-size: .9rem; }
+.today-head .btn { margin-left: auto; }
+.timeline { display: flex; gap: 3px; margin: .6rem 0 .45rem; height: 22px; }
+.timeline div { border-radius: 4px; display: flex; align-items: center; padding: 0 .4rem; font: .64rem var(--mono); color: var(--accent-text); overflow: hidden; white-space: nowrap; }
+.today-items { display: flex; flex-wrap: wrap; gap: .3rem .9rem; font-size: .76rem; color: var(--text-muted); }
+.today-items span { display: inline-flex; gap: .3rem; align-items: center; }
+.why-mix { font-size: .74rem; color: var(--text-muted); margin-top: .45rem; }
+
+/* 60 find a source */
+.page-title { font: 600 1rem var(--prose); margin: 0; }
+.page-meta { font: .7rem var(--mono); color: var(--text-muted); }
+.unsourced { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; border-left: 3px solid var(--warn); background: var(--bg-inset); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: .45rem .6rem; font-size: .8rem; }
+.unsourced .btn { margin-left: auto; }
+.proposal { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); gap: .35rem; padding: .45rem 0; border-top: 1px solid var(--border); font-size: .8rem; }
+.proposal:first-of-type { border-top: 0; }
+.proposal input { margin-top: .25rem; accent-color: var(--accent); }
+.proposal .src { font: .68rem var(--mono); color: var(--text-muted); }
+.proposal q { display: block; color: var(--text-muted); font-size: .78rem; margin-top: .15rem; }
+.proposal .lvl { font: .64rem var(--mono); color: var(--warn); margin-left: .35rem; }
+.prop-acts { display: flex; gap: .45rem; justify-content: flex-end; align-items: center; margin-top: .4rem; }
+
+/* 62 check claim */
+.tutor mark.sel { background: var(--accent-soft); color: var(--text); border-radius: 3px; box-shadow: 0 0 0 1px var(--accent); }
+.float-bar { display: inline-flex; gap: .25rem; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .2rem; margin: -.15rem 0 .5rem 1.5rem; }
+.check-result { background: var(--bg-inset); border-radius: var(--radius); padding: .6rem .75rem; font-size: .8rem; }
+.check-result .head { display: flex; gap: .6rem; align-items: baseline; flex-wrap: wrap; margin-bottom: .35rem; }
+.check-result .verdict-ok { font: 600 .74rem var(--mono); color: var(--good); }
+.evid { display: grid; grid-template-columns: 1.4rem minmax(0, 1fr); gap: .3rem; padding: .3rem 0; border-top: 1px solid var(--border); }
+.evid .mark { font: 600 .8rem var(--mono); color: var(--good); }
+.evid .mark.n { color: var(--warn); }
+.evid .src { font: .68rem var(--mono); color: var(--text-muted); }
+
+/* 71 palette */
+.overlay { position: absolute; inset: 0; background: color-mix(in srgb, var(--bg) 70%, transparent); display: flex; justify-content: center; align-items: flex-start; padding-top: 2.2rem; z-index: 4; }
+.palette { width: min(560px, 92%); background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell); overflow: hidden; }
+.palette input { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: var(--bg-panel); color: var(--text); font: .95rem var(--prose); padding: .75rem .9rem; outline: none; }
+.palette input:focus-visible { box-shadow: inset 0 -2px 0 var(--accent); }
+.pal-list { max-height: 280px; overflow: auto; padding: .35rem 0; }
+.pal-group { font: 600 .64rem var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--text-muted); padding: .45rem .9rem .2rem; }
+.pal-item { display: flex; align-items: center; gap: .6rem; padding: .35rem .9rem; font-size: .84rem; }
+.pal-item .sub { margin-left: auto; font: .68rem var(--mono); color: var(--text-muted); }
+.pal-item.on { background: var(--accent-soft); }
+.pal-foot { display: flex; gap: .9rem; flex-wrap: wrap; padding: .45rem .9rem; border-top: 1px solid var(--border); font-size: .7rem; color: var(--text-muted); }
+
+/* 79 tray */
+.tray-row { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; gap: .5rem; padding: .45rem 0; border-top: 1px solid var(--border); font-size: .8rem; align-items: start; }
+.tray-row:first-of-type { border-top: 0; }
+.tray-row .dot { width: .55rem; height: .55rem; border-radius: 50%; margin-top: .45rem; }
+.tray-row .what { font-weight: 600; }
+.tray-row .detail { color: var(--text-muted); font-size: .76rem; }
+.tray-row .time { font: .68rem var(--mono); color: var(--text-muted); }
+.prog { height: 5px; background: var(--bg-inset); border-radius: 3px; margin-top: .3rem; overflow: hidden; }
+.prog i { display: block; height: 100%; background: var(--accent); border-radius: 3px; }
+.tray-foot { font-size: .72rem; color: var(--text-muted); margin-top: .45rem; }
+
+.closing { background: var(--bg-panel); border-radius: var(--radius-shell); padding: 1rem 1.2rem; font-size: .88rem; }
+.closing ul { margin: .4rem 0 0; padding-left: 1.1rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Top ten, mocked up</h1>
+<p class="lede">The ten top picks from the 100-idea list, drawn inside Myelin's current interface and filled with your own content: the Rust pages, the inference-infra lesson and your real model setup. Each mockup names the component it would change, and notes how it works from the keyboard and screen reader. A few parts are interactive: the confidence choice, the palette search and the source checkboxes. Mockups only: nothing here is built yet.</p>
+<p class="meta">myelin · top-10 UI mockups · 2026-09-22 · follows design.md tokens, dark and light</p>
+<nav class="toc" aria-label="Mockups">
+  <a href="#m2">2 · key doctor</a><a href="#m9">9 · resume</a><a href="#m12">12 · quick replies</a>
+  <a href="#m22">22 · confidence</a><a href="#m31">31 · ready to learn</a><a href="#m41">41 · today lane</a>
+  <a href="#m60">60 · find a source</a><a href="#m62">62 · check a claim</a><a href="#m71">71 · palette</a><a href="#m79">79 · activity tray</a>
+</nav>
+
+<!-- ========== 2 KEY DOCTOR ========== -->
+<section class="mock" id="m2">
+  <div class="mock-head"><span class="num">#2</span><h2>Key doctor</h2></div>
+  <p class="where">TopbarStatus.tsx models menu · setupRoutes.ts gets a POST /api/setup/test-key · effort S</p>
+  <div class="app" style="min-height: 440px">
+    <div class="topbar">
+      <span class="wordmark"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3h4.5A1.5 1.5 0 0 1 8 4.5V13a1.5 1.5 0 0 0-1.5-1.5H2zM14 3H9.5A1.5 1.5 0 0 0 8 4.5V13a1.5 1.5 0 0 1 1.5-1.5H14z"/></svg>MYELIN</span>
+      <span class="spacer"></span>
+      <span class="icon-btn" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 8a5 5 0 1 0 1.5-3.6M3 3v2.5h2.5M8 5v3l2 1.5"/></svg></span>
+      <span class="pill">sabien</span><span class="pill active">oai:gpt-6-luna ▾</span>
+      <span class="btn">Add material</span>
+    </div>
+    <div class="canvas single dim-behind" style="min-height: 380px"><div class="transcript"></div></div>
+    <div class="popover" style="top: 44px; right: 14px; width: min(560px, calc(100% - 28px));" role="dialog" aria-label="Models and keys">
+      <p class="pop-title">keys · tested just now</p>
+      <div class="keyrow"><span class="name">openai api key</span><span class="stat ok">● works · 412 ms · gpt-6-luna available</span><span class="btn small">test</span></div>
+      <div class="keyrow"><span class="name">openrouter</span><span class="stat ok">● works · 689 ms · free router</span><span class="btn small">test</span></div>
+      <div class="keyrow"><span class="name">groq</span><span class="stat bad">✗ 401 · key rejected</span><span class="btn small">replace</span></div>
+      <div class="keyrow"><span class="name">openai-compatible</span><span class="stat warn">✗ can't reach localhost:8081 · is bonsai running?</span><span class="btn small">retry</span></div>
+      <div class="shadow-warn" role="alert">
+        <b>Your shell overrides the saved OpenAI key.</b> <code>OPENAI_API_KEY=ollama</code> is set in the environment Myelin started from, and the environment wins, so every <code>oai:</code> call would fail with 401.
+        <div class="acts"><span class="btn small">copy: env -u OPENAI_API_KEY npm run dev:server</span><span class="btn small ghost">why this happens</span></div>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-top:.6rem"><span class="meta">each test is one tiny request · about $0.0001</span><span class="btn small primary">test all</span></div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li><b>Tests are explicit.</b> Nothing runs until you press test or open the menu the first time. A test is a models-list or 1-token call, never a lesson.</li>
+    <li><b>Shadowing is detected</b> by comparing the saved value with the environment's, and the menu gives the fix instead of just "shadowed".</li>
+    <li>Status text carries meaning in words and symbols, never colour alone; the warning is a <code>role="alert"</code>.</li>
+  </ul>
+</section>
+
+<!-- ========== 9 RESUME ========== -->
+<section class="mock" id="m9">
+  <div class="mock-head"><span class="num">#9</span><h2>Resume, exactly</h2></div>
+  <p class="where">the empty-transcript home state in Thread.tsx · reads the last thread + its open block from sessionStore · effort S</p>
+  <div class="app">
+    <div class="topbar"><span class="wordmark">MYELIN</span><span class="spacer"></span><span class="pill">oai:gpt-6-luna</span><span class="btn">Add material</span></div>
+    <div class="canvas">
+      <div class="transcript">
+        <div class="resume">
+          <h3>Pick up where you left off</h3>
+          <div class="resume-card">
+            <div class="thread"><b>i want to learn rust</b><span class="meta">22:30 · 14 min ago</span></div>
+            <div class="pending"><div class="block-kind">waiting for your answer · structured check</div>Why does this fail to compile? <code>let s2 = s1; println!("{s1}");</code></div>
+            <span class="btn primary">Resume at the open question</span>
+          </div>
+          <div class="also"><span>3 due for review · about 6 min</span><a href="#m41">start something new</a></div>
+        </div>
+        <div class="composer"><div class="ph">Ask your tutor…</div><div class="row"><span>attach</span><span>Math symbols</span><span class="send">↑</span></div></div>
+      </div>
+      <div class="panel"><div class="tabs"><span class="tab on">Stage</span><span class="tab">Graph</span><span class="tab">Page</span><span class="tab">Library</span></div>
+        <div class="panel-body"><p class="meta" style="margin:0">Nothing on stage yet. Resume brings the open question back here.</p></div></div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li><b>One button, exact landing.</b> It opens the thread scrolled to the open block with that block focused, not just the thread.</li>
+    <li>If nothing is open, the card shows the last thread's next suggested step instead, so the button is never a dead end.</li>
+    <li>Enter on the home screen activates it; the button's name includes the thread title for screen readers.</li>
+  </ul>
+</section>
+
+<!-- ========== 12 QUICK REPLIES ========== -->
+<section class="mock" id="m12">
+  <div class="mock-head"><span class="num">#12</span><h2>Quick replies</h2></div>
+  <p class="where">Thread.tsx AssistantMessage (latest message only) · sends as a structured command like /aside, not prose · effort S</p>
+  <div class="app">
+    <div class="canvas single">
+      <div class="transcript">
+        <div class="user-bubble">sure</div>
+        <div class="tutor">
+          <span class="tool-note">read the Rust Book</span><span class="tool-note">checked your progress</span>
+          <p>When you write <code>let s2 = s1;</code> with a <code>String</code>, Rust <b>moves</b> ownership: the heap data isn't copied, and <code>s1</code> stops being valid. That's why using <code>s1</code> afterwards is a compile error, not a runtime bug.</p>
+        </div>
+        <div class="quick" role="group" aria-label="Quick replies">
+          <span class="qr focus">simpler</span><span class="qr">an example</span><span class="qr">why?</span><span class="qr">skip ahead</span>
+          <span class="meta" style="margin-left:.4rem">alt+1–4</span>
+        </div>
+        <div class="user-bubble"><span class="cmd-chip">an example</span></div>
+        <div class="composer"><div class="ph">Ask your tutor…</div><div class="row"><span>attach</span><span>Math symbols</span><span class="send">↑</span></div></div>
+      </div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li><b>Only under the newest tutor message,</b> and gone as soon as you start typing, so they never clutter the history.</li>
+    <li>Sent as a command chip (like <code>/beginner</code>), so the tutor gets an exact instruction ("give a concrete example of this point") and the transcript stays clean.</li>
+    <li>A real <code>role="group"</code> of buttons; Alt+1 to 4 as shortcuts, listed in the shortcut sheet.</li>
+  </ul>
+</section>
+
+<!-- ========== 22 CONFIDENCE ========== -->
+<section class="mock" id="m22">
+  <div class="mock-head"><span class="num">#22</span><h2>Confidence before submit</h2></div>
+  <p class="where">blocks/QuickCheck.tsx + Quiz.tsx (shared control) · confidence rides record_evidence's note · calibration in the Library · effort M</p>
+  <div class="app">
+    <div class="canvas">
+      <div class="transcript">
+        <div class="tutor"><p>Quick check before we go further.</p></div>
+        <div class="composer"><div class="ph">Ask your tutor…</div><div class="row"><span>attach</span><span>Math symbols</span><span class="send">↑</span></div></div>
+      </div>
+      <div class="panel"><div class="tabs"><span class="tab on">Stage</span><span class="tab">Graph</span><span class="tab">Page</span><span class="tab">Library</span></div>
+        <div class="panel-body">
+          <div class="block">
+            <div class="block-kind">quick check · rust ownership</div>
+            After <code>let s2 = s1;</code> where <code>s1</code> is a <code>String</code>, what is true of <code>s1</code>?
+            <div class="opt"><span class="k">1</span>It still owns the data</div>
+            <div class="opt sel"><span class="k">2</span>It was moved and can't be used</div>
+            <div class="opt"><span class="k">3</span>It holds a copy of the data</div>
+            <div class="conf" role="radiogroup" aria-label="How sure are you?">
+              <span class="conf-label">how sure?</span>
+              <span class="seg">
+                <input type="radio" name="conf" id="c1"><label for="c1">guess</label>
+                <input type="radio" name="conf" id="c2"><label for="c2">think so</label>
+                <input type="radio" name="conf" id="c3" checked><label for="c3">sure</label>
+              </span>
+              <span class="btn primary small" style="margin-left:auto">Submit</span>
+            </div>
+          </div>
+          <div class="block">
+            <div class="block-kind">library · your calibration (last 30 days)</div>
+            <div class="calib">
+              <span>when “sure”</span><span class="bar"><i style="width:92%;background:var(--good)"></i><b style="left:95%"></b></span><span class="meta">92%</span>
+              <span>“think so”</span><span class="bar"><i style="width:71%;background:var(--accent)"></i><b style="left:70%"></b></span><span class="meta">71%</span>
+              <span>“guess”</span><span class="bar"><i style="width:48%;background:var(--warn)"></i><b style="left:33%"></b></span><span class="meta">48%</span>
+            </div>
+            <p class="meta" style="margin:.5rem 0 0">tick = where you'd expect to be · your guesses are better than you think</p>
+          </div>
+        </div></div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li><b>Optional, never blocking:</b> Submit works without a choice. Choosing adds one data point per answer.</li>
+    <li>Scheduling can use it: a "sure" miss is a misconception worth probing; a "guess" hit shouldn't raise mastery much.</li>
+    <li>Native radio buttons inside a <code>radiogroup</code>; arrow keys move between guess, think so and sure.</li>
+  </ul>
+</section>
+
+<!-- ========== 31 READY TO LEARN ========== -->
+<section class="mock" id="m31">
+  <div class="mock-head"><span class="num">#31</span><h2>Ready-to-learn outline</h2></div>
+  <p class="where">graph/nodeProgram.ts (one more ring style) · buildGraph.ts computes "prereqs mastered, node unseen" · effort S</p>
+  <div class="app">
+    <div class="canvas single"><div class="panel" style="border:0">
+      <div class="tabs"><span class="tab">Stage</span><span class="tab on">Graph</span><span class="tab">Page</span><span class="tab">Library</span></div>
+      <div class="panel-body">
+        <div style="display:flex; gap:.4rem; align-items:center; flex-wrap:wrap"><span class="pill active">This topic</span><span class="pill">Whole vault</span><span class="pill">fit</span><span class="meta" style="margin-left:auto">around Rust ownership and moves · 2 hops</span></div>
+        <div class="graph-box">
+          <svg viewBox="0 0 640 300" role="img" aria-label="Rust graph with one ready-to-learn node">
+            <g stroke="var(--text-muted)" stroke-width="1.4" opacity=".6">
+              <line x1="140" y1="150" x2="280" y2="95"/><line x1="280" y1="95" x2="420" y2="140"/>
+              <line x1="420" y1="140" x2="530" y2="80"/><line x1="530" y1="80" x2="560" y2="215"/>
+              <line x1="280" y1="95" x2="300" y2="235" stroke-dasharray="4 3"/>
+            </g>
+            <circle cx="140" cy="150" r="17" fill="var(--m-mastered)"/><circle cx="140" cy="150" r="23" fill="none" stroke="var(--m-mastered)" stroke-width="2.5" stroke-dasharray="118 200" transform="rotate(-90 140 150)"/>
+            <text x="140" y="188" text-anchor="middle" font-size="12" fill="var(--text)">Rust ownership and moves</text>
+            <circle cx="280" cy="95" r="15" fill="var(--m-mastered)"/>
+            <text x="280" y="68" text-anchor="middle" font-size="12" fill="var(--text)">Borrowing and slices</text>
+            <circle cx="420" cy="140" r="13" fill="var(--m-unseen)" opacity=".85"/>
+            <circle cx="420" cy="140" r="20" fill="none" stroke="var(--accent)" stroke-width="2.5"/>
+            <text x="420" y="176" text-anchor="middle" font-size="12" fill="var(--text)" font-weight="600">Error handling with Result</text>
+            <circle cx="530" cy="80" r="11" fill="var(--m-unseen)" opacity=".45"/>
+            <text x="530" y="56" text-anchor="middle" font-size="11" fill="var(--text-muted)">Generics and traits</text>
+            <circle cx="560" cy="215" r="11" fill="var(--m-unseen)" opacity=".45"/>
+            <text x="560" y="245" text-anchor="middle" font-size="11" fill="var(--text-muted)">Lifetimes</text>
+            <circle cx="300" cy="235" r="10" fill="var(--m-practicing)"/>
+            <text x="300" y="264" text-anchor="middle" font-size="11" fill="var(--text-muted)">Slices in practice</text>
+          </svg>
+          <div class="hovercard" role="tooltip"><b>Error handling with Result</b><br><span style="color:var(--accent)">ready to learn</span> · you've mastered its prerequisite, Borrowing and slices.<div style="display:flex; gap:.35rem; margin-top:.45rem"><span class="btn small primary">teach me this</span><span class="btn small">open page</span></div></div>
+        </div>
+        <div class="legend"><span><i class="swatch" style="background:var(--m-unseen)"></i>unseen</span><span><i class="swatch" style="background:var(--m-exposed)"></i>exposed</span><span><i class="swatch" style="background:var(--m-practicing)"></i>practicing</span><span><i class="swatch" style="background:var(--m-mastered)"></i>mastered</span><span><i class="swatch" style="background:none; box-shadow: inset 0 0 0 2px var(--accent)"></i>ready to learn</span></div>
+      </div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><b>Ready means:</b> every prerequisite is mastered and you haven't started the page. Generics and Lifetimes stay dimmed because their prerequisites aren't done.</li>
+    <li>The outline is a ring, not a colour change, so it reads next to mastery colours and in the colour-blind pattern mode.</li>
+    <li>The topic list under the canvas gets "ready to learn" in each ready node's accessible name, and a filter to show only those.</li>
+  </ul>
+</section>
+
+<!-- ========== 41 TODAY LANE ========== -->
+<section class="mock" id="m41">
+  <div class="mock-head"><span class="num">#41</span><h2>Today lane</h2></div>
+  <p class="where">ReviewQueue.tsx + the empty Stage · estimate = sum of each item's median time-on-task · effort S</p>
+  <div class="app">
+    <div class="canvas"><div class="transcript">
+        <div class="today" role="region" aria-label="Today's review">
+          <div class="today-head"><span class="t">today</span><span class="sum"><b>7 due</b> · about 12 min</span><span class="btn primary">Start review</span></div>
+          <div class="timeline" aria-hidden="true">
+            <div style="flex:3; background:var(--warn)">ownership</div><div style="flex:2; background:var(--m-practicing)">borrowing</div>
+            <div style="flex:2; background:var(--m-practicing)">derivatives</div><div style="flex:1.5; background:var(--m-mastered)">slices</div>
+            <div style="flex:1.5; background:var(--m-mastered)">SSE streams</div><div style="flex:1; background:var(--m-exposed)">batching</div><div style="flex:1; background:var(--m-exposed)">latency</div>
+          </div>
+          <div class="today-items"><span><i class="swatch" style="background:var(--warn)"></i>Rust ownership · slipping</span><span>+ 6 more on schedule</span></div>
+          <div class="why-mix">mixed on purpose: Rust, calculus and serving interleave, harder now and stickier later · <a href="#m41" style="color:var(--accent)">why</a></div>
+        </div>
+        <div class="composer"><div class="ph">Ask your tutor…</div><div class="row"><span>attach</span><span>Math symbols</span><span class="send">↑</span></div></div>
+      </div>
+      <div class="panel"><div class="tabs"><span class="tab on">Stage</span><span class="tab">Graph</span><span class="tab">Page</span><span class="tab">Library</span></div>
+        <div class="panel-body"><p class="meta" style="margin:0">Start review stages the first item here and keeps a small "3 of 7" counter above it.</p></div></div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li><b>One decision</b> replaces a list: the time estimate is the thing people actually decide on.</li>
+    <li>The slipping item leads and is named; the rest collapse to "+ 6 more", expandable to the full queue.</li>
+    <li>The colour strip is decorative (<code>aria-hidden</code>); the region's text says the same thing in words.</li>
+  </ul>
+</section>
+
+<!-- ========== 60 FIND A HUMAN SOURCE ========== -->
+<section class="mock" id="m60">
+  <div class="mock-head"><span class="num">#60</span><h2>Find a human source</h2></div>
+  <p class="where">PagePanel.tsx · new POST /api/pages/:slug/find-sources (web search + canonical search, no writes) · accepting writes through Engram · effort M</p>
+  <div class="app">
+    <div class="canvas single"><div class="panel" style="border:0">
+      <div class="tabs"><span class="tab">Stage</span><span class="tab">Graph</span><span class="tab on">Page</span><span class="tab">Library</span></div>
+      <div class="panel-body">
+        <div><p class="page-title">Rust Lifetimes</p><p class="page-meta">programming-languages · draft · written from lesson notes · no sources</p></div>
+        <div class="unsourced" role="status"><span><b>Written from memory.</b> Nothing here has been checked against a source.</span><span class="btn small primary">find a human source</span></div>
+        <div class="block" style="background:var(--bg-inset)">
+          <div class="block-kind">3 candidates found · choose what to cite</div>
+          <div class="proposal"><input type="checkbox" id="p1" checked><label for="p1"><b>The Rust Programming Language — 10.3 Validating References with Lifetimes</b><span class="src"> · doc.rust-lang.org/book</span><q>"Lifetimes are another kind of generic that we've already been using…"</q></label></div>
+          <div class="proposal"><input type="checkbox" id="p2" checked><label for="p2"><b>Rust by Example — Lifetimes</b><span class="src"> · doc.rust-lang.org/rust-by-example</span><q>"A lifetime is a construct the compiler (or more specifically, its borrow checker) uses…"</q></label></div>
+          <div class="proposal"><input type="checkbox" id="p3"><label for="p3"><b>The Rustonomicon — Lifetimes</b><span class="lvl">advanced</span><span class="src"> · doc.rust-lang.org/nomicon</span><q>"Rust enforces these rules through lifetimes…"</q></label></div>
+          <div class="prop-acts"><span class="meta">checks what the page claims against each source first</span><span class="btn small">dismiss</span><span class="btn small primary">cite 2 sources</span></div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><b>Nothing is written until you choose.</b> The search proposes; accepting adds the citations through Engram (the only writer) and keeps the body as it is.</li>
+    <li>Each candidate shows the exact passage it would stand behind, so "cite" is an informed choice, not a link dump.</li>
+    <li>Pairs with the lesson-notes fix landing now: pages it writes without sources are drafts, and this button is how they get sources.</li>
+  </ul>
+</section>
+
+<!-- ========== 62 CHECK A CLAIM ========== -->
+<section class="mock" id="m62">
+  <div class="mock-head"><span class="num">#62</span><h2>Check this claim</h2></div>
+  <p class="where">the aside selection toolbar in Thread.tsx gains a second action · a sibling of /api/aside with its own prompt · effort M</p>
+  <div class="app">
+    <div class="canvas single"><div class="transcript">
+      <div class="tutor">
+        <p>Borrowing lets code use a value without taking ownership. <mark class="sel">A <code>&amp;mut</code> borrow must be the only borrow of that value while it's in use</mark>, which is how Rust rules out data races at compile time.</p>
+      </div>
+      <div class="float-bar" role="toolbar" aria-label="Selection actions"><span class="btn small">ask aside</span><span class="btn small primary">check this claim</span></div>
+      <div class="check-result" role="region" aria-label="Claim check">
+        <div class="head"><span class="verdict-ok">✓ supported</span><span>2 sources agree · 0 contradict · 1 nuance</span></div>
+        <div class="evid"><span class="mark">✓</span><span>"At any given time, you can have either one mutable reference or any number of immutable references."<br><span class="src">The Rust Programming Language · 4.2 References and Borrowing</span></span></div>
+        <div class="evid"><span class="mark">✓</span><span>"…a mutable reference is exclusive for the duration of its use."<br><span class="src">vault · Borrowing and slices (cites the Rust Book)</span></span></div>
+        <div class="evid"><span class="mark n">~</span><span>"While it's in use" is the key phrase: a borrow ends at its last use, not at the end of the scope (non-lexical lifetimes).<br><span class="src">Rust Edition Guide · non-lexical lifetimes</span></span></div>
+      </div>
+      <div class="composer"><div class="ph">Ask your tutor…</div><div class="row"><span>attach</span><span>Math symbols</span><span class="send">↑</span></div></div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><b>A verdict plus the evidence,</b> never a verdict alone: each line quotes the source it relies on.</li>
+    <li>"Contradicted" results are filed as a misconception flag against the tutor's claim, not against you, and the tutor corrects it next turn.</li>
+    <li>Same selection toolbar as asides; the toolbar is keyboard-reachable after selecting text with Shift+arrows.</li>
+  </ul>
+</section>
+
+<!-- ========== 71 COMMAND PALETTE ========== -->
+<section class="mock" id="m71">
+  <div class="mock-head"><span class="num">#71</span><h2>Command palette</h2></div>
+  <p class="where">new CommandPalette.tsx mounted in App.tsx · sources: threads, vault pages, panelBus actions, settings · effort M · type below to try the filter</p>
+  <div class="app" style="min-height: 430px">
+    <div class="topbar"><span class="wordmark">MYELIN</span><span class="spacer"></span><span class="pill">oai:gpt-6-luna</span><span class="btn">Add material</span></div>
+    <div class="canvas single dim-behind" style="min-height: 370px"><div class="transcript"></div></div>
+    <div class="overlay">
+      <div class="palette" role="dialog" aria-label="Command palette">
+        <input id="pal-q" value="rust" aria-label="Search threads, pages, actions and settings" autocomplete="off">
+        <div class="pal-list" id="pal-list"></div>
+        <div class="pal-foot"><span><span class="kbd">↑↓</span> move</span><span><span class="kbd">enter</span> open</span><span><span class="kbd">tab</span> actions for this item</span><span><span class="kbd">esc</span> close</span></div>
+      </div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li><b>Ctrl/Cmd+K anywhere.</b> Pages, threads, actions and settings in one fuzzy list; Tab on a page shows its actions (teach, quiz, find a source).</li>
+    <li>A real dialog: focus moves into the input, is trapped while open, and returns to where it was on Esc.</li>
+    <li>Each group is a <code>listbox</code> with <code>aria-activedescendant</code>, so arrowing doesn't move browser focus.</li>
+  </ul>
+</section>
+
+<!-- ========== 79 ACTIVITY TRAY ========== -->
+<section class="mock" id="m79">
+  <div class="mock-head"><span class="num">#79</span><h2>Background activity tray</h2></div>
+  <p class="where">new icon in the topbar · reads the compile queue (lesson notes, chapters, ingests) the Library already polls · effort M</p>
+  <div class="app" style="min-height: 420px">
+    <div class="topbar">
+      <span class="wordmark">MYELIN</span><span class="spacer"></span>
+      <span class="icon-btn active" aria-label="Background activity, 1 running, 1 needs attention"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1.5 8h3l2-5 3 10 2-5h3"/></svg><span class="badge">2</span></span>
+      <span class="pill">oai:gpt-6-luna</span><span class="btn">Add material</span>
+    </div>
+    <div class="canvas single dim-behind" style="min-height: 360px"><div class="transcript"></div></div>
+    <div class="popover" style="top: 44px; right: 120px; width: min(470px, calc(100% - 28px));" role="dialog" aria-label="Background activity">
+      <p class="pop-title">background · this session</p>
+      <div class="tray-row"><span class="dot" style="background:var(--accent)"></span><span><span class="what">Compiling Strogatz, chapter 3</span><div class="detail">part 12 of 40 · 4 pages so far</div><div class="prog"><i style="width:30%"></i></div></span><span class="time">running</span></div>
+      <div class="tray-row"><span class="dot" style="background:var(--good)"></span><span><span class="what">Lesson notes · Rust ownership</span><div class="detail">+2 pages (Borrowing and slices, Lifetimes) · 1 cited source · 1 existing page kept as it was</div></span><span class="time">22:31 · <a href="#m79" style="color:var(--accent)">view</a></span></div>
+      <div class="tray-row"><span class="dot" style="background:var(--good)"></span><span><span class="what">Lesson notes · inference infra</span><div class="detail">no new pages: nothing taught this turn was substantial enough</div></span><span class="time">21:22</span></div>
+      <div class="tray-row"><span class="dot" style="background:var(--bad)"></span><span><span class="what">Ingest failed · youtube.com/watch?v=…</span><div class="detail">transcript unavailable for this video · try uploading the file instead</div></span><span class="time"><span class="btn small">retry</span></span></div>
+      <div class="tray-foot">background work pauses when today's spend cap is reached (spend meter, idea #68)</div>
+    </div>
+  </div>
+  <ul class="notes">
+    <li><b>Background work stops being invisible.</b> Every lesson-notes run says what it added, and what it refused to overwrite (the safeguard landing now).</li>
+    <li>The badge counts running jobs plus ones needing attention; its accessible name says which is which.</li>
+    <li>Failures carry one plain next step (retry, upload instead), per the degrade-loudly rule.</li>
+  </ul>
+</section>
+
+<div class="closing">
+  <b>Build order if you want all ten:</b>
+  <ul>
+    <li><b>Quick wins, about a day each:</b> #9 resume, #12 quick replies, #31 ready-to-learn (the graph renderer already has the ring code), #41 today lane, #2 key doctor.</li>
+    <li><b>Then the trust pair:</b> #60 find a source and #62 check a claim. They share one research endpoint and the aside selection toolbar.</li>
+    <li><b>Then the frame:</b> #71 palette and #79 tray, which make everything above faster to reach and easier to see.</li>
+    <li><b>#22 confidence</b> last: it's the only one that changes what evidence records, so it deserves its own small design pass.</li>
+  </ul>
+</div>
+</div>
+
+<script>
+// Palette mock: a tiny fuzzy filter over sample items, keyboard-driven like the real thing would be.
+const ITEMS = [
+  ['Pages', 'Rust ownership and moves', 'solid · 2 sources'],
+  ['Pages', 'Rust borrowing and slices', 'draft · 1 source'],
+  ['Pages', 'Rust lifetimes', 'draft · no sources'],
+  ['Pages', 'Rust error handling with Result', 'draft · ready to learn'],
+  ['Pages', 'Inference infrastructure engineering', 'draft'],
+  ['Threads', 'i want to learn rust', '22:30'],
+  ['Threads', 'teach me inference infra engineering', '21:19'],
+  ['Actions', 'Quiz me on Rust ownership and moves', 'stage'],
+  ['Actions', 'Find a human source for Rust lifetimes', 'research'],
+  ['Actions', 'Start today\'s review (7 due)', 'about 12 min'],
+  ['Settings', 'Tutor model: oai:gpt-6-luna', 'models'],
+  ['Settings', 'Stance for this thread: intermediate', 'thread'],
+];
+const q = document.getElementById('pal-q');
+const list = document.getElementById('pal-list');
+let active = 0;
+function score(text, query) {
+  let i = 0; const t = text.toLowerCase();
+  for (const ch of query.toLowerCase()) { i = t.indexOf(ch, i); if (i < 0) return -1; i++; }
+  return 1;
+}
+function render() {
+  const query = q.value.trim();
+  const hits = ITEMS.filter(([, name]) => !query || score(name, query) > 0);
+  active = Math.min(active, Math.max(0, hits.length - 1));
+  list.innerHTML = '';
+  let group = null;
+  hits.forEach(([g, name, sub], i) => {
+    if (g !== group) { group = g; const h = document.createElement('div'); h.className = 'pal-group'; h.textContent = g; list.append(h); }
+    const row = document.createElement('div');
+    row.className = 'pal-item' + (i === active ? ' on' : '');
+    row.innerHTML = `<span></span><span class="sub"></span>`;
+    row.firstChild.textContent = name; row.lastChild.textContent = sub;
+    list.append(row);
+  });
+  if (!hits.length) { const e = document.createElement('div'); e.className = 'pal-item'; e.textContent = 'nothing matches'; list.append(e); }
+}
+q.addEventListener('input', () => { active = 0; render(); });
+q.addEventListener('keydown', (e) => {
+  const n = list.querySelectorAll('.pal-item').length;
+  if (e.key === 'ArrowDown') { active = (active + 1) % Math.max(n, 1); render(); e.preventDefault(); }
+  if (e.key === 'ArrowUp') { active = (active - 1 + Math.max(n, 1)) % Math.max(n, 1); render(); e.preventDefault(); }
+});
+render();
+</script>
+</body>
+</html>

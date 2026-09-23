@@ -830,6 +830,75 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   white-space: pre-wrap;
 }
 
+/* ── inline asides: select a tutor passage, ask about just that, without derailing the lesson ── */
+.aside-ask-region { position: relative; }
+.aside-ask {
+  position: absolute;
+  z-index: 5;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+}
+.aside-ask:hover { border-color: var(--accent); }
+.aside-form {
+  margin: 0.4rem 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-inset);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.aside-form blockquote {
+  margin: 0 0 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.aside-form label { display: block; margin-bottom: 0.25rem; font-size: 0.78rem; color: var(--text-muted); }
+.aside-form textarea {
+  width: 100%;
+  min-height: 3.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.aside-form-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.aside-composer-status,
+.aside-composer-error { font-size: 0.8rem; margin: 0.3rem 0; }
+.aside-composer-error { color: var(--bad); }
+.aside-composer-status { color: var(--text-muted); }
+
+/* model thinking's own summary treatment, reused for the aside note so a side question reads
+   with the same quiet weight as a collapsed thinking block. */
+.aside-part { margin: 0.4rem 0; font-size: 0.85rem; }
+.aside-part summary { cursor: pointer; width: fit-content; color: var(--text-muted); }
+.aside-part summary:hover { color: var(--text); }
+.aside-part-body {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-inset);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.aside-part-sources { margin: 0.4rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; }
+.wiki-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+.aside-part-memory { margin: 0.4rem 0 0; color: var(--text-muted); font-size: 0.78rem; }
+
 /* pronounce — the spoken-language block (Pronounce.tsx): hear, record, and see your pitch contour
    drawn over the target so a tone miss is visible, not just told. */
 .pronounce-word { font-size: 1.8rem; font-weight: 600; margin: 0.3rem 0 0; }
@@ -991,8 +1060,10 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .mark-ok { color: var(--good); font-weight: 700; }
 .mark-bad { color: var(--bad); font-weight: 700; }
 
-.graph-panel:has(.graph-topic-list) .graph-canvas { flex: 0 1 260px; min-height: 160px; }
-.graph-topic-list { flex: none; padding: .85rem 0; border-top: 1px solid var(--border); }
+/* The topic list is now the ONLY keyboard/screen-reader surface for the graph (the canvas is
+   aria-hidden WebGL, unreachable to both) — unlike the old occasional footnote under a small
+   graph, it is always present and needs real room of its own instead of a fixed 260px footer. */
+.graph-topic-list { flex: 1 1 0; min-height: 120px; overflow-y: auto; padding: .85rem 0; border-top: 1px solid var(--border); }
 .graph-topic-list h3 { margin: 0 0 .5rem; font-family: var(--font-prose); font-size: .9rem; }
 .graph-topic-list p { margin: 0 0 .65rem; font-size: .8rem; color: var(--text-muted); }
 .graph-topic-list ul { list-style: none; margin: 0; padding: 0; }
@@ -1054,57 +1125,36 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   color: var(--bad);
 }
 
-/* The pannable/zoomable canvas — fills whatever vertical room .graph-controls and .graph-legend
-   (both flex: none) don't take. overflow:hidden because navigation is via d3-zoom (pan/wheel/
-   pinch), not native scrolling; touch-action:none stops the browser's own touch-scroll/pinch-zoom
-   from fighting d3-zoom's own touch handling. */
-.graph-canvas {
-  flex: 1;
-  min-height: 0;
+/* The WebGL canvas's own wrapper — position:relative so the HTML overlays below (the "Teach me
+   this" button, misconception markers) can be placed against it with graphToViewport pixels.
+   flex-grow:0 caps it at the 260px basis (matching the pre-WebGL SVG rule this replaces —
+   sparse-graph.e2e.ts asserts <=280px) instead of letting it claim the panel's whole height; the
+   topic list below is flex:1 1 0 (see .graph-topic-list) and absorbs whatever room that leaves, so
+   a taller panel (the whole-vault view) still gives the EXTRA space to the one surface that is
+   the real keyboard/screen-reader interaction target, not to a picture of the graph. */
+.graph-canvas-wrap {
+  flex: 0 1 260px;
+  min-height: 160px;
   position: relative;
+}
+/* aria-hidden WebGL surface — sigma mounts its own canvases into this div. touch-action:none stops
+   the browser's own touch-scroll/pinch-zoom from fighting sigma's own touch handling. */
+.graph-canvas {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   touch-action: none;
   border-radius: var(--radius-sm);
   background: var(--bg-inset);
+  cursor: grab;
 }
-.graph-svg { width: 100%; height: 100%; display: block; cursor: grab; }
-.graph-svg:active { cursor: grabbing; }
+.graph-canvas:active { cursor: grabbing; }
 
-.graph-node { transition: opacity 0.15s; }
-.graph-node.dim { opacity: 0.18; }
-.graph-node circle { transition: filter 0.12s; }
-.graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }
-/* pointer-events auto, not none: the label sits inside the node's g[role=link], so clicking the
-   words routes to the same open-page handler as the dot. With none, the label — the biggest and
-   most readable part of a node — was a dead zone, and the only click target was the ~10px dot
-   (audit 33 caught it: a real unforced click on a label timed out on actionability). */
-.graph-node text { fill: var(--text); pointer-events: auto; }
-/* The global focus-visible rule only names input/textarea/select/button, so a focusable <g> got
-   nothing. An SVG outline follows the element's own bounding box, which for a node group is the
-   circle plus its label — close enough to read as "this node", and it scales with the zoom for
-   free because the outline is painted in user space. */
-.graph-node:focus { outline: none; }
-/* Not `outline`: on an SVG element outline-width is measured in USER units AND rounded to whole
-   pixels, so at a fitted zoom of 3.3 the closest it can get to a 2px ring is 1 user unit — 3.3 real
-   pixels. A stroked circle with vector-effect gives exactly 2 real pixels at any zoom, the same
-   property that already keeps the edges honest. */
-.graph-node:focus-visible { outline: none; }
-.graph-focus-ring {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-  opacity: 0;
-}
-.graph-node:focus-visible .graph-focus-ring { opacity: 1; }
-
-/* non-scaling-stroke keeps edges 1.5 REAL pixels at any zoom. Without it, filling the canvas on a
-   small graph also thickened every line into a slab — the same inflation the label font-size
-   counter-scaling solves for text, but SVG has a purpose-built property for strokes. */
-.graph-edge { stroke: var(--text-muted); stroke-width: 1.5; vector-effect: non-scaling-stroke; transition: opacity 0.15s; }
-.graph-edge-prereq { opacity: 0.75; }
-.graph-edge-deepens { stroke-dasharray: 4 3; opacity: 0.45; }
-.graph-edge.dim { opacity: 0.08; }
+/* Positioned in JS (style.left/top, in canvas pixels) off sigma's own graphToViewport — the
+   translate below just re-centres each overlay on that point instead of anchoring its corner. */
+.graph-overlay { position: absolute; transform: translate(-50%, -50%); }
+.graph-teach { transform: translate(-50%, 0.6rem); font-size: 0.8rem; padding: 0.3rem 0.65rem; white-space: nowrap; }
+.graph-misconception { display: inline-flex; pointer-events: none; }
 
 .graph-legend {
   display: flex;
@@ -1191,11 +1241,14 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 900px) {
   .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(0, 55%) minmax(0, 45%); }
   /* Stacked, the side panel gets 45% of the viewport, and the graph's tab strip, scope toggle,
-     subtitle and legend eat most of it — measured 88px of actual canvas at 375x800, which no
-     amount of zoom-to-fit can make into a usable graph. A floor plus a scrolling tab body trades
-     "everything visible at once" for "the graph is legible", which is the right way round. */
+     subtitle and legend eat most of it — measured 88px of actual canvas at 375x800 against the old
+     SVG rule's min-height:160px floor (this file's own history), which no amount of zoom-to-fit
+     could make into a usable graph. A scrolling tab body is what actually fixed that (below); this
+     breakpoint no longer needs its OWN min-height override on top of .graph-canvas-wrap's base
+     160px floor — a SEPARATE, bigger one here (320px) is exactly what regressed sparse-graph.e2e.ts
+     back past its <=280px ceiling at a narrow viewport, since flex-grow:0 there already caps the
+     canvas at a 260px basis on every width; a taller floor here only fought that cap. */
   .tab-body { overflow-y: auto; }
-  .graph-canvas { min-height: 320px; }
   .thread { border-right: none; border-bottom: 1px solid var(--border); }
   .msg.user { margin-left: 8%; }
   .topbar { flex-wrap: wrap; gap: 0.5rem; }
@@ -1219,7 +1272,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
    exactly the reader those trades were made against, so for them the paper hairline gives way. */
 @media (prefers-contrast: more) {
   :root { --text-muted: #d9dce1; --border: #858a94; }
-  .page-chip, .graph-edge, .graph-edge-deepens { opacity: 1; }
+  .page-chip { opacity: 1; }
 }
 @media (prefers-contrast: more) and (prefers-color-scheme: light) {
   :root { --text-muted: #33373e; --border: #777d87; }
@@ -2812,8 +2865,6 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .thread-empty-examples button:hover { border-left-color: var(--accent); }
 
 .graph-canvas { border: 1px solid var(--border); background: var(--bg); }
-.graph-node:hover circle { filter: brightness(1.12); }
-.graph-node text { paint-order: stroke fill; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
 .models-chips { max-height: 10rem; overflow-y: auto; }
 .models-chip { overflow-wrap: anywhere; text-align: left; }
 @media (max-width: 640px) {

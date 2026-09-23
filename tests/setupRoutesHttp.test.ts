@@ -213,6 +213,32 @@ describe('GET/PUT /api/setup/models', () => {
     expect(readSettings().env?.OPENAI_COMPAT_API_KEY).toBe('sk-or-supersecret-123');
   });
 
+  // Mirrors the groq: check just above: the oai: endpoint is pinned (Responses API), so a missing
+  // OPENAI_API_KEY is the one thing that can be wrong, and a keyless call is a 401 mid-lesson.
+  it('refuses to save an oai: role with no key anywhere — it would fail mid-lesson instead', async () => {
+    const cfg = cfgWith(plainModels());
+    const app = buildSetupRoutes(cfg);
+    const res = await put(app, { models: { tutor: 'oai:gpt-5.1' } });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/openai api key/i);
+    expect(cfg.models.tutor.model).toBe('claude-sonnet-5'); // the refused save changed nothing
+  });
+
+  it('saves an oai: role together with its key; the key never comes back in a response', async () => {
+    const cfg = cfgWith(plainModels());
+    const app = buildSetupRoutes(cfg);
+    const res = await put(app, {
+      models: { tutor: 'oai:gpt-5.1' }, env: { OPENAI_API_KEY: 'sk-oai-secret' },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).not.toContain('sk-oai-secret');
+    expect(JSON.parse(body).env.OPENAI_API_KEY).toEqual({ set: true, shadowed: false });
+    expect(cfg.models.tutor.model).toBe('oai:gpt-5.1');
+    expect(readSettings().env?.OPENAI_API_KEY).toBe('sk-oai-secret');
+    expect(process.env.OPENAI_API_KEY).toBe('sk-oai-secret');
+  });
+
   it('a real environment variable shadows the saved value: reported, and never overwritten', async () => {
     process.env.OLLAMA_BASE_URL = 'http://real:9/v1'; // present before first capture = a real var
     const app = buildSetupRoutes(cfgWith(plainModels()));

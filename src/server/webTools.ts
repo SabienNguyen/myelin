@@ -44,11 +44,15 @@ function fetchPublicPage(url: string, guard: (url: string) => Promise<void>): Pr
  *  the results never pass through this process. That makes it free of local infrastructure — the
  *  API key the tutor already needs is the whole setup — but it also means it only exists on an
  *  Anthropic-routed model. An `ollama:` or `openai:` tutor gets nothing back from it: an
- *  `openai:` route is still an OpenAI-compatible wire (see openaiCompat.ts), which has no concept
- *  of a provider-executed Anthropic tool and drops it silently, so declaring it there would be a
- *  no-op that also lies to the learner about search working. */
+ *  `openai:` route is still an OpenAI-compatible chat-completions wire (see openaiCompat.ts),
+ *  which has no concept of a provider-executed Anthropic tool and drops it silently, so declaring
+ *  it there would be a no-op that also lies to the learner about search working. `oai:` is the
+ *  second exception (O2): its Responses API wire carries OpenAI's OWN built-in web_search, mapped
+ *  below.
+ */
 function usesProviderSearch(modelId: string | undefined): boolean {
-  return modelId !== undefined && modelRouteFor(modelId) === 'anthropic';
+  return modelId !== undefined
+    && (modelRouteFor(modelId) === 'anthropic' || modelRouteFor(modelId) === 'oai');
 }
 
 /** Loop-executed tools plus provider-executed ones, carried separately because they travel
@@ -63,12 +67,14 @@ export interface WebTools {
  *
  * Search has two backends, in preference order:
  *
- *   1. **Anthropic's server-side web search** (`web_search_20260209`, dynamic filtering) whenever
- *      the tutor runs on an Anthropic-routed model. Nothing to install, nothing to host — which is
- *      the point: research used to require a self-hosted SearXNG, so out of the box the tutor
- *      could only teach from model memory and from files the learner supplied by hand.
+ *   1. **Provider-executed search** — Anthropic's `web_search_20260209` (dynamic filtering) for an
+ *      Anthropic-routed model, or OpenAI's built-in `web_search` (O2) for an `oai:`-routed one.
+ *      Nothing to install, nothing to host — which is the point: research used to require a
+ *      self-hosted SearXNG, so out of the box the tutor could only teach from model memory and
+ *      from files the learner supplied by hand.
  *   2. **A configured SearXNG** (`search.searxng`), which is what an `ollama:` or `openai:`
- *      tutor can use, since a provider-executed tool has no meaning off Anthropic's servers.
+ *      tutor can use, since a provider-executed tool has no meaning off Anthropic's or OpenAI's
+ *      own servers.
  *
  * `read_url` is deliberately UNGATED. It needs no infrastructure at all, and a learner who names a
  * specific URL should be readable regardless of which search backend exists.
@@ -111,6 +117,11 @@ export function buildWebTools(cfg: HarnessConfig, modelId?: string, deps: WebToo
   ];
 
   if (usesProviderSearch(modelId)) {
+    if (modelRouteFor(modelId!) === 'oai') {
+      // The exact shape openaiResponses.ts (O1) maps onto `{ type: 'web_search' }` on the wire.
+      // Unlike Anthropic's tool there is no `max_uses` knob on this wire to pass through.
+      return { tools, serverTools: [{ type: 'web_search', name: 'web_search' }] };
+    }
     // Pinned deliberately: web_search_20250305 is the older basic variant; _20260209 is the one
     // with dynamic filtering, and it is what the model actually behaves well with.
     return {

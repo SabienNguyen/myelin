@@ -119,6 +119,31 @@ describe('evidence guardrail', () => {
     expect(body).not.toContain('tool-output-error');
   });
 
+  // A live GPT-6 turn answered "hi" from the bootstrap, called next_lessons for the same list, then
+  // wrote the whole greeting again from the result — the learner read one reply twice.
+  it('offers no tools when a greeting opens the thread', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond([
+      { id: 'g1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+    ] as any, 'learn', 'greeting-opens')).text();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].tools ?? []).toEqual([]);
+    expect(calls[0].system).toContain('every tool is withheld');
+  });
+
+  // Mid-thread there is no fresh bootstrap to answer from, so the tools must stay.
+  it('keeps the tools for a greeting later in a thread', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Teach me arithmetic' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Sure — what is 2+2?' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'hi again' }] },
+    ] as any, 'learn', 'greeting-mid-thread')).text();
+    expect(calls[0].tools?.map((tool) => tool.name)).toContain('next_lessons');
+  });
+
   it('does not nudge on plain conversation', async () => {
     const { model, calls } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
@@ -1190,5 +1215,54 @@ describe('the stray-evidence detector does not fire on the turn it is meant to b
     await (await session.respond(history, 'learn', 'stray-thread')).text();
     const logged = readFileSync(logPath, 'utf8').slice(before.length);
     expect(logged).not.toMatch(/never read, staged or wrote/);
+  }, 30_000);
+});
+
+// Inline asides (A1): asideRoute.ts answers a side question with a SEPARATE model call and
+// persists the result as a `data-aside` part on the message it anchors to — this thread never
+// sees it as a turn. The main tutor still needs to know it happened, or the next turn re-explains
+// what the student already has, or answers the aside's own question instead of the one it is
+// actually waiting on (see session.ts's trailing HARNESS notes).
+describe('the aside note', () => {
+  it('tells the tutor about aside questions on its last message, and gives the first sentence of the answer', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me arithmetic' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [
+          { type: 'text', text: 'Addition combines two numbers into a sum.' },
+          {
+            type: 'data-aside', id: 'aside-1',
+            data: {
+              question: 'what does "sum" mean?',
+              answer: 'A sum is the result of adding numbers. It shows up throughout arithmetic.',
+            },
+          },
+        ],
+      },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'ok, now teach me subtraction' }] },
+    ] as any;
+    await (await session.respond(history, 'learn', 'aside-note-thread')).text();
+
+    const tail = JSON.stringify(calls[0].messages[calls[0].messages.length - 1]);
+    expect(tail).toMatch(/HARNESS: while answering, the student asked aside questions about your last message/);
+    expect(tail).toMatch(/what does \\"sum\\" mean\?/);
+    expect(tail).toMatch(/A sum is the result of adding numbers\./);
+    // Only the first sentence, not the whole answer.
+    expect(tail).not.toMatch(/shows up throughout arithmetic/);
+    expect(tail).toMatch(/still expect their answer to your pending question/);
+  }, 30_000);
+
+  it('adds nothing when the last assistant message carries no aside', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me arithmetic' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Addition combines two numbers into a sum.' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'ok, now teach me subtraction' }] },
+    ] as any;
+    await (await session.respond(history, 'learn', 'no-aside-note-thread')).text();
+    expect(JSON.stringify(calls[0].messages)).not.toMatch(/asked aside questions/);
   }, 30_000);
 });

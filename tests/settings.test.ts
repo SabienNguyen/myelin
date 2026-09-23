@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { DEFAULT_MODEL, loadConfig } from '../src/server/config.js';
 import {
   applySettings, envShadow, PROVIDER_ENV_KEYS, readSettings, resetEnvShadow, settingsPath,
-  writeSettings,
+  writeSettings, type Settings,
 } from '../src/server/settings.js';
 
 let confDir: string;
@@ -102,6 +102,77 @@ describe('merge precedence: defaults < harness.config.json < settings.json', () 
       applySettings(cfg);
       expect(cfg.models.tutor.model).toBe(DEFAULT_MODEL); // the boot value survives
       expect(String(err.mock.calls[0]?.[0])).toMatch(/claude-sdk:' has been removed/);
+    } finally {
+      err.mockRestore();
+    }
+  });
+});
+
+describe('a role saved as an OBJECT (hand-tuned sampler), not a bare id', () => {
+  // The motivating real case: someone hand-edits quiz_gen in settings.json to
+  // `{ model, sampler: { topP, topK, minP } }` to tame a local model, and this used to vanish —
+  // applySettings skipped anything that was not `typeof === 'string'`, with nothing logged, so the
+  // role silently ran on the default model forever.
+  it('a valid object sets the model and every other field it declares', () => {
+    writeSettings({
+      models: {
+        quiz_gen: {
+          model: 'openai:bonsai-2-27b',
+          effort: 'high',
+          sampler: { topP: 0.95, topK: 20, minP: 0 },
+          contextTokens: 16_384,
+          concurrency: 2,
+        },
+      },
+    });
+    const cfg = loadConfig(bareConfig());
+    applySettings(cfg);
+    expect(cfg.models.quiz_gen.model).toBe('openai:bonsai-2-27b');
+    expect(cfg.models.quiz_gen.effort).toBe('high');
+    expect(cfg.models.quiz_gen.sampler).toEqual({ topP: 0.95, topK: 20, minP: 0 });
+    expect(cfg.models.quiz_gen.contextTokens).toBe(16_384);
+    expect(cfg.models.quiz_gen.concurrency).toBe(2);
+  });
+
+  it('an invalid object is refused OUT LOUD, naming the role and the file, and the role keeps its default', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // No `model` — the one field roleSchema actually requires.
+      writeSettings({ models: { grader: { sampler: { topP: 0.95 } } } } as unknown as Settings);
+      const cfg = loadConfig(bareConfig());
+      applySettings(cfg);
+      expect(cfg.models.grader.model).toBe(DEFAULT_MODEL); // the boot value survives
+      expect(err).toHaveBeenCalledTimes(1);
+      const msg = String(err.mock.calls[0]?.[0]);
+      expect(msg).toContain(settingsPath());
+      expect(msg).toContain('models.grader');
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  it('claude-sdk: inside an object is refused exactly like a bare claude-sdk: id', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      writeSettings({ models: { tutor: { model: 'claude-sdk:opus', sampler: { topP: 0.9 } } } });
+      const cfg = loadConfig(bareConfig());
+      applySettings(cfg);
+      expect(cfg.models.tutor.model).toBe(DEFAULT_MODEL);
+      expect(String(err.mock.calls[0]?.[0])).toMatch(/claude-sdk:' has been removed/);
+    } finally {
+      err.mockRestore();
+    }
+  });
+
+  it('garbage that is neither a string nor an object is refused the same way, not silently skipped', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      writeSettings({ models: { grader: 42 } } as unknown as Settings);
+      const cfg = loadConfig(bareConfig());
+      applySettings(cfg);
+      expect(cfg.models.grader.model).toBe(DEFAULT_MODEL);
+      expect(err).toHaveBeenCalledTimes(1);
+      expect(String(err.mock.calls[0]?.[0])).toContain('models.grader');
     } finally {
       err.mockRestore();
     }

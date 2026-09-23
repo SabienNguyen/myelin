@@ -1,5 +1,7 @@
 import { createRequire } from 'node:module';
-import { anthropicModel, openaiCompatModel, type ChatModel, type ChatRequest } from './llm/index.js';
+import {
+  anthropicModel, openaiCompatModel, openaiResponsesModel, type ChatModel, type ChatRequest,
+} from './llm/index.js';
 import type { HarnessConfig, ModelRole } from './config.js';
 
 // The three model routes resolved onto the first-party ChatModel. Env vars are read PER CALL, not
@@ -18,6 +20,14 @@ const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 // ONE custom-endpoint slot — so Groq and a LiteLLM proxy (or Nous) could not be configured at once.
 const GROQ_PREFIX = 'groq:';
 const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
+// oai: is its own route rather than a case of openai:, even though both eventually mean "OpenAI":
+// openai: stays the free slot for a custom OpenAI-COMPATIBLE server (LM Studio, LiteLLM, a proxy),
+// configured through OPENAI_COMPAT_BASE_URL — while oai: is OpenAI's own Responses API, pinned to
+// api.openai.com, which is what gets a tutor OpenAI's built-in web_search and reasoning.effort
+// sent alongside function tools (openaiCompat's chat-completions wire refuses that combination).
+// Checked before openai: below even though 'oai:' and 'openai:' cannot collide as prefixes — the
+// ordering is there so a reader never has to reason about it.
+const OAI_PREFIX = 'oai:';
 
 // One scripted instance per script path, so every role pops from the SAME turn sequence. Without
 // this, the tutor session (which holds its model) advances the counter while each grading call
@@ -25,13 +35,14 @@ const GROQ_BASE_URL = 'https://api.groq.com/openai/v1';
 // turn forever instead of reaching its scripted verdict.
 const scriptedChatCache = new Map<string, ChatModel>();
 
-export type ModelRoute = 'anthropic' | 'ollama' | 'openai' | 'openrouter' | 'groq';
+export type ModelRoute = 'anthropic' | 'ollama' | 'openai' | 'openrouter' | 'groq' | 'oai';
 
 /** Which provider a model id resolves to, by the same prefix rule chatModelFor uses to pick an
  *  adapter. Exported so call sites that need to branch on the route (webTools' search backend,
  *  setupRoutes' needsApiKey) read it from here instead of re-parsing the prefix themselves. */
 export function modelRouteFor(modelId: string): ModelRoute {
   if (modelId.startsWith(OLLAMA_PREFIX)) return 'ollama';
+  if (modelId.startsWith(OAI_PREFIX)) return 'oai';
   if (modelId.startsWith(OPENAI_PREFIX)) return 'openai';
   if (modelId.startsWith(OPENROUTER_PREFIX)) return 'openrouter';
   if (modelId.startsWith(GROQ_PREFIX)) return 'groq';
@@ -99,6 +110,15 @@ export function chatModelFor(role: ModelRole, cfg: HarnessConfig): ChatModel {
       modelId: modelId.slice(GROQ_PREFIX.length),
       baseUrl: GROQ_BASE_URL,
       apiKey: process.env.GROQ_API_KEY,
+    }));
+  }
+  if (modelId.startsWith(OAI_PREFIX)) {
+    // No baseUrl override: oai: is pinned to api.openai.com, unlike openai: which exists
+    // specifically to point somewhere else. Env read per call, same reasoning as every other
+    // route here — a key saved through the setup panel takes effect on the next turn.
+    return wrap(openaiResponsesModel({
+      modelId: modelId.slice(OAI_PREFIX.length),
+      apiKey: process.env.OPENAI_API_KEY,
     }));
   }
   if (modelId.startsWith(OPENAI_PREFIX)) {

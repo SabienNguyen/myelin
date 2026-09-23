@@ -7,12 +7,16 @@ import type { EvidenceKind } from '../shared/engram.js';
 import { generateStructured, generateText, type ChatModel } from './llm/index.js';
 import { chatModelFor } from './models.js';
 import { recordUsage } from './usageLedger.js';
+import { sameAnswer, takeAnswerKey } from './answerKey.js';
 import type { HarnessConfig } from './config.js';
 
 /** Injectable grader-model seam for tests (mirrors gapHelp.ts's GapHelpDeps.model). Real callers
  * omit it; the configured grader role's model is used. */
 export interface GradingDeps {
   model?: ChatModel;
+  /** The staged block's toolCallId — where answerKey.ts filed the key the grader prepared while
+   *  the learner was thinking. Absent (tests, rails, a restart) means grade without one. */
+  keyId?: string;
 }
 
 // predictable: true makes functions like log()/sqrt() return NaN (not a Complex) outside
@@ -621,9 +625,9 @@ export async function gradeBlockOutput(
       // kind (capApplied keeps it from minting applied-correctly — a model judged it, honestly so),
       // and a genuinely wrong one still records struggled. Free-text punishing phrasing teaches
       // learners to guess the grader's wording, which is the opposite of knowing the thing.
-      return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected), conf);
+      return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, input.expected, deps.keyId), conf);
     }
-    return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps), conf);
+    return withConfidenceNote(await gradeOpenAnswer(input.question, answer, input.pageSlug, cfg, deps, undefined, deps.keyId), conf);
   }
 
   if (tool === 'math_scratchpad') {
@@ -709,7 +713,8 @@ export async function gradeBlockOutput(
         && answer.trim().toLowerCase() === item.expected.trim().toLowerCase()) {
         return { id: item.id, source: 'mechanical' as GradeSource, correct: true };
       }
-      const g = await gradeOpenAnswer(item.prompt, answer, item.pageSlug, cfg, deps, item.expected ?? undefined);
+      const g = await gradeOpenAnswer(item.prompt, answer, item.pageSlug, cfg, deps, item.expected ?? undefined,
+        deps.keyId ? `${deps.keyId}:${item.id}` : undefined);
       return { id: item.id, source: 'model' as GradeSource, correct: g.verdict === 'correct' };
     }));
     const right = perItem.filter((p) => p.correct).length;
@@ -1138,7 +1143,7 @@ function latexParses(latex: string): boolean {
 
 async function gradeOpenAnswer(
   question: string, answer: string, slug: string, cfg: HarnessConfig, deps: GradingDeps = {},
-  expected?: string,
+  expected?: string, keyId?: string,
 ): Promise<Grade> {
   // A BLANK answer never reaches the model. Nothing submitted cannot demonstrate knowledge, and
   // asking a grader to judge an empty string invites exactly what it produced live: a four-item
@@ -1152,9 +1157,27 @@ async function gradeOpenAnswer(
       evidence: [ev(slug, 'struggled', `open answer: ${question}`, 'model')],
     };
   }
-  // `expected` (quick_check's fallback path) reaches only the PROMPT — grading context for the
-  // model, never copied into the evidence note.
-  const prompt = `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
+  // The grader decided the answer when the question was staged (answerKey.ts); now the reply is
+  // compared with it. A reply that IS that answer is settled here with no model call — the call
+  // that would have judged it was already spent while the learner was thinking. `source` stays
+  // 'model': a model wrote the key, so capApplied still keeps this from minting applied-correctly.
+  const key = keyId ? await takeAnswerKey(keyId) : null;
+  if (key && sameAnswer(answer, key.answer)) {
+    return {
+      verdict: 'correct', source: 'model', detail: 'matches the answer the grader prepared',
+      evidence: [ev(slug, 'applied-correctly', `open answer: ${question}`, 'model')],
+    };
+  }
+  // `expected` and the key reach only the PROMPT — grading context for the model, never copied
+  // into the evidence note. With a key the question is "how well", so PARTIAL is on offer; the
+  // tutor's `expected` rides along as a second reference, and the question settles a disagreement.
+  const prompt = key
+    ? `Question: ${question}\nReference answer (prepared before the student replied): ${key.answer}\n`
+      + (key.points.length ? `A full answer contains:\n${key.points.map((p) => `- ${p}`).join('\n')}\n` : '')
+      + (expected ? `The tutor's own expected answer: ${expected} (if it disagrees with the reference, judge by the question)\n` : '')
+      + `Student answer: ${answer}\nCompare the student's answer with the reference. Wording does not matter; meaning does. `
+      + 'Reply with exactly CORRECT, PARTIAL or INCORRECT, followed by a one-line reason naming what was right and what was missing.'
+    : `Question: ${question}\n${expected ? `A correct answer conveys: ${expected}\n` : ''}Student answer: ${answer}\nReply with exactly CORRECT or INCORRECT followed by a one-line reason.`;
   const { text, usage } = await generateText({ model: deps.model ?? chatModelFor('grader', cfg), prompt });
   recordUsage(cfg.vault, {
     role: 'grader', model: cfg.models?.grader?.model ?? 'unknown', usage,
@@ -1169,13 +1192,22 @@ async function gradeOpenAnswer(
   // of all — "CORRECT The student identifies…" — recording a right answer as `struggled`.
   // Leading whitespace and markdown emphasis (**CORRECT**, _INCORRECT_, "# CORRECT") are stripped.
   const stripped = text.trim().replace(/^[\s*_#>]+/, '');
-  const match = stripped.match(/^(CORRECT|INCORRECT)(?![A-Za-z0-9])(?![*_]*\s+(?:answers?|responses?|solutions?|options?|choices?|values?|results?)\b)/i);
+  const match = stripped.match(/^(CORRECT|INCORRECT|PARTIAL(?:LY)?(?:[*_]*\s+CORRECT)?)(?![A-Za-z0-9])(?![*_]*\s+(?:answers?|responses?|solutions?|options?|choices?|values?|results?)\b)/i);
   if (!match) {
     // A reply we could not read says nothing about the learner. Grading it `incorrect` minted
     // `struggled` on the strength of a formatting miss; `ungraded` records nothing and leaves the
     // tutor to judge, the same call the vector checker makes for an answer it cannot parse.
     console.error(`gradeOpenAnswer: grader reply unparseable: ${text.slice(0, 200)}`);
     return { verdict: 'ungraded', source: 'model', detail: 'grader reply unparseable', evidence: [] };
+  }
+  if (/^PARTIAL/i.test(match[1])) {
+    // Half an answer is neither a repair the learner needs (`struggled`) nor something they have
+    // shown they can explain. `exposed` refreshes the page's decay clock and promotes nothing; the
+    // detail carries what was missing, which is what the tutor teaches next.
+    return {
+      verdict: 'partial', source: 'model', detail: text.trim(),
+      evidence: [ev(slug, 'exposed', `open answer, partly right: ${question}`, 'model')],
+    };
   }
   const ok = match[1].toUpperCase() === 'CORRECT';
   return {

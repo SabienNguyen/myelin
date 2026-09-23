@@ -42,6 +42,58 @@ const CROSSREF_JSON = {
   },
 };
 
+// The live failure this guards against: asked for canonical sources on inference-serving systems,
+// findCanonicalPapers used to sort Crossref by citation count with no topic filter, so the
+// MOST-CITED paper sharing even one word won. It returned DADA2 (amplicon-sequencing software —
+// "inference" as in statistics) and, on a reworded retry, ImageNet ("large-scale" image database)
+// — both landmark papers, neither in a field the learner asked about.
+const REAL_TOPIC = 'inference infrastructure engineering: serving large language models, systems, GPU inference';
+
+const DADA2_ITEM = {
+  title: ['DADA2: High-resolution sample inference from Illumina amplicon data'],
+  author: [{ given: 'B', family: 'Callahan' }],
+  created: { 'date-time': '2016-05-23T00:00:00Z' },
+  URL: 'https://doi.org/10.1000/dada2',
+  DOI: '10.1000/dada2',
+  'is-referenced-by-count': 12000,
+};
+
+const IMAGENET_ITEM = {
+  title: ['ImageNet: A large-scale hierarchical image database'],
+  author: [{ given: 'J', family: 'Deng' }],
+  created: { 'date-time': '2009-06-20T00:00:00Z' },
+  URL: 'https://doi.org/10.1000/imagenet',
+  DOI: '10.1000/imagenet',
+  'is-referenced-by-count': 45000,
+};
+
+const ON_TOPIC_HIGH_ITEM = {
+  title: ['GPU Inference Systems: An Engineering Survey of Serving Large Language Models'],
+  author: [{ given: 'A', family: 'Systems' }],
+  created: { 'date-time': '2024-01-10T00:00:00Z' },
+  URL: 'https://doi.org/10.1000/survey',
+  DOI: '10.1000/survey',
+  'is-referenced-by-count': 1500,
+};
+
+const ON_TOPIC_LOW_ITEM = {
+  title: ['Efficient Memory Management for Serving Large Language Models: A Systems Approach'],
+  author: [{ given: 'W', family: 'Kwon' }],
+  created: { 'date-time': '2023-09-12T00:00:00Z' },
+  URL: 'https://doi.org/10.1000/paged2',
+  DOI: '10.1000/paged2',
+  'is-referenced-by-count': 300,
+};
+
+const ON_TOPIC_NO_COUNT_ITEM = {
+  title: ['A Systems Survey of GPU Inference Infrastructure for Serving Language Models'],
+  author: [{ given: 'C', family: 'NoCount' }],
+  created: { 'date-time': '2024-03-01T00:00:00Z' },
+  URL: 'https://doi.org/10.1000/nocount',
+  DOI: '10.1000/nocount',
+  // No is-referenced-by-count key: Crossref reported nothing for this one.
+};
+
 const fakeFetch = (arxivOk = true, crossrefOk = true): typeof fetch => (async (url: any) => {
   const u = String(url);
   if (u.includes('export.arxiv.org')) {
@@ -71,6 +123,17 @@ describe('searchCrossref', () => {
     expect(got).toHaveLength(2);
     expect(got[0].url).toBe('https://doi.org/10.1000/paged');
   });
+
+  it("defaults rows to the per-source cap when called the way findRecentPapers calls it", async () => {
+    const urls: string[] = [];
+    const spy: typeof fetch = (async (u: any) => {
+      urls.push(String(u));
+      return new Response(JSON.stringify(CROSSREF_JSON), { status: 200 });
+    }) as typeof fetch;
+    await searchCrossref('kv cache', spy, 'created');
+    expect(urls[0]).toContain('rows=8');
+    expect(urls[0]).not.toContain('sort=score');
+  });
 });
 
 describe('findRecentPapers', () => {
@@ -98,14 +161,15 @@ describe('findRecentPapers', () => {
 });
 
 describe('findCanonicalPapers', () => {
-  it('asks Crossref for citation-sorted results — who to read, not what is newest', async () => {
+  it('asks Crossref for a relevance-sorted pool wide enough to filter, not a citation-sorted one', async () => {
     const urls: string[] = [];
     const spy: typeof fetch = (async (u: any) => {
       urls.push(String(u));
       return new Response(JSON.stringify(CROSSREF_JSON), { status: 200 });
     }) as typeof fetch;
     const { papers } = await findCanonicalPapers('kv cache', spy);
-    expect(urls[0]).toContain('sort=is-referenced-by-count');
+    expect(urls[0]).toContain('sort=score');
+    expect(urls[0]).toContain('rows=40');
     expect(papers.length).toBeGreaterThan(0);
   });
 
@@ -116,6 +180,36 @@ describe('findCanonicalPapers', () => {
     const { papers } = await findCanonicalPapers('kv cache', spy);
     expect(papers[0].citations).toBe(4182);
     expect(papers[1].citations).toBeUndefined();
+  });
+
+  it('drops the most-cited results when they only share a word with the topic (DADA2, ImageNet)', async () => {
+    const body = { message: { items: [DADA2_ITEM, IMAGENET_ITEM, ON_TOPIC_LOW_ITEM, ON_TOPIC_HIGH_ITEM] } };
+    const spy: typeof fetch = (async () => new Response(JSON.stringify(body), { status: 200 })) as typeof fetch;
+    const { papers } = await findCanonicalPapers(REAL_TOPIC, spy);
+    const titles = papers.map((p) => p.title);
+    expect(titles.some((t) => /DADA2/.test(t))).toBe(false);
+    expect(titles.some((t) => /ImageNet/.test(t))).toBe(false);
+    expect(titles).toHaveLength(2);
+  });
+
+  it('orders on-topic survivors by citation count, descending, no-count papers last', async () => {
+    // Deliberately shuffled and interleaved with the junk items — the pool arrives relevance
+    // sorted, not citation sorted, so this order has to come from findCanonicalPapers itself.
+    const body = {
+      message: { items: [ON_TOPIC_NO_COUNT_ITEM, DADA2_ITEM, ON_TOPIC_LOW_ITEM, IMAGENET_ITEM, ON_TOPIC_HIGH_ITEM] },
+    };
+    const spy: typeof fetch = (async () => new Response(JSON.stringify(body), { status: 200 })) as typeof fetch;
+    const { papers } = await findCanonicalPapers(REAL_TOPIC, spy);
+    expect(papers.map((p) => p.citations)).toEqual([1500, 300, undefined]);
+  });
+
+  it('returns no papers plus a note when nothing survives the topic filter — never a junk fallback', async () => {
+    const body = { message: { items: [DADA2_ITEM, IMAGENET_ITEM] } };
+    const spy: typeof fetch = (async () => new Response(JSON.stringify(body), { status: 200 })) as typeof fetch;
+    const { papers, sourceErrors, note } = await findCanonicalPapers(REAL_TOPIC, spy);
+    expect(papers).toEqual([]);
+    expect(sourceErrors).toEqual([]);
+    expect(note).toMatch(/no on-topic canonical papers/i);
   });
 });
 

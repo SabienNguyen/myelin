@@ -74,7 +74,7 @@ describe('CommandEditor', () => {
     const { handle, dom } = await mount();
     act(() => { handle().editor.commands.insertContent('/'); });
     const listbox = await screen.findByRole('listbox', { name: 'Commands' });
-    expect(listbox.querySelectorAll('[role="option"]')).toHaveLength(8);
+    expect(listbox.querySelectorAll('[role="option"]')).toHaveLength(9); // 8 wire commands + /aside
 
     act(() => { handle().editor.commands.insertContent('qu'); });
     await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1));

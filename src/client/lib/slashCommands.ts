@@ -3,8 +3,13 @@
 // mounting Tiptap in jsdom.
 import { COMMANDS, type Command } from '../../shared/commands.js';
 
+/** The menu's vocabulary is one command WIDER than the wire's: `aside` never reaches chatRoute
+ * (it routes to askAside instead — see Thread.tsx's Composer), so it deliberately stays out of
+ * src/shared/commands.ts's COMMANDS. Every other command is exactly the wire's Command. */
+export type ComposerCommand = Command | 'aside';
+
 export interface CommandSpec {
-  command: Command;
+  command: ComposerCommand;
   /** One line under the name in the menu — terse, lowercase-leaning, no mechanics narration. */
   hint: string;
 }
@@ -19,6 +24,7 @@ export const COMMAND_SPECS: CommandSpec[] = [
   { command: 'quiz', hint: 'switch to quiz mode — open with a quiz' },
   { command: 'freeform', hint: 'switch to freeform mode — follow your lead, write pages' },
   { command: 'write', hint: 'write this up as a page — one turn only' },
+  { command: 'aside', hint: 'ask about the last thing the tutor said — does not derail the lesson' },
 ];
 
 /** Prefix match on the command name; the empty query lists everything. */
@@ -29,7 +35,7 @@ export function filterCommands(query: string): CommandSpec[] {
 
 /** What a send carries — the structured replacement for raw "/beginner …" prose. */
 export interface ComposerPayload {
-  command?: Command;
+  command?: ComposerCommand;
   text: string;
 }
 
@@ -48,15 +54,16 @@ interface PMNodeJSON {
  * hand-restored doc, not a policy with two answers.
  */
 export function serializeComposerDoc(doc: PMNodeJSON): ComposerPayload {
-  let command: Command | undefined;
+  let command: ComposerCommand | undefined;
   const lines: string[] = [];
   for (const block of doc.content ?? []) {
     let line = '';
     for (const node of block.content ?? []) {
       if (node.type === 'commandChip') {
         const c = node.attrs?.command;
-        if (command === undefined && typeof c === 'string' && (COMMANDS as readonly string[]).includes(c)) {
-          command = c as Command;
+        if (command === undefined && typeof c === 'string'
+          && ((COMMANDS as readonly string[]).includes(c) || c === 'aside')) {
+          command = c as ComposerCommand;
         }
       } else if (typeof node.text === 'string') {
         line += node.text;

@@ -16,6 +16,26 @@ export function assertThreadId(threadId: string) {
   }
 }
 
+/** asideRoute.ts persists a `data-aside` part on a message DIRECTLY (addPartToMessage below),
+ *  outside the request that produced the message it anchors to. A later client save of that same
+ *  message — built from a browser snapshot taken before the aside landed — carries no such part,
+ *  and saveThread's ordinary "incoming replaces disk, same position" rule would silently drop it:
+ *  the learner's aside answer would vanish the next time either tab saved. Parts are matched by
+ *  their own `id`, not by position, so an aside added after the incoming copy was snapshotted is
+ *  exactly the case this restores. */
+function keepAsideParts(onDiskMsg: any, incomingMsg: any): any {
+  const onDiskParts: any[] = Array.isArray(onDiskMsg?.parts) ? onDiskMsg.parts : [];
+  const asideOnDisk = onDiskParts.filter((p) => p?.type === 'data-aside');
+  if (asideOnDisk.length === 0) return incomingMsg;
+  const incomingParts: any[] = Array.isArray(incomingMsg?.parts) ? incomingMsg.parts : [];
+  const incomingAsideIds = new Set(
+    incomingParts.filter((p) => p?.type === 'data-aside').map((p) => p?.id),
+  );
+  const missing = asideOnDisk.filter((p) => !incomingAsideIds.has(p?.id));
+  if (missing.length === 0) return incomingMsg;
+  return { ...incomingMsg, parts: [...incomingParts, ...missing] };
+}
+
 export function saveThread(vault: string, threadId: string, messages: unknown[]) {
   assertThreadId(threadId);
   mkdirSync(dir(vault), { recursive: true });
@@ -57,7 +77,10 @@ export function saveThread(vault: string, threadId: string, messages: unknown[])
       merged.push(m);
       continue;
     }
-    merged.push(byId.get(id) ?? m); // fresher version if the writer has one, same position
+    const incomingMsg = byId.get(id);
+    // fresher version if the writer has one, same position — but never at the cost of a
+    // `data-aside` part (see keepAsideParts below).
+    merged.push(incomingMsg ? keepAsideParts(m, incomingMsg) : m);
     seen.add(id);
   }
   for (const m of incoming) {
@@ -83,6 +106,28 @@ export function loadThread(vault: string, threadId: string): unknown[] {
   if (!Array.isArray(parsed)) return [];
   return dedupeById(parsed);
 }
+
+/** Persists one part (e.g. an aside's `data-aside` result) onto a specific message, outside the
+ * normal chat-turn save. Writes straight to disk rather than through saveThread's merge: this is
+ * the AUTHORITATIVE copy of the part, minted after the message it anchors to already exists, so
+ * there is nothing to merge it against — a same-id part already on the message is replaced
+ * (asking twice about the same aside updates it in place), everything else is kept. */
+export function addPartToMessage<P extends { type: string; id?: unknown }>(
+  vault: string, threadId: string, messageId: string, part: P,
+): void {
+  assertThreadId(threadId);
+  const messages = loadThread(vault, threadId) as any[];
+  const idx = messages.findIndex((m) => m?.id === messageId);
+  if (idx === -1) {
+    throw new Error(`no message "${messageId}" in thread "${threadId}"`);
+  }
+  const parts: any[] = Array.isArray(messages[idx].parts) ? messages[idx].parts : [];
+  const kept = parts.filter((p) => !(part.id !== undefined && p?.id === part.id));
+  messages[idx] = { ...messages[idx], parts: [...kept, part] };
+  mkdirSync(dir(vault), { recursive: true });
+  atomicWrite(join(dir(vault), `${threadId}.json`), JSON.stringify(messages));
+}
+
 export function deleteThread(vault: string, threadId: string) {
   assertThreadId(threadId);
   const p = join(dir(vault), `${threadId}.json`);

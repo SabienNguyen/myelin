@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useThread, useThreadRuntime } from '@assistant-ui/react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useMessage, useThread, useThreadRuntime } from '@assistant-ui/react';
 import { ArrowUpIcon as ArrowUp, FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, XIcon as X } from '@phosphor-icons/react';
 import type { FileUIPart } from '../../shared/uiMessages.js';
 import { useChatStore } from '../chatCore/index.js';
+import { askAside } from '../lib/api.js';
+import { AsidePart } from './AsidePart.js';
 import { CommandEditor, type CommandEditorHandle } from './CommandEditor.js';
 import { MarkdownText } from './MarkdownText.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
@@ -73,14 +75,136 @@ function ReasoningPart({ text }: { text: string }) {
   );
 }
 
+/** Selection cap for an aside quote — same rationale and number as SourceReader's MAX_PASSAGE:
+ *  a "passage" is a sentence or two, not the whole message. */
+const MAX_ASIDE_QUOTE = 600;
+
+/**
+ * "Ask aside" on a tutor message: select text → a floating button → an inline form (quote,
+ * optional question, submit/cancel) → askAside → the returned part lands on THIS message via
+ * chatStore.addPartToMessage. Mirrors SourceReader.tsx's selection handling (selectionchange,
+ * not mouseup — a screen reader's selection commands never fire mouseup) scoped to this one
+ * message's own DOM subtree, since a transcript holds many of these at once.
+ */
+function AsideAsk({ messageId, children }: { messageId: string; children: ReactNode }) {
+  const store = useChatStore();
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [pick, setPick] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [form, setForm] = useState<{ quote: string } | null>(null);
+  const [question, setQuestion] = useState('');
+  const [status, setStatus] = useState<'idle' | 'pending'>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onSelectionChange = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const body = bodyRef.current;
+        const sel = window.getSelection();
+        const text = sel?.toString().trim() ?? '';
+        if (!body || !sel || sel.isCollapsed || !text || !body.contains(sel.anchorNode)) {
+          setPick(null);
+          return;
+        }
+        const rangeRect = sel.getRangeAt(0).getBoundingClientRect();
+        const bodyRect = body.getBoundingClientRect();
+        setPick({
+          text: text.length > MAX_ASIDE_QUOTE ? `${text.slice(0, MAX_ASIDE_QUOTE)}…` : text,
+          x: Math.max(0, rangeRect.left - bodyRect.left + body.scrollLeft),
+          y: rangeRect.bottom - bodyRect.top + body.scrollTop,
+        });
+      }, 180);
+    };
+    document.addEventListener('selectionchange', onSelectionChange);
+    return () => { clearTimeout(timer); document.removeEventListener('selectionchange', onSelectionChange); };
+  }, []);
+
+  const openForm = () => {
+    if (!pick) return;
+    setForm({ quote: pick.text });
+    setPick(null);
+    window.getSelection()?.removeAllRanges();
+  };
+  const cancel = () => { setForm(null); setQuestion(''); setError(null); };
+
+  const submit = async () => {
+    if (!form) return;
+    setStatus('pending');
+    setError(null);
+    try {
+      const part = await askAside({
+        threadId: store.threadId,
+        messageId,
+        question: question.trim() || `Explain "${form.quote}"`,
+        quote: form.quote,
+      });
+      store.addPartToMessage(messageId, part);
+      setForm(null);
+      setQuestion('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStatus('idle');
+    }
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+  };
+
+  return (
+    <div ref={bodyRef} className="aside-ask-region">
+      {children}
+      {pick && !form && (
+        <button
+          type="button"
+          className="aside-ask"
+          style={{ left: pick.x, top: pick.y + 8 }}
+          onClick={openForm}
+        >
+          ask aside
+        </button>
+      )}
+      {form && (
+        <form
+          className="aside-form"
+          onSubmit={(e) => { e.preventDefault(); void submit(); }}
+        >
+          <blockquote>{form.quote}</blockquote>
+          <label htmlFor={`aside-question-${messageId}`}>aside question</label>
+          <textarea
+            id={`aside-question-${messageId}`}
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            onKeyDown={onKeyDown}
+            autoFocus
+          />
+          <div className="aside-form-actions">
+            <button type="submit">submit</button>
+            <button type="button" onClick={cancel}>cancel</button>
+          </div>
+        </form>
+      )}
+      {status === 'pending' && <p className="aside-composer-status" role="status">answering aside…</p>}
+      {error && <p className="aside-composer-error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
 function AssistantMessage() {
+  const messageId = useMessage((m) => m.id);
   return (
     <MessagePrimitive.Root className="msg assistant">
-      <MessagePrimitive.Parts components={{
-        Text: MarkdownText,
-        Reasoning: ReasoningPart,
-        tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
-      }} />
+      <AsideAsk messageId={messageId}>
+        <MessagePrimitive.Parts components={{
+          Text: MarkdownText,
+          Reasoning: ReasoningPart,
+          tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
+          data: { by_name: { aside: AsidePart } },
+        }} />
+      </AsideAsk>
       <MessagePrimitive.Error>
         <ErrorPrimitive.Root className="error-bubble">
           ⚠ <ErrorPrimitive.Message />
@@ -261,7 +385,7 @@ const ATTACH_MAX_BYTES = 5 * 1024 * 1024;
  * input even when it was a textarea (setText+send is synchronous; nothing renders in between).
  * Two send paths, one store method, no editor/composer state syncing to get wrong.
  */
-function Composer() {
+export function Composer({ testEditorHandleRef }: { testEditorHandleRef?: RefObject<CommandEditorHandle | null> } = {}) {
   const store = useChatStore();
   const [files, setFiles] = useState<FileUIPart[]>([]);
   const [note, setNote] = useState<string | null>(null);
@@ -269,7 +393,15 @@ function Composer() {
   // "/beginner" is a valid send), and must also open for a files-only message.
   const [editorEmpty, setEditorEmpty] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
-  const editorRef = useRef<CommandEditorHandle | null>(null);
+  const ownEditorRef = useRef<CommandEditorHandle | null>(null);
+  // `testEditorHandleRef` is a test-only seam: jsdom cannot type into Tiptap's contenteditable
+  // (commandEditor.test.tsx drives it through this same handle), so a Composer-level test needs a
+  // way to reach it too. Production never passes it; the default is the ref this component owns.
+  const editorRef = testEditorHandleRef ?? ownEditorRef;
+  // `/aside` never becomes a chat turn — see doSubmit below — so it needs its own tiny bit of
+  // status the composer form itself carries (no assistant message to anchor a part on yet).
+  const [asidePending, setAsidePending] = useState(false);
+  const [asideError, setAsideError] = useState<string | null>(null);
 
   const addFiles = (picked: FileList | null) => {
     for (const file of Array.from(picked ?? [])) {
@@ -288,11 +420,33 @@ function Composer() {
     }
   };
 
+  // `/aside <question>` never rides a chat turn (chatRoute 400s an unknown command on purpose —
+  // see slashCommands.ts's ComposerCommand note): it calls askAside directly against the latest
+  // ASSISTANT message, and the returned part lands on that message via addPartToMessage, exactly
+  // as the selection-driven AsideAsk flow does.
+  const submitAside = (question: string) => {
+    const last = [...store.getState().messages].reverse().find((m) => m.role === 'assistant');
+    if (!last) {
+      setAsideError('no tutor message to ask about yet');
+      return;
+    }
+    setAsideError(null);
+    editorRef.current?.clear();
+    setFiles([]);
+    setNote(null);
+    setAsidePending(true);
+    askAside({ threadId: store.threadId, messageId: last.id, question })
+      .then((part) => { store.addPartToMessage(last.id, part); })
+      .catch((e: unknown) => { setAsideError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => setAsidePending(false));
+  };
+
   // One send path for the Send button, the form, and the editor's Enter keymap. serialize()
   // already trims: whitespace-only text beside files sends as files-only — no junk text part.
   const doSubmit = () => {
     const payload = editorRef.current?.serialize() ?? { text: '' };
     if (payload.text === '' && payload.command === undefined && files.length === 0) return;
+    if (payload.command === 'aside') { submitAside(payload.text); return; }
     store.sendMessage(payload.text, files, { command: payload.command });
     editorRef.current?.clear();
     setFiles([]);
@@ -308,6 +462,8 @@ function Composer() {
 
   return (
     <ComposerPrimitive.Root className="composer" onSubmit={submit}>
+      {asidePending && <p className="aside-composer-status" role="status">answering aside…</p>}
+      {asideError !== null && <p className="aside-composer-error" role="alert">{asideError}</p>}
       {(files.length > 0 || note !== null) && (
         <div className="composer-attachments">
           {files.map((f, i) => (

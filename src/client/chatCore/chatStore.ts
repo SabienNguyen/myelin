@@ -76,6 +76,32 @@ export class ChatStore {
     this.setState({ messages });
   }
 
+  /** The thread this store is bound to — read by callers that need it alongside the store
+   * (askAside's request needs threadId, messageId and question; only the store knows threadId). */
+  get threadId(): string {
+    return this.opts.threadId;
+  }
+
+  /** Insert (or replace, matched by part.id) a part on an existing message — how an aside answer
+   * lands on the tutor message it was asked about, without a chat turn or a server round-trip
+   * through run(). No-ops (with a console.error, same as addToolOutput's own guard) when the
+   * message is gone, which the caller cannot be responsible for by the time an async answer
+   * resolves. */
+  addPartToMessage(messageId: string, part: UIPart & { id?: string }): void {
+    const index = this.state.messages.findIndex((m) => m.id === messageId);
+    if (index === -1) {
+      console.error(`addPartToMessage: no message "${messageId}" in the thread`);
+      return;
+    }
+    const message = this.state.messages[index]!;
+    const partIndex = part.id === undefined ? -1 : message.parts.findIndex((p) => 'id' in p && p.id === part.id);
+    const parts = [...message.parts];
+    if (partIndex === -1) parts.push(part); else parts[partIndex] = part;
+    const messages = [...this.state.messages];
+    messages[index] = { ...message, parts };
+    this.setState({ messages });
+  }
+
   sendMessage(text: string, files: FileUIPart[] = [], opts: { command?: Command } = {}): void {
     const messages = closePendingToolCalls(this.state.messages);
     // The data-command part LEADS (runtimeAdapter maps data parts; the transcript chip renders

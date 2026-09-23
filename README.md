@@ -128,6 +128,26 @@ setup is never asked for a key.
 - **YouTube ingest** — `pipx install yt-dlp` (captions only; a caption-less video gets an honest
   error, not a fake transcript).
 
+## ChatGPT subscription connection (preview)
+
+Open the model badge in the top bar and scroll to **ChatGPT subscription · preview**.
+**Sign in with ChatGPT** requests a device code; open the displayed OpenAI link and
+complete authorization yourself. **Refresh status** checks the connection, and
+**Disconnect ChatGPT** removes this app's login. These controls do not save or change
+any model selections.
+
+This preview is **sign-in only**: subscription-backed tutor/grader execution is not
+available yet. Do not enter a subscription token in an API-key field. The official
+`@openai/codex` app-server owns credentials and refresh, in a Myelin-specific `codex`
+directory alongside Myelin's credentials store, outside the vault. Myelin does not
+read or export those tokens. Account sign-in is not proof of model entitlement or
+remaining quota.
+
+The internal `src/server/codexTurn.ts` runner has protocol-fixture tests for text,
+host-tool replies, cancellation and failures; it is not connected to the live tutor.
+Live execution still needs transport integration, built-in tool isolation, Myelin's
+exercise pause/resume semantics, and a user-authorized subscription test.
+
 ## Model routes: API key, local, or any OpenAI-compatible provider
 
 Every `models.*.model` id is routed by prefix, so a config can freely mix routes per role:

@@ -2,6 +2,7 @@
 export * from './types.js';
 export { anthropicModel, type AnthropicModelOptions } from './anthropic.js';
 export { openaiCompatModel, type OpenAICompatModelOptions } from './openaiCompat.js';
+export { openaiResponsesModel, type OpenAIResponsesModelOptions } from './openaiResponses.js';
 export {
   runLoop,
   type LoopEvent, type LoopResult, type LoopStep, type LoopTool, type RunLoopOptions,

@@ -7,6 +7,9 @@ import { configSource, loadConfig } from './config.js';
 import { applyCredentials, credentialsPath } from './credentials.js';
 import { applySettings } from './settings.js';
 import { buildSetupRoutes, needsApiKey } from './setupRoutes.js';
+import { buildCodexRoutes } from './codexRoutes.js';
+import { buildAsideRoute } from './asideRoute.js';
+import { CodexConnection } from './codexConnection.js';
 import { modelRouteFor } from './models.js';
 import { buildStaticRoutes } from './staticRoutes.js';
 import { Engram } from './mcp.js';
@@ -185,6 +188,14 @@ if (lw) app.route('/', buildGapHelpRoute(lw, cfg));
 // First-run readiness + the one thing a first run must supply. Mounted last so it is reachable
 // even if a feature route above is disabled.
 app.route('/', buildSetupRoutes(cfg));
+// Codex/ChatGPT subscription sign-in (auth-only for now; no model routing yet).
+const codexConnection = new CodexConnection();
+app.route('/', buildCodexRoutes(codexConnection));
+process.on('exit', () => { void codexConnection.close(); });
+// Inline asides: a separate small model call, not a chat turn — mounted unconditionally (like
+// the codex routes above) so it 502s with a clear reason on a degraded boot instead of falling
+// through to the /api/* catch-all's generic engram-down message.
+app.route('/', buildAsideRoute(lw, cfg));
 // Whether the memory server came up, and if not, the same words the terminal got. 200 either way:
 // a probe that cannot be read is no better than the console line this replaces.
 app.get('/api/engram', (c) => c.json({ ok: !engramFailure, error: engramFailure }));

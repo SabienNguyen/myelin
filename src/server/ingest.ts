@@ -563,6 +563,52 @@ export function buildCompilePrompt(
   ].join('\n\n');
 }
 
+/**
+ * Builds the WHOLE compile prompt for a `mode: 'lesson'` ledger entry — replacing, not extending,
+ * buildCompilePrompt's book/chapter framing. `content` is the lesson file's own text (one chunk of
+ * it, if it ever needs chunking). This is the other half of the fix for a live data-loss incident:
+ * the old approach ran buildCompilePrompt (its "Book: ..." / "Chapter N: ..." framing, and
+ * compile-prompt.md's "sources must include the book title and this chapter, e.g. `["<book
+ * title>", "chapter <n>"]`" instruction) plus an appended buildLessonCompileInstructions that told
+ * the model to "extend that page with write_page" — which is exactly how a real 'solid' page with
+ * real citations got silently replaced by a 'draft' with sources `["lesson-notes", "chapter 1"]`.
+ * There is no book or chapter here, so this prompt never frames one, and it states the no-rewrite
+ * rule up front. That rule is also enforced mechanically (see compileOne's withLessonRules) — this
+ * prompt is the prose half, not the guarantee itself; a model that ignores it still cannot overwrite
+ * a page, it just wastes a step being refused.
+ */
+function buildLessonCompilePrompt(entry: QueueEntry, content: string, slugs: string[]): string {
+  const { tagged } = fenceSource(content);
+  const urls = entry.sourceUrls ?? [];
+  return [
+    'You are filing what a tutor just taught a student in ONE live turn into the vault. This is a '
+      + 'record of what was taught, not authored source material to summarize wholesale.',
+    'Extract AT MOST 3 concepts the turn actually taught. Fewer is fine — do not pad to reach 3, '
+      + 'and skip anything too thin to stand as its own page.',
+    'For each concept, call `search` FIRST. If a vault page already covers it, call `link_pages` to '
+      + 'connect this lesson to it — do NOT call `write_page` on an existing slug. Existing pages '
+      + 'are linked, never rewritten, by a lesson compile, and the call will be refused — except a '
+      + 'page whose status is "stub", which write_page may extend.',
+    entry.lessonTopic
+      ? `Link every new page to "${entry.lessonTopic}" (the lesson's own topic) as a prereq or `
+        + 'deepens edge, whichever direction actually fits.'
+      : 'The thread named no single current topic — link new pages to each other where that fits.',
+    urls.length > 0
+      ? `Cite only these URLs, and only on a page a citation actually came from: ${urls.join(', ')}. `
+        + 'Never write "lesson-notes", "chapter N", or any URL not in this list — anything else you '
+        + 'put in `sources` is dropped before it reaches disk. A concept with no matching URL still '
+        + 'gets a page, with status "draft" and no sources.'
+      : 'This turn cited no research URLs — every page you write gets status "draft" and no '
+        + 'sources, whatever you put in `sources`.',
+    slugs.length <= SLUG_LIST_CAP
+      ? `Existing vault slugs (link to these with link_pages; do not write_page on them): `
+        + `${slugs.join(', ') || '(none yet)'}`
+      : `The vault has ${slugs.length} pages — too many to list. Call \`search\` before writing so `
+        + 'you do not duplicate an existing page.',
+    tagged,
+  ].join('\n\n');
+}
+
 // ---- weak-model compile fallback ---------------------------------------------------------------
 //
 // The agentic compile above expects the model to DRIVE write_page — which a 7-9B model reliably
@@ -702,12 +748,15 @@ export async function compileOne(
     const budget = Math.min(chunkChars, budgetChars(cfg.models?.compile?.contextTokens));
     const chunks = chunkChapter(chapterMarkdown, budget);
 
-    // Citation is a MECHANICAL guarantee, not a prompt hope: every write_page
-    // during this compile gets the canonical source merged into its sources array, whether or not
-    // the model remembered. Papers cite their fetch URL; book chapters cite book + chapter.
-    // Video-sourced compiles get one more mechanical pass: plain [M:SS] stamps the model kept as
-    // citation anchors become deep links into the video, so the COMPILED page can jump to the
-    // exact second the way the raw transcript already does.
+    // Citation is a MECHANICAL guarantee, not a prompt hope, for a book/paper/repo compile
+    // (`entry.mode` unset or 'repo'): every write_page during this compile gets the canonical
+    // source merged into its sources array, whether or not the model remembered. Papers cite their
+    // fetch URL; book chapters cite book + chapter. Video-sourced compiles get one more mechanical
+    // pass: plain [M:SS] stamps the model kept as citation anchors become deep links into the
+    // video, so the COMPILED page can jump to the exact second the way the raw transcript already
+    // does. `entry.mode === 'lesson'` skips all of this — there is no book or chapter to cite — and
+    // gets its OWN mechanical guarantee instead (withLessonRules, below): sources filtered down to
+    // entry.sourceUrls, and no write_page onto a page that predates this compile.
     const citation = entry.sourceUrl
       ? `${entry.book} (${entry.sourceUrl})`
       : `${entry.book} — ${entry.title}`;
@@ -739,6 +788,88 @@ export async function compileOne(
         },
       }));
 
+    const isLesson = entry.mode === 'lesson';
+    // mode:'lesson' only — the mechanical fix for the incident this branch exists to close: the old
+    // prompt told the model to "extend that page with write_page" onto an existing page, and
+    // write_page's own update semantics (args replace title/body/status/sources wholesale — see
+    // engram's graphTools.ts) silently overwrote a real 'solid' page and its real citations with a
+    // 'draft' and fabricated sources. Snapshotting the vault's slugs before this compile starts, and
+    // refusing any write_page onto one of them (withLessonRules, below), closes that hole
+    // mechanically instead of trusting the model to remember not to. A slug THIS compile already
+    // wrote (writtenSlugs, shared with withCitation above) is exempt: refining a page the model
+    // itself just created a moment ago is fine and is exactly what buildLessonCompilePrompt invites.
+    const preLessonSlugs = isLesson ? new Set(await lw.listSlugs()) : null;
+    // Trim + drop one trailing slash, so "https://x/" (as recorded in entry.sourceUrls) still
+    // matches a model that wrote "https://x" (or vice versa) — the two most common harmless
+    // spellings of the same URL, not a reason to lose an otherwise-legitimate citation.
+    const normalizeUrl = (u: string) => u.trim().replace(/\/+$/, '');
+    const allowedUrls = new Set((entry.sourceUrls ?? []).map(normalizeUrl));
+
+    /**
+     * mode:'lesson' only write_page wrapper — used INSTEAD OF withCitation (there is no book or
+     * chapter to cite for a live turn). Two mechanical guarantees, neither a prompt hope:
+     *  1. `sources` is filtered down to ONLY urls this turn actually cited (entry.sourceUrls) —
+     *     "lesson-notes", "chapter 1", or any other string the model writes into `sources` never
+     *     reaches disk. An empty result forces status 'draft': an unsourced page must not read as
+     *     solid.
+     *  2. A write to a slug that existed in the vault BEFORE this compile started is REFUSED — a
+     *     tool-error result the model can read and recover from (link_pages instead), not a throw
+     *     — UNLESS that page's live status is 'stub' (checked via read_page at write time), in
+     *     which case the write is allowed and `sources` becomes the union of the stub's existing
+     *     sources and this write's filtered ones.
+     */
+    const withLessonRules = (tools: LoopTool[]): LoopTool[] =>
+      tools.map((t) => (t.name !== 'write_page' || !t.execute ? t : {
+        ...t,
+        execute: async (args: any) => {
+          const slug = typeof args?.slug === 'string' ? slugify(args.slug) : '';
+          const filterSources = (union: string[] = []) => {
+            const kept = Array.isArray(args?.sources)
+              ? args.sources.filter((s: unknown) => typeof s === 'string' && allowedUrls.has(normalizeUrl(s)))
+              : [];
+            return [...new Set([...union, ...kept])];
+          };
+          const writtenThisCompile = slug !== '' && writtenSlugs.includes(slug);
+
+          if (slug && preLessonSlugs!.has(slug) && !writtenThisCompile) {
+            // Pre-existing slug this compile did not itself write: read its live status before
+            // deciding — a 'stub' is the one page a lesson compile may still fill in.
+            let stubSources: string[] | null = null;
+            try {
+              const { page } = await lw.call('read_page', { slug });
+              if (page?.meta?.status === 'stub') stubSources = page.meta.sources ?? [];
+            } catch (e) {
+              // Can't confirm this is a safe stub upgrade — refuse rather than risk the very
+              // overwrite this guard exists to prevent. Expected to be rare (slug came from
+              // listSlugs moments ago), so worth knowing about if it isn't: logged, not swallowed.
+              console.error(`[compile] lesson mode: read_page(${slug}) failed while checking stub status:`, e);
+            }
+            if (stubSources === null) {
+              return {
+                content: [{
+                  type: 'text',
+                  text: 'this page already exists — lesson notes never rewrite an existing page; '
+                    + 'link to it with link_pages instead',
+                }],
+                isError: true,
+              };
+            }
+            if (!writtenSlugs.includes(slug)) writtenSlugs.push(slug);
+            const sources = filterSources(stubSources);
+            return t.execute!({ ...args, sources, ...(sources.length === 0 ? { status: 'draft' } : {}) });
+          }
+
+          if (slug && !writtenSlugs.includes(slug)) writtenSlugs.push(slug);
+          const sources = filterSources();
+          return t.execute!({ ...args, sources, ...(sources.length === 0 ? { status: 'draft' } : {}) });
+        },
+      }));
+
+    // Every write_page tool creation below goes through this one choice, so book/paper/repo
+    // compiles (wrapWritePage === withCitation) are byte-for-byte the pre-existing behavior and a
+    // lesson compile (wrapWritePage === withLessonRules) never falls back to citation-stamping.
+    const wrapWritePage = isLesson ? withLessonRules : withCitation;
+
     let wroteAny = false;
     const partErrors: string[] = [];
     // Stays true until some part proves the model can't drive write_page agentically. From that
@@ -753,13 +884,17 @@ export async function compileOne(
       // meaningful for the agentic path — distillation below never links, so it snapshots once.
       const slugs = await lw.listSlugs();
       const partLabel = chunks.length > 1 ? ` (part ${i + 1} of ${chunks.length})` : '';
-      const prompt = buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel);
-      const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
+      const prompt = isLesson
+        ? buildLessonCompilePrompt(entry, chunks[i], slugs)
+        : buildCompilePrompt(entry.book, chapterN, entry.title, chunks[i], slugs, partLabel);
+      const tools = wrapWritePage(guardTools(await lw.tools(), cfg.student, slugs));
 
       try {
         const result = await runLoop({
           model,
-          system: 'You are compiling one textbook chapter into Engram vault pages.',
+          system: isLesson
+            ? 'You are filing concepts a tutor just taught into Engram vault pages.'
+            : 'You are compiling one textbook chapter into Engram vault pages.',
           messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
           tools,
           maxSteps: 16,
@@ -800,9 +935,10 @@ export async function compileOne(
       // needs): distillation never links pages together, so there is nothing later parts need to
       // see that earlier ones just wrote.
       const slugs = await lw.listSlugs();
-      const tools = withCitation(guardTools(await lw.tools(), cfg.student, slugs));
-      // The citation-wrapped execute, so distilled/verbatim pages get the same mechanical source
-      // guarantee (and video-timestamp linkify) every agentic write_page gets.
+      const tools = wrapWritePage(guardTools(await lw.tools(), cfg.student, slugs));
+      // The same wrapped execute the agentic loop above used, so distilled/verbatim pages get the
+      // same mechanical guarantee: citation + video-timestamp linkify for book/paper/repo, or the
+      // sourceUrls filter + no-overwrite guard for a lesson.
       const writePage = tools.find((t) => t.name === 'write_page')?.execute;
       if (!writePage) {
         for (let i = firstFallbackPart; i < chunks.length; i++) {
@@ -846,10 +982,10 @@ export async function compileOne(
     // Single-page chapters skip it: a map of one place is noise. Re-fetches its own write_page
     // (rather than reusing either branch's local `writePage`, which is agentic-loop- or
     // distillation-scoped and may not exist in the other
-    // path) so the MOC always goes through the same citation wrapper the parts did.
+    // path) so the MOC always goes through the same write_page wrapper the parts did.
     if (!agenticAlive && writtenSlugs.length > 1) {
       const mocSlugsBefore = await lw.listSlugs();
-      const mocWritePage = withCitation(guardTools(await lw.tools(), cfg.student, mocSlugsBefore))
+      const mocWritePage = wrapWritePage(guardTools(await lw.tools(), cfg.student, mocSlugsBefore))
         .find((t) => t.name === 'write_page')?.execute;
       if (mocWritePage) {
         let overview = '';

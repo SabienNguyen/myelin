@@ -20,7 +20,10 @@ const samplerSchema = z.object({
   presencePenalty: z.number().optional(),
 }).optional();
 
-const roleSchema = z.object({
+// Exported so settings.ts can validate a hand-edited role OBJECT in settings.json (not just a bare
+// model id) against these exact rules — one schema, so a saved override can never accept something
+// harness.config.json itself would reject.
+export const roleSchema = z.object({
   model: z.string(),
   effort: z.enum(['low', 'medium', 'high']).optional(),
   sampler: samplerSchema,
