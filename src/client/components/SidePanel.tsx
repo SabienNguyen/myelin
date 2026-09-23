@@ -1,9 +1,10 @@
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ChatStoreContext } from '../chatCore/index.js';
 import { StageSummary } from './StageSummary.js';
+import { ConversationPages } from './ConversationPages.js';
 import { getGraph } from '../lib/api.js';
 import { panelBus, type PanelTab } from '../lib/panelBus.js';
-import { parseHash, serializeHash } from '../lib/urlState.js';
+import { parseHash, parseNotebookRoute, serializeHash } from '../lib/urlState.js';
 import { GraphPanel } from './GraphPanel.js';
 import { LibraryPanel } from './LibraryPanel.js';
 import { PagePanel } from './PagePanel.js';
@@ -91,6 +92,9 @@ export function SidePanel() {
 
   useEffect(() => {
     const onHashChange = () => {
+      // Leaving for the notebooks screens unmounts this panel. Reacting first would reset the tab
+      // and let the write-back effect above replace `#/notebooks` with a thread hash.
+      if (parseNotebookRoute(location.hash)) return;
       const parsed = parseHash(location.hash);
       tabTouchedRef.current = true;
       setTab(parsed.tab);
@@ -139,6 +143,7 @@ export function SidePanel() {
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
         <section className="stage-empty">
+          <ConversationPages messages={messages} isRunning={chat?.isRunning ?? false} />
           <h2>Your workspace</h2>
           <p>Exercises and feedback appear here as you learn.</p>
           <div className="stage-empty-actions">

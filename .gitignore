@@ -25,3 +25,5 @@ dist-pronounce/
 tests/e2e/.tmp-vault-pronounce/
 tests/e2e/.tmp-fake-audio.wav
 tests/e2e/.tmp-vault-rails/
+dist-chat/
+tests/e2e/.tmp-vault-chat/

@@ -102,7 +102,9 @@ or say nothing.
 - Tabs and panels: `SidePanel` owns `stage` / `graph` / `page` / `library`. Extend it.
 - Cross-component events: `panelBus` (`openPage`, `setTab`, `focusMode`).
 - Deep links: `urlState.ts` owns the `#/t/<threadId>[/<tab>|/page/<slug>]` hash. `App` owns the
-  threadId slice, `SidePanel` owns tab/page; each preserves the other's.
+  threadId slice, `SidePanel` owns tab/page; each preserves the other's. `#/notebooks` and
+  `#/notebooks/<id>` (`parseNotebookRoute`) sit outside that scheme and replace the workspace;
+  `SidePanel` ignores them.
 - Blocks render into `#stage-root` via `StagePortal`.
 - Model output is untrusted: it passes through `scrubModelArtifacts` (`panelBus.ts`) before render,
   because degenerate local models leak raw ChatML control tokens.

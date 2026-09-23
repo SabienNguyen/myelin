@@ -4,6 +4,7 @@ import { getGraph, getPage } from '../lib/api.js';
 import { POLL_MS } from './GraphPanel.js';
 import { RichMarkdown } from './RichMarkdown.js';
 import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
+import { PageNotebooks } from './Notebooks.js';
 
 // The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
 // system whose whole thesis is a JUSTIFIED TYPED GRAPH — every edge carries a rationale someone had
@@ -262,6 +263,7 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
         )}
         {page.page.domain && <span className="page-chip">{page.page.domain}</span>}
         {(meta.tags ?? []).map((t: string) => <span key={t} className="page-chip page-tag">#{t}</span>)}
+        <PageNotebooks slug={page.page.slug} />
       </div>
 
       {standing && (

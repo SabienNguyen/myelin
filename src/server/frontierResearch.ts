@@ -29,6 +29,11 @@ export interface FrontierPaper {
 
 const MAX_PER_SOURCE = 8;
 const MAX_TOTAL = 10;
+/** Rows to pull from Crossref, relevance-sorted, before filtering to on-topic and re-sorting by
+ *  citation count. A pool, not a result count: the paper this topic actually wants can rank well
+ *  below an off-topic one in raw relevance, so `concernsTopic` needs enough candidates to find it
+ *  in — see findCanonicalPapers. */
+const CANONICAL_POOL_ROWS = 40;
 
 /** Pull one XML tag's text content out of an entry block. arXiv's Atom feed is stable and flat
  *  enough for this; a full XML parser would be a dependency for two tags. */
@@ -63,11 +68,12 @@ export async function searchArxiv(
 }
 
 export async function searchCrossref(
-  topic: string, fetchImpl: typeof fetch = fetch, sort: 'created' | 'is-referenced-by-count' = 'created',
-  timeoutMs = 15_000,
+  topic: string, fetchImpl: typeof fetch = fetch,
+  sort: 'created' | 'is-referenced-by-count' | 'score' = 'created',
+  timeoutMs = 15_000, rows: number = MAX_PER_SOURCE,
 ): Promise<FrontierPaper[]> {
   const url = `https://api.crossref.org/works?query=${encodeURIComponent(topic)}`
-    + `&sort=${sort}&order=desc&rows=${MAX_PER_SOURCE}`
+    + `&sort=${sort}&order=desc&rows=${rows}`
     + '&select=title,author,created,URL,DOI,container-title,is-referenced-by-count';
   const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
   if (!res.ok) throw new Error(`Crossref responded ${res.status}`);
@@ -149,21 +155,48 @@ export async function findRecentPapers(
 }
 
 /**
- * The CANONICAL artifacts of a field — Crossref sorted by citation count instead of date.
+ * The CANONICAL artifacts of a field — the on-topic papers Crossref ranks highest by citations.
  *
  * The distinction this serves (3blue1brown's framing, and this app's own): a model's best role in
  * learning is LIBRARIAN, not author — route the learner to the load-bearing human artifacts and
  * the people behind them, then let the artifacts teach. Newest-first answers "what is happening";
  * most-cited answers "who should I read first". Both end in ingest_url, never in generated prose.
+ *
+ * Sorting Crossref itself by citation count (the previous implementation) ranks the whole index,
+ * not the query's matches — so the MOST-CITED paper sharing even one keyword wins. Asked for
+ * "inference infrastructure engineering: serving large language models, systems, GPU inference",
+ * it returned DADA2 (amplicon-sequencing software — "inference" as in statistics) and, reworded,
+ * ImageNet ("large-scale" image database): real, heavily-cited papers in fields nobody asked
+ * about. Crossref is asked for relevance instead, over a wide pool, and `concernsTopic` — the same
+ * filter findRecentPapers already used for this — throws out everything off-topic before
+ * citations are ever compared.
+ *
+ * Unlike findRecentPapers, a filter that leaves nothing does NOT fall back to the unfiltered
+ * pool: a merely-loose "newest paper" is still some real, dated finding, but a "canonical source"
+ * that is off-topic is actively harmful — the tutor hands it to the learner as the field's reading
+ * list. Reporting nothing found beats a confident wrong answer.
  */
 export async function findCanonicalPapers(
   topic: string, fetchImpl: typeof fetch = fetch, timeoutMs = 15_000,
-): Promise<{ papers: FrontierPaper[]; sourceErrors: string[] }> {
+): Promise<{ papers: FrontierPaper[]; sourceErrors: string[]; note?: string }> {
+  let pool: FrontierPaper[];
   try {
-    const papers = (await searchCrossref(topic, fetchImpl, 'is-referenced-by-count', timeoutMs))
-      .slice(0, MAX_TOTAL);
-    return { papers, sourceErrors: [] };
+    pool = await searchCrossref(topic, fetchImpl, 'score', timeoutMs, CANONICAL_POOL_ROWS);
   } catch (e: any) {
     throw new Error(`no index reachable — Crossref: ${e?.message ?? e}`);
   }
+
+  const onTopic = pool.filter((p) => concernsTopic(p, topic));
+  if (onTopic.length === 0) {
+    return {
+      papers: [],
+      sourceErrors: [],
+      note: `no on-topic canonical papers found for "${topic}" — the highest-cited Crossref `
+        + 'matches were all off-topic, so none are shown; try a narrower phrasing or find_recent_papers.',
+    };
+  }
+  const papers = onTopic
+    .sort((a, b) => (b.citations ?? -1) - (a.citations ?? -1))
+    .slice(0, MAX_TOTAL);
+  return { papers, sourceErrors: [] };
 }

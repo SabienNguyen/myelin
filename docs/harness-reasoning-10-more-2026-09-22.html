@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ten More Reasoning Displays</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #101116; --bg-panel: #17191f; --bg-inset: #21242c;
+  --text: #edeef2; --text-muted: #a5a9b6; --border: #3a3e4a;
+  --accent: #93b4f7; --accent-soft: #1f2a44;
+  --good: #85cba0; --bad: #f09c95; --warn: #e5c17e;
+  --radius: 10px; --radius-sm: 7px; --radius-shell: 14px;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --prose: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f4f5f8; --bg-panel: #ffffff; --bg-inset: #eceef3;
+    --text: #1f2128; --text-muted: #565a68; --border: #c9cbd8;
+    --accent: #2b55c4; --accent-soft: #dfe7fb;
+    --good: #27613f; --bad: #9b3632; --warn: #765319;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--prose); }
+.wrap { max-width: 1060px; margin: 0 auto; padding: 2rem 16px 5rem; }
+h1 { font: 600 1.55rem/1.25 var(--mono); margin: 0 0 .4rem; }
+h2 { font: 600 1.05rem/1.3 var(--mono); margin: 0; }
+.lede { color: var(--text-muted); max-width: 68ch; margin: 0 0 1.4rem; }
+.meta { font: .78rem var(--mono); color: var(--text-muted); }
+nav.toc { display: flex; flex-wrap: wrap; gap: .35rem .5rem; margin: 0 0 2rem; }
+nav.toc a { font: .78rem var(--mono); color: var(--text-muted); text-decoration: none; border: 1px solid var(--border); border-radius: 99px; padding: .15rem .6rem; }
+nav.toc a:hover { color: var(--text); border-color: var(--accent); }
+section.idea { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell); padding: 1.25rem 1.25rem 1.4rem; margin: 0 0 1.5rem; }
+.idea-head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; margin-bottom: .35rem; }
+.num { font: 600 .8rem var(--mono); color: var(--accent); }
+.pitch { color: var(--text-muted); margin: 0 0 1rem; max-width: 72ch; }
+.tradeoffs { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; margin-top: 1rem; font-size: .85rem; }
+.tradeoffs div { background: var(--bg-inset); border-radius: var(--radius-sm); padding: .55rem .75rem; }
+.tradeoffs b { font: 600 .72rem var(--mono); text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: .15rem; color: var(--text-muted); }
+@media (max-width: 640px) { .tradeoffs { grid-template-columns: 1fr; } }
+.stage { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; overflow: hidden; }
+.user-msg { margin: 0 0 .9rem auto; width: fit-content; max-width: 80%; background: var(--accent-soft); border-radius: var(--radius); padding: .4rem .75rem; font-size: .92rem; }
+.tutor p { margin: 0 0 .6rem; }
+.muted { color: var(--text-muted); } .small { font-size: .8rem; }
+.btn { font: .8rem var(--prose); border: 1px solid var(--border); background: var(--bg-panel); color: var(--text); border-radius: var(--radius-sm); padding: .3rem .75rem; }
+.btn.primary { background: var(--accent); color: #11131a; border-color: var(--accent); }
+
+/* 11 ambient */
+.composer { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-panel); padding: .55rem .75rem; margin-top: .9rem; font-size: .9rem; }
+.composer .live { font: .8rem var(--mono); color: var(--text-muted); }
+.composer .live b { color: var(--text); font-weight: 500; }
+.ghost { opacity: .35; }
+
+/* 12 gauge */
+.gauge-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 1.2rem; align-items: center; }
+.gauge svg { width: 100%; height: auto; display: block; }
+.why { font-size: .8rem; margin: .4rem 0 0; padding-left: 1rem; color: var(--text-muted); }
+@media (max-width: 640px) { .gauge-row { grid-template-columns: 1fr; } .gauge { max-width: 170px; } }
+
+/* 13 decision tree */
+.tree { font-size: .82rem; margin-bottom: .9rem; }
+.branch { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); gap: .3rem; margin: .2rem 0; }
+.branch .mark { font: 600 .8rem var(--mono); }
+.branch.no .mark { color: var(--bad); } .branch.yes .mark { color: var(--good); }
+.branch.no .txt { color: var(--text-muted); text-decoration: line-through; text-decoration-color: var(--border); }
+.node { font: 600 .74rem var(--mono); color: var(--accent); margin-top: .5rem; text-transform: uppercase; letter-spacing: .05em; }
+.indent { padding-left: 1.3rem; border-left: 1px dashed var(--border); margin-left: .4rem; }
+
+/* 14 consent */
+.checkpoint { border: 1px solid var(--warn); border-radius: var(--radius); padding: .75rem .85rem; background: var(--bg-inset); margin-bottom: .9rem; }
+.checkpoint h3 { font: 600 .74rem var(--mono); color: var(--warn); margin: 0 0 .3rem; text-transform: uppercase; letter-spacing: .06em; }
+.checkpoint .acts { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .6rem; }
+
+/* 15 storyboard */
+.board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin-bottom: .9rem; }
+.panel { border: 2px solid var(--text-muted); border-radius: 4px; background: var(--bg-inset); padding: .45rem; font-size: .74rem; min-height: 150px; display: flex; flex-direction: column; gap: .35rem; }
+.panel svg { width: 100%; height: 64px; }
+.panel .cap { font-style: italic; color: var(--text-muted); }
+@media (max-width: 720px) { .board { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* 16 forecast */
+.forecast { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; margin-bottom: .9rem; }
+.fc { background: var(--bg-inset); border-radius: var(--radius-sm); padding: .55rem .6rem; text-align: center; font-size: .76rem; }
+.fc .big { font: 600 1.35rem var(--mono); display: block; margin: .15rem 0; }
+.fc svg { width: 34px; height: 34px; display: block; margin: 0 auto .15rem; }
+@media (max-width: 640px) { .forecast { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* 17 vault diff */
+.diff { font: .74rem/1.6 var(--mono); background: var(--bg-inset); border-radius: var(--radius-sm); padding: .55rem .7rem; margin-bottom: .9rem; overflow-x: auto; }
+.diff .h { color: var(--text-muted); } .diff .a { color: var(--good); } .diff .d { color: var(--bad); } .diff .n { color: var(--warn); }
+.diff div { white-space: pre; }
+
+/* 18 narration */
+.player { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .7rem; align-items: center; background: var(--bg-inset); border-radius: 99px; padding: .35rem .8rem .35rem .4rem; margin-bottom: .6rem; }
+.play { width: 34px; height: 34px; border-radius: 50%; border: 0; background: var(--accent); display: grid; place-items: center; }
+.wave { display: flex; align-items: center; gap: 2px; height: 26px; }
+.wave i { display: block; width: 3px; border-radius: 2px; background: var(--text-muted); }
+.wave i.done { background: var(--accent); }
+.transcript { font-size: .82rem; color: var(--text-muted); border-left: 2px solid var(--border); padding-left: .7rem; margin-bottom: .9rem; }
+.transcript .now { color: var(--text); background: var(--accent-soft); }
+
+/* 19 your words */
+.heat { font-size: 1.05rem; margin: 0 0 .4rem auto; width: fit-content; background: var(--accent-soft); border-radius: var(--radius); padding: .5rem .8rem; }
+.heat span { border-radius: 4px; padding: 0 .15rem; }
+.heat .h-bad { background: color-mix(in srgb, var(--bad) 35%, transparent); }
+.heat .h-ok { background: color-mix(in srgb, var(--good) 30%, transparent); }
+.heat .h-mid { background: color-mix(in srgb, var(--warn) 30%, transparent); }
+.readings { font-size: .8rem; margin: .5rem 0 .9rem; display: grid; gap: .3rem; }
+.readings div { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr); gap: .5rem; }
+.readings b { font: 600 .74rem var(--mono); }
+
+/* 20 annotation */
+.moves { font: .82rem/1.8 var(--mono); background: var(--bg-inset); border-radius: var(--radius-sm); padding: .55rem .75rem; margin-bottom: .6rem; }
+.moves .g { color: var(--good); font-weight: 700; } .moves .b { color: var(--bad); font-weight: 700; } .moves .i { color: var(--warn); font-weight: 700; }
+.moves .mn { color: var(--text-muted); }
+.annot { font-size: .8rem; color: var(--text-muted); margin: 0 0 .9rem; }
+.annot b { font-family: var(--mono); color: var(--text); }
+
+.closing { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell); padding: 1.1rem 1.25rem; }
+.closing ul { margin: .4rem 0 0; padding-left: 1.1rem; } .closing li { margin-bottom: .3rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Ten more reasoning displays</h1>
+<p class="lede">Ideas 11–20, chosen to share nothing with the first ten. The sample is the same turn as before (“teach me inference infra engineering”: two off-topic source searches, a stub-only vault search, a draft page with zero sources). The first page was about <i>showing</i> what the harness did. These go further: some let you <i>act on</i> the reasoning, some show only its <i>effects</i>, one isn't visual at all.</p>
+<p class="meta">myelin · reasoning display · concepts 11–20 · mockups, not code</p>
+<nav class="toc" aria-label="Concepts">
+  <a href="#ambient">11 · ambient line</a><a href="#gauge">12 · grounding gauge</a><a href="#tree">13 · roads not taken</a>
+  <a href="#consent">14 · checkpoint</a><a href="#story">15 · storyboard</a><a href="#forecast">16 · forecast</a>
+  <a href="#diff">17 · vault diff</a><a href="#narrate">18 · narration</a><a href="#words">19 · your words</a><a href="#chess">20 · annotated moves</a>
+</nav>
+
+<!-- 11 -->
+<section class="idea" id="ambient">
+  <div class="idea-head"><span class="num">11</span><h2>Ambient line</h2><span class="meta">the reasoning lives in the input box and then disappears</span></div>
+  <p class="pitch">The extreme minimum. Nothing is added to the transcript. While the tutor works, the placeholder of your empty input box says what it's doing right now, one short present-tense phrase at a time. When the answer arrives, the line is gone. Nothing to scroll past, nothing saved.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="tutor ghost"><p>…</p></div>
+    <div class="composer"><span class="live">looking for something a person wrote about <b>LLM serving</b> · 2nd try</span></div>
+    <p class="small muted" style="margin:.5rem 0 0">earlier in the same turn: “checking what you already know” → “reading the vault” → “nothing solid yet”</p>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Studying with no clutter at all. The live phrase answers “is it stuck?” in the one place your eyes already are.</div><div><b>Costs</b>Leaves no record: you can't look back at why the tutor did something. Needs a present-tense phrase for each tool, which is cheap.</div></div>
+</section>
+
+<!-- 12 -->
+<section class="idea" id="gauge">
+  <div class="idea-head"><span class="num">12</span><h2>Grounding gauge</h2><span class="meta">one instrument per message</span></div>
+  <p class="pitch">Each tutor message gets a single dial showing how firmly it's grounded, from “memory” up to “sourced”. Under it, three short lines say why the needle sits where it does. You get the answer to “can I trust this?” in one glance, and the tools themselves never appear.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="gauge-row">
+      <div class="gauge">
+        <svg viewBox="0 0 150 95" role="img" aria-label="Grounding: low">
+          <path d="M15 85 A60 60 0 0 1 135 85" fill="none" stroke="var(--bg-inset)" stroke-width="14"/>
+          <path d="M15 85 A60 60 0 0 1 45 33" fill="none" stroke="var(--bad)" stroke-width="14"/>
+          <path d="M45 33 A60 60 0 0 1 105 33" fill="none" stroke="var(--warn)" stroke-width="14" opacity=".35"/>
+          <path d="M105 33 A60 60 0 0 1 135 85" fill="none" stroke="var(--good)" stroke-width="14" opacity=".35"/>
+          <line x1="75" y1="85" x2="36" y2="52" stroke="var(--text)" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="75" cy="85" r="5" fill="var(--text)"/>
+          <text x="15" y="95" font-size="8" fill="var(--text-muted)" font-family="ui-monospace">memory</text>
+          <text x="104" y="95" font-size="8" fill="var(--text-muted)" font-family="ui-monospace">sourced</text>
+        </svg>
+      </div>
+      <div class="tutor">
+        <p>Inference infrastructure engineering has no substantive sourced page in the vault, so I’ll build a beginner-friendly first leg from general systems knowledge…</p>
+        <ul class="why"><li>no vault page covers this (closest: a stub)</li><li>2 source searches, 0 relevant</li><li>no web search on this model route</li></ul>
+      </div>
+    </div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>A trust signal readable at a glance, without the per-sentence work that provenance ink needs. Low needles on many messages add up to an argument for giving the tutor better sources.</div><div><b>Costs</b>A single number hides nuance, since some sentences may be well sourced and others not. The scoring rule has to be explainable, and it is: vault hit, source count, route.</div></div>
+</section>
+
+<!-- 13 -->
+<section class="idea" id="tree">
+  <div class="idea-head"><span class="num">13</span><h2>Roads not taken</h2><span class="meta">the options it considered and dropped</span></div>
+  <p class="pitch">Most displays show what the tutor did. This one shows what it <i>didn't</i> do, and why. At each decision point the options it considered are listed, with the dropped ones struck through and a reason beside them. You see that “search the web” was never available, which is a fact about your setup rather than a choice the tutor made.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="tree">
+      <div class="node">Where do I get the material?</div>
+      <div class="indent">
+        <div class="branch no"><span class="mark">✗</span><span class="txt">Teach from the vault page</span></div><div class="small muted" style="margin:-.2rem 0 .2rem 1.6rem">only a stub exists</div>
+        <div class="branch no"><span class="mark">✗</span><span class="txt">Cite a canonical source</span></div><div class="small muted" style="margin:-.2rem 0 .2rem 1.6rem">searches returned DADA2 and ImageNet</div>
+        <div class="branch no"><span class="mark">✗</span><span class="txt">Search the web</span></div><div class="small muted" style="margin:-.2rem 0 .2rem 1.6rem">not available: this model route has no search configured</div>
+        <div class="branch yes"><span class="mark">✓</span><span class="txt">Teach from general knowledge, labelled unverified</span></div>
+      </div>
+      <div class="node">How do I start?</div>
+      <div class="indent">
+        <div class="branch no"><span class="mark">✗</span><span class="txt">Explain the whole serving stack</span></div><div class="small muted" style="margin:-.2rem 0 .2rem 1.6rem">no record of what you know yet</div>
+        <div class="branch yes"><span class="mark">✓</span><span class="txt">Calibrate with one question on batching</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Showing that the weak spots come from missing capabilities, not from the model's choices. It tells you what to fix (turn on search) rather than what to blame.</div><div><b>Costs</b>The harness knows unavailable options for certain (the tool list), but options the model considered and dropped have to come from the model's own summary, which could be made up after the fact.</div></div>
+</section>
+
+<!-- 14 -->
+<section class="idea" id="consent">
+  <div class="idea-head"><span class="num">14</span><h2>Checkpoint</h2><span class="meta">the reasoning asks you before it commits</span></div>
+  <p class="pitch">When the tutor reaches a consequential fork, like teaching unverified material or writing a sourceless page, it doesn't decide alone. The reasoning turns into a short question with buttons. You can give it a link, upload a document, or let it continue from memory. This is the only design where you can change the reasoning, not just read it.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="checkpoint" role="group" aria-label="Tutor checkpoint">
+      <h3>Before I teach this</h3>
+      <div>I couldn’t find anything a person wrote about inference serving: two source searches came back off-topic, and web search isn’t set up for this model. I can teach it from general knowledge, but none of it will be checked.</div>
+      <div class="acts"><button class="btn primary" type="button">Give it a link</button><button class="btn" type="button">Upload a doc</button><button class="btn" type="button">Go on from memory</button></div>
+    </div>
+    <p class="small muted">Your answer is remembered per topic, so it asks once, not every turn.</p>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Your core complaint. Human-written material gets asked for at exactly the moment it matters, and it puts the choice between speed and trust in your hands.</div><div><b>Costs</b>Interrupts the flow, so it has to be rare: once per topic and only for teaching or writing unsourced material. Needs a harness-level pause-and-resume, a bit like the aside endpoint.</div></div>
+</section>
+
+<!-- 15 -->
+<section class="idea" id="story">
+  <div class="idea-head"><span class="num">15</span><h2>Storyboard</h2><span class="meta">the turn as four comic panels</span></div>
+  <p class="pitch">The turn is summarized into up to four panels, each with a simple line drawing and a one-line caption: the question arrives, the search comes back empty, the tutor writes a draft, the tutor asks a calibration question. It's a quick way to recall later what happened in a turn, by picture.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="board">
+      <div class="panel"><svg viewBox="0 0 100 64"><rect x="30" y="14" width="40" height="30" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M38 44 L34 54 L46 44" fill="none" stroke="currentColor" stroke-width="2"/><text x="50" y="33" text-anchor="middle" font-size="12" fill="currentColor">?</text></svg><span class="cap">A new subject. No record of you on it.</span></div>
+      <div class="panel"><svg viewBox="0 0 100 64"><circle cx="42" cy="28" r="13" fill="none" stroke="currentColor" stroke-width="2"/><line x1="51" y1="38" x2="64" y2="52" stroke="currentColor" stroke-width="3"/><line x1="36" y1="22" x2="48" y2="34" stroke="var(--bad)" stroke-width="2"/><line x1="48" y1="22" x2="36" y2="34" stroke="var(--bad)" stroke-width="2"/></svg><span class="cap">Two searches, only junk (ImageNet?).</span></div>
+      <div class="panel"><svg viewBox="0 0 100 64"><rect x="32" y="8" width="36" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"/><line x1="38" y1="20" x2="62" y2="20" stroke="currentColor"/><line x1="38" y1="28" x2="62" y2="28" stroke="currentColor"/><line x1="38" y1="36" x2="54" y2="36" stroke="currentColor"/></svg><span class="cap">A draft page, dashed: nothing cited.</span></div>
+      <div class="panel"><svg viewBox="0 0 100 64"><rect x="26" y="12" width="48" height="36" rx="5" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="36" cy="26" r="3" fill="var(--accent)"/><line x1="44" y1="26" x2="66" y2="26" stroke="currentColor"/><circle cx="36" cy="36" r="3" fill="none" stroke="currentColor"/><line x1="44" y1="36" x2="62" y2="36" stroke="currentColor"/></svg><span class="cap">So: one question on batching first.</span></div>
+    </div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Recalling a turn weeks later, and friendlier to visual learners. The panels could go into the lesson notes as a small visual summary.</div><div><b>Costs</b>Needs a set of reusable drawings (search, write, read, grade, empty result…). Panels must come from templates, never generated images, which keeps it cheap and honest.</div></div>
+</section>
+
+<!-- 16 -->
+<section class="idea" id="forecast">
+  <div class="idea-head"><span class="num">16</span><h2>Source forecast</h2><span class="meta">a weather report for what you're about to read</span></div>
+  <p class="pitch">Before the answer, a short forecast of how the turn's information is sourced: the chance it comes from memory, how much vault coverage there is, any off-topic papers, and whether the vault got bigger. It's playful, but it frames the text before you read it instead of after.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="forecast">
+      <div class="fc"><svg viewBox="0 0 34 34"><path d="M9 22 a7 7 0 0 1 3-13 a8 8 0 0 1 15 3 a5 5 0 0 1 0 10 z" fill="none" stroke="var(--warn)" stroke-width="2"/></svg>memory<span class="big" style="color:var(--warn)">80%</span>heavy cover</div>
+      <div class="fc"><svg viewBox="0 0 34 34"><circle cx="17" cy="17" r="7" fill="none" stroke="var(--good)" stroke-width="2"/><g stroke="var(--good)" stroke-width="2"><line x1="17" y1="3" x2="17" y2="7"/><line x1="17" y1="27" x2="17" y2="31"/><line x1="3" y1="17" x2="7" y2="17"/><line x1="27" y1="17" x2="31" y2="17"/></g></svg>vault<span class="big">20%</span>one stub</div>
+      <div class="fc"><svg viewBox="0 0 34 34"><path d="M8 20 a6 6 0 0 1 3-11 a7 7 0 0 1 13 3 a4 4 0 0 1 0 8 z" fill="none" stroke="var(--bad)" stroke-width="2"/><g stroke="var(--bad)" stroke-width="2"><line x1="12" y1="24" x2="10" y2="29"/><line x1="18" y1="24" x2="16" y2="29"/><line x1="24" y1="24" x2="22" y2="29"/></g></svg>papers<span class="big" style="color:var(--bad)">0/2</span>off-topic showers</div>
+      <div class="fc"><svg viewBox="0 0 34 34"><path d="M6 26 L17 8 L28 26 Z" fill="none" stroke="var(--accent)" stroke-width="2"/></svg>vault growth<span class="big">+1</span>draft page</div>
+    </div>
+    <div class="tutor"><p>Inference infrastructure engineering has no substantive sourced page in the vault, so I’ll build…</p></div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Memorable, and it frames the reading before it starts. The “vault growth” tile is a running reminder of whether you're building anything.</div><div><b>Costs</b>The metaphor gets old. It needs a proportion of memory vs sources per turn, which only real attribution (provenance ink, page 1) can give honestly.</div></div>
+</section>
+
+<!-- 17 -->
+<section class="idea" id="diff">
+  <div class="idea-head"><span class="num">17</span><h2>Vault diff</h2><span class="meta">only the consequences, as a code-review diff</span></div>
+  <p class="pitch">Ignore the process completely and show what changed. Each turn ends with a diff of your vault and learner record, like a commit: added pages, changed frontmatter, new links, evidence recorded. Warnings are flagged inline, such as <code>sources: []</code>. A turn that changed nothing says “no changes”, which is itself informative.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="tutor"><p>Inference infrastructure engineering has no substantive sourced page in the vault, so I’ll build…</p></div>
+    <div class="diff" role="region" aria-label="Vault changes this turn">
+<div class="h">vault · this turn · 1 file added, 0 changed · learner record unchanged</div>
+<div class="a">+ pages/systems-engineering/inference-infra-engineering.md</div>
+<div class="a">+   title: Inference infrastructure engineering: a learning path foundation</div>
+<div class="a">+   status: draft</div>
+<div class="n">+   sources: []                         ⚠ written from memory: nothing to check against</div>
+<div class="a">+   prereqs: []   deepens: []</div>
+<div class="n">! links: 0 · this page is an island in your graph</div>
+    </div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Answers your other complaint, “why isn't the vault filling up”, on every turn. Honest by construction: it's computed from files, not from what the model says it did.</div><div><b>Costs</b>Says nothing about why. Needs a before-and-after snapshot of the pages each turn touched; cheap, since writes go through one place (Engram).</div></div>
+</section>
+
+<!-- 18 -->
+<section class="idea" id="narrate">
+  <div class="idea-head"><span class="num">18</span><h2>Narration</h2><span class="meta">reasoning you listen to</span></div>
+  <p class="pitch">Not visual at all. Each turn has a small play button that reads a 20-second spoken summary of the reasoning, with the matching transcript line highlighted as it plays. Useful while your eyes are on the question, on a walk, or if reading the reasoning isn't comfortable. The same text also serves screen-reader users.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="player">
+      <button class="play" type="button" aria-label="Play reasoning narration"><svg width="12" height="14" viewBox="0 0 12 14"><path d="M1 1 L11 7 L1 13 Z" fill="#11131a"/></svg></button>
+      <div class="wave" aria-hidden="true">
+        <i class="done" style="height:8px"></i><i class="done" style="height:16px"></i><i class="done" style="height:22px"></i><i class="done" style="height:12px"></i><i class="done" style="height:18px"></i><i class="done" style="height:24px"></i><i class="done" style="height:10px"></i><i style="height:20px"></i><i style="height:14px"></i><i style="height:22px"></i><i style="height:8px"></i><i style="height:18px"></i><i style="height:12px"></i><i style="height:20px"></i><i style="height:10px"></i><i style="height:16px"></i><i style="height:6px"></i><i style="height:14px"></i><i style="height:9px"></i><i style="height:17px"></i>
+      </div>
+      <span class="small muted">0:07 / 0:19</span>
+    </div>
+    <div class="transcript">I haven’t taught you this before, so I looked for something a person wrote on it. <span class="now">The two sources I found were about genetics and image datasets, so I set them aside.</span> Nothing in your vault covers it either, so I’m teaching from general knowledge and saying so, and I started a draft page to improve later.</div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Accessibility and hands-free study. The summary has to be written for a listener, which also makes it better written.</div><div><b>Costs</b>Needs text-to-speech (the browser's built-in speech works offline, keeping with the app's no-CDN rule) and a short summary generated per turn.</div></div>
+</section>
+
+<!-- 19 -->
+<section class="idea" id="words">
+  <div class="idea-head"><span class="num">19</span><h2>Your words, read back</h2><span class="meta">the reasoning painted onto your own message</span></div>
+  <p class="pitch">Instead of annotating the tutor's reply, annotate <i>your</i> message: highlight each word by how the harness read it and what it matched. Here it shows the failure exactly: “inference” pulled in a genetics paper titled “sample <i>inference</i>”, while “infra engineering” found nothing. You learn how to phrase requests, and the harness's misreadings become visible.</p>
+  <div class="stage">
+    <div class="heat"><span class="h-mid">teach me</span> <span class="h-bad">inference</span> <span class="h-mid">infra</span> <span class="h-ok">engineering</span></div>
+    <div class="readings">
+      <div><b style="color:var(--warn)">teach me</b><span class="muted">read as a request to start a new subject → learn mode</span></div>
+      <div><b style="color:var(--bad)">inference</b><span class="muted">matched “DADA2: sample <u>inference</u>…” (bioinformatics): a keyword match, wrong field</span></div>
+      <div><b style="color:var(--warn)">infra</b><span class="muted">no vault match; abbreviation not expanded to “infrastructure”</span></div>
+      <div><b style="color:var(--good)">engineering</b><span class="muted">set the page's domain: systems-engineering</span></div>
+    </div>
+    <div class="tutor"><p class="small muted">Tip under the message: try “LLM serving systems” for better sources.</p></div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Debugging why retrieval went wrong, which is the step before every other failure. It teaches you to ask better and shows exactly where the harness needs smarter query expansion.</div><div><b>Costs</b>Needs each query's terms traced back to results. The search tools would return which terms matched, a modest change to Engram and the source tools.</div></div>
+</section>
+
+<!-- 20 -->
+<section class="idea" id="chess">
+  <div class="idea-head"><span class="num">20</span><h2>Annotated moves</h2><span class="meta">chess notation for a tutoring turn</span></div>
+  <p class="pitch">The turn is written as a compact line of moves, each a short code for one action, and graded with chess annotation marks: <b>!</b> a good move, <b>?</b> a weak one, <b>??</b> a blunder, <b>!?</b> an interesting gamble. A reviewer, whether a rule set or a second model, annotates the tutor's play. Expert shorthand that fits a whole turn in one line.</p>
+  <div class="stage">
+    <div class="user-msg">teach me inference infra engineering</div>
+    <div class="moves">
+      <span class="mn">1.</span> St <span class="mn">(state)</span> &nbsp; Src<span class="b">?</span> &nbsp; An &nbsp; Rp&nbsp;stub &nbsp; Sv &nbsp; Src<span class="b">??</span> &nbsp; Wp<span class="i">!?</span> &nbsp; Wp<span class="b">?</span> &nbsp; Nx &nbsp; Qc<span class="g">!</span>
+    </div>
+    <div class="annot"><b>Src??</b> retried the same source search with a reworded query and got ImageNet; should have fallen back to asking for a link. <b>Wp!?</b> a page with no sources is a gamble, but it gives the concept a home. <b>Wp?</b> duplicate write. <b>Qc!</b> probing before teaching, exactly per rule 3.</div>
+    <div class="tutor"><p>Inference infrastructure engineering has no substantive sourced page in the vault, so I’ll build…</p></div>
+  </div>
+  <div class="tradeoffs"><div><b>Good for</b>Evaluating the harness itself: a turn's quality in one line, easy to compare across runs and models. Great in an eval dashboard.</div><div><b>Costs</b>Opaque to anyone who doesn't know the codes, so it's for you as builder, not for studying. The marks need a judge; rules can catch duplicates and empty searches for free.</div></div>
+</section>
+
+<div class="closing">
+  <h2>Combinations worth considering</h2>
+  <ul>
+    <li><b>14 + 17:</b> ask before teaching unsourced material, then show the vault diff after. Together they address both of your complaints: sources before, vault growth after.</li>
+    <li><b>11 + 12:</b> a live line while the turn runs and a gauge when it's done. The quietest option that still tells you whether to trust the answer.</li>
+    <li><b>19 + 20 as developer tools:</b> retrieval tracing and move annotation for tuning the harness, off by default in study mode.</li>
+  </ul>
+  <p class="small muted" style="margin-top:.6rem">Percentages, relevance and timings are illustrative. The tool calls and results are from the saved session <code>t-mudlbc5z</code>.</p>
+</div>
+</div>
+</body>
+</html>

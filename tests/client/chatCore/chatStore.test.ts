@@ -221,6 +221,20 @@ describe('ChatStore', () => {
     expect(seen).toEqual(['review']);
   });
 
+  // /study is the learn tutor. /chat clears the sticky mode rather than pinning 'chat': chat is what
+  // the server derives from a request with no mode, and an explicit mode would outrank "quiz me".
+  it('/study makes learn sticky; /chat clears the sticky mode to derive-it', async () => {
+    const seen: string[] = [];
+    const { store } = makeStore([scriptedTurnChunks(), scriptedTurnChunks()], [], {
+      onModeCommand: (m) => seen.push(m),
+    });
+    store.sendMessage('teach me tensors', [], { command: 'study' });
+    await settled(store);
+    store.sendMessage('', [], { command: 'chat' });
+    await settled(store);
+    expect(seen).toEqual(['learn', '']);
+  });
+
   it('addToolOutput on a block part patches it and fires EXACTLY one resubmit', async () => {
     const { store, calls, chatCalls } = makeStore([continuationChunks('a1', 'tc1')], pausedBlockHistory());
 

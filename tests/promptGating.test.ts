@@ -42,31 +42,43 @@ describe('buildInstructions — the whole document', () => {
 });
 
 describe('condition terms are real', () => {
-  it('every tool: names a tool the harness can actually offer', () => {
-    const offered = new Set([
+  // Shared by both prompt files: chat's own conditions (web_search, read_url) sit outside what
+  // turnBlockTools/buildFrontierTools model, same as engram's own create_path/write_page below —
+  // a superset is fine, this only checks each file's terms resolve to something real. Built in a
+  // nested beforeAll (not at describe scope) so it runs after the outer beforeAll has set `session`.
+  let offered: Set<string>;
+  beforeAll(() => {
+    offered = new Set([
       ...session.turnBlockTools(false, ['stream-consumer — demo'], false, [], true).map((t) => t.name),
       ...session.buildFrontierTools().map((t) => t.name),
       'create_path', 'write_page', // engram's own, pinned by crossRepoContract.test.ts
+      'web_search', 'read_url', // webTools.ts's own research tools, gated by search backend/provider
     ]);
-    for (const term of promptConditionTerms().filter((t) => t.startsWith('tool:'))) {
+  });
+
+  it.each(['tutor', 'chat'] as const)('%s: every tool: names a tool the harness can actually offer', (variant) => {
+    for (const term of promptConditionTerms(variant).filter((t) => t.startsWith('tool:'))) {
       expect(offered, term).toContain(term.slice(5));
     }
   });
 
-  it('every fact: is one turnFacts can produce', () => {
+  it.each(['tutor', 'chat'] as const)('%s: every fact: is one turnFacts can produce', (variant) => {
     const everything = session.turnFacts({
       tools: ['web_search'], mode: 'review', emptyVault: true, bankSize: 3, readingSource: true,
       sources: [{ origin: { kind: 'video' } }],
       messages: [{ id: 'u', role: 'user', parts: [{ type: 'text', text: "Run today's session, in this order:\n1. [new] vietnamese tones" }] }] as any,
     });
-    for (const term of promptConditionTerms().filter((t) => t.startsWith('fact:'))) {
+    for (const term of promptConditionTerms(variant).filter((t) => t.startsWith('fact:'))) {
       expect(everything.facts, term).toContain(term.slice(5));
     }
   });
 
-  it('an unknown condition throws rather than dropping a rule forever', async () => {
+  it.each([
+    ['tutor', '../src/server/tutor-system-prompt.md'],
+    ['chat', '../src/server/chat-system-prompt.md'],
+  ] as const)('%s: an unknown condition throws rather than dropping a rule forever', async (_variant, path) => {
     const { readFileSync } = await import('node:fs');
-    const text = readFileSync(new URL('../src/server/tutor-system-prompt.md', import.meta.url), 'utf8');
+    const text = readFileSync(new URL(path, import.meta.url), 'utf8');
     expect(text).not.toMatch(/<!-- when: (?!(?:(?:tool|fact):[\w]+\|?)+ -->)/);
   });
 });

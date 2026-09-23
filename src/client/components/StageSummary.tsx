@@ -28,7 +28,9 @@ export function StageSummary({ messages, isRunning = false, onRetry }: {
   return (
     <section className="block stage-summary" aria-label="Latest exercise">
       <h3>Latest exercise</h3>
-      <span className="graded-tag">{grading?.verdict === 'ungraded' ? 'Not graded' : grading ? 'Reviewed' : 'Submitted'}</span>
+      {/* Same words as the block's own tag (QuickCheck and the other blocks say "graded" /
+          "submitted"), so the Stage and the transcript describe one answer the same way. */}
+      <span className="graded-tag">{grading?.verdict === 'ungraded' ? 'not graded' : grading ? 'graded' : 'submitted'}</span>
       {prompt && <BlockProse text={prompt} />}
       {getToolName(last) === 'math_scratchpad' && <div className="stage-math-work">
         <div className="stage-problem"><Latex tex={String(input.problemLatex ?? '')} /></div>

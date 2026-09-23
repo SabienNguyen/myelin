@@ -11,6 +11,8 @@
  * "GET /api/graph failed: 502" is neither. The method, path and status stay on the error object
  * for anyone logging it — they are diagnostics, not copy.
  */
+import type { AsideRequest, AsidePart, AsideResponse } from '../../shared/aside.js';
+
 export class ApiError extends Error {
   constructor(readonly path: string, readonly status: number, message: string) {
     super(message);
@@ -93,6 +95,31 @@ export interface PathsPayload { goal: Goal | null; paths: PathRow[] }
 
 export const getPaths = (): Promise<PathsPayload> => getJson<PathsPayload>('/api/paths', 'your learning paths');
 
+// An inline aside: a separate small model call grounded in the anchored tutor message (never a
+// chat turn — see src/shared/aside.ts's wire contract and asideRoute.ts). Errors carry the
+// server's own message (validation / unknown message / model failure), matching getJson's rule
+// that a caught fetch failure gets its own text since there is no server response to read.
+export async function askAside(req: AsideRequest): Promise<AsidePart> {
+  let res: Response;
+  try {
+    res = await fetch('/api/aside', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+  } catch {
+    throw new Error('Can’t reach the harness — the aside wasn’t asked.');
+  }
+  let body: AsideResponse;
+  try {
+    body = await res.json() as AsideResponse;
+  } catch {
+    throw new Error(`Couldn’t ask that aside — the reply wasn’t readable (${res.status}).`);
+  }
+  if (!res.ok || 'error' in body) throw new Error('error' in body ? body.error : `Couldn’t ask that aside (${res.status}).`);
+  return body.part;
+}
+
 export const setGoal = async (goal: { kind: 'path' | 'page'; slug: string } | null): Promise<Goal | null> => {
   let res: Response;
   try {
@@ -113,3 +140,71 @@ export const setGoal = async (goal: { kind: 'path' | 'page'; slug: string } | nu
     throw new ApiError('/api/goal', res.status, `Couldn’t save your goal — the reply wasn’t readable.`);
   }
 };
+
+// Notebooks (notebookRoutes.ts). Counts, mastery and due are derived server-side on every read, so
+// a card reflects decay the moment it happens rather than when the notebook was last touched.
+export type NotebookLevel = 'mastered' | 'practicing' | 'exposed' | 'unseen';
+export interface NotebookSummary {
+  id: string; title: string; createdAt: string;
+  sources: number; chats: number; topics: number;
+  mastery: Record<NotebookLevel, number>;
+  due: number; lastActive: string;
+}
+export interface ThreadRow { id: string; title: string; updatedAt: string; messages: number }
+export interface NotebooksPayload {
+  notebooks: NotebookSummary[]; unfiled: ThreadRow[];
+  /** Library sources no notebook uses yet. Optional: an older server does not send it. */
+  looseSources?: NotebookSource[];
+}
+export interface NotebookSource { book: string; title: string; authors: string[] }
+export interface NotebookTopic { slug: string; title: string; level: NotebookLevel; due: boolean; daysLeft?: number | null }
+export interface NotebookDetail {
+  notebook: NotebookSummary;
+  threads: ThreadRow[];
+  sources: NotebookSource[];
+  library: NotebookSource[];
+  topics: NotebookTopic[];
+}
+export interface NotebookRef { id: string; title: string }
+
+export const getNotebooks = () => getJson<NotebooksPayload>('/api/notebooks', 'your notebooks');
+export const getNotebook = (id: string) => getJson<NotebookDetail>(`/api/notebooks/${encodeURIComponent(id)}`, 'this notebook');
+export const getThreadNotebook = (threadId: string) =>
+  getJson<NotebookRef | null>(`/api/thread/${encodeURIComponent(threadId)}/notebook`, 'this conversation’s notebook');
+
+/** Writes for the notebook routes. `action` finishes the sentence "Couldn’t …" so a failure says
+ *  what did not happen; the server's own error text (a missing source, an empty title) wins when
+ *  it sent one, because it names the actual problem. */
+async function sendJson<T>(method: string, path: string, body: unknown, action: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(path, 0, `Can’t reach the harness — couldn’t ${action}.`);
+  }
+  const data = await res.json().catch(() => null) as any;
+  if (!res.ok) {
+    throw new ApiError(path, res.status, typeof data?.error === 'string'
+      ? `Couldn’t ${action}: ${data.error}.`
+      : `Couldn’t ${action} (${res.status}).`);
+  }
+  return data as T;
+}
+
+export const createNotebook = (title: string, sources?: string[]) =>
+  sendJson<NotebookRef>('POST', '/api/notebooks', sources ? { title, sources } : { title }, 'create the notebook');
+export const renameNotebook = (id: string, title: string) =>
+  sendJson<NotebookRef>('PATCH', `/api/notebooks/${encodeURIComponent(id)}`, { title }, 'rename the notebook');
+export const setNotebookSources = (id: string, sources: string[]) =>
+  sendJson<NotebookRef>('PATCH', `/api/notebooks/${encodeURIComponent(id)}`, { sources }, 'save the sources');
+export const deleteNotebook = (id: string) =>
+  sendJson<{ deleted: string }>('DELETE', `/api/notebooks/${encodeURIComponent(id)}`, undefined, 'delete the notebook');
+export const fileThread = (id: string, threadId: string) =>
+  sendJson<NotebookRef>('PUT', `/api/notebooks/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}`,
+    undefined, 'file the conversation');
+export const getPageNotebooks = (slug: string) =>
+  getJson<NotebookRef[]>(`/api/page/${encodeURIComponent(slug)}/notebooks`, 'the notebooks this page is in');

@@ -9,8 +9,11 @@ const para = (...content: object[]) => ({ type: 'paragraph', ...(content.length 
 const doc = (...content: object[]) => ({ type: 'doc', content });
 
 describe('COMMAND_SPECS', () => {
-  it('offers every wire command exactly once — menu and validation cannot drift', () => {
-    expect(COMMAND_SPECS.map((s) => s.command).sort()).toEqual([...COMMANDS].sort());
+  it('offers every wire command exactly once, plus the one command the wire never sees', () => {
+    // `aside` is deliberately NOT in COMMANDS: it routes to askAside instead of a chat turn, so
+    // chatRoute must keep 400ing it as unknown. Every other menu entry still has to match the
+    // wire's vocabulary exactly — that half of the invariant cannot drift.
+    expect(COMMAND_SPECS.map((s) => s.command).sort()).toEqual([...COMMANDS, 'aside'].sort());
   });
 
   it('filterCommands prefix-matches the name; the empty query lists everything', () => {

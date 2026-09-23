@@ -43,6 +43,11 @@ and decays it over time, so the picture moves down as well as up.
   <img src="docs/screenshots/graph.png" alt="The mastery graph after a real sitting" width="520">
 </p>
 
+**Notebooks keep a subject together.** A notebook holds one subject's conversations and the
+Library sources you pick for it. Its card shows what is due and how much of it you have proven, both
+worked out from your evidence every time you open it. A conversation started inside a notebook tells
+the tutor which material to draw on first. Open them from **Notebooks** in the top bar.
+
 ## Why it's different
 
 - **Every subject gets an applied check.** Mechanical checkers for science and structured answers
@@ -127,6 +132,26 @@ setup is never asked for a key.
   search falls back to lexical matching. For the real thing: `ollama pull nomic-embed-text`.
 - **YouTube ingest** — `pipx install yt-dlp` (captions only; a caption-less video gets an honest
   error, not a fake transcript).
+
+## ChatGPT subscription connection (preview)
+
+Open the model badge in the top bar and scroll to **ChatGPT subscription · preview**.
+**Sign in with ChatGPT** requests a device code; open the displayed OpenAI link and
+complete authorization yourself. **Refresh status** checks the connection, and
+**Disconnect ChatGPT** removes this app's login. These controls do not save or change
+any model selections.
+
+This preview is **sign-in only**: subscription-backed tutor/grader execution is not
+available yet. Do not enter a subscription token in an API-key field. The official
+`@openai/codex` app-server owns credentials and refresh, in a Myelin-specific `codex`
+directory alongside Myelin's credentials store, outside the vault. Myelin does not
+read or export those tokens. Account sign-in is not proof of model entitlement or
+remaining quota.
+
+The internal `src/server/codexTurn.ts` runner has protocol-fixture tests for text,
+host-tool replies, cancellation and failures; it is not connected to the live tutor.
+Live execution still needs transport integration, built-in tool isolation, Myelin's
+exercise pause/resume semantics, and a user-authorized subscription test.
 
 ## Model routes: API key, local, or any OpenAI-compatible provider
 

@@ -41,6 +41,7 @@ afterAll(() => new Promise<void>((r) => server.close(() => r())));
 const cfg = (searxng?: string) => ({ search: searxng ? { searxng } : undefined }) as any;
 const OLLAMA = 'ollama:qwen2.5';
 const OPENAI = 'openai:gpt-5';
+const OAI = 'oai:gpt-5.1';
 
 // The fixture server is on 127.0.0.1, which the production guard exists to refuse.
 const LOCAL_OK = { guard: async () => {} };
@@ -90,6 +91,21 @@ describe('web research tools', () => {
     const wt = buildWebTools(cfg(), OPENAI);
     expect(names(wt)).toEqual(['read_url']);
     expect(wt.serverTools).toEqual([]);
+  });
+
+  // oai: is the Responses API route (O2), which carries OpenAI's own built-in web_search — the
+  // second provider, after Anthropic, that needs no local infrastructure at all. openai: (the
+  // generic OpenAI-compatible endpoint) is unaffected and still falls through to SearXNG/nothing.
+  it('gives an oai:-routed tutor OpenAI\'s built-in web_search, with no local infrastructure', () => {
+    const wt = buildWebTools(cfg(), OAI);
+    expect(names(wt)).toEqual(['read_url']);
+    expect(wt.serverTools).toEqual([{ type: 'web_search', name: 'web_search' }]);
+  });
+
+  it('prefers the oai: provider tool over a configured SearXNG too', () => {
+    const wt = buildWebTools(cfg(base), OAI);
+    expect(wt.serverTools).toEqual([{ type: 'web_search', name: 'web_search' }]);
+    expect(names(wt)).not.toContain('web_search');
   });
 
   it('prefers the provider tool over a configured SearXNG when both are possible', () => {

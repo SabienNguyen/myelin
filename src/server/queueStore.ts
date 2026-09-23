@@ -45,12 +45,27 @@ export interface QueueEntry {
   // lifetime (cloning -> docs pass -> mining pass -> sidecar refresh -> seeding). Per-chapter
   // entries queued by the docs pass are plain book chapters (no `mode`) — they compile through the
   // existing, unmodified pipeline exactly like a book's.
-  mode?: 'repo';
+  // E (lessonNotes.ts): marks an entry queued from a teaching turn rather than an upload — the
+  // chapter file under raw/uploads/lesson-notes/<threadId>/ is the turn's own prose, not authored
+  // source material, so compileOne's lesson branch (ingest.ts's buildLessonCompilePrompt) hands the
+  // compile model a different prompt (search first, cite lessonTopic/sourceUrls, at most 3
+  // concepts) AND a mechanical write_page guard the model cannot override: sources are filtered
+  // down to this entry's own sourceUrls, and a write to a page that predates this compile is
+  // refused unless that page is a 'stub'.
+  mode?: 'repo' | 'lesson';
   // Human-readable phase text for a `mode: 'repo'` placeholder ('cloning', 'docs: N queued',
   // 'mining…', 'mined P/C passed', the final 'pages: N queued, exercises: P' summary) — the repo
   // analogue of `progress` above, which is shaped for page-count conversion progress and doesn't
   // fit a multi-phase repo ingest.
   phase?: string;
+  // mode: 'lesson' only: the slug the compiling turn was teaching (session.ts's threadTopic) —
+  // new pages the compile model writes link to it as a prereq/deepens edge. Absent when the
+  // thread had no current topic (e.g. a fresh freeform turn that named none yet).
+  lessonTopic?: string;
+  // mode: 'lesson' only: research URLs the turn actually cited (a server-tool-result's sources, or
+  // a read_url call) — handed to the compile model so it can cite the ones a concept really came
+  // from, never invented ones. Absent (not empty) when the turn cited none.
+  sourceUrls?: string[];
 }
 
 function ledgerPath(vault: string): string {

@@ -8,8 +8,10 @@ import {
   createTutorSession, guardMcpTools, isProgressQuestion, isSelectedPassage, relatedPattern,
   turnBlockTools,
 } from '../src/server/session.js';
+import { attachThread, createNotebook } from '../src/server/notebookStore.js';
 import { streamModel, turnsModel } from './mockModel.js';
 import { LW_REPO } from './lwRepo.js';
+import { readQueue } from '../src/server/queueStore.js';
 
 let lw: Engram; let vault: string;
 
@@ -119,6 +121,31 @@ describe('evidence guardrail', () => {
     expect(body).not.toContain('tool-output-error');
   });
 
+  // A live GPT-6 turn answered "hi" from the bootstrap, called next_lessons for the same list, then
+  // wrote the whole greeting again from the result — the learner read one reply twice.
+  it('offers no tools when a greeting opens the thread', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond([
+      { id: 'g1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+    ] as any, 'learn', 'greeting-opens')).text();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].tools ?? []).toEqual([]);
+    expect(calls[0].system).toContain('every tool is withheld');
+  });
+
+  // Mid-thread there is no fresh bootstrap to answer from, so the tools must stay.
+  it('keeps the tools for a greeting later in a thread', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    await (await session.respond([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Teach me arithmetic' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Sure — what is 2+2?' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'hi again' }] },
+    ] as any, 'learn', 'greeting-mid-thread')).text();
+    expect(calls[0].tools?.map((tool) => tool.name)).toContain('next_lessons');
+  });
+
   it('does not nudge on plain conversation', async () => {
     const { model, calls } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
@@ -138,6 +165,20 @@ describe('evidence guardrail', () => {
   // breakpoints reuse, so per-turn HARNESS notes go at the TAIL (after the history) and only the
   // first turn's bootstrap leads. A prepended note would shift every byte of the history and
   // force a full input re-read on that turn and the next.
+  it('tells the tutor which notebook a filed conversation belongs to, and only that one', async () => {
+    const nb = createNotebook(vault, 'Arithmetic drills');
+    attachThread(vault, nb.id, 'nb-filed');
+    const filed = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model: filed.model });
+    await (await session.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn', 'nb-filed')).text();
+    expect(JSON.stringify(filed.calls[0].messages)).toMatch(/notebook \\"Arithmetic drills\\"/);
+
+    const loose = textOnly();
+    const other = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model: loose.model });
+    await (await other.respond([{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any, 'learn', 'nb-loose')).text();
+    expect(JSON.stringify(loose.calls[0].messages)).not.toMatch(/Notebook:/);
+  });
+
   it('puts per-turn harness notes at the tail of the transcript, bootstrap at the head', async () => {
     const { model, calls } = textOnly();
     const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any,
@@ -1190,5 +1231,137 @@ describe('the stray-evidence detector does not fire on the turn it is meant to b
     await (await session.respond(history, 'learn', 'stray-thread')).text();
     const logged = readFileSync(logPath, 'utf8').slice(before.length);
     expect(logged).not.toMatch(/never read, staged or wrote/);
+  }, 30_000);
+});
+
+// Inline asides (A1): asideRoute.ts answers a side question with a SEPARATE model call and
+// persists the result as a `data-aside` part on the message it anchors to — this thread never
+// sees it as a turn. The main tutor still needs to know it happened, or the next turn re-explains
+// what the student already has, or answers the aside's own question instead of the one it is
+// actually waiting on (see session.ts's trailing HARNESS notes).
+describe('the aside note', () => {
+  it('tells the tutor about aside questions on its last message, and gives the first sentence of the answer', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me arithmetic' }] },
+      {
+        id: 'a1', role: 'assistant', parts: [
+          { type: 'text', text: 'Addition combines two numbers into a sum.' },
+          {
+            type: 'data-aside', id: 'aside-1',
+            data: {
+              question: 'what does "sum" mean?',
+              answer: 'A sum is the result of adding numbers. It shows up throughout arithmetic.',
+            },
+          },
+        ],
+      },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'ok, now teach me subtraction' }] },
+    ] as any;
+    await (await session.respond(history, 'learn', 'aside-note-thread')).text();
+
+    const tail = JSON.stringify(calls[0].messages[calls[0].messages.length - 1]);
+    expect(tail).toMatch(/HARNESS: while answering, the student asked aside questions about your last message/);
+    expect(tail).toMatch(/what does \\"sum\\" mean\?/);
+    expect(tail).toMatch(/A sum is the result of adding numbers\./);
+    // Only the first sentence, not the whole answer.
+    expect(tail).not.toMatch(/shows up throughout arithmetic/);
+    expect(tail).toMatch(/still expect their answer to your pending question/);
+  }, 30_000);
+
+  it('adds nothing when the last assistant message carries no aside', async () => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const history = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'teach me arithmetic' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Addition combines two numbers into a sum.' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'ok, now teach me subtraction' }] },
+    ] as any;
+    await (await session.respond(history, 'learn', 'no-aside-note-thread')).text();
+    expect(JSON.stringify(calls[0].messages)).not.toMatch(/asked aside questions/);
+  }, 30_000);
+});
+
+// Chat is the default mode (deriveMode.ts): the learner's turn, not a lesson plan. It keeps every
+// capability freeform has, gets the practice blocks too, and runs on chat-system-prompt.md with none
+// of the tutor's per-turn forcing — the forcing that made "hi" resume last session's topic and put
+// blocks into turns that only wanted an answer.
+describe('chat mode', () => {
+  const drive = async (mode: 'chat' | 'learn', text: string) => {
+    const { model, calls } = textOnly();
+    const session = createTutorSession(lw, {
+      student: 'kid', vault, models: {}, search: { searxng: 'http://127.0.0.1:1' },
+    } as any, { model });
+    await (await session.respond([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Hello — what would you like to explore?' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text }] },
+    ] as any, mode, `chat-mode-${mode}-${text.length}`)).text();
+    return {
+      tools: (calls[0].tools ?? []).map((t: any) => t.name),
+      system: calls[0].system ?? '',
+      // What the HARNESS injected this turn: the user-role messages after the history.
+      notes: JSON.stringify((calls[0].messages ?? []).slice(3)),
+    };
+  };
+
+  it('offers research, vault writes and the practice blocks — even where a solid page covers it', async () => {
+    // A learn turn on this text gets no research at all: a solid, sourced page covers it.
+    const { tools } = await drive('chat', 'remind me how arithmetic works');
+    for (const name of ['web_search', 'read_url', 'write_page', 'ingest_paper', 'generate_exercise', 'quick_check', 'writing_draft']) {
+      expect(tools, name).toContain(name);
+    }
+    // A one-click "write this up" is for modes that cannot write; chat can.
+    expect(tools).not.toContain('offer_write');
+  }, 30_000);
+
+  it('runs on the chat prompt, not the tutor rulebook', async () => {
+    const chat = await drive('chat', 'what is a monad?');
+    expect(chat.system).toContain('# Myelin Chat Prompt');
+    expect(chat.system).not.toContain('# Engram Harness Tutor Prompt');
+    const learn = await drive('learn', 'what is a monad?');
+    expect(learn.system).toContain('# Engram Harness Tutor Prompt');
+  }, 30_000);
+
+  it('adds none of the tutor forcing notes, which learn still gets', async () => {
+    const chat = await drive('chat', 'teach me arithmetic');
+    expect(chat.notes).not.toMatch(/something the student PRODUCES/);
+    expect(chat.notes).not.toMatch(/the student named a subject in this message/);
+    const learn = await drive('learn', 'teach me arithmetic');
+    expect(learn.notes).toMatch(/something the student PRODUCES/);
+    expect(learn.notes).toMatch(/the student named a subject in this message/);
+  }, 30_000);
+
+  it('answers a reader passage without forcing a block', async () => {
+    const passage = 'From the source “Arithmetic”:\n\n> Addition combines two numbers.\n\nWhat does this mean?';
+    const chat = await drive('chat', passage);
+    expect(chat.notes).toMatch(/this came from the reader/);
+    expect(chat.notes).not.toMatch(/END THE TURN ON A BLOCK/);
+    const learn = await drive('learn', passage);
+    expect(learn.notes).toMatch(/END THE TURN ON A BLOCK/);
+  }, 30_000);
+
+  it('files a long answer from memory into lesson notes in learn, but not in chat', async () => {
+    const vaultForNotes = mkdtempSync(join(tmpdir(), 'lwh-chat-notes-'));
+    mkdirSync(join(vaultForNotes, 'pages'), { recursive: true });
+    const answer = `Arithmetic is the study of numbers under addition and multiplication. ${'More detail. '.repeat(40)}`;
+    const run = async (mode: 'chat' | 'learn') => {
+      const model = streamModel(() => ({ text: answer }));
+      const session = createTutorSession(lw, {
+        student: 'kid', vault: vaultForNotes, models: {}, autoCompile: false,
+      } as any, { model });
+      await (await session.respond([
+        { id: `u-${mode}`, role: 'user', parts: [{ type: 'text', text: 'explain arithmetic properly' }] },
+      ] as any, mode, `notes-${mode}`)).text();
+    };
+    const queued = (thread: string) => readQueue(vaultForNotes)
+      .filter((e) => e.book === 'lesson-notes' && e.chapter.includes(`/${thread}/`));
+    await run('learn');
+    await expect.poll(() => queued('notes-learn').length).toBe(1);
+    await run('chat');
+    // Give the fire-and-forget enqueue the same chance it had above before asserting absence.
+    await new Promise((r) => setTimeout(r, 300));
+    expect(queued('notes-chat')).toHaveLength(0);
   }, 30_000);
 });

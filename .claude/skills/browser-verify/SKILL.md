@@ -65,15 +65,16 @@ set, so a normal dev machine is unaffected. For an ad-hoc script, pass
 PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npx playwright test --reporter=list
 ```
 
-Playwright starts **all four** `webServer` entries (two backends, two `vite build` + `vite preview`
-pairs), so a cold run takes a couple of minutes. To iterate on one file, still expect all four to
-boot — that is how the config is written.
+Playwright starts **every** `webServer` entry (five backend + `vite build`/`vite preview` pairs, one
+per scripted-model script), so a cold run takes a couple of minutes. To iterate on one file, still
+expect all of them to boot — that is how the config is written.
 
 ### Known results — do not mistake these for your regression
 
-The suite currently runs **all 10 tests green** (verified). The two entries below were once a
-documented skip and a documented failure; both are now resolved. They are kept here so that if
-either reappears you recognise it as a REAL regression, not the old baseline:
+The suite runs **all 20 tests green** (verified 2026-09-23, cloud container, with
+`PLAYWRIGHT_CHROMIUM_PATH`). The entries below were once a documented skip or failure; all are now
+resolved. They are kept here so that if one reappears you recognise it as a REAL regression, not
+the old baseline:
 
 - `gap-exercise.e2e.ts` and `gap-help.e2e.ts` **run and pass** — they exercise the BUILT-IN sandbox,
   which serves `/api/gap/*` from the backend process itself, so there is no external the-gap sidecar
@@ -84,7 +85,13 @@ either reappears you recognise it as a REAL regression, not the old baseline:
   `getByText('Correct! Recorded — nice.')` matched both the real transcript `<p>` and `FocusRail`'s
   hidden `.focus-rail-lastline` mirror) was fixed by asserting with `{ exact: true }`, which the
   rail's longer containing text no longer satisfies. A re-broadened locator would bring it back.
-- `graph-contextual.e2e.ts` passes.
+  It opens with a real request, not "hi": a thread-opening greeting withholds every tool.
+- `graph-contextual.e2e.ts` passes **on its own**. It used to anchor on the boot-seeded
+  `stream-consumer` stub, which `/api/graph` hides until it has evidence, so it only passed after
+  `gap-exercise.e2e.ts` had graded that page. It now has its own hub page (global-setup.ts).
+- `aside.e2e.ts` and `chat-first.e2e.ts` share the chat pair (:4824/:4178). Their script is keyed
+  (`when` in scripted-model.cjs), so turn order across files does not matter; a keyed turn that
+  never arrives means its request did not say what the key expects.
 
 ## Ad-hoc driving (the useful mode)
 

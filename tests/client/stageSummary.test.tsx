@@ -58,7 +58,8 @@ describe('Stage continuity', () => {
     const messages = structuredClone(answered);
     (messages[0].parts[0] as any).output.grading = { verdict: 'ungraded', detail: 'Could not parse this format.' };
     render(<StageSummary messages={messages} />);
-    expect(screen.getByText('Not graded')).toBeTruthy();
+    expect(screen.getByText('not graded')).toBeTruthy();
+    expect(screen.queryByText('graded')).toBeNull();
     expect(screen.getByText(/125/)).toBeTruthy();
   });
 });

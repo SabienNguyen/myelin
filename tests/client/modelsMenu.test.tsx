@@ -11,7 +11,7 @@ type EnvOverrides = Partial<Record<string, object>>;
 type Available = { ollama?: string[]; openaiCompat?: string[] };
 function modelsState(
   env: EnvOverrides = {}, roles: Record<string, string> = {}, available: Available = {},
-  windows: Record<string, number> = {},
+  windows: Record<string, number> = {}, overrideRoles: string[] = [],
 ) {
   const effective = {
     tutor: 'claude-sonnet-5', grader: 'claude-haiku-4-5', quiz_gen: 'claude-sonnet-5',
@@ -19,12 +19,18 @@ function modelsState(
   };
   return {
     roles: Object.fromEntries(Object.entries(effective).map(([r, m]) =>
-      [r, { effective: m, saved: null, contextTokens: windows[r] ?? null }])),
+      [r, {
+        effective: m, saved: null, contextTokens: windows[r] ?? null,
+        // Mirrors setupRoutes.ts: settings.json can hold a role as a hand-tuned object rather
+        // than a bare id. GET still reports `saved` as a plain string; this is the separate hint.
+        ...(overrideRoles.includes(r) ? { savedHasOverrides: true } : {}),
+      }])),
     env: {
       OLLAMA_BASE_URL: { value: '', shadowed: false },
       OLLAMA_API_KEY: { set: false, shadowed: false },
       OPENAI_COMPAT_BASE_URL: { value: '', shadowed: false },
       OPENAI_COMPAT_API_KEY: { set: false, shadowed: false },
+      OPENAI_API_KEY: { set: false, shadowed: false },
       ...env,
     },
     available,
@@ -156,6 +162,23 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
     expect(body.env).toEqual({ GROQ_API_KEY: 'gsk-test' });
   });
 
+  // oai: is the Responses API route (O2) — its own provider entry, its own key, since openai:
+  // stays the generic OpenAI-compatible endpoint with its own base URL and key.
+  it('picks OpenAI (Responses API) as a provider and saves the key with it', async () => {
+    const mock = stubFetch();
+    await openPopover();
+    fireEvent.change(await screen.findByLabelText('tutor provider'), { target: { value: 'oai' } });
+    fireEvent.change(screen.getByLabelText('tutor'), { target: { value: 'gpt-5.1' } });
+    const key = screen.getByLabelText('openai api key') as HTMLInputElement;
+    expect(key.type).toBe('password');
+    fireEvent.change(key, { target: { value: 'sk-oai-test' } });
+    fireEvent.click(screen.getByRole('button', { name: 'save' }));
+    await screen.findByText(/saved — takes effect/);
+    const body = JSON.parse(String(mock.mock.calls.find(([, init]) => init?.method === 'PUT')?.[1]?.body));
+    expect(body.models).toEqual({ tutor: 'oai:gpt-5.1' });
+    expect(body.env).toEqual({ OPENAI_API_KEY: 'sk-oai-test' });
+  });
+
   it('renders every CALLABLE role with its effective id, with provider-specific suggestions', async () => {
     // quiz_gen is deliberately not among them: nothing calls it (quiz blocks are staged by the
     // tutor as a block tool), so offering it asked the learner to pick a model that could not
@@ -171,6 +194,18 @@ describe('ModelsMenu — the tutor badge opens the model configuration dialog', 
       expect((screen.getByLabelText('grader') as HTMLInputElement).value).toBe('claude-haiku-4-5');
       expect((screen.getByLabelText('tutor') as HTMLInputElement).value).toBe('claude-sonnet-5');
     });
+  });
+
+  // The GET contract for `saved` is `string | null` even when settings.json holds a role as a
+  // hand-tuned OBJECT (a sampler tuned for a local model) — the server reduces it to the model id
+  // and adds savedHasOverrides. This pins the client's side: render that id plainly, never dump
+  // the object itself into the DOM.
+  it('an object-form saved role renders its model id and a muted note, never "[object Object]"', async () => {
+    stubFetch(modelsState({}, { grader: 'openai:bonsai-2-27b' }, {}, {}, ['grader']));
+    const dialog = await openPopover();
+    await waitFor(() => expect((screen.getByLabelText('grader') as HTMLInputElement).value).toBe('bonsai-2-27b'));
+    screen.getByText(/custom settings saved/);
+    expect(dialog.textContent).not.toContain('[object Object]');
   });
 
   it('save PUTs only what changed, then shows the quiet confirmation', async () => {

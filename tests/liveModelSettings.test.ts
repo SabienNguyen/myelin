@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { Hono } from 'hono';
 import { buildChatRoute } from '../src/server/chatRoute.js';
 import { buildSetupRoutes } from '../src/server/setupRoutes.js';
-import { resetEnvShadow } from '../src/server/settings.js';
+import { readSettings, resetEnvShadow, writeSettings } from '../src/server/settings.js';
 import { chatModelFor } from '../src/server/models.js';
 import { streamModel } from './mockModel.js';
 import type { HarnessConfig } from '../src/server/config.js';
@@ -97,5 +97,64 @@ describe('UI model saves reach the existing chat handler', () => {
     });
     await send();
     expect(used).toEqual(['ollama:old', 'openrouter:openrouter/free']);
+  });
+});
+
+// The real report: a role hand-edited into settings.json as `{ model, sampler: {...} }` (tuning a
+// local model past what the popover exposes) must survive both reads and writes of every OTHER
+// role — this is the PUT route's side of the fix; settings.test.ts covers applySettings' boot-time
+// validation of the object itself.
+describe('an object-form saved role (hand-tuned sampler) survives GET and PUT', () => {
+  const cfgWithQuizGen = (vault: string): HarnessConfig => ({
+    student: 'test', vault, models: {
+      tutor: { model: 'ollama:old' }, grader: { model: 'ollama:grader' },
+      quiz_gen: { model: 'openai:bonsai-2-27b' },
+      card_gen: { model: 'ollama:cards' }, compile: { model: 'ollama:compile' },
+    },
+  } as unknown as HarnessConfig);
+
+  it('a PUT touching another role leaves an object-form role on disk untouched', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'myelin-objectrole-1-'));
+    vi.stubEnv('MYELIN_CONFIG_DIR', join(dir, 'config'));
+    resetEnvShadow();
+    const override = { model: 'openai:bonsai-2-27b', sampler: { topP: 0.95, topK: 20, minP: 0 } };
+    writeSettings({ models: { quiz_gen: override } });
+    const app = new Hono();
+    app.route('/', buildSetupRoutes(cfgWithQuizGen(dir)));
+    const res = await app.request('/api/setup/models', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ models: { tutor: 'ollama:new-tutor' } }),
+    });
+    expect(res.status).toBe(200);
+    expect(readSettings().models?.quiz_gen).toEqual(override);
+  });
+
+  it("a PUT changing an object-form role's model keeps its other fields, only the id changes", async () => {
+    dir = mkdtempSync(join(tmpdir(), 'myelin-objectrole-2-'));
+    vi.stubEnv('MYELIN_CONFIG_DIR', join(dir, 'config'));
+    resetEnvShadow();
+    const override = { model: 'openai:bonsai-2-27b', sampler: { topP: 0.95, topK: 20, minP: 0 } };
+    writeSettings({ models: { quiz_gen: override } });
+    const app = new Hono();
+    app.route('/', buildSetupRoutes(cfgWithQuizGen(dir)));
+    const res = await app.request('/api/setup/models', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ models: { quiz_gen: 'ollama:bonsai-3-40b-q4' } }),
+    });
+    expect(res.status).toBe(200);
+    expect(readSettings().models?.quiz_gen).toEqual({ ...override, model: 'ollama:bonsai-3-40b-q4' });
+  });
+
+  it('GET reports the saved model id as a string even though settings.json holds the full object', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'myelin-objectrole-3-'));
+    vi.stubEnv('MYELIN_CONFIG_DIR', join(dir, 'config'));
+    resetEnvShadow();
+    writeSettings({ models: { quiz_gen: { model: 'openai:bonsai-2-27b', sampler: { topP: 0.95 } } } });
+    const app = new Hono();
+    app.route('/', buildSetupRoutes(cfgWithQuizGen(dir)));
+    const state = await (await app.request('/api/setup/models')).json();
+    expect(state.roles.quiz_gen.saved).toBe('openai:bonsai-2-27b');
+    expect(typeof state.roles.quiz_gen.saved).toBe('string');
+    expect(state.roles.quiz_gen.savedHasOverrides).toBe(true);
   });
 });

@@ -160,7 +160,7 @@ export function MathScratchpadInner({ args, addResult, MathInput = MathLiveInput
       {args.stepMode && (
         <button type="button" onClick={saveStep}>{editing !== null ? `Save step ${editing + 1}` : 'Add step'}</button>
       )}
-      <button type="button" onClick={() => {
+      <button className="block-submit" type="button" onClick={() => {
         const allSteps = folded();
         addResult({ steps: allSteps, finalLatex: allSteps[allSteps.length - 1]?.latex ?? '' });
       }}>Submit</button>

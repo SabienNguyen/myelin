@@ -321,6 +321,8 @@ describe('createUiStream wire shape', () => {
         .filter((p: any) => p.type === 'text').map((p: any) => p.text).join('');
       expect(text).toBe('the model returned nothing');
       expect(chunks.some((c) => c.type === 'error')).toBe(false);
+      // Failed, not finished: the client must not treat the note as an answer.
+      expect(chunks.at(-1)).toEqual({ type: 'finish', finishReason: 'error' });
       expectValidChunks(chunks);
     });
 

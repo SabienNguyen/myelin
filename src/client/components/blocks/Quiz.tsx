@@ -29,7 +29,7 @@ export function QuizInner({ args, addResult }: {
                   aria-pressed={answers[item.id] === ch}
                   className={answers[item.id] === ch ? 'on' : ''}
                   onClick={() => setAnswer(item.id, ch)}
-                >{ch}</button>
+                ><BlockProse text={ch} inline /></button>
               ))
             : (
               // The prompt sits right above (BlockProse), but it isn't programmatically tied to the
@@ -43,7 +43,7 @@ export function QuizInner({ args, addResult }: {
             )}
         </div>
       ))}
-      <button type="button" onClick={() => addResult({
+      <button type="button" className="block-submit" onClick={() => addResult({
         answers: args.items.map((item: any) => ({ id: item.id, answer: answers[item.id] ?? '' })),
       })}>Submit</button>
     </div>
@@ -67,9 +67,17 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
           {props.args.items.map((item: any) => {
             const answer = answers.find((a) => a.id === item.id)?.answer;
             const scored = byId.get(item.id);
+            // A choice answer is one of the tutor's own choices, maths included, so it renders like
+            // one; a typed answer is the learner's text and stays literal.
+            const shown = item.type === 'choice' && answer ? <BlockProse text={answer} inline /> : answer;
             return (
               <li key={item.id}>
-                <BlockProse text={item.prompt} inline /> — {answer} {scored != null && <Mark ok={scored.correct} />}
+                <BlockProse text={item.prompt} inline /> — {shown} {scored != null && <Mark ok={scored.correct} />}
+                {/* A ✗ with no right answer leaves the learner to guess what they missed; every
+                    flashcard app shows it. Only when the item carried an expected answer. */}
+                {scored != null && !scored.correct && item.expected && (
+                  <span className="quiz-expected"> · answer: <BlockProse text={item.expected} inline /></span>
+                )}
                 {/* Which verdicts are a machine's and which are a model's opinion — the evidence
                     note already said "(model-graded)", but the learner could not see WHICH items.
                     Checked is the default and gets no badge; judged is the exception worth naming. */}

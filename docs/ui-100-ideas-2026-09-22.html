@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Myelin UI Ideas</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #101116; --bg-panel: #17191f; --bg-inset: #21242c;
+  --text: #edeef2; --text-muted: #a5a9b6; --border: #3a3e4a;
+  --accent: #93b4f7; --accent-soft: #1f2a44; --accent-text: #11131a;
+  --good: #85cba0; --bad: #f09c95; --warn: #e5c17e;
+  --radius: 10px; --radius-sm: 7px; --radius-shell: 14px;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --prose: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #eeeef7; --bg-panel: #ffffff; --bg-inset: #e4e5f0;
+    --text: #1f2128; --text-muted: #565a68; --border: #c9cbd8;
+    --accent: #2b55c4; --accent-soft: #e3e9fb; --accent-text: #ffffff;
+    --good: #27613f; --bad: #9b3632; --warn: #765319;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 var(--prose); }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 2rem 16px 5rem; }
+h1 { font: 600 1.55rem/1.25 var(--mono); margin: 0 0 .4rem; }
+h2 { font: 600 1rem/1.3 var(--mono); margin: 0 0 .7rem; }
+.lede { color: var(--text-muted); max-width: 72ch; margin: 0 0 1.2rem; }
+.meta { font: .78rem var(--mono); color: var(--text-muted); }
+
+.picks { background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell); padding: 1.1rem 1.2rem; margin: 0 0 1.6rem; }
+.picks ol { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: .45rem 1.4rem; counter-reset: pick; }
+.picks li { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: .5rem; font-size: .88rem; }
+.picks li b { font-weight: 600; }
+.picks .pn { font: 600 .74rem var(--mono); color: var(--accent); padding-top: .15rem; }
+.picks .why { color: var(--text-muted); }
+
+.controls { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: .7rem 0 .8rem; margin-bottom: .6rem; border-bottom: 1px solid var(--border); }
+.row { display: flex; flex-wrap: wrap; gap: .35rem .45rem; align-items: center; }
+.row + .row { margin-top: .45rem; }
+.chip {
+  font: .76rem var(--mono); color: var(--text-muted); background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: 99px; padding: .2rem .65rem; cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.chip:hover { color: var(--text); border-color: var(--accent); }
+.chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--text); border-color: var(--accent); }
+.search {
+  flex: 1 1 220px; min-width: 0; font: .88rem var(--prose); color: var(--text); background: var(--bg-panel);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .35rem .6rem;
+}
+.count { font: .76rem var(--mono); color: var(--text-muted); margin-left: auto; }
+
+section.area { margin: 1.4rem 0 0; }
+section.area[hidden] { display: none; }
+.area-head { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; margin-bottom: .6rem; }
+.area-head p { margin: 0; color: var(--text-muted); font-size: .85rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: .6rem; }
+.card { background: var(--bg-panel); border-radius: var(--radius); padding: .75rem .85rem .7rem; display: flex; flex-direction: column; gap: .3rem; }
+.card[hidden] { display: none; }
+.card.pick { box-shadow: inset 3px 0 0 var(--accent); }
+.card h3 { margin: 0; font: 600 .92rem/1.35 var(--prose); display: flex; gap: .45rem; }
+.card h3 .n { font: 600 .74rem var(--mono); color: var(--accent); padding-top: .12rem; flex: none; min-width: 1.8rem; }
+.card p { margin: 0; font-size: .84rem; color: var(--text-muted); }
+.tags { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: auto; padding-top: .25rem; }
+.tag { font: .68rem var(--mono); border-radius: 99px; padding: .05rem .5rem; background: var(--bg-inset); color: var(--text-muted); }
+.tag.e-S { color: var(--good); } .tag.e-M { color: var(--accent); } .tag.e-L { color: var(--warn); }
+.tag.bends { color: var(--bad); }
+.tag.pick { color: var(--accent); }
+.empty { color: var(--text-muted); font-size: .9rem; padding: 1rem 0; }
+.foot { margin-top: 2.2rem; font-size: .8rem; color: var(--text-muted); }
+.foot b { color: var(--text); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>100 UI ideas for Myelin</h1>
+<p class="lede">Overhauls and enhancements across the whole app: first run, the conversation, the Stage, the graph, review, sources, trust, the workspace, accessibility and reflection. Each builds on what Myelin already has (Stage blocks, the vault, evidence, decay, the new asides and WebGL graph) and keeps to <code>design.md</code>: dark and dense, one accent, no gradients or glass, minimal motion. Ideas that would need an exception to those rules are tagged.</p>
+<p class="meta">effort: S = hours to a day · M = a few days · L = a week or more · 2026-09-22</p>
+
+<div class="picks" aria-labelledby="picks-h">
+  <h2 id="picks-h">Start with these ten</h2>
+  <ol id="pick-list"></ol>
+</div>
+
+<div class="controls" role="search">
+  <div class="row" id="area-chips" aria-label="Filter by area"></div>
+  <div class="row">
+    <span class="meta">effort</span>
+    <button class="chip" type="button" data-effort="S" aria-pressed="false">S</button>
+    <button class="chip" type="button" data-effort="M" aria-pressed="false">M</button>
+    <button class="chip" type="button" data-effort="L" aria-pressed="false">L</button>
+    <button class="chip" type="button" id="picks-only" aria-pressed="false">top picks</button>
+    <label for="q" class="meta" style="position:absolute;left:-9999px">search ideas</label>
+    <input id="q" class="search" type="search" placeholder="search ideas…" autocomplete="off">
+    <span class="count" id="count" role="status" aria-live="polite"></span>
+  </div>
+</div>
+
+<div id="areas"></div>
+<p class="empty" id="empty" hidden>No ideas match. Clear a filter or the search.</p>
+
+<p class="foot"><b>How to read the tags.</b> The surface each idea lives on is implied by its section. “Design exception” means the idea bends a rule in <code>design.md</code> or <code>no-slop-ui</code> (motion, a navigation rail, sound, a second window) and would need a deliberate decision first. Ideas that repeat one of the 20 reasoning-display concepts from the two earlier pages are left out; see those pages for that area.</p>
+</div>
+
+<script>
+const AREAS = [
+  ['start', 'First minutes', 'Getting from a fresh install to a first real lesson.'],
+  ['compose', 'Conversation & composer', 'Talking to the tutor with less typing and less friction.'],
+  ['stage', 'Stage & practice', 'Where answers happen and evidence is earned.'],
+  ['graph', 'Knowledge graph', 'Making the vault feel like a territory you are mapping.'],
+  ['review', 'Review & retention', 'The spacing loop, made visible and humane.'],
+  ['sources', 'Reading & sources', 'Human-written material at the centre, not the margins.'],
+  ['trust', 'Trust & control', 'Seeing and steering what the tutor does to your vault.'],
+  ['workspace', 'Workspace & navigation', 'Moving around fast, keeping your place.'],
+  ['access', 'Accessibility & comfort', 'Long study sessions for every body and every setup.'],
+  ['reflect', 'Reflection & progress', 'Meaning without streaks, points or confetti.'],
+];
+
+// [n, area, title, description, effort, flags]  flags: p = top pick, b = design exception
+const IDEAS = [
+  [1, 'start', 'Three-tap intake', 'Replace the blank "what do you want to learn?" with three quick choices: what for (exam, work, curiosity), how much you know, how long today. They set the stance, session length and first path.', 'M', ''],
+  [2, 'start', 'Key doctor', 'The models menu tests each provider key live with a tiny call and shows OK, 401 or out of quota, plus latency. It flags when a shell variable overrides a saved key (today\'s OPENAI_API_KEY=ollama case) and says how to fix it.', 'S', 'p'],
+  [3, 'start', 'Drop anything to start', 'The empty workspace is one big drop zone for a PDF, URL, video link or repo. The graph grows live beside it while the material compiles, so the first minute already shows the product working.', 'M', ''],
+  [4, 'start', 'Try it without a key', 'A bundled demo vault plus the scripted tutor the e2e tests already use gives a two-minute guided tour before any provider setup.', 'M', ''],
+  [5, 'start', 'The loop, drawn', 'The empty Stage shows the four-step loop (ask, practice, evidence, review) as a small diagram where every step is a real link. It explains the app by showing it.', 'S', ''],
+  [6, 'start', 'Starters from your library', 'Starter prompts come from your own sources and due pages ("Chapter 3 of Strogatz is compiled; start it?"), not fixed examples about derivatives.', 'S', ''],
+  [7, 'start', 'Cost and privacy card', 'Beside each provider: what leaves your machine, rough cost per lesson, and whether it works offline. You choose knowing the trade-offs.', 'S', ''],
+  [8, 'start', 'Import Anki and Obsidian', 'Map Obsidian notes to vault pages and Anki review history to evidence, with a preview of every page and mastery level before anything is written.', 'L', ''],
+  [9, 'start', 'Resume, exactly', 'The home card offers one button that returns to the last thread, scrolled to the last unanswered block, with today\'s due count beside it.', 'S', 'p'],
+  [10, 'start', 'A first lesson that shows you around', 'The very first session briefly names each surface as it appears ("answers on the Stage count as evidence"), once, then never again.', 'M', ''],
+
+  [11, 'compose', 'Mode in the composer', 'Learn, review, quiz and freeform become a small segmented control in the composer row, where you decide what to send. The topbar select goes away.', 'S', ''],
+  [12, 'compose', 'Quick replies', 'Under the latest tutor message: simpler, example, why?, skip. One click steers the lesson without typing. They disappear once you type.', 'S', 'p'],
+  [13, 'compose', '"Lost here" marker', 'Click the margin beside a paragraph to flag confusion. Lighter than an aside, it reaches the tutor as a misconception probe on the next turn.', 'M', ''],
+  [14, 'compose', 'Aside drawer', 'Every aside in the thread in one collapsible, searchable list. Asides already feed the vault; this makes them findable again.', 'S', ''],
+  [15, 'compose', 'Draft keeper', 'Unsent composer text survives reloads and thread switches, per thread, with a quiet "draft restored" note.', 'S', ''],
+  [16, 'compose', 'Stop that keeps the good part', 'Stopping leaves the partial answer in place marked "stopped", with a "continue from here" action instead of losing it.', 'S', ''],
+  [17, 'compose', 'Goal ribbon', 'A slim line under the topbar: the thread\'s goal or path and progress ("3 of 7 pages"). Click it to open the path.', 'S', ''],
+  [18, 'compose', 'Live maths and code preview', 'Typing $…$ in the composer renders the maths just below the input; backticks render monospace. You see your answer as the tutor will.', 'M', ''],
+  [19, 'compose', 'Speak your answer', 'Push-to-talk dictation (the browser\'s own speech recognition) fills the composer for editing before you send. Nothing sends by voice alone.', 'M', ''],
+  [20, 'compose', 'Reply to a specific point', 'Quote-reply any tutor paragraph. The reply carries its anchor, so the tutor answers that exact point instead of guessing.', 'M', ''],
+
+  [21, 'stage', 'Flow mode', 'The Stage takes the whole canvas and the tutor\'s question shrinks to one line above it. Esc brings the transcript back. For long exercises.', 'M', ''],
+  [22, 'stage', 'Confidence before submit', 'A three-step choice (guess, think so, sure) before answering. Over weeks, a calibration chart shows where you over- or under-estimate yourself.', 'M', 'p'],
+  [23, 'stage', 'Hint ladder with an honest cost', 'Nudge, then strategy, then worked step. Each rung visibly lowers how much the answer counts as evidence, so hints are a choice, not a cheat.', 'M', ''],
+  [24, 'stage', 'Faded worked examples', 'First a full worked solution, then each following block hides one more step until you do it alone. Well-supported by research on learning.', 'L', ''],
+  [25, 'stage', 'Try a variant', 'After a miss, one button asks for the same idea with new numbers or wording. The miss stays recorded; the variant is a fresh attempt.', 'S', ''],
+  [26, 'stage', 'Why did you pick that?', 'An optional one-line rationale on multiple-choice answers, graded for misconceptions rather than correctness. It catches right answers given for wrong reasons.', 'M', ''],
+  [27, 'stage', 'Answer diff', 'Side by side: your answer and the expected one for code, maths and drafts, with the first point of divergence highlighted.', 'M', ''],
+  [28, 'stage', 'Keyboard-native blocks', '1 to 4 chooses, Enter submits, H opens hints. Key hints appear when a block has focus. Practice at typing speed.', 'S', ''],
+  [29, 'stage', 'Stage filmstrip', 'Small cards for this session\'s finished blocks along the bottom of the Stage. Click one to revisit it read-only.', 'M', ''],
+  [30, 'stage', 'Scratch paper', 'A persistent per-block scratch area (text and a simple sketch pad) that is never graded. Working space, like paper beside a textbook.', 'M', ''],
+
+  [31, 'graph', 'Ready-to-learn outline', 'Nodes whose prerequisites you have mastered, but which you have not started, get an accent outline. The real frontier, visible at a glance.', 'S', 'p'],
+  [32, 'graph', 'Route overlay', 'The active path drawn as a numbered route through the graph. Finished stops are filled, and the next stop is outlined.', 'M', ''],
+  [33, 'graph', 'Growth time-lapse', 'A scrubber replays the vault growing and mastery shifting over weeks. Your learning, as a map that fills in.', 'L', 'b'],
+  [34, 'graph', 'Depth dial', 'A local view with a 1 to 3 hop slider around the open page, like Obsidian\'s local graph.', 'S', ''],
+  [35, 'graph', 'Search and fly', 'Type a page name and the camera moves to it and marks it. Under reduced motion it jumps instead of gliding.', 'S', 'b'],
+  [36, 'graph', 'Territory labels', 'Zoomed out, node labels give way to cluster labels ("Rust", "Calculus"). Zoom in and the pages return.', 'M', ''],
+  [37, 'graph', 'Node menu', 'Right-click or long-press a node: teach me, quiz me, open page, show sources, hide. Every graph action in one place.', 'M', ''],
+  [38, 'graph', 'Honesty lens', 'A filter that dims everything except unsourced and draft pages, showing exactly where the vault is still guesswork.', 'S', ''],
+  [39, 'graph', 'Mini-map', 'For large vaults, a corner overview with a draggable viewport rectangle.', 'M', ''],
+  [40, 'graph', 'Then and now', 'Two snapshots side by side, last month and today, with nodes that changed mastery outlined.', 'L', ''],
+
+  [41, 'review', 'Today lane', 'The due queue as one row with a time estimate ("about 12 min") and a single start button. The whole day\'s review in one decision.', 'S', 'p'],
+  [42, 'review', 'Scrub the future', 'Drag along the decay horizon to preview what will be due on any day, so you can plan around a busy week.', 'M', ''],
+  [43, 'review', 'Evidence calendar', 'A quiet heatmap of days with graded evidence. No streak counter and no broken-streak guilt; just the record.', 'S', ''],
+  [44, 'review', 'Rescue before the drop', 'Pages about to lose a mastery rung get a "two-minute rescue" card before they slip, not after.', 'S', ''],
+  [45, 'review', 'Why this mix', 'One line on the session plan explaining interleaving ("mixing calculus and Rust on purpose: harder now, stickier later").', 'S', ''],
+  [46, 'review', 'Lapse autopsy', 'A failed review shows the misconception recorded last time and the answer that fixed it then.', 'M', ''],
+  [47, 'review', 'Bury with a reason', '"Too easy", "not relevant" or "later": each reason changes scheduling differently, instead of one blunt skip.', 'M', ''],
+  [48, 'review', 'Pocket review', 'A small popover from the topbar runs three due items without leaving the lesson you are in.', 'M', ''],
+  [49, 'review', 'Session receipt', 'An end-of-session card: what moved up, what slipped, time spent, what comes next. Exportable as a note.', 'S', ''],
+  [50, 'review', 'Anki bridge status', 'Sync health, last sync and any conflicts, explained in plain language in one place.', 'S', ''],
+
+  [51, 'sources', 'Passage-to-page threads', 'In the source reader, highlighted passages show which vault page each one became. Click to jump between source and page.', 'M', ''],
+  [52, 'sources', 'Asides in the reader', 'The same highlight-and-ask aside, on source text, saved alongside the passage.', 'S', ''],
+  [53, 'sources', 'Citation hover cards', 'Hover a cited source in a message to see title, author, date and the exact passage it came from.', 'M', ''],
+  [54, 'sources', 'Provenance strip', 'The top of every page: sources, authors, verified or claimed bylines, and when it was last reviewed.', 'S', ''],
+  [55, 'sources', 'Source progress bars', 'One stacked bar per source: how much is read, compiled into pages, and mastered.', 'S', ''],
+  [56, 'sources', 'Scroll-synced split', 'Source on the left, compiled page on the right, scrolling together section by section.', 'L', ''],
+  [57, 'sources', 'Point at a figure', 'Click an image or diagram in a source to ask the tutor about it.', 'M', ''],
+  [58, 'sources', 'One search box', 'Search pages, sources, threads and asides together, with filters and keyboard navigation.', 'M', ''],
+  [59, 'sources', 'Concept-pinned video timeline', 'Video sources get a timeline with each concept pinned at its timestamp. Jump straight to the moment it is explained.', 'M', ''],
+  [60, 'sources', 'Find a human source', 'On any unsourced page, one button runs research and proposes real citations for you to accept or reject.', 'M', 'p'],
+
+  [61, 'trust', 'Sources-only mode', 'A lock toggle: the tutor may only teach from your sources and cited research, and says so when it cannot answer. For exam prep.', 'M', ''],
+  [62, 'trust', 'Check this claim', 'Select any sentence the tutor wrote and press "check". A quick search of the vault and the web shows sources that support or contradict it.', 'M', 'p'],
+  [63, 'trust', 'What the tutor thinks you know', 'A readable, editable page of the student model: what you have shown, your misconceptions, your stance. You can correct it.', 'M', ''],
+  [64, 'trust', 'Why this next', 'Hover a suggested lesson to see why: due for review, on the frontier, or a prerequisite of your goal.', 'S', ''],
+  [65, 'trust', 'Route badge', 'Hover a message\'s time to see which model answered, through which route, how long it took and what it cost.', 'S', ''],
+  [66, 'trust', 'Undo a turn\'s writes', '"Revert pages written this turn" with a preview diff. The vault should never change in a way you cannot undo.', 'M', ''],
+  [67, 'trust', 'Evidence receipts', 'Click any mastery change to see the exact graded answer that earned it.', 'S', ''],
+  [68, 'trust', 'Spend meter', 'Today\'s cost by role (tutor, grader, compile) with an optional daily cap that pauses background work when reached.', 'M', ''],
+  [69, 'trust', 'Readable failures', 'When a tool fails, the message says what failed and what the tutor did instead, in one plain line.', 'S', ''],
+  [70, 'trust', 'Model side-by-side', 'Re-run one turn on another model and compare the answers, for choosing which model should be the tutor.', 'L', ''],
+
+  [71, 'workspace', 'Command palette', 'Ctrl/Cmd+K: jump to threads and pages, run actions, change settings, all by fuzzy search.', 'M', 'p'],
+  [72, 'workspace', 'Remembered split', 'A draggable divider between transcript and panel that remembers its width; double-click resets.', 'S', ''],
+  [73, 'workspace', 'Zen mode', 'Transcript and Stage only; topbar and panel get out of the way. One key toggles it.', 'S', ''],
+  [74, 'workspace', 'Optional thread sidebar', 'Pinned threads, topics and last activity. Hidden by default, because design.md deliberately has no navigation rail.', 'M', 'b'],
+  [75, 'workspace', 'Page breadcrumbs', 'Domain, path and page at the top of the Page tab, with back and forward.', 'S', ''],
+  [76, 'workspace', 'Scroll memory', 'Every tab and every page remembers where you were.', 'S', ''],
+  [77, 'workspace', 'Pop-out windows', 'In the desktop app, pop the graph or a page into its own window, kept in sync.', 'L', 'b'],
+  [78, 'workspace', 'Status line', 'A monospace bottom bar with model, vault, queue and due count, replacing the pills in the topbar.', 'M', ''],
+  [79, 'workspace', 'Background activity tray', 'Compiles, lesson notes and ingests in one place, with what each produced and any error. Background work stops being invisible.', 'M', 'p'],
+  [80, 'workspace', 'Shortcut sheet', 'Press ? to see every shortcut; rebind any of them, saved locally.', 'M', ''],
+
+  [81, 'access', 'Reading controls', 'Text size, line length and prose font, per user and per device.', 'S', ''],
+  [82, 'access', 'Pattern-coded mastery', 'Mastery levels carry shape and pattern as well as colour, for colour-blind readers. One toggle.', 'S', ''],
+  [83, 'access', 'Spacing mode', 'Wider letter, word and line spacing for dyslexic readers.', 'S', ''],
+  [84, 'access', 'Lesson landmarks', 'Headings and landmarks per turn and per block, so a screen reader can jump through a long lesson.', 'S', ''],
+  [85, 'access', 'Read aloud', 'Tutor messages read by the browser\'s own voice, with the current sentence highlighted. Works offline.', 'M', ''],
+  [86, 'access', 'Large-target mode', 'Bigger hit areas and spacing for touch screens and unsteady hands.', 'S', ''],
+  [87, 'access', 'Focus-order overlay', 'A debug overlay that draws the keyboard focus order, so keyboard problems are visible during development.', 'S', ''],
+  [88, 'access', 'Break nudges', 'Opt-in: after a long stretch, a quiet note to stand up, paired with the session receipt.', 'S', ''],
+  [89, 'access', 'Automatic language input', 'In a language lesson the composer offers that language\'s input method automatically, building on ImeInput.', 'S', ''],
+  [90, 'access', 'In-app motion setting', 'Reduce motion in Myelin without changing the whole operating system.', 'S', ''],
+
+  [91, 'reflect', 'Teach it back', 'Explain a concept to a "student" persona that asks naive questions, graded by rubric. Teaching is the strongest test of knowing.', 'M', ''],
+  [92, 'reflect', 'Then and now answers', 'Your first answer on a concept beside your latest. Progress you can read.', 'S', ''],
+  [93, 'reflect', 'Learning journal', 'A weekly note drafted from lesson notes, editable, saved to the vault.', 'M', ''],
+  [94, 'reflect', 'Proof portfolio', 'Export mastered concepts with the evidence behind each as a static page you can keep or share.', 'M', ''],
+  [95, 'reflect', 'Frontier postcard', 'One ready-to-learn concept surfaced per day, with a one-line reason it is interesting.', 'S', ''],
+  [96, 'reflect', 'Path milestones', 'Finishing a path shows a quiet summary of what you can now do, in concrete terms.', 'S', ''],
+  [97, 'reflect', 'Weekly reflection prompt', '"What surprised you this week?" Answers become vault notes linked to the pages involved.', 'S', ''],
+  [98, 'reflect', 'Your question bank', 'Every question you asked, searchable. Re-ask any of them later as a quiz on yourself.', 'M', ''],
+  [99, 'reflect', 'Seasons view', 'A months-long view of which areas grew and which you kept.', 'M', ''],
+  [100, 'reflect', 'One quiet sound', 'Opt-in and off by default: a single soft tone for a correct graded answer. Nothing else makes noise.', 'S', 'b'],
+];
+
+const PICK_WHY = {
+  2: 'Would have caught today\'s shadowed-key failure before any lesson.',
+  9: 'The most common action in the app, reduced to one click.',
+  12: 'Steering without typing; cheap and immediately felt.',
+  22: 'Turns every answer into calibration data the scheduler can use.',
+  31: 'Makes the new graph answer "what should I learn next?"',
+  41: 'One decision replaces a list of due items.',
+  60: 'Directly targets "it relies on training data, not human sources".',
+  62: 'Lets you verify the tutor on the spot instead of trusting it.',
+  71: 'Speeds up every other feature on this list.',
+  79: 'Lesson notes and compiles run invisibly today; this shows their results.',
+};
+
+const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const pickList = document.getElementById('pick-list');
+for (const [n, , title] of IDEAS.filter((i) => i[5].includes('p'))) {
+  const li = document.createElement('li');
+  li.innerHTML = `<span class="pn">#${n}</span><span><b>${esc(title)}</b> <span class="why">${esc(PICK_WHY[n] ?? '')}</span></span>`;
+  pickList.append(li);
+}
+
+const areasEl = document.getElementById('areas');
+const chipsEl = document.getElementById('area-chips');
+const allChip = Object.assign(document.createElement('button'), { className: 'chip', type: 'button', textContent: 'all areas' });
+allChip.dataset.area = '*'; allChip.setAttribute('aria-pressed', 'true');
+chipsEl.append(allChip);
+for (const [id, name, blurb] of AREAS) {
+  const chip = Object.assign(document.createElement('button'), { className: 'chip', type: 'button', textContent: name.toLowerCase() });
+  chip.dataset.area = id; chip.setAttribute('aria-pressed', 'false');
+  chipsEl.append(chip);
+  const sec = document.createElement('section');
+  sec.className = 'area'; sec.id = id; sec.setAttribute('aria-labelledby', `${id}-h`);
+  sec.innerHTML = `<div class="area-head"><h2 id="${id}-h">${esc(name)}</h2><p>${esc(blurb)}</p></div><div class="grid"></div>`;
+  const grid = sec.querySelector('.grid');
+  for (const [n, area, title, desc, effort, flags] of IDEAS.filter((i) => i[1] === id)) {
+    const card = document.createElement('article');
+    card.className = 'card' + (flags.includes('p') ? ' pick' : '');
+    Object.assign(card.dataset, { effort, pick: flags.includes('p') ? '1' : '', text: `${title} ${desc}`.toLowerCase() });
+    card.innerHTML = `<h3><span class="n">${n}</span><span>${esc(title)}</span></h3><p>${esc(desc)}</p>`
+      + `<div class="tags"><span class="tag e-${effort}">effort ${effort}</span>`
+      + (flags.includes('p') ? '<span class="tag pick">top pick</span>' : '')
+      + (flags.includes('b') ? '<span class="tag bends">design exception</span>' : '') + '</div>';
+    grid.append(card);
+  }
+  areasEl.append(sec);
+}
+
+const state = { area: '*', efforts: new Set(), picks: false, q: '' };
+const countEl = document.getElementById('count');
+const emptyEl = document.getElementById('empty');
+function apply() {
+  let shown = 0;
+  for (const sec of areasEl.querySelectorAll('section.area')) {
+    let secShown = 0;
+    const inArea = state.area === '*' || state.area === sec.id;
+    for (const card of sec.querySelectorAll('.card')) {
+      const ok = inArea
+        && (state.efforts.size === 0 || state.efforts.has(card.dataset.effort))
+        && (!state.picks || card.dataset.pick === '1')
+        && (!state.q || card.dataset.text.includes(state.q));
+      card.hidden = !ok;
+      if (ok) secShown++;
+    }
+    sec.hidden = secShown === 0;
+    shown += secShown;
+  }
+  countEl.textContent = `${shown} of ${IDEAS.length} ideas`;
+  emptyEl.hidden = shown !== 0;
+}
+chipsEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-area]'); if (!b) return;
+  state.area = b.dataset.area;
+  for (const c of chipsEl.querySelectorAll('button')) c.setAttribute('aria-pressed', String(c === b));
+  apply();
+});
+for (const b of document.querySelectorAll('button[data-effort]')) {
+  b.addEventListener('click', () => {
+    const on = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', String(on));
+    on ? state.efforts.add(b.dataset.effort) : state.efforts.delete(b.dataset.effort);
+    apply();
+  });
+}
+document.getElementById('picks-only').addEventListener('click', (e) => {
+  state.picks = !state.picks; e.currentTarget.setAttribute('aria-pressed', String(state.picks)); apply();
+});
+document.getElementById('q').addEventListener('input', (e) => { state.q = e.target.value.trim().toLowerCase(); apply(); });
+apply();
+</script>
+</body>
+</html>

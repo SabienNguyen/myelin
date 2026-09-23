@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { saveThread, loadThread, listThreads, deleteThread } from '../src/server/sessionStore.js';
+import {
+  saveThread, loadThread, listThreads, deleteThread, addPartToMessage,
+} from '../src/server/sessionStore.js';
 
 const makeVault = () => {
   const vault = mkdtempSync(join(tmpdir(), 'lwh-vault-'));
@@ -207,6 +209,16 @@ describe('listThreads', () => {
     expect(threads[0].title).toBe('no-user-text');
   });
 
+  it('titles from the first sentence when it is a real one', () => {
+    const vault = makeVault();
+    saveThread(vault, 't-studio', [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'Quiz me across Calculus I. One question per page, mixed in order: Limits, Derivatives, Chain rule.' }] }]);
+    saveThread(vault, 't-short', [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'Why? Because the derivative is a limit of slopes, and I want to see it.' }] }]);
+    const byId = Object.fromEntries(listThreads(vault).map((t) => [t.id, t.title]));
+    expect(byId['t-studio']).toBe('Quiz me across Calculus I.');
+    // "Why?" is too short to stand as a title, so the opening keeps going.
+    expect(byId['t-short']).toBe('Why? Because the derivative is a limit of slopes, and I want…');
+  });
+
   it('trims long titles to ~60 chars', () => {
     const vault = makeVault();
     saveThread(vault, 'longone', [{ role: 'user', parts: [{ type: 'text', text: 'x'.repeat(120) }] }]);
@@ -232,6 +244,77 @@ describe('deleteThread', () => {
   it('is a no-op for a missing (but validly-named) thread', () => {
     const vault = makeVault();
     expect(() => deleteThread(vault, 'doesnotexist')).not.toThrow();
+  });
+});
+
+// asideRoute.ts persists a `data-aside` part outside the normal chat-turn save (addPartToMessage),
+// after the message it anchors to already exists. A browser tab that snapshotted the message
+// before the aside landed then PUTs its own (aside-less) copy back — saveThread's ordinary
+// "incoming replaces disk, same position" rule would silently erase the aside the moment that
+// stale save lands, which is exactly the loss union-by-id already exists to prevent for whole
+// messages.
+describe('addPartToMessage + saveThread — a data-aside part survives a later save that lacks it', () => {
+  it('addPartToMessage adds a part to the right message, replacing a same-id part in place', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'hi' }] }]);
+
+    addPartToMessage(vault, 't', 'a1', { type: 'data-aside', id: 'aside-1', data: { answer: 'first' } });
+    let out = loadThread(vault, 't') as any[];
+    expect(out[0].parts).toEqual([
+      { type: 'text', text: 'hi' },
+      { type: 'data-aside', id: 'aside-1', data: { answer: 'first' } },
+    ]);
+
+    // Asking again about the same aside updates it in place rather than duplicating it.
+    addPartToMessage(vault, 't', 'a1', { type: 'data-aside', id: 'aside-1', data: { answer: 'revised' } });
+    out = loadThread(vault, 't') as any[];
+    expect(out[0].parts).toEqual([
+      { type: 'text', text: 'hi' },
+      { type: 'data-aside', id: 'aside-1', data: { answer: 'revised' } },
+    ]);
+  });
+
+  it('throws for an unknown messageId rather than silently doing nothing', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ id: 'a1', role: 'assistant', parts: [] }]);
+    expect(() => addPartToMessage(vault, 't', 'no-such-message', { type: 'data-aside', id: 'x', data: {} }))
+      .toThrow(/no-such-message/);
+  });
+
+  it('a later client save of the anchored message WITHOUT the aside part keeps it on disk', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'question' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'answer' }] },
+    ]);
+    addPartToMessage(vault, 't', 'a1', { type: 'data-aside', id: 'aside-1', data: { answer: 'aside answer' } });
+
+    // A tab that snapshotted BEFORE the aside landed sends its own view back — no data-aside part.
+    saveThread(vault, 't', [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'question' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'answer' }] },
+    ]);
+
+    const out = loadThread(vault, 't') as any[];
+    const anchor = out.find((m) => m.id === 'a1');
+    expect(anchor.parts).toContainEqual({ type: 'data-aside', id: 'aside-1', data: { answer: 'aside answer' } });
+  });
+
+  it('a save that DOES carry the aside part (e.g. echoing it back) is not duplicated', () => {
+    const vault = makeVault();
+    saveThread(vault, 't', [{ id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'answer' }] }]);
+    addPartToMessage(vault, 't', 'a1', { type: 'data-aside', id: 'aside-1', data: { answer: 'v1' } });
+
+    saveThread(vault, 't', [
+      {
+        id: 'a1', role: 'assistant',
+        parts: [{ type: 'text', text: 'answer' }, { type: 'data-aside', id: 'aside-1', data: { answer: 'v1' } }],
+      },
+    ]);
+
+    const out = loadThread(vault, 't') as any[];
+    const asideParts = out.find((m) => m.id === 'a1').parts.filter((p: any) => p.type === 'data-aside');
+    expect(asideParts).toHaveLength(1);
   });
 });
 

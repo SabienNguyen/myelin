@@ -198,6 +198,14 @@ describe('GraphPanel — contextual mode (component)', () => {
     expect(screen.getByText('Topic Isolated')).not.toBeNull();
   });
 
+  it('jsdom has no WebGL, so the canvas fails and the fallback message + topic list render', async () => {
+    render(<GraphPanel visible />);
+    const status = await screen.findByText(/graph view needs webgl/i);
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.textContent).toMatch(/showing the topic list instead/i);
+    expect(screen.getByRole('region', { name: 'Topics in this view' })).not.toBeNull();
+  });
+
   it('re-seeds live off a panelBus openPage event while visible', async () => {
     render(<GraphPanel visible />);
     await screen.findByText(/open a page to focus the graph/i);
@@ -261,14 +269,14 @@ describe('GraphPanel — loading state', () => {
     const { container } = render(<GraphPanel visible />);
     expect(screen.getByText(/laying out the graph/i)).not.toBeNull();
     expect(screen.queryByText(/open a page to focus the graph/i)).toBeNull();
-    expect(container.querySelector('svg')).toBeNull();
+    expect(container.querySelector('.graph-canvas')).toBeNull();
 
     await act(async () => {
       resolveFetch({ ok: true, json: async () => ({ nodes: graphNodes }) });
     });
 
     expect(screen.queryByText(/laying out the graph/i)).toBeNull();
-    expect(container.querySelector('svg')).not.toBeNull();
+    expect(container.querySelector('.graph-canvas')).not.toBeNull();
     await screen.findByText(/open a page to focus the graph/i);
   });
 
@@ -277,7 +285,7 @@ describe('GraphPanel — loading state', () => {
     const opened: string[] = [];
     const unsub = panelBus.subscribe((e) => { if (e.type === 'openPage') opened.push(e.slug); });
     render(<GraphPanel visible />);
-    const link = await screen.findByRole('button', { name: 'Open Topic A' });
+    const link = await screen.findByRole('button', { name: 'Open Topic A, unseen' });
     expect(screen.getByRole('region', { name: 'Topics in this view' }).textContent).toContain('unseen');
     expect(screen.getByText(/No connections in this view yet/)).toBeTruthy();
     fireEvent.click(link);
@@ -335,8 +343,10 @@ describe('GraphPanel — contextual-first perf (rendering scoped to subgraph)', 
     const { container } = render(<GraphPanel visible />);
     await screen.findByText(/around Seed Topic/i);
 
-    // Rendered scope: seed + its 50 hop-1 children, none of the 100 disconnected filler nodes.
-    expect(container.querySelectorAll('.graph-node')).toHaveLength(HOP1_COUNT + 1);
+    // Rendered scope: seed + its 50 hop-1 children, none of the 100 disconnected filler nodes —
+    // the topic list is now the only DOM surface for graph membership (the canvas is aria-hidden
+    // and, in jsdom, never even mounts — see the WebGL-fallback test above).
+    expect(container.querySelectorAll('.graph-topic-list li')).toHaveLength(HOP1_COUNT + 1);
     expect(screen.queryByText('Isolated 0')).toBeNull();
   });
 });

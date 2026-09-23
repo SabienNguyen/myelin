@@ -48,7 +48,8 @@ describe('POST /api/chat — writeUp promotion', () => {
     await post({ messages: msgs, mode: 'learn' });                 // ordinary learn turn
     await post({ messages: msgs, mode: 'learn', writeUp: true });  // the one-click write
     await post({ messages: msgs, mode: 'freeform', writeUp: true }); // already freeform, unchanged
-    expect(seenModes).toEqual(['learn', 'freeform', 'freeform']);
+    await post({ messages: msgs, mode: 'chat', writeUp: true });   // chat can already write
+    expect(seenModes).toEqual(['learn', 'freeform', 'freeform', 'chat']);
   });
 });
 
@@ -82,6 +83,16 @@ describe('POST /api/chat — slash commands', () => {
     await post({ messages: msgs, mode: 'quiz', command: 'freeform' });
     await post({ messages: msgs, mode: 'learn', command: 'write' });    // same promotion as writeUp:true
     expect(seenModes).toEqual(['review', 'freeform', 'freeform']);
+  });
+
+  // /study names no mode of its own: it is the structured tutor, which is `learn`. /chat leaves it.
+  it('/study runs the turn as the learn tutor and /chat returns it to chat', async () => {
+    const { post } = makeApp();
+    seenModes.length = 0;
+    await post({ messages: msgs, command: 'study' });
+    await post({ messages: msgs, mode: 'learn', command: 'chat' });
+    await post({ messages: msgs, mode: 'chat', command: 'write' });
+    expect(seenModes).toEqual(['learn', 'chat', 'chat']);
   });
 
   it('a stance command persists per thread — including a bare send with no text — and later turns keep it', async () => {
@@ -145,8 +156,13 @@ describe('an absent mode is derived, not defaulted', () => {
     return seenModes[0];
   };
 
-  it('routes an authoring ask to freeform', async () => {
-    expect(await send('build me a path for jazz harmony')).toBe('freeform');
+  it('routes an authoring ask to chat, which can build paths', async () => {
+    expect(await send('build me a path for jazz harmony')).toBe('chat');
+  });
+
+  it('routes an ordinary message to chat', async () => {
+    expect(await send('hi')).toBe('chat');
+    expect(await send('what is a monad?')).toBe('chat');
   });
 
   it('routes "quiz me" to quiz', async () => {
@@ -155,11 +171,11 @@ describe('an absent mode is derived, not defaulted', () => {
 
   it('follows the plan when the learner asks for nothing in particular', async () => {
     expect(await send('ok next', { planKinds: ['review', 'new'] })).toBe('review');
-    expect(await send('ok next', { planKinds: ['new'] })).toBe('learn');
+    expect(await send('ok next', { planKinds: ['new'] })).toBe('chat');
   });
 
-  it('treats an empty vault as freeform, which is what coldStartMode used to do', async () => {
-    expect(await send('teach me jazz harmony', { emptyVault: true })).toBe('freeform');
+  it('treats an empty vault as chat, which can research and write the first pages', async () => {
+    expect(await send('teach me jazz harmony', { emptyVault: true })).toBe('chat');
   });
 
   it('still honours an explicit mode, so anything that sends one is unaffected', async () => {

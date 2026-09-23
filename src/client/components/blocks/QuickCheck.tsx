@@ -37,10 +37,15 @@ export function QuickCheck({ args, result, addResult }: {
         {/* The confidence echo stays on the graded card: calibration feedback only teaches if the
             learner can see which rating each verdict was paired with. */}
         <p>
-          You: {result.answer?.trim() ? result.answer : '(blank)'}
+          You: {result.answer?.trim()
+            ? (args.mode === 'choice' ? <BlockProse text={result.answer} inline /> : result.answer)
+            : '(blank)'}
           <Verdict grading={result.grading} dash word />
           {said && <span className="confidence-echo"> — you said {said}</span>}
         </p>
+        {result.grading?.verdict === 'incorrect' && args.expected && (
+          <p className="quiz-expected">Answer: <BlockProse text={args.expected} inline /></p>
+        )}
       </div>
     );
   }
@@ -69,7 +74,9 @@ export function QuickCheck({ args, result, addResult }: {
           Telex today, so a learner types diacritics from an ASCII keyboard (ImeInput.tsx). */}
       {args.mode === 'choice'
         ? args.choices?.map((ch: string) => (
-            <button key={ch} onClick={() => submit(ch)}>{ch}</button>
+            // Choices carry maths as often as the question does ("$\frac{1}{2}$"), so they render
+            // through the same prose renderer instead of showing LaTeX source on a button.
+            <button key={ch} type="button" onClick={() => submit(ch)}><BlockProse text={ch} inline /></button>
           ))
         : <ImeInput name="a" lang={args.lang} onSubmit={submit} />}
     </div>

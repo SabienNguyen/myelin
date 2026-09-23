@@ -9,17 +9,25 @@ import { HistoryMenu } from './components/HistoryMenu.js';
 import { FocusRail } from './components/FocusRail.js';
 import { FirstRun } from './components/FirstRun.js';
 import { AddMaterial } from './components/AddMaterial.js';
+import { NotebookCrumb, NotebookView, NotebooksHome } from './components/Notebooks.js';
+import { CommandPalette } from './components/CommandPalette.js';
 import { panelBus } from './lib/panelBus.js';
-import { parseHash, serializeHash } from './lib/urlState.js';
+import { parseHash, parseNotebookRoute, serializeHash } from './lib/urlState.js';
 
 export function App() {
-  // '' means "let the harness decide" — the mode selector is gone. Three of the four modes were
-  // only a framing sentence, and the three mechanisms that had grown up to route around the
-  // selector (coldStartMode, writeIntent, the mode slash commands) were the system saying so.
-  // A mode slash command still sets this for its one turn; see deriveMode.ts and the design at
-  // docs/superpowers/specs/2026-07-31-one-mode-design.html.
+  // '' means "let the harness decide", which is chat (deriveMode.ts) — the mode selector is gone.
+  // Three of the four modes were only a framing sentence, and the three mechanisms that had grown
+  // up to route around the selector (coldStartMode, writeIntent, the mode slash commands) were the
+  // system saying so. A study-family command (/study, /review, /quiz, /freeform) makes its mode
+  // sticky until the learner ends it from the composer chip or sends /chat; see the design at
+  // docs/superpowers/specs/2026-07-31-one-mode-design.html and plans/2026-09-22-chat-first.md.
   const [mode, setMode] = useState('');
   const [threadId, setThreadId] = useState(() => parseHash(location.hash).threadId);
+  // The notebooks screens (#/notebooks, #/notebooks/<id>) replace the chat workspace; null means
+  // a conversation is open. The thread id above is kept while they show, so Back returns to it.
+  const [notebookRoute, setNotebookRoute] = useState(() => parseNotebookRoute(location.hash));
+  // A study session belongs to the conversation it was started in; another thread opens in chat.
+  useEffect(() => { setMode(''); }, [threadId]);
 
   // Whether the vault has anything real to teach from. This used to pick a MODE (coldStartMode:
   // an empty vault opened in freeform, because teaching modes could not write and a newcomer's
@@ -71,6 +79,9 @@ export function App() {
 
   useEffect(() => {
     const onHashChange = () => {
+      const route = parseNotebookRoute(location.hash);
+      setNotebookRoute(route);
+      if (route) return;
       const parsed = parseHash(location.hash);
       setThreadId((prev) => (parsed.threadId !== prev ? parsed.threadId : prev));
     };
@@ -84,16 +95,42 @@ export function App() {
 
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
+  const brand = <h1><BookOpenText size={20} weight="duotone" aria-hidden="true" /> <span className="brand-word">Myelin</span></h1>;
+
+  if (notebookRoute) {
+    return (
+      <FirstRun>
+        <div className="app">
+          <header className="topbar">
+            {brand}
+            <CommandPalette threadId={threadId} />
+            <TopbarStatus />
+            <AddMaterial />
+          </header>
+          <main className="notebooks-main">
+            {notebookRoute.notebookId
+              // Keyed: notebook A's state (a load in flight, an open delete confirmation) must never
+              // carry over to notebook B.
+              ? <NotebookView key={notebookRoute.notebookId} id={notebookRoute.notebookId} />
+              : <NotebooksHome />}
+          </main>
+        </div>
+      </FirstRun>
+    );
+  }
+
   return (
     // Setup gate first: with no API key there is no tutor, so a Runtime that cannot answer must not
     // mount and invite a question. Renders `children` untouched once the key is in place.
     <FirstRun>
-    {/* onSetMode: a /learn-family slash command must land on this selector too — the server only
-        overrides the one turn the command rides; persistence is the selector's job. */}
+    {/* onSetMode: a /study-family command makes its mode sticky here (and /chat clears it) — the
+        server only overrides the one turn the command rides; persistence is this state's job. */}
     <Runtime key={threadId} mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={setMode}>
       <div className={appClass}>
         <header className="topbar">
-          <h1><BookOpenText size={20} weight="duotone" /> Myelin</h1>
+          {brand}
+          <NotebookCrumb threadId={threadId} />
+          <CommandPalette threadId={threadId} />
           <HistoryMenu activeId={threadId} onSelect={selectThread} />
           <TopbarStatus />
           {/* THE add entry point — one control for every kind of material (file, git URL, local
@@ -103,7 +140,7 @@ export function App() {
         <main className="workspace">
           <div className="thread-column">
             <FocusRail peek={peek} onTogglePeek={() => setPeek((p) => !p)} />
-            <Thread />
+            <Thread mode={mode} onModeChange={setMode} threadId={threadId} />
           </div>
           <SidePanel />
         </main>

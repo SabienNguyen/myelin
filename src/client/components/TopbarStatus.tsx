@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { BrainIcon as Brain, UserCircleIcon as UserCircle } from '@phosphor-icons/react';
 import { LocalModelGetter } from './LocalModelGetter.js';
+import { CodexConnectionPanel } from './CodexConnectionPanel.js';
 
 type Status = { anki?: 'up' | 'down' | 'backlog'; student?: string; tutor?: string };
 
@@ -31,6 +32,9 @@ export function modelLabel(id: string): { name: string; how: string } {
   // OpenAI-compatible model. The id is shown verbatim too — `pretty()` title-cases and rewrites
   // trailing digits for `claude-sonnet-5`, which turned `openai:gpt-5.6-luna` into
   // `Openai:gpt-5.6-luna`, an id that exists nowhere.
+  if (id.startsWith('oai:')) {
+    return { name: id.slice('oai:'.length), how: 'OpenAI API' };
+  }
   if (id.startsWith('openai:')) {
     return { name: id.slice('openai:'.length), how: 'OpenAI-compatible endpoint' };
   }
@@ -184,6 +188,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
 // filled. The config key is kept (config.ts) so existing settings still load.
 const PROVIDERS = [
   { id: 'anthropic', label: 'Anthropic' },
+  { id: 'oai', label: 'OpenAI' },
   { id: 'openrouter', label: 'OpenRouter' },
   { id: 'groq', label: 'Groq' },
   { id: 'ollama', label: 'Ollama' },
@@ -193,8 +198,11 @@ type Provider = typeof PROVIDERS[number]['id'];
 
 // Keep the wire/storage format stable. Only known routing prefixes are removed, never a
 // model's own suffix (qwen3:8b, vendor/model:free). Pasted legacy routed ids still work.
+// 'oai' is checked before 'openai' in the alternation for the same reason models.ts orders its
+// prefix checks explicitly — the two cannot actually collide, but a reader should not have to work
+// that out.
 function splitModel(id: string): { provider: Provider; model: string } {
-  const prefix = /^(openrouter|groq|ollama|openai):/.exec(id);
+  const prefix = /^(oai|openrouter|groq|ollama|openai):/.exec(id);
   return prefix
     ? { provider: prefix[1] as Provider, model: id.slice(prefix[0].length) }
     : { provider: 'anthropic', model: id };
@@ -216,6 +224,7 @@ const KEY_FIELDS = [
   { key: 'OPENAI_COMPAT_API_KEY', label: 'openai-compatible api key' },
   { key: 'OPENROUTER_API_KEY', label: 'openrouter api key' },
   { key: 'GROQ_API_KEY', label: 'groq api key' },
+  { key: 'OPENAI_API_KEY', label: 'openai api key' },
 ] as const;
 type EnvKey = (typeof URL_FIELDS | typeof KEY_FIELDS)[number]['key'];
 
@@ -224,7 +233,13 @@ type EnvKey = (typeof URL_FIELDS | typeof KEY_FIELDS)[number]['key'];
 type Available = { ollama?: string[]; openaiCompat?: string[] };
 
 type ModelsState = {
-  roles: Record<string, { effective: string; saved: string | null; contextTokens?: number | null }>;
+  roles: Record<string, {
+    effective: string; saved: string | null; contextTokens?: number | null;
+    // True when settings.json holds this role as a hand-tuned OBJECT (sampler, effort, ...)
+    // rather than a bare id. `saved` above is still the whole id contract — this is only a hint
+    // that more than that is saved for the role.
+    savedHasOverrides?: boolean;
+  }>;
   env: Record<EnvKey, { value?: string; set?: boolean; shadowed: boolean }>;
   available?: Available;
 };
@@ -292,7 +307,8 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
   // What the server reported at load — a save only sends what changed against this.
   const [loaded, setLoaded] = useState<ModelsState | null>(null);
   const [env, setEnv] = useState<Record<EnvKey, string>>({
-    OLLAMA_BASE_URL: '', OLLAMA_API_KEY: '', OPENAI_COMPAT_BASE_URL: '', OPENAI_COMPAT_API_KEY: '', OPENROUTER_API_KEY: '', GROQ_API_KEY: '',
+    OLLAMA_BASE_URL: '', OLLAMA_API_KEY: '', OPENAI_COMPAT_BASE_URL: '', OPENAI_COMPAT_API_KEY: '',
+    OPENROUTER_API_KEY: '', GROQ_API_KEY: '', OPENAI_API_KEY: '',
   });
   const [note, setNote] = useState<{ text: string; err: boolean } | null>(null);
   // Set when any of the dialog-open reads fails. Those reads used to end in a bare
@@ -333,7 +349,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       ...e,
       OLLAMA_BASE_URL: d.env.OLLAMA_BASE_URL.value ?? '',
       OPENAI_COMPAT_BASE_URL: d.env.OPENAI_COMPAT_BASE_URL.value ?? '',
-      OLLAMA_API_KEY: '', OPENAI_COMPAT_API_KEY: '', OPENROUTER_API_KEY: '', GROQ_API_KEY: '',
+      OLLAMA_API_KEY: '', OPENAI_COMPAT_API_KEY: '', OPENROUTER_API_KEY: '', GROQ_API_KEY: '', OPENAI_API_KEY: '',
     }));
   };
 
@@ -485,6 +501,15 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       {/* A dialog for the same reason StudentSwitcher is one: text inputs cannot live in a menu. */}
       {open && (
         <form className="models-panel" role="dialog" aria-label="models" onSubmit={save}>
+          {/* oai: and openai: read the same brand name but are different routes (models.ts):
+              oai:<model> is OpenAI's own Responses API — built-in web search, reasoning alongside
+              tools; openai: stays the generic OpenAI-compatible endpoint (LM Studio, LiteLLM, a
+              proxy), which needs its own base URL below. */}
+          <span className="models-hint">
+            oai is OpenAI's own API (built-in web search, e.g. oai:gpt-5.1); OpenAI-compatible is
+            any other server that speaks the same wire (LM Studio, LiteLLM, a proxy) and needs a
+            base URL.
+          </span>
           {ROLE_ORDER.map((r, i) => (
             <Fragment key={r}>
               <span className="models-row">
@@ -508,10 +533,16 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                   onFocus={() => { lastRole.current = r; }}
                   onChange={(e) => {
                     const value = e.target.value;
-                    setRoles((s) => ({ ...s, [r]: /^(openrouter|groq|ollama|openai):/.test(value.trim())
+                    setRoles((s) => ({ ...s, [r]: /^(oai|openrouter|groq|ollama|openai):/.test(value.trim())
                       ? value.trim() : routedModel(splitModel(s[r]).provider, value) }));
                   }}
                 />
+                {/* settings.json can hold this role as a hand-tuned object (sampler, effort — see
+                    settings.ts's RoleObject) instead of a bare id. A save here still only ever
+                    touches the id (setupRoutes.ts keeps the rest), so this is a note, not a field. */}
+                {loaded?.roles[r]?.savedHasOverrides && (
+                  <span className="models-shadow-note">custom settings saved — editing the id keeps them</span>
+                )}
               </span>
               <span className="models-row">
                 <label htmlFor={`models-context-${r}`}>{r} context</label>
@@ -616,6 +647,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             tutor and compile want the strongest model; grader and card_gen run fine on a
             cheap or local one
           </span>
+          <CodexConnectionPanel />
           <span className="models-group">provider endpoints</span>
           {/* The Anthropic key, changeable after first run (the first-run card only sets it once).
               Same conventions as the other key fields: value never round-trips, typing replaces,
@@ -634,7 +666,10 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
             )}
           </span>
           {/* Paired per provider: each base url sits directly above its key. */}
-          {([URL_FIELDS[0], KEY_FIELDS[0], URL_FIELDS[1], KEY_FIELDS[1], KEY_FIELDS[2], KEY_FIELDS[3]] as const).map((f) => {
+          {([
+            URL_FIELDS[0], KEY_FIELDS[0], URL_FIELDS[1], KEY_FIELDS[1],
+            KEY_FIELDS[2], KEY_FIELDS[3], KEY_FIELDS[4],
+          ] as const).map((f) => {
             const meta = loaded?.env[f.key];
             const isKey = f.key.endsWith('_API_KEY');
             return (

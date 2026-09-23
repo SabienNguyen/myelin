@@ -12,6 +12,7 @@
 // built by POST /api/curate with no model involved, and each row's reasons are index facts; this
 // component only renders them, and must never summarise or editorialise them.
 import { useEffect, useRef, useState } from 'react';
+import { PlusIcon as Plus } from '@phosphor-icons/react/dist/csr/Plus';
 import { panelBus } from '../lib/panelBus.js';
 import { isVideoUrl } from '../../shared/videoUrl.js';
 
@@ -211,12 +212,16 @@ export function AddMaterial() {
       <button
         ref={buttonRef}
         type="button"
+        className="add-material-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
         disabled={busy}
         onClick={() => setOpen((o) => !o)}
       >
-        {busy ? 'Adding…' : 'Add material'}
+        <Plus size={15} weight="bold" aria-hidden="true" />
+        {/* The label stays in the DOM at every width (it is the button's accessible name); a
+            phone-width topbar hides it visually so the bar fits on one row. */}
+        <span className="add-material-label">{busy ? 'Adding…' : 'Add material'}</span>
       </button>
       {open && (
         <div

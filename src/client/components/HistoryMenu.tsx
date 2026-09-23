@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { ClockCounterClockwiseIcon as ClockCounterClockwise } from '@phosphor-icons/react';
 
-type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number };
+type ThreadSummary = {
+  id: string; title: string; updatedAt: string; messages: number;
+  /** The notebook the conversation is filed under (chatRoute's /api/threads), if any. */
+  notebook?: { id: string; title: string } | null;
+};
 
 /** No-dependency relative-time label ("2h ago") for the thread list. */
-function relativeTime(iso: string): string {
+export function relativeTime(iso: string): string {
   const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000));
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
@@ -116,6 +120,7 @@ export function HistoryMenu({ activeId, onSelect }: { activeId: string; onSelect
               onClick={() => selectAndClose(t.id)}
             >
               <span className="history-title">{t.title}</span>
+              {t.notebook && <span className="history-notebook">{t.notebook.title}</span>}
               <span className="history-time">{relativeTime(t.updatedAt)}</span>
             </button>
           ))}

@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import type { UIMessage } from '../shared/uiMessages.js';
-import { COMMANDS, MODE_COMMANDS, isCommand, isStance } from '../shared/commands.js';
+import { COMMANDS, commandMode, isCommand, isStance } from '../shared/commands.js';
 import type { HarnessConfig } from './config.js';
 import type { Engram } from './mcp.js';
 import { createTutorSession } from './session.js';
 import { deriveMode, lastUserText } from './deriveMode.js';
 import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { clearStance, setStance } from './stanceStore.js';
+import { forgetThread, readNotebooks } from './notebookStore.js';
 import { MODES, type Mode } from './prompt.js';
 import { detachedResponse } from './detachedResponse.js';
 import { TurnStalled } from './turnError.js';
@@ -56,16 +57,17 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
       });
     // A mode command overrides the selector for THIS turn only server-side; the client flips its
     // own selector on send, so the following turns carry the new mode in body.mode as usual.
-    const commandMode = command !== undefined && (MODE_COMMANDS as readonly string[]).includes(command)
-      ? (command as Mode) : undefined;
+    // `/study` is the tutor, so it maps onto `learn` (commandMode in shared/commands.ts).
+    const baseMode: Mode = (command !== undefined ? commandMode(command) : undefined) ?? mode;
     // One-shot "write this up" from a teaching mode (OfferWrite.tsx's writeUp flag, and now the
     // /write command — same promotion): promote THIS turn to freeform so the single-writer vault
     // path unlocks — the client's visible mode never changed, and because the promotion rides one
     // request only, the next turn reverts to the real mode. Writing still happens under freeform's
-    // rules, so the single-writer invariant holds.
+    // rules, so the single-writer invariant holds. Chat can already write: promoting it would only
+    // swap its prompt for the tutor's for one turn.
     const writeUp = body.writeUp === true || command === 'write';
-    const baseMode = commandMode ?? mode;
-    const effectiveMode: Mode = writeUp && baseMode !== 'freeform' ? 'freeform' : baseMode;
+    const teaching = baseMode === 'learn' || baseMode === 'review' || baseMode === 'quiz';
+    const effectiveMode: Mode = writeUp && teaching ? 'freeform' : baseMode;
     const threadId = body.threadId ?? 'default';
     // The thread id becomes a file name below (sessionStore's assertThreadId, stanceStore has no
     // such check of its own) — reject a bad one BEFORE setStance so a doomed turn never leaves a
@@ -144,7 +146,13 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
       return c.json({ error: error?.message ?? String(error) }, 400);
     }
   });
-  app.get('/api/threads', (c) => c.json(listThreads(cfg.vault)));
+  // Each row names the notebook it is filed under, so history reads like a project list rather than
+  // one undifferentiated stream of conversations.
+  app.get('/api/threads', (c) => {
+    const owner = new Map<string, { id: string; title: string }>();
+    for (const nb of readNotebooks(cfg.vault)) for (const t of nb.threads) owner.set(t, { id: nb.id, title: nb.title });
+    return c.json(listThreads(cfg.vault).map((t) => ({ ...t, notebook: owner.get(t.id) ?? null })));
+  });
   // loadThread/saveThread/deleteThread throw on a threadId that fails sessionStore's filename
   // allowlist (assertThreadId) — a real client bug (nothing legitimate sends one), but it must
   // read as a 400 naming the problem, not a bare 500 with no message.
@@ -172,6 +180,7 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
       return c.json({ error: e?.message ?? String(e) }, 400);
     }
     clearStance(cfg.vault, c.req.param('id'));
+    forgetThread(cfg.vault, c.req.param('id'));
     return c.body(null, 204);
   });
   return app;

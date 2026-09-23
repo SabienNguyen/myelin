@@ -1,0 +1,14 @@
+import { chromium } from '@playwright/test';
+const b = await chromium.launch();
+const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+await p.goto('http://localhost:4301/#/t/hi-check', { waitUntil: 'domcontentloaded' });
+await p.waitForTimeout(8000);
+const box = p.getByRole('textbox', { name: 'Ask your tutor…' });
+const w = p.getByText('tutor is working', { exact: false });
+await box.waitFor({ state: 'visible', timeout: 60000 });
+await box.fill('hi');
+await p.keyboard.press('Enter');
+await w.waitFor({ state: 'visible', timeout: 40000 }).catch(() => {});
+await w.waitFor({ state: 'hidden', timeout: 300000 }).catch(() => console.log('!! deadline'));
+await p.waitForTimeout(3000);
+await b.close();

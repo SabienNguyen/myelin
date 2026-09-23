@@ -141,6 +141,25 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
+    // aside.e2e.ts and chat-first.e2e.ts share one pair. Their script is KEYED (scripted-model.cjs's
+    // `when`): each turn answers the request that says its key, so neither file depends on which
+    // one runs first or on a reused server's counter.
+    {
+      command:
+        'LW_MOCK_MODEL=tests/e2e/chat-script.json HARNESS_CONFIG=tests/e2e/chat.config.json npx tsx src/server/index.ts',
+      port: 4824,
+      reuseExistingServer: !process.env.CI,
+      timeout: 60_000,
+      env: backendEnv,
+    },
+    {
+      command:
+        'HARNESS_API=http://localhost:4824 sh -c "npx vite build --outDir dist-chat '
+        + '&& npx vite preview --outDir dist-chat --port 4178 --strictPort"',
+      port: 4178,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+    },
     // pronounce.e2e.ts gets its own pair for the same turn-counter reason as the specs above.
     // Backend port 4823 comes from pronounce.config.json; the frontend proxies /api there.
     {

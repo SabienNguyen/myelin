@@ -15,10 +15,9 @@ import { PluginKey, TextSelection } from '@tiptap/pm/state';
 import { closeHistory } from '@tiptap/pm/history';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { Suggestion } from '@tiptap/suggestion';
-import type { Command } from '../../shared/commands.js';
 import { SymbolKeyboard } from './SymbolKeyboard.js';
 import {
-  filterCommands, serializeComposerDoc, type CommandSpec, type ComposerPayload,
+  filterCommands, serializeComposerDoc, type CommandSpec, type ComposerCommand, type ComposerPayload,
 } from '../lib/slashCommands.js';
 
 declare module '@tiptap/core' {
@@ -26,7 +25,7 @@ declare module '@tiptap/core' {
     commandChip: {
       /** Insert the chip for `command` at the document start, replacing any existing chip —
        * the at-most-one-command-per-message rule lives here, not in the menu. */
-      setCommandChip: (command: Command) => ReturnType;
+      setCommandChip: (command: ComposerCommand) => ReturnType;
     };
   }
 }

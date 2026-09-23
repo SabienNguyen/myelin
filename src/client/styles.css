@@ -129,7 +129,8 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   top: calc(100% + 0.4rem);
   left: 0;
   z-index: 10;
-  width: 20rem;
+  /* Wide enough for a title AND its notebook tag; capped to the viewport on a phone. */
+  width: min(25rem, calc(100vw - 1rem));
   max-height: 22rem;
   overflow-y: auto;
   display: flex;
@@ -162,6 +163,12 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
    clears 4.5:1 on that background in both themes. */
 .history-row.active .history-time { color: inherit; }
 .history-empty { padding: 0.5rem 0.6rem; color: var(--text-muted); font-size: 0.85rem; }
+.history-notebook {
+  flex: none; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);
+  padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); background: var(--bg-inset);
+}
+.history-row.active .history-notebook { color: inherit; background: transparent; }
 
 .topbar-status { display: flex; gap: 0.4rem; align-items: center; }
 .badge {
@@ -623,12 +630,17 @@ button.badge:hover { color: var(--text); }
 /* Writing-draft scoped to the pre-submit card only: the DONE card grew its own buttons (.cite-link,
    .revise-btn) that a bare `.writing-draft button` dressed as solid-accent primaries — the exact
    over-broad-selector bug the note above warns about. */
-.quiz > button:last-child, .math-scratchpad > button:last-child, .writing-draft:not(.done) > button {
+/* An explicit class, not position: the old `> button:last-child` selectors missed structured_check's
+   Submit entirely, so one block's primary action looked secondary beside the other three. */
+.block .block-submit {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
   font-weight: 600;
 }
+/* The shared button:hover swaps in --accent-soft, which under --accent-text is dark-on-dark in the
+   dark theme: a hovered Submit was all but unreadable. Keep the fill, lift it slightly. */
+.block .block-submit:hover { background: var(--accent); filter: brightness(1.08); }
 
 math-field { display: block; width: 100%; margin: 0.5rem 0; border-radius: var(--radius-sm); }
 /* MathLive's default focus ring is its own orange — the one saturated hue nothing else in this
@@ -818,6 +830,15 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note::before { content: "\2713\00a0"; color: var(--good); }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
+.tool-note.skipped { font-weight: 500; letter-spacing: 0.04em; }
+/* The page a tool acted on, as a link into the Page tab: the name keeps its own case (a title,
+   not chrome) and takes the accent, so the source list reads as clickable. */
+.tool-note-page {
+  font: inherit; text-transform: none; letter-spacing: 0.01em; color: var(--accent);
+  background: none; border: 0; padding: 0; border-radius: 2px; cursor: pointer;
+}
+.tool-note-page:hover { background: none; text-decoration: underline; text-underline-offset: 2px; }
+.tool-note.skipped::before { content: "\2013\00a0"; color: var(--text-muted); }
 
 /* ── model thinking: collapsed by default, quiet like the tool chips ── */
 .reasoning-part { margin: 0.15rem 0; font-size: 0.8rem; color: var(--text-muted); }
@@ -829,6 +850,113 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   border-left: 2px solid var(--border);
   white-space: pre-wrap;
 }
+
+/* ── inline asides: select a tutor passage, ask about just that, without derailing the lesson ── */
+.aside-ask-region { position: relative; }
+/* The selection toolbar: "ask aside" and "quiz me on this", side by side under the selection. */
+.aside-ask {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  gap: 0.35rem;
+}
+.aside-ask button {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+}
+.aside-ask button:hover:not(:disabled) { border-color: var(--accent); }
+.aside-ask button:disabled { opacity: 0.45; cursor: default; }
+
+/* ── chat first: quiet ways into study, and the chip that says a study session is on ── */
+.follow-ups { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: -0.4rem 0 1.1rem; }
+.follow-ups button {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.78rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.follow-ups button:hover { color: var(--text); border-color: var(--accent); }
+.composer-mode {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+.composer .composer-mode button {
+  padding: 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 400;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.composer .composer-mode button:hover { filter: none; color: var(--text); border-color: var(--accent); background: transparent; }
+.aside-form {
+  margin: 0.4rem 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--bg-inset);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.aside-form blockquote {
+  margin: 0 0 0.5rem;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+.aside-form label { display: block; margin-bottom: 0.25rem; font-size: 0.78rem; color: var(--text-muted); }
+.aside-form textarea {
+  width: 100%;
+  min-height: 3.5rem;
+  padding: 0.4rem 0.5rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+.aside-form-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.aside-composer-status,
+.aside-composer-error { font-size: 0.8rem; margin: 0.3rem 0; }
+.aside-composer-error { color: var(--bad); }
+.aside-composer-status { color: var(--text-muted); }
+
+/* model thinking's own summary treatment, reused for the aside note so a side question reads
+   with the same quiet weight as a collapsed thinking block. */
+.aside-part { margin: 0.4rem 0; font-size: 0.85rem; }
+.aside-part summary { cursor: pointer; width: fit-content; color: var(--text-muted); }
+.aside-part summary:hover { color: var(--text); }
+.aside-part-body {
+  margin: 0.4rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-inset);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+}
+.aside-part-sources { margin: 0.4rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; }
+.wiki-link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+.aside-part-memory { margin: 0.4rem 0 0; color: var(--text-muted); font-size: 0.78rem; }
 
 /* pronounce — the spoken-language block (Pronounce.tsx): hear, record, and see your pitch contour
    drawn over the target so a tone miss is visible, not just told. */
@@ -991,8 +1119,13 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .mark-ok { color: var(--good); font-weight: 700; }
 .mark-bad { color: var(--bad); font-weight: 700; }
 
-.graph-panel:has(.graph-topic-list) .graph-canvas { flex: 0 1 260px; min-height: 160px; }
-.graph-topic-list { flex: none; padding: .85rem 0; border-top: 1px solid var(--border); }
+/* The topic list is now the ONLY keyboard/screen-reader surface for the graph (the canvas is
+   aria-hidden WebGL, unreachable to both) — unlike the old occasional footnote under a small
+   graph, it is always present and needs real room of its own instead of a fixed 260px footer. */
+/* Bounded beneath a real graph (the canvas takes the height, see .graph-canvas-wrap); a sparse view
+   has nothing to draw, so there the list takes the room instead. */
+.graph-topic-list { flex: 0 1 auto; max-height: 35%; min-height: 120px; overflow-y: auto; padding: .85rem 0; border-top: 1px solid var(--border); }
+.graph-panel.is-sparse .graph-topic-list { flex: 1 1 0; max-height: none; }
 .graph-topic-list h3 { margin: 0 0 .5rem; font-family: var(--font-prose); font-size: .9rem; }
 .graph-topic-list p { margin: 0 0 .65rem; font-size: .8rem; color: var(--text-muted); }
 .graph-topic-list ul { list-style: none; margin: 0; padding: 0; }
@@ -1054,57 +1187,36 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   color: var(--bad);
 }
 
-/* The pannable/zoomable canvas — fills whatever vertical room .graph-controls and .graph-legend
-   (both flex: none) don't take. overflow:hidden because navigation is via d3-zoom (pan/wheel/
-   pinch), not native scrolling; touch-action:none stops the browser's own touch-scroll/pinch-zoom
-   from fighting d3-zoom's own touch handling. */
-.graph-canvas {
-  flex: 1;
-  min-height: 0;
+/* The WebGL canvas's own wrapper — position:relative so the HTML overlays below (the "Teach me
+   this" button, misconception markers) can be placed against it with graphToViewport pixels.
+   It grows into the panel: capped at 260px for every view, a 400-page whole vault drew as a clump
+   in a letterbox strip while the list below took the rest. Only a sparse view (three pages or
+   fewer, GraphPanel's SPARSE_NODES) keeps the cap — the pre-WebGL rule for that case, which
+   sparse-graph.e2e.ts asserts (<=280px). */
+.graph-canvas-wrap {
+  flex: 1 1 260px;
+  min-height: 160px;
   position: relative;
+}
+.graph-panel.is-sparse .graph-canvas-wrap { flex: 0 1 260px; }
+/* aria-hidden WebGL surface — sigma mounts its own canvases into this div. touch-action:none stops
+   the browser's own touch-scroll/pinch-zoom from fighting sigma's own touch handling. */
+.graph-canvas {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   touch-action: none;
   border-radius: var(--radius-sm);
   background: var(--bg-inset);
+  cursor: grab;
 }
-.graph-svg { width: 100%; height: 100%; display: block; cursor: grab; }
-.graph-svg:active { cursor: grabbing; }
+.graph-canvas:active { cursor: grabbing; }
 
-.graph-node { transition: opacity 0.15s; }
-.graph-node.dim { opacity: 0.18; }
-.graph-node circle { transition: filter 0.12s; }
-.graph-node:hover circle { filter: brightness(1.12) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)); }
-/* pointer-events auto, not none: the label sits inside the node's g[role=link], so clicking the
-   words routes to the same open-page handler as the dot. With none, the label — the biggest and
-   most readable part of a node — was a dead zone, and the only click target was the ~10px dot
-   (audit 33 caught it: a real unforced click on a label timed out on actionability). */
-.graph-node text { fill: var(--text); pointer-events: auto; }
-/* The global focus-visible rule only names input/textarea/select/button, so a focusable <g> got
-   nothing. An SVG outline follows the element's own bounding box, which for a node group is the
-   circle plus its label — close enough to read as "this node", and it scales with the zoom for
-   free because the outline is painted in user space. */
-.graph-node:focus { outline: none; }
-/* Not `outline`: on an SVG element outline-width is measured in USER units AND rounded to whole
-   pixels, so at a fitted zoom of 3.3 the closest it can get to a 2px ring is 1 user unit — 3.3 real
-   pixels. A stroked circle with vector-effect gives exactly 2 real pixels at any zoom, the same
-   property that already keeps the edges honest. */
-.graph-node:focus-visible { outline: none; }
-.graph-focus-ring {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-  opacity: 0;
-}
-.graph-node:focus-visible .graph-focus-ring { opacity: 1; }
-
-/* non-scaling-stroke keeps edges 1.5 REAL pixels at any zoom. Without it, filling the canvas on a
-   small graph also thickened every line into a slab — the same inflation the label font-size
-   counter-scaling solves for text, but SVG has a purpose-built property for strokes. */
-.graph-edge { stroke: var(--text-muted); stroke-width: 1.5; vector-effect: non-scaling-stroke; transition: opacity 0.15s; }
-.graph-edge-prereq { opacity: 0.75; }
-.graph-edge-deepens { stroke-dasharray: 4 3; opacity: 0.45; }
-.graph-edge.dim { opacity: 0.08; }
+/* Positioned in JS (style.left/top, in canvas pixels) off sigma's own graphToViewport — the
+   translate below just re-centres each overlay on that point instead of anchoring its corner. */
+.graph-overlay { position: absolute; transform: translate(-50%, -50%); }
+.graph-teach { transform: translate(-50%, 0.6rem); font-size: 0.8rem; padding: 0.3rem 0.65rem; white-space: nowrap; }
+.graph-misconception { display: inline-flex; pointer-events: none; }
 
 .graph-legend {
   display: flex;
@@ -1147,7 +1259,10 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .library-book li { padding: 0.3rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
 .q-status {
   display: inline-block;
-  min-width: 4.6em;
+  /* Wide enough for "compiling" in spaced capitals, with its own gap: the title after it is a
+     button whose leading space collapses, so "PENDINGLesson notes" ran together at 4.6em. */
+  min-width: 6.6em;
+  margin-right: 0.4em;
   font-size: 0.68rem;
   font-weight: 600;
   letter-spacing: 0.07em;
@@ -1191,11 +1306,14 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 900px) {
   .workspace { grid-template-columns: 1fr; grid-template-rows: minmax(0, 55%) minmax(0, 45%); }
   /* Stacked, the side panel gets 45% of the viewport, and the graph's tab strip, scope toggle,
-     subtitle and legend eat most of it — measured 88px of actual canvas at 375x800, which no
-     amount of zoom-to-fit can make into a usable graph. A floor plus a scrolling tab body trades
-     "everything visible at once" for "the graph is legible", which is the right way round. */
+     subtitle and legend eat most of it — measured 88px of actual canvas at 375x800 against the old
+     SVG rule's min-height:160px floor (this file's own history), which no amount of zoom-to-fit
+     could make into a usable graph. A scrolling tab body is what actually fixed that (below); this
+     breakpoint no longer needs its OWN min-height override on top of .graph-canvas-wrap's base
+     160px floor — a SEPARATE, bigger one here (320px) is exactly what regressed sparse-graph.e2e.ts
+     back past its <=280px ceiling at a narrow viewport, since a sparse view's canvas is capped at a
+     260px basis on every width; a taller floor here only fought that cap. */
   .tab-body { overflow-y: auto; }
-  .graph-canvas { min-height: 320px; }
   .thread { border-right: none; border-bottom: 1px solid var(--border); }
   .msg.user { margin-left: 8%; }
   .topbar { flex-wrap: wrap; gap: 0.5rem; }
@@ -1219,7 +1337,7 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
    exactly the reader those trades were made against, so for them the paper hairline gives way. */
 @media (prefers-contrast: more) {
   :root { --text-muted: #d9dce1; --border: #858a94; }
-  .page-chip, .graph-edge, .graph-edge-deepens { opacity: 1; }
+  .page-chip { opacity: 1; }
 }
 @media (prefers-contrast: more) and (prefers-color-scheme: light) {
   :root { --text-muted: #33373e; --border: #777d87; }
@@ -2812,8 +2930,6 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .thread-empty-examples button:hover { border-left-color: var(--accent); }
 
 .graph-canvas { border: 1px solid var(--border); background: var(--bg); }
-.graph-node:hover circle { filter: brightness(1.12); }
-.graph-node text { paint-order: stroke fill; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
 .models-chips { max-height: 10rem; overflow-y: auto; }
 .models-chip { overflow-wrap: anywhere; text-align: left; }
 @media (max-width: 640px) {
@@ -2922,3 +3038,256 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 }
 .cluster-sandbox-row button { font-size: 0.8rem; white-space: nowrap; }
 .cluster-sandbox-note { margin: 0.5rem 0 0; font-size: 0.8rem; color: var(--text-muted); }
+
+/* ── Notebooks ─────────────────────────────────────────────────────────────────────────────── */
+/* A subject's conversations and sources, grouped (Notebooks.tsx). The home grid and one notebook
+   replace the workspace below the topbar; the crumb sits in the topbar of every conversation. */
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+.notebooks-main { overflow-y: auto; min-height: 0; }
+.nb-page {
+  max-width: 64rem; margin: 0 auto; padding: 1.5rem 1.25rem 3rem;
+  display: flex; flex-direction: column; gap: 0.9rem;
+}
+.nb-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.nb-heading { font-family: var(--font-mono); font-size: 1.35rem; font-weight: 600; margin: 0; text-wrap: balance; }
+.nb-lede { margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
+.nb-subheading {
+  font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted); margin: 0;
+}
+.nb-create { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.nb-create label { font-size: 0.85rem; color: var(--text-muted); }
+.nb-create input { width: 14rem; max-width: 100%; }
+.nb-create .panel-error { flex-basis: 100%; }
+
+.nb-grid {
+  list-style: none; margin: 0; padding: 0;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr)); gap: 0.75rem;
+}
+.nb-card {
+  display: flex; flex-direction: column; gap: 0.6rem; height: 100%;
+  padding: 0.9rem 1rem; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg-panel); color: inherit; text-decoration: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+.nb-card:hover { border-color: var(--accent); }
+.nb-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.nb-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; }
+.nb-card-title { font-weight: 600; font-size: 1rem; overflow-wrap: anywhere; }
+.nb-card-meta { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
+.nb-card-time { color: var(--text-muted); font-family: var(--font-mono); font-size: 0.72rem; }
+.nb-pill {
+  flex: none; font-family: var(--font-mono); font-size: 0.72rem; white-space: nowrap;
+  padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--bg-inset); color: var(--text-muted);
+}
+.nb-pill--due { color: var(--warn); border: 1px solid var(--warn); background: transparent; }
+
+.nb-meter { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--bg-inset); }
+.nb-meter--empty { opacity: 0.6; }
+.nb-meter-seg { display: block; height: 100%; flex-basis: 0; }
+.nb-level-mastered { background: var(--mastery-mastered); }
+.nb-level-practicing { background: var(--mastery-practicing); }
+.nb-level-exposed { background: var(--mastery-exposed); }
+/* Not started reads as an outline in the dots and a faint track in the bar — "nothing yet", not a
+   fourth colour competing with the three that mean something. */
+.nb-level-unseen { background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--mastery-unseen); }
+.nb-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.nb-legend {
+  list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.9rem;
+  color: var(--text-muted); font-size: 0.78rem;
+}
+.nb-legend li { display: flex; align-items: center; gap: 0.35rem; }
+
+.nb-back { color: var(--text-muted); font-size: 0.85rem; text-decoration: none; align-self: flex-start; }
+.nb-back:hover { color: var(--accent); }
+.nb-title-row { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.nb-small { font-size: 0.8rem; color: var(--text-muted); padding: 0.2rem 0.5rem; }
+.nb-small.nb-action { color: var(--accent); }
+.nb-rename { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
+.nb-rename input { width: 18rem; max-width: 100%; }
+.nb-rename .panel-error { flex-basis: 100%; }
+
+.nb-columns {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 1.25rem;
+  margin-top: 0.5rem; align-items: start;
+}
+.nb-section { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.nb-section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; min-height: 1.75rem; }
+.nb-stats { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.nb-list { list-style: none; margin: 0; padding: 0; }
+.nb-row {
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.45rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem;
+}
+.nb-row-title { flex: 1; min-width: 0; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+a.nb-row-title:hover { color: var(--accent); }
+.nb-row-time { flex: none; color: var(--text-muted); font-size: 0.78rem; }
+.nb-row select { font-size: 0.8rem; padding: 0.2rem 0.4rem; }
+.nb-row .panel-error { flex-basis: 100%; }
+.nb-picker { display: flex; flex-direction: column; gap: 0.4rem; margin: 0; padding: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.nb-pick { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.9rem; }
+.nb-pick input { margin-top: 0.2rem; accent-color: var(--accent); }
+.nb-actions { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+
+.nb-danger { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.nb-confirm p { margin: 0 0 0.5rem; }
+button.nb-delete { border-color: var(--bad); color: var(--bad); }
+button.nb-delete:hover { background: var(--bg-inset); }
+
+.topbar > h1:has(+ .notebook-crumb) { margin-right: 0; }
+.notebook-crumb { display: flex; align-items: center; gap: 0.35rem; margin-right: auto; min-width: 0; font-size: 0.85rem; }
+.notebook-crumb-link {
+  display: inline-flex; align-items: center; gap: 0.3rem; color: var(--text-muted); text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 16rem;
+}
+.notebook-crumb-link:hover { color: var(--accent); }
+.notebook-crumb-sep { color: var(--border); }
+@media (max-width: 640px) {
+  .nb-page { padding-inline: 0.9rem; }
+  .notebook-crumb-link { max-width: 9rem; }
+}
+
+/* ── Phone-width top bar: one row ─────────────────────────────────────────────────────────────
+   At 390px the bar used to wrap into two rows (brand and history, then badges and Add material),
+   spending a sixth of the screen on chrome before the conversation starts. Labels that have an
+   icon beside them collapse to the icon; their text stays in the DOM as the accessible name. */
+.add-material-trigger { display: inline-flex; align-items: center; gap: 0.35rem; }
+@media (max-width: 640px) {
+  .topbar { flex-wrap: nowrap; gap: 0.3rem; padding: 0.45rem 0.5rem; }
+  .topbar h1 { font-size: 0.9rem; padding-left: 0.1rem; }
+  .topbar h1 svg { flex: none; }
+  .add-material-label, .notebook-crumb-label, .brand-word {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .add-material-trigger { padding: 0.4rem 0.55rem; }
+  .notebook-crumb-link { max-width: 6.5rem; }
+  .topbar-status { gap: 0.25rem; min-width: 0; }
+  .topbar-status .badge { padding-inline: 0.45rem; max-width: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ── A notebook's own opening (Notebooks.tsx NotebookIntro) ─────────────────────────────────── */
+.nb-intro { display: flex; flex-direction: column; align-items: center; gap: 0.2rem; }
+.nb-intro-name {
+  display: inline-flex; align-items: center; gap: 0.35rem; margin-bottom: 0.6rem;
+  padding: 0.2rem 0.7rem; border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+  font-family: var(--font-mono); font-size: 0.78rem; font-weight: 600; text-decoration: none;
+}
+.nb-intro-name:hover { filter: brightness(1.08); }
+.nb-intro .nb-meter { width: 100%; max-width: 22rem; margin: -0.4rem 0 1.1rem; }
+.nb-starters { list-style: none; margin: 0 0 1.2rem; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 0.4rem; }
+.nb-starters button {
+  width: 100%; display: flex; align-items: center; gap: 0.6rem; text-align: left;
+  font-family: var(--font-prose); font-size: 0.9rem; padding: 0.5rem 0.75rem;
+}
+.nb-starter-kind {
+  flex: none; min-width: 3.2rem; text-align: center; font-family: var(--font-mono); font-size: 0.68rem;
+  font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  padding: 0.1rem 0.4rem; border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--text-muted);
+}
+.nb-starter-kind--review { color: var(--warn); }
+.nb-starter-kind--quiz { color: var(--mastery-practicing); }
+
+/* ── Stage at rest: the conversation's pages (ConversationPages.tsx) ───────────────────────── */
+.stage-pages { margin: 0 0 2rem; }
+.stage-pages h2 { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.5rem; }
+.stage-pages ul { list-style: none; margin: 0; padding: 0; }
+.stage-pages button {
+  width: 100%; display: flex; align-items: center; gap: 0.55rem; text-align: left;
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; padding: 0.55rem 0.2rem;
+}
+.stage-pages button:hover { background: var(--bg-inset); }
+.stage-pages-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.stage-pages-level { flex: none; color: var(--text-muted); font-size: 0.78rem; }
+.stage-empty:has(.stage-pages) { margin-top: 1.25rem; }
+
+/* ── Command palette (CommandPalette.tsx) ─────────────────────────────────────────────────────── */
+.palette { position: relative; }
+.palette-trigger { gap: 0.4rem; color: var(--text-muted); font-size: 0.85rem; }
+.palette-trigger:hover { color: var(--text); }
+.palette-kbd {
+  font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted);
+  padding: 0.05rem 0.35rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+/* Centred under the topbar like Linear's: fixed to the viewport, so it is the same box from every
+   screen, and solid — surfaces separate by fill and hairline here, never by blur. */
+.palette-panel {
+  position: fixed; z-index: 30; top: 4.5rem; left: 50%; transform: translateX(-50%);
+  width: min(36rem, calc(100vw - 1rem)); max-height: min(28rem, 70vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell);
+}
+.palette-input {
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent;
+  padding: 0.85rem 1rem; font-size: 1rem;
+}
+.palette-input:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--accent); }
+.palette-empty { margin: 0; padding: 0.8rem 1rem; color: var(--text-muted); font-size: 0.88rem; }
+.palette-list { list-style: none; margin: 0; padding: 0.35rem; overflow-y: auto; }
+.palette-option { cursor: pointer; border-radius: var(--radius-sm); }
+.palette-group {
+  display: block; padding: 0.55rem 0.6rem 0.25rem; font-family: var(--font-mono); font-size: 0.68rem;
+  font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
+}
+.palette-row { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.45rem 0.6rem; border-radius: var(--radius-sm); }
+.palette-option.active .palette-row { background: var(--accent-soft); color: var(--accent); }
+.palette-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-detail { flex: none; font-size: 0.78rem; color: var(--text-muted); }
+.palette-option.active .palette-detail { color: inherit; }
+@media (max-width: 640px) {
+  .palette-kbd { display: none; }
+  .palette-trigger-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .palette-panel { top: 3.2rem; }
+}
+
+/* ── A notebook's Studio (Notebooks.tsx studioActions) ─────────────────────────────────────── */
+.nb-studio { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.4rem; }
+.nb-studio ul {
+  list-style: none; margin: 0; padding: 0;
+  /* 10rem lets a phone fit two a row; one column of four cards filled most of a 390px screen. */
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); gap: 0.5rem;
+}
+.nb-studio button {
+  width: 100%; height: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 0.15rem;
+  text-align: left; padding: 0.6rem 0.75rem; border-radius: var(--radius);
+}
+.nb-studio-label { font-weight: 600; }
+.nb-studio-hint { font-size: 0.78rem; color: var(--text-muted); }
+
+/* A page's notebooks, in its meta row (Notebooks.tsx PageNotebooks): a link, so the accent. */
+.page-chip.page-notebook {
+  display: inline-flex; align-items: center; gap: 0.25rem; text-decoration: none;
+  color: var(--accent); background: var(--accent-soft); border-color: transparent;
+}
+.page-chip.page-notebook:hover { filter: brightness(1.08); }
+
+/* The right answer under a ✗ (Quiz.tsx, QuickCheck.tsx): quiet, but there. */
+.quiz-expected { color: var(--text-muted); font-size: 0.9em; }
+p.quiz-expected { margin: 0.3rem 0 0; }
+
+/* The Library's per-notebook progress (Notebooks.tsx NotebooksSection). */
+.nb-library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
+.nb-library-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; font-size: 0.9rem; }
+.nb-library { margin-bottom: 1.5rem; }
+
+/* The general empty chat's way into a notebook (Notebooks.tsx NotebookPicker). */
+.nb-picker-row { display: flex; flex-direction: column; align-items: center; gap: 0.45rem; margin: 0 0 1.2rem; }
+.nb-picker-lede { font-size: 0.85rem; color: var(--text-muted); }
+.nb-picker-row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem; }
+.nb-picker-row .chip-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem;
+  padding: 0.3rem 0.75rem; border-radius: 999px;
+}
+.nb-picker-due { color: var(--warn); }
+
+/* Phone-width tab strip: one line. At 390px "Library" and its due badge wrapped onto two rows,
+   making that tab twice as tall as its neighbours. */
+@media (max-width: 640px) {
+  .tabs { padding-inline: 0.5rem; }
+  .tabs button {
+    padding-inline: 0.35rem; white-space: nowrap;
+    display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
+  }
+}
