@@ -1,5 +1,6 @@
 import {
-  useCallback, useEffect, useMemo, useRef, useState,
+  memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  type Dispatch, type KeyboardEvent, type SetStateAction,
 } from 'react';
 import { useThreadRuntime } from '@assistant-ui/react';
 // sigma's bundle reads WebGLRenderingContext/WebGL2RenderingContext constants AT MODULE LOAD (see
@@ -17,7 +18,7 @@ import { graphMeta, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLay
 import { panelBus } from '../lib/panelBus.js';
 import { parseHash } from '../lib/urlState.js';
 import {
-  resolveGraphColors, syncGraph, type MasteryGraph, type GraphColors,
+  densityScale, resolveGraphColors, syncGraph, type MasteryGraph, type GraphColors,
 } from '../graph/buildGraph.js';
 import { createLayout, type LayoutController } from '../graph/layout.js';
 import { loadPositions, savePositions } from '../graph/positionStore.js';
@@ -39,13 +40,24 @@ export const CONTEXT_CAP = 40;
 // hideEdgesOnMove/hideLabelsOnMove drop that work while movement is happening; a small graph never
 // gets slow enough to need it, and always hiding edges there would just make hovering less useful.
 const LARGE_GRAPH_NODES = 1_000;
-// Above CONTEXT_CAP, forceLabel is off (see syncGraph's opts.forceLabels below) and sigma's label
-// grid picks which labels to draw. A 400-node whole-vault screenshot showed labels overlapping
-// each other in the dense centre at the default labelDensity/labelGridCellSize — fewer, larger
-// grid cells thin that out; a contextual view never reaches this path since every one of its ≤40
-// labels is forced on regardless of density.
+// Labels not forced on (see labelsFor) go through sigma's label grid, which skips a label that would
+// collide. A 400-node whole-vault screenshot showed labels overlapping each other in the dense
+// centre at the default labelDensity/labelGridCellSize — fewer, larger grid cells thin that out.
 const DENSE_LABEL_DENSITY = 0.35;
 const DENSE_LABEL_GRID_CELL_SIZE = 140;
+// Forced labels are drawn whether or not they collide. Every label forced on in a 27-page topic
+// view piled a dozen titles on top of each other in its core, so past this size only the topic and
+// its direct links are forced; hovering any node still labels its whole neighbourhood.
+const ALL_LABELS_UP_TO = 12;
+
+function labelsFor(sub: Subgraph<GraphNodeMeta>): boolean | ReadonlySet<string> {
+  if (sub.nodes.length <= ALL_LABELS_UP_TO) return true;
+  if (sub.nodes.length > CONTEXT_CAP || sub.seedSlug == null) return false;
+  return new Set([sub.seedSlug, ...neighborSlugs(sub.seedSlug, sub.edges)]);
+}
+// At or below this many pages the canvas keeps its 260px cap and the topic list takes the room (see
+// .graph-panel.is-sparse in styles.css): a tall canvas around one or two dots is empty space.
+const SPARSE_NODES = 3;
 
 // Membership (this BFS) only ever reads `slug` (for graph structure, via `edges`) and `daysLeft`
 // (for the decay-inference fallback below) — never color/degree/etc. Keeping contextualSubgraph
@@ -171,8 +183,43 @@ function factsFor(n: GraphNodeMeta): string {
 }
 
 const FIT_ANIMATION_MS = 300;
-// How long a released drag keeps the worker running so neighbours can settle around the node's
-// new position — mirrors LAYOUT.releaseRunMs, kept here only as the doc anchor for that behaviour.
+
+interface TopicListProps {
+  nodes: GraphNodeMeta[];
+  hasEdges: boolean;
+  selected: string | null;
+  onKeys: (e: KeyboardEvent<Element>) => void;
+  onFocusTopic: Dispatch<SetStateAction<string | null>>;
+  onOpen: (slug: string) => void;
+}
+
+// Memoized, with only stable callbacks passed in: GraphPanel re-renders on every canvas hover (the
+// `focus` state), and on a whole vault this list is one button per page — re-rendering 5,000 of
+// them per hover cost more than the highlight it accompanied.
+const TopicList = memo(function TopicList({
+  nodes, hasEdges, selected, onKeys, onFocusTopic, onOpen,
+}: TopicListProps) {
+  return (
+    <section className="graph-topic-list" aria-label="Topics in this view">
+      <h3>Topics in this view</h3>
+      {!hasEdges && <p>No connections in this view yet. Open a topic to read its notes.</p>}
+      <ul onKeyDown={onKeys}>{nodes.map((n, nodeIndex) => (
+        <li key={n.slug}>
+          <button type="button" aria-label={`Open ${n.title}, ${factsFor(n)}`}
+            tabIndex={(selected != null ? selected === n.slug : nodeIndex === 0) ? 0 : -1}
+            onFocus={() => onFocusTopic(n.slug)}
+            onBlur={() => onFocusTopic((f) => (f === n.slug ? null : f))}
+            onMouseEnter={() => onFocusTopic(n.slug)}
+            onMouseLeave={() => onFocusTopic((f) => (f === n.slug ? null : f))}
+            onClick={() => onOpen(n.slug)}>
+            <span>{n.title}</span>
+            <span className="graph-topic-standing">{n.effective}{n.slipped ? ' · due for review' : ''}</span>
+          </button>
+        </li>
+      ))}</ul>
+    </section>
+  );
+});
 
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const onScopeKeys = useTablistKeys();
@@ -201,10 +248,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // 'pending' until the mount effect below resolves; 'fallback' means Sigma's import or
   // construction failed (no WebGL — true of every jsdom test, and of a real browser without it).
   const [canvasMode, setCanvasMode] = useState<'pending' | 'ready' | 'fallback'>('pending');
-  const [teachAnchor, setTeachAnchor] = useState<{ x: number; y: number } | null>(null);
-  const [misconceptionMarks, setMisconceptionMarks] = useState<
-    Array<{ slug: string; x: number; y: number; text: string }>
-  >([]);
+  // The HTML overlays' POSITIONS never pass through React state. They follow the camera, so they
+  // change on every sigma frame, and a setState per frame re-rendered this whole panel (topic list
+  // included) while panning: ~25ms of React work per frame at 5,000 pages, measured with a CPU
+  // profile of graph-perf.e2e.ts's pan — over budget before the canvas drew anything. React decides
+  // WHICH overlays exist; placeOverlaysRef writes where they sit, straight to their style.
+  const teachRef = useRef<HTMLButtonElement | null>(null);
+  const markEls = useRef(new Map<string, HTMLElement>());
+  const placeOverlaysRef = useRef<(() => void) | null>(null);
 
   const reducedMotionRef = useRef<boolean>(
     typeof window !== 'undefined' && typeof window.matchMedia === 'function'
@@ -248,7 +299,9 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null);
   const canvasRefCallback = useCallback((el: HTMLDivElement | null) => setCanvasEl(el), []);
 
-  useEffect(() => { selectedRef.current = selected; }, [selected]);
+  // A layout effect so the overlay placement below (also a layout effect, declared later) reads the
+  // new selection rather than the one before it — passive effects run after every layout effect.
+  useLayoutEffect(() => { selectedRef.current = selected; }, [selected]);
 
   // Recompute the highlight set whenever focus changes and ask the renderer to repaint with it.
   // Declared before the mount effect so its ref writes land before anything reads them the first
@@ -416,34 +469,33 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       mouseCaptor.on('mouseup', onMouseUp);
 
       // The "Teach me this" button and misconception markers are HTML overlays (a WebGL canvas
-      // can't host real, focusable/screen-readable DOM), repositioned every frame off the
-      // renderer's own afterRender — the one hook guaranteed to fire after the camera/layout has
-      // actually moved the pixels these overlays must track.
-      const updateOverlays = () => {
+      // can't host real, focusable/screen-readable DOM), repositioned off the renderer's own
+      // afterRender — the one hook guaranteed to fire after the camera/layout has actually moved
+      // the pixels these overlays must track. `visibility`, not the `hidden` attribute: the
+      // stylesheet gives .graph-misconception an explicit display, which beats hidden's UA rule.
+      const placeOverlays = () => {
+        const { width, height } = renderer.getDimensions();
+        const place = (el: HTMLElement, slug: string) => {
+          if (!graph.hasNode(slug)) { el.style.visibility = 'hidden'; return; }
+          const attrs = graph.getNodeAttributes(slug);
+          const { x, y } = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
+          el.style.left = `${x}px`;
+          el.style.top = `${y}px`;
+          el.style.visibility = x < 0 || y < 0 || x > width || y > height ? 'hidden' : '';
+        };
         const sel = selectedRef.current;
-        if (sel != null && graph.hasNode(sel)) {
-          const attrs = graph.getNodeAttributes(sel);
-          setTeachAnchor(renderer.graphToViewport({ x: attrs.x, y: attrs.y }));
-        } else {
-          setTeachAnchor(null);
-        }
-        const marks: Array<{ slug: string; x: number; y: number; text: string }> = [];
-        graph.forEachNode((slug, attrs) => {
-          if (attrs.misconceptions.length > 0) {
-            const pos = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
-            marks.push({ slug, x: pos.x, y: pos.y, text: attrs.misconceptions.join('; ') });
-          }
-        });
-        setMisconceptionMarks(marks);
+        if (teachRef.current && sel != null) place(teachRef.current, sel);
+        for (const [slug, el] of markEls.current) place(el, slug);
       };
-      renderer.on('afterRender', updateOverlays);
+      placeOverlaysRef.current = placeOverlays;
+      renderer.on('afterRender', placeOverlays);
 
       cleanup = () => {
         camera.off('updated', onCameraUpdated);
         renderer.off('downNode', onDownNode);
         renderer.off('enterNode', onEnterNode);
         renderer.off('leaveNode', onLeaveNode);
-        renderer.off('afterRender', updateOverlays);
+        renderer.off('afterRender', placeOverlays);
         mouseCaptor.off('mousemovebody', onMouseMoveBody);
         mouseCaptor.off('mouseup', onMouseUp);
         unsubscribeSettle();
@@ -456,6 +508,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       cancelled = true;
       cleanup?.();
       fitRef.current = null;
+      placeOverlaysRef.current = null;
       if (rendererRef.current) {
         savePositions(graphRef.current!);
         layoutRef.current?.kill();
@@ -544,7 +597,8 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     const graph = graphRef.current!;
     const colors = colorsRef.current!;
     const { added, removed } = syncGraph(graph, sub, loadPositions(), {
-      forceLabels: sub.nodes.length <= CONTEXT_CAP, colors,
+      forceLabels: labelsFor(sub), colors,
+      sizeScale: densityScale(sub.nodes.length, CONTEXT_CAP),
     });
     if (focusRef.current != null && !graph.hasNode(focusRef.current)) setFocus(null);
     if (selectedRef.current != null && !graph.hasNode(selectedRef.current)) setSelected(null);
@@ -568,6 +622,16 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     }
   }, [sub]);
 
+  const marked = useMemo(() => sub.nodes.filter((n) => n.misconceptions.length > 0), [sub]);
+  // A newly mounted overlay has no position until something places it, and sigma only fires
+  // afterRender when it draws — selecting a node on a settled graph draws nothing.
+  useLayoutEffect(() => { placeOverlaysRef.current?.(); }, [selected, marked, canvasMode]);
+
+  const openTopic = useCallback((slug: string) => {
+    setSelected(slug);
+    panelBus.openPage(slug);
+  }, []);
+
   const seedTitle = mode === 'contextual' && sub.seedSlug != null
     ? (meta.nodes.find((n) => n.slug === sub.seedSlug)?.title ?? sub.seedSlug) : null;
 
@@ -577,7 +641,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const controlsHidden = !loading && sub.nodes.length === 0;
 
   return (
-    <div className="graph-panel">
+    <div className={`graph-panel${sub.nodes.length <= SPARSE_NODES ? ' is-sparse' : ''}`}>
       {/* The whole control row is hidden on an empty vault: a scope toggle with nothing to scope
           and a "fit" button with nothing to fit are just noise in front of the one sentence that
           tells a new learner what to do. */}
@@ -652,40 +716,28 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
               graph view needs WebGL — showing the topic list instead
             </p>
           )}
-          {canvasMode === 'ready' && selected != null && teachAnchor != null && (
-            <button type="button" className="graph-overlay graph-teach"
-              style={{ left: teachAnchor.x, top: teachAnchor.y }}
+          {canvasMode === 'ready' && selected != null && (
+            <button type="button" ref={teachRef} className="graph-overlay graph-teach"
               onClick={() => threadRuntime.append(`Teach me ${selected} now`)}>
               Teach me this
             </button>
           )}
-          {canvasMode === 'ready' && misconceptionMarks.map((m) => (
-            <span key={m.slug} className="graph-overlay graph-misconception" aria-hidden="true"
-              style={{ left: m.x, top: m.y }} title={m.text}>
+          {canvasMode === 'ready' && marked.map((n) => (
+            <span key={n.slug} className="graph-overlay graph-misconception" aria-hidden="true"
+              title={n.misconceptions.join('; ')}
+              ref={(el) => {
+                if (!el) return undefined;
+                markEls.current.set(n.slug, el);
+                return () => { markEls.current.delete(n.slug); };
+              }}>
               <Warning size={14} weight="bold" color="var(--bad)" />
             </span>
           ))}
         </div>
       )}
       {!loading && !loadError && sub.nodes.length > 0 && (
-        <section className="graph-topic-list" aria-label="Topics in this view">
-          <h3>Topics in this view</h3>
-          {sub.edges.length === 0 && <p>No connections in this view yet. Open a topic to read its notes.</p>}
-          <ul onKeyDown={onTopicKeys}>{sub.nodes.map((n, nodeIndex) => (
-            <li key={n.slug}>
-              <button type="button" aria-label={`Open ${n.title}, ${factsFor(n)}`}
-                tabIndex={(selected != null ? selected === n.slug : nodeIndex === 0) ? 0 : -1}
-                onFocus={() => setFocus(n.slug)}
-                onBlur={() => setFocus((f) => (f === n.slug ? null : f))}
-                onMouseEnter={() => setFocus(n.slug)}
-                onMouseLeave={() => setFocus((f) => (f === n.slug ? null : f))}
-                onClick={() => { setSelected(n.slug); panelBus.openPage(n.slug); }}>
-                <span>{n.title}</span>
-                <span className="graph-topic-standing">{n.effective}{n.slipped ? ' · due for review' : ''}</span>
-              </button>
-            </li>
-          ))}</ul>
-        </section>
+        <TopicList nodes={sub.nodes} hasEdges={sub.edges.length > 0} selected={selected}
+          onKeys={onTopicKeys} onFocusTopic={setFocus} onOpen={openTopic} />
       )}
       {/* Also gated on loadError: a mastery legend under an error message is a key to a graph that
           is not there. */}

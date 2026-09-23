@@ -40,6 +40,17 @@ export interface GraphColors {
 // addressed separately in layout.ts (adjustSizes) rather than by shrinking every node back down.
 export const NODE_SIZE_SCALE = 0.7;
 export const SEED_JITTER = 20;
+const MIN_DENSITY_SCALE = 0.3;
+
+/** Node-size multiplier for a view of `count` pages. sigma draws sizes in screen pixels, so at fit
+ *  a node is as big beside 5,000 others as beside 20 — a 400-page whole vault drew as one
+ *  overlapping clump. Full size up to `fullSizeUpTo`, then shrinking with the square root of the
+ *  count (so total node area grows linearly, not quadratically), floored so a node stays visible
+ *  and grabbable. Zooming in still enlarges nodes (sigma scales them by sqrt of the zoom). */
+export function densityScale(count: number, fullSizeUpTo: number): number {
+  if (count <= fullSizeUpTo) return 1;
+  return Math.max(MIN_DENSITY_SCALE, Math.sqrt(fullSizeUpTo / count));
+}
 
 // jsdom (component + this file's own tests) has no styles.css loaded, so getComputedStyle returns
 // '' for every custom property — these hex literals are what graphLayout.ts's masteryColors()
@@ -103,9 +114,11 @@ export function seedPosition(placedNeighbours: Point[], totalNodes: number, rand
   return { x: r * Math.cos(angle), y: r * Math.sin(angle) };
 }
 
-function nodeAttrs(n: GraphNodeMeta, opts: { forceLabels: boolean }): Omit<NodeAttrs, 'x' | 'y'> {
+type ForceLabels = boolean | ReadonlySet<string>;
+
+function nodeAttrs(n: GraphNodeMeta, opts: { forceLabels: ForceLabels; sizeScale?: number }): Omit<NodeAttrs, 'x' | 'y'> {
   return {
-    size: radiusForDegree(n.degree) * NODE_SIZE_SCALE,
+    size: radiusForDegree(n.degree) * NODE_SIZE_SCALE * (opts.sizeScale ?? 1),
     color: n.color,
     label: n.title,
     type: 'mastery',
@@ -115,17 +128,17 @@ function nodeAttrs(n: GraphNodeMeta, opts: { forceLabels: boolean }): Omit<NodeA
     effective: n.effective,
     daysLeft: n.daysLeft,
     degree: n.degree,
-    forceLabel: opts.forceLabels,
+    forceLabel: typeof opts.forceLabels === 'boolean' ? opts.forceLabels : opts.forceLabels.has(n.slug),
   };
 }
 
 /** Makes `graph` match `sub` IN PLACE so the live layout keeps running: removes nodes not in `sub`,
  *  adds new ones (position from `remembered`, else seedPosition from neighbours placed so far in
  *  this pass or already in the graph), updates every surviving node's display attrs WITHOUT
- *  touching its x/y, and replaces the edge set. Returns the slugs added and removed. */
+ *  touching its x/y, and brings the edge set in line. Returns the slugs added and removed. */
 export function syncGraph(
   graph: MasteryGraph, sub: Subgraph<GraphNodeMeta>, remembered: ReadonlyMap<string, Point>,
-  opts: { forceLabels: boolean; colors: GraphColors; rand?: () => number },
+  opts: { forceLabels: ForceLabels; colors: GraphColors; sizeScale?: number; rand?: () => number },
 ): { added: string[]; removed: string[] } {
   const targetSlugs = new Set(sub.nodes.map((n) => n.slug));
   const removed: string[] = [];
@@ -168,10 +181,15 @@ export function syncGraph(
     graph.addNode(n.slug, { ...attrs, x: point.x, y: point.y });
   }
 
-  graph.clearEdges();
-  for (const e of sub.edges) {
-    const key = `${e.type}:${e.src}->${e.dst}`;
-    graph.mergeEdgeWithKey(key, e.src, e.dst, {
+  // Diffed, not cleared and re-added: every 30s poll syncs a usually unchanged graph, and each
+  // edge event makes sigma reindex and the ForceAtlas2 supervisor terminate and respawn its worker.
+  const wanted = new Map(sub.edges.map((e) => [`${e.type}:${e.src}->${e.dst}`, e]));
+  for (const key of graph.edges()) {
+    if (!wanted.has(key)) graph.dropEdge(key);
+  }
+  for (const [key, e] of wanted) {
+    if (graph.hasEdge(key)) continue;
+    graph.addEdgeWithKey(key, e.src, e.dst, {
       kind: e.type,
       color: opts.colors[e.type],
       size: e.type === 'prereq' ? 1 : 0.8,

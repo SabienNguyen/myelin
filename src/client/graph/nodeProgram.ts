@@ -15,10 +15,12 @@ import type { NodeDisplayData, RenderParams } from 'sigma/types';
 const UNIFORMS = ['u_sizeRatio', 'u_correctionRatio', 'u_matrix', 'u_warnColor'] as const;
 
 // The enclosing quad is the same "triangle circumscribing a circle" sigma's NodeCircleProgram
-// builds, just inflated: NodeCircleProgram sizes its triangle to exactly touch the disc, so a ring
-// drawn outside that disc would be clipped by the rasterizer. Scaling every node's quad by this
-// factor — not only nodes that currently carry a ring — keeps processVisibleItem identical to
-// sigma's own and costs nothing visible (the extra quad area is transparent where there's no ring).
+// builds, inflated for a node that draws a ring: NodeCircleProgram sizes its triangle to exactly
+// touch the disc, so a ring drawn outside that disc would be clipped by the rasterizer. Only ringed
+// nodes get the bigger quad (the vertex shader decides, so processVisibleItem stays identical to
+// sigma's own). Inflating every node cost ~2.1x the fragments for pixels that are always
+// transparent, and on a software rasterizer — headless Chromium's SwiftShader, where
+// graph-perf.e2e.ts runs — fragment shading is most of the frame.
 const RING_QUAD_SCALE = 1.45;
 
 // Ring geometry, as fractions of the node's own (unscaled) radius.
@@ -59,7 +61,8 @@ void main() {
   // (matches NodeCircleProgram's v_radius = a_size * correctionRatio / sizeRatio * 2.0 exactly, so
   // this program's disc lines up with edges sized against the same node).
   float radius = a_size * u_correctionRatio / u_sizeRatio * 2.0;
-  float quadRadius = radius * ${numberToGLSLFloat(RING_QUAD_SCALE)};
+  bool hasRing = a_ringFraction >= 0.0 || a_slipped > 0.5;
+  float quadRadius = radius * (hasRing ? ${numberToGLSLFloat(RING_QUAD_SCALE)} : 1.0);
   vec2 diffVector = quadRadius * 2.0 * vec2(cos(a_angle), sin(a_angle));
   vec2 position = a_position + diffVector;
   gl_Position = vec4((u_matrix * vec3(position, 1)).xy, 0, 1);

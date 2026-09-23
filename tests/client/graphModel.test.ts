@@ -6,7 +6,7 @@ import type { GraphNodeMeta } from '../../src/client/lib/graphLayout.js';
 import type { Subgraph } from '../../src/client/components/GraphPanel.js';
 import {
   type MasteryGraph, type GraphColors, type Point,
-  withAlpha, seedPosition, syncGraph, SEED_JITTER,
+  withAlpha, seedPosition, syncGraph, densityScale, SEED_JITTER,
 } from '../../src/client/graph/buildGraph.js';
 import { focusNeighbourhood, nodeReducer, edgeReducer } from '../../src/client/graph/highlight.js';
 
@@ -144,6 +144,15 @@ describe('syncGraph', () => {
     expect(graph.getNodeAttribute('b', 'forceLabel')).toBe(false);
   });
 
+  it('forces labels on only the named nodes when given a set', () => {
+    const graph = freshGraph();
+    syncGraph(graph, sub([node('a'), node('b'), node('c')]), new Map(),
+      { forceLabels: new Set(['a', 'c']), colors: COLORS });
+    expect(graph.getNodeAttribute('a', 'forceLabel')).toBe(true);
+    expect(graph.getNodeAttribute('b', 'forceLabel')).toBe(false);
+    expect(graph.getNodeAttribute('c', 'forceLabel')).toBe(true);
+  });
+
   it('replaces the edge set wholesale, including dropping edges no longer present', () => {
     const graph = freshGraph();
     syncGraph(
@@ -160,6 +169,37 @@ describe('syncGraph', () => {
     expect(graph.getEdgeAttribute('deepens:a->b', 'size')).toBe(0.8);
   });
 
+  // Every 30s poll re-syncs the same graph. Each edge event wakes sigma's reindexing and restarts a
+  // running layout's worker (layout.ts), so an unchanged edge set must cause none.
+  it('leaves an unchanged edge set alone: no edge is dropped or re-added', () => {
+    const graph = freshGraph();
+    const shape = sub([node('a'), node('b'), node('c')], [
+      { src: 'a', dst: 'b', type: 'prereq' },
+      { src: 'b', dst: 'c', type: 'deepens' },
+    ]);
+    syncGraph(graph, shape, new Map(), { forceLabels: false, colors: COLORS });
+    const events: string[] = [];
+    for (const name of ['edgeAdded', 'edgeDropped', 'edgesCleared'] as const) {
+      graph.on(name, () => events.push(name));
+    }
+    syncGraph(graph, shape, new Map(), { forceLabels: false, colors: COLORS });
+    expect(events).toEqual([]);
+    expect(graph.edges().sort()).toEqual(['deepens:b->c', 'prereq:a->b']);
+  });
+
+  it('keeps one edge when the payload repeats the same edge', () => {
+    const graph = freshGraph();
+    syncGraph(
+      graph,
+      sub([node('a'), node('b')], [
+        { src: 'a', dst: 'b', type: 'prereq' },
+        { src: 'a', dst: 'b', type: 'prereq' },
+      ]),
+      new Map(), { forceLabels: false, colors: COLORS },
+    );
+    expect(graph.edges()).toEqual(['prereq:a->b']);
+  });
+
   it('does not throw when the same pair of nodes carries both a prereq and a deepens edge', () => {
     const graph = freshGraph();
     const result = syncGraph(
@@ -172,6 +212,31 @@ describe('syncGraph', () => {
     );
     expect(result.added.sort()).toEqual(['a', 'b']);
     expect(graph.edges().sort()).toEqual(['deepens:a->b', 'prereq:a->b']);
+  });
+});
+
+// sigma draws node sizes in screen pixels, so without this a 400-page whole vault drew every node at
+// contextual size and the view was one overlapping clump.
+describe('densityScale', () => {
+  it('is full size up to the threshold', () => {
+    expect(densityScale(1, 40)).toBe(1);
+    expect(densityScale(40, 40)).toBe(1);
+  });
+  it('shrinks with the square root of the count past it', () => {
+    expect(densityScale(160, 40)).toBeCloseTo(0.5);
+  });
+  it('never shrinks a node below the floor', () => {
+    expect(densityScale(5_000, 40)).toBe(densityScale(50_000, 40));
+    expect(densityScale(5_000, 40)).toBeGreaterThan(0.2);
+  });
+  it('syncGraph applies sizeScale to new and surviving nodes', () => {
+    const graph = freshGraph();
+    syncGraph(graph, sub([node('a', { degree: 4 })]), new Map(), { forceLabels: false, colors: COLORS });
+    const full = graph.getNodeAttribute('a', 'size');
+    syncGraph(graph, sub([node('a', { degree: 4 }), node('b', { degree: 4 })]), new Map(),
+      { forceLabels: false, colors: COLORS, sizeScale: 0.5 });
+    expect(graph.getNodeAttribute('a', 'size')).toBeCloseTo(full / 2);
+    expect(graph.getNodeAttribute('b', 'size')).toBeCloseTo(full / 2);
   });
 });
 
