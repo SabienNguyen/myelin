@@ -489,8 +489,10 @@ export function useConversationNotebook(threadId: string | undefined): NotebookD
     let cancelled = false;
     setDetail(undefined);
     getThreadNotebook(threadId)
-      .then((ref) => (ref ? getNotebook(ref.id) : null))
-      .then((d) => { if (!cancelled) setDetail(d); })
+      .then((ref) => (ref && typeof ref.id === 'string' ? getNotebook(ref.id) : null))
+      // A reply without the notebook's summary is no notebook to open on (an older server, a
+      // proxy page) — the general empty state, not a crash in NotebookIntro.
+      .then((d) => { if (!cancelled) setDetail(d && d.notebook ? d : null); })
       .catch((e) => {
         console.error('[notebooks] could not load this conversation’s notebook:', e);
         if (!cancelled) setDetail(null);

@@ -12,6 +12,7 @@ import { NotebookIntro, useConversationNotebook } from './Notebooks.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
 import { takePendingAsk } from '../lib/pendingAsk.js';
+import type { Command } from '../../shared/commands.js';
 
 // P1 FIX (docs/superpowers/plans/2026-07-20-gap-integration.md — post-review): these two must be
 // stable module-scope function references, NOT inline arrow functions inside Thread()'s render
@@ -413,6 +414,31 @@ function awaitsAnswer(message: UIMessage): boolean {
 }
 
 /**
+ * "try again" under a turn that failed — what its closing note tells the learner to do, as one
+ * click. It re-sends the last question (text and any slash command) rather than rewriting history:
+ * the failed turn and its note stay in the transcript, as they do on disk, so the live view and a
+ * reload agree. Only offered while the failure is live (lastTurnFailed), and never while a turn
+ * runs or the learner is typing.
+ */
+function RetryFailed({ drafting }: { drafting: boolean }) {
+  const store = useChatStore();
+  const { messages, isRunning, lastTurnFailed } = useSyncExternalStore(store.subscribe, store.getState);
+  if (drafting || isRunning || !lastTurnFailed || messages.at(-1)?.role !== 'assistant') return null;
+  const asked = [...messages].reverse().find((m) => m.role === 'user');
+  if (!asked) return null;
+  const text = asked.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
+  const command = (asked.parts.find((p) => p.type === 'data-command') as { data?: { command?: Command } } | undefined)?.data?.command;
+  if (!text.trim() && command === undefined) return null;
+  return (
+    <div className="follow-ups">
+      <button type="button" onClick={() => store.sendMessage(text, [], command !== undefined ? { command } : {})}>
+        try again
+      </button>
+    </div>
+  );
+}
+
+/**
  * Chat's two ways into study, under the newest answer: one quick check on it, or the structured
  * tutor on what was just discussed. Chat never forces a block (chat-system-prompt.md rule 3), so
  * these are the learner's one-click version of asking for one. They step aside while a block is
@@ -644,6 +670,7 @@ export function Thread({ mode = '', onModeChange, threadId }: {
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
         {mode === '' && <FollowUps drafting={drafting} />}
+        <RetryFailed drafting={drafting} />
         <ThreadPrimitive.If running>
           <div className="working" role="status">
             <span className="dot" /><span className="dot" /><span className="dot" />

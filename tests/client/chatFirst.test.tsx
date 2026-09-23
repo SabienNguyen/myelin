@@ -174,6 +174,24 @@ describe('follow-up chips in chat', () => {
     expect(screen.queryByRole('button', { name: 'check my understanding' })).toBeNull();
   });
 
+  it('a failed turn offers "try again", which asks the same question again', async () => {
+    const note = 'The tutor model returned nothing for this turn — no answer and no block staged.';
+    const chats = stubServer(answered, [`${FAILED}${note}`, LONG_ANSWER]);
+    await renderThread();
+    fireEvent.click(await screen.findByRole('button', { name: 'check my understanding' }));
+    const retry = await screen.findByRole('button', { name: 'try again' });
+    expect(screen.queryByRole('button', { name: 'check my understanding' })).toBeNull();
+    fireEvent.click(retry);
+    await waitFor(() => expect(chats).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'try again' })).toBeNull());
+    const asked = (body: ChatBody) => body.messages.filter((m) => m.role === 'user').at(-1)!
+      .parts.map((p: any) => p.text ?? '').join('');
+    expect(asked(chats[1])).toBe(asked(chats[0]));
+    // The failure stays in the transcript, as it does on disk.
+    expect(screen.getByText(/returned nothing for this turn/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'try again' })).toBeNull();
+  });
+
   it('not while a block waits for the learner\'s answer', async () => {
     stubServer([
       answered[0],
