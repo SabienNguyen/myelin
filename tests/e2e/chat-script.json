@@ -1,0 +1,62 @@
+{
+  "turns": [
+    {
+      "when": "hello there",
+      "text": "Hi — what would you like to explore today?"
+    },
+    {
+      "when": "what is a derivative",
+      "text": "A derivative measures how fast a function changes at a single point: the slope of the tangent line there. You get it as the limit of the average rate of change over a shrinking interval, and it is what turns a position curve into a velocity, or a cost curve into a marginal cost."
+    },
+    {
+      "when": "check my understanding",
+      "toolCalls": [
+        {
+          "toolName": "quick_check",
+          "input": {
+            "question": "What does a derivative measure at a point?",
+            "mode": "choice",
+            "choices": ["the slope of the tangent", "the area under the curve"],
+            "expected": "the slope of the tangent",
+            "pageSlug": "derivatives"
+          }
+        }
+      ],
+      "text": "One quick question on that."
+    },
+    {
+      "when": "teach me limits properly",
+      "text": "Limits, step by step. First the idea: what value a function approaches as its input approaches a point."
+    },
+    {
+      "when": "quiz me on the chain rule",
+      "toolCalls": [
+        {
+          "toolName": "quick_check",
+          "input": {
+            "question": "What does the chain rule differentiate?",
+            "mode": "choice",
+            "choices": ["compositions of functions", "sums of functions"],
+            "expected": "compositions of functions",
+            "pageSlug": "derivatives"
+          }
+        }
+      ],
+      "text": "The chain rule differentiates a composition by multiplying the outer derivative by the inner one."
+    },
+    {
+      "when": "why multiply by the inner one",
+      "text": "Because the inner function sets how fast the outer function's input moves, so its rate scales the outer rate."
+    },
+    {
+      "when": "asked aside questions",
+      "toolCalls": [
+        {
+          "toolName": "record_evidence",
+          "input": { "student": "e2e", "slug": "derivatives", "kind": "applied-correctly", "note": "chain rule check" }
+        }
+      ],
+      "text": "Right — compositions. Recorded."
+    }
+  ]
+}

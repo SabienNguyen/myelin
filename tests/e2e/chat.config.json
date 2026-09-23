@@ -1,0 +1,15 @@
+{
+  "vault": "${E2E_DIR}/.tmp-vault-chat",
+  "student": "e2e",
+  "models": {
+    "tutor":    { "model": "scripted" },
+    "grader":   { "model": "scripted" },
+    "quiz_gen": { "model": "scripted" },
+    "card_gen": { "model": "scripted" },
+    "compile":  { "model": "scripted" }
+  },
+  "engram": { "command": "npx", "args": ["tsx", "${ENGRAM_SRC}"], "embeddings": "fake" },
+  "schedule": { "digestHour": 9, "quietHours": [22, 8], "ankiSyncMinutes": 30, "ankiBacklogNudgeDays": 3 },
+  "autoCompile": false,
+  "port": 4824
+}

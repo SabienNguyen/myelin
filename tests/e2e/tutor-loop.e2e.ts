@@ -38,7 +38,9 @@ test('full loop: bootstrap → quick_check → answer → auto-resubmit → evid
 
   const firstChat = page.waitForResponse((res) => res.url().endsWith('/api/chat'));
   await page.goto('/');
-  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('hi');
+  // A real request, not "hi": a thread-opening greeting withholds every tool (session.ts's
+  // greetingOnly), so the scripted quick_check had nowhere to land and the loop never started.
+  await page.getByRole('textbox', { name: 'Ask your tutor…' }).fill('quiz me on derivatives');
   await page.keyboard.press('Enter');
   await firstChat;
 

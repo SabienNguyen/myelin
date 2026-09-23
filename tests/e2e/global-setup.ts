@@ -26,6 +26,7 @@ const VAULT = join(E2E_DIR, '.tmp-vault');
 const GAP_VAULT = join(E2E_DIR, '.tmp-vault-gap');
 const LABEL_VAULT = join(E2E_DIR, '.tmp-vault-label');
 const PRONOUNCE_VAULT = join(E2E_DIR, '.tmp-vault-pronounce');
+const CHAT_VAULT = join(E2E_DIR, '.tmp-vault-chat');
 
 /** A mono 16-bit PCM WAV of a steady tone — the fake microphone input for the pronounce spec.
  *  A steady pitch reads as the level tone (ngang) no matter where Chromium's loop starts it, so the
@@ -85,8 +86,11 @@ export default async function globalSetup() {
   rmSync(join(GAP_VAULT, '.harness', 'sessions'), { recursive: true, force: true });
   mkdirSync(join(GAP_VAULT, 'pages'), { recursive: true });
 
-  // graph-contextual.e2e.ts's 1-hop/2-hop neighborhood around the boot-seeded 'stream-consumer'
-  // stub. Written HERE, not in that file's beforeAll, because the backend's /api/graph payload is
+  // graph-contextual.e2e.ts's 1-hop/2-hop neighborhood around its own hub page. Not around the
+  // boot-seeded 'stream-consumer' stub, as it once was: /api/graph hides an untouched built-in
+  // pattern stub (restRoutes.ts, BUILTIN_PATTERN_SLUGS), so that test only passed after
+  // gap-exercise.e2e.ts had recorded evidence on stream-consumer, and failed when run alone.
+  // Written HERE, not in that file's beforeAll, because the backend's /api/graph payload is
   // TTL-cached (src/server/graphCache.ts): when the gap tests run first, their chat turns warm
   // the cache, and fixture pages written after that warm were invisible to the graph test's
   // fresh-by-TTL read. global-setup runs before any test can warm anything. Slugs come from the
@@ -94,24 +98,39 @@ export default async function globalSetup() {
   const fixtureDir = join(GAP_VAULT, 'pages', 'programming');
   mkdirSync(fixtureDir, { recursive: true });
   const GAP_FIXTURE_PAGES: Record<string, string> = {
+    'stream-basics.md':
+      '---\ntitle: Stream Basics\nprereqs: []\ndeepens: []\ndifficulty: 2\nstatus: stub\n---\n'
+      + 'Hub page for the contextual-graph e2e test.\n',
     'decoder.md':
-      '---\ntitle: Stream Decoding\nprereqs: [stream-consumer]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
-      + 'Fixture page for the contextual-graph e2e test (1 hop from stream-consumer).\n',
+      '---\ntitle: Stream Decoding\nprereqs: [stream-basics]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
+      + 'Fixture page for the contextual-graph e2e test (1 hop from stream-basics).\n',
     'backpressure.md':
-      '---\ntitle: Backpressure Handling\nprereqs: [stream-consumer]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
-      + 'Fixture page for the contextual-graph e2e test (1 hop from stream-consumer).\n',
+      '---\ntitle: Backpressure Handling\nprereqs: [stream-basics]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
+      + 'Fixture page for the contextual-graph e2e test (1 hop from stream-basics).\n',
     'reconnect-strategy.md':
       '---\ntitle: Reconnect Strategy\nprereqs: [decoder]\ndeepens: []\ndifficulty: 3\nstatus: stub\n---\n'
-      + 'Fixture page for the contextual-graph e2e test (2 hops from stream-consumer, via decoder).\n',
+      + 'Fixture page for the contextual-graph e2e test (2 hops from stream-basics, via decoder).\n',
     'unrelated-topic.md':
       '---\ntitle: Totally Unrelated Topic\nprereqs: []\ndeepens: []\ndifficulty: 1\nstatus: stub\n---\n'
-      + 'Deliberately disconnected from stream-consumer — proves contextual scope excludes it.\n',
+      + 'Deliberately disconnected from stream-basics — proves contextual scope excludes it.\n',
   };
   for (const [name, content] of Object.entries(GAP_FIXTURE_PAGES)) {
     writeFileSync(join(fixtureDir, name), content);
   }
 
+  // aside.e2e.ts and chat-first.e2e.ts: their own backend pair (:4824/:4178, chat.config.json),
+  // fresh sessions and evidence every run, and one solid, sourced page for the quiz to land on.
+  rmSync(join(CHAT_VAULT, 'students'), { recursive: true, force: true });
+  rmSync(join(CHAT_VAULT, '.harness', 'sessions'), { recursive: true, force: true });
+  mkdirSync(join(CHAT_VAULT, 'pages'), { recursive: true });
+  writeFileSync(
+    join(CHAT_VAULT, 'pages', 'derivatives.md'),
+    '---\ntitle: Derivatives\ndifficulty: 1\nstatus: solid\nsources: ["https://example.edu/derivatives"]\n---\n'
+      + `The derivative measures the instantaneous rate of change — the slope at a point. ${'More. '.repeat(80)}`,
+  );
+
   // Forked Playwright test workers inherit process.env from this (the main runner) process.
   process.env.E2E_VAULT = VAULT;
   process.env.E2E_GAP_VAULT = GAP_VAULT;
+  process.env.E2E_CHAT_VAULT = CHAT_VAULT;
 }
