@@ -13,6 +13,7 @@ import {
   type NotebookDetail, type NotebookLevel, type NotebookRef, type NotebookSummary, type NotebooksPayload,
 } from '../lib/api.js';
 import { notebookHash, serializeHash } from '../lib/urlState.js';
+import { panelBus } from '../lib/panelBus.js';
 import { relativeTime } from './HistoryMenu.js';
 import { Collapsible } from './Collapsible.js';
 import { setPendingAsk, type PendingAsk } from '../lib/pendingAsk.js';
@@ -540,6 +541,7 @@ export function NotebookView({ id }: { id: string }) {
 /** Topbar: a way to the notebooks from any conversation, and which one this conversation is in. */
 export function NotebookCrumb({ threadId }: { threadId: string }) {
   const [nb, setNb] = useState<NotebookRef | null>(null);
+  const version = useFiledVersion(threadId);
   useEffect(() => {
     let cancelled = false;
     setNb(null);
@@ -549,7 +551,7 @@ export function NotebookCrumb({ threadId }: { threadId: string }) {
       // conversation itself is unaffected. Logged so a broken route is still visible.
       .catch((e) => console.error('[notebooks] could not look up this conversation’s notebook:', e));
     return () => { cancelled = true; };
-  }, [threadId]);
+  }, [threadId, version]);
   return (
     <nav className="notebook-crumb" aria-label="Notebook">
       <a href={notebookHash()} className="notebook-crumb-link">
@@ -587,11 +589,22 @@ export function notebookStarters(detail: Pick<NotebookDetail, 'topics' | 'source
   return out;
 }
 
+/** Counts panelBus notebookFiled events for this conversation, so a lookup keyed on it runs again
+ *  when the conversation is filed from inside the workspace. */
+function useFiledVersion(threadId: string | undefined): number {
+  const [version, setVersion] = useState(0);
+  useEffect(() => panelBus.subscribe((e) => {
+    if (e.type === 'notebookFiled' && e.threadId === threadId) setVersion((v) => v + 1);
+  }), [threadId]);
+  return version;
+}
+
 /** The notebook an open conversation is filed under, with its detail: `undefined` while looking,
  *  `null` for a conversation outside every notebook (or when the lookup failed — logged, and the
  *  empty state falls back to the general one rather than blocking the chat). */
 export function useConversationNotebook(threadId: string | undefined): NotebookDetail | null | undefined {
   const [detail, setDetail] = useState<NotebookDetail | null | undefined>(undefined);
+  const version = useFiledVersion(threadId);
   useEffect(() => {
     if (!threadId) { setDetail(null); return; }
     let cancelled = false;
@@ -606,8 +619,54 @@ export function useConversationNotebook(threadId: string | undefined): NotebookD
         if (!cancelled) setDetail(null);
       });
     return () => { cancelled = true; };
-  }, [threadId]);
+  }, [threadId, version]);
   return detail;
+}
+
+/**
+ * On the general empty chat, the learner's notebooks as a way in: "work in Calculus I" files THIS
+ * conversation under it, and the empty state turns into that notebook's own opening. Up to four,
+ * most recently active first (the order /api/notebooks already returns). Nothing when there are no
+ * notebooks — the general welcome stands on its own.
+ */
+export function NotebookPicker({ threadId }: { threadId: string }) {
+  const [notebooks, setNotebooks] = useState<NotebookSummary[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getNotebooks()
+      .then((d) => { if (!cancelled) setNotebooks(Array.isArray(d.notebooks) ? d.notebooks.slice(0, 4) : []); })
+      // The picker is an extra way in; without it the chat works as ever. Logged, not shown.
+      .catch((e) => console.error('[notebooks] could not list notebooks for the empty chat:', e));
+    return () => { cancelled = true; };
+  }, []);
+  async function file(id: string) {
+    setError(null);
+    try {
+      await fileThread(id, threadId);
+      panelBus.notebookFiled(threadId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+  if (notebooks.length === 0) return null;
+  return (
+    <div className="nb-picker-row">
+      <span className="nb-picker-lede">Or work in a notebook:</span>
+      <ul aria-label="Your notebooks">
+        {notebooks.map((nb) => (
+          <li key={nb.id}>
+            <button type="button" className="chip-btn" onClick={() => file(nb.id)}>
+              <NotebookGlyph size={13} weight="duotone" aria-hidden="true" />
+              {nb.title}
+              {nb.due > 0 && <span className="nb-picker-due"> · {nb.due} due</span>}
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="panel-error" role="alert">{error}</p>}
+    </div>
+  );
 }
 
 const STARTER_LABEL: Record<Starter['kind'], string> = { review: 'due', quiz: 'quiz', new: 'new' };

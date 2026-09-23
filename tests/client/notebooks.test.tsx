@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, NotebooksSection, PageNotebooks, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
+import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
+import { NotebookCrumb, NotebookIntro, NotebookPicker, NotebookView, NotebooksHome, NotebooksSection, PageNotebooks, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
 import { takePendingAsk } from '../../src/client/lib/pendingAsk.js';
+import { panelBus } from '../../src/client/lib/panelBus.js';
 
 const now = new Date().toISOString();
 const summary = {
@@ -224,6 +225,17 @@ describe('NotebookCrumb', () => {
     expect(screen.getByRole('link', { name: 'Notebooks' }).getAttribute('href')).toBe('#/notebooks');
   });
 
+  it('picks up a filing that happens while the conversation is open', async () => {
+    let filedYet = false;
+    routes['GET /api/thread/t-new/notebook'] = () => ({ body: filedYet ? { id: 'nb-calc', title: 'Calculus I' } : null });
+    render(<NotebookCrumb threadId="t-new" />);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(screen.queryByRole('link', { name: 'Calculus I' })).toBeNull();
+    filedYet = true;
+    act(() => { panelBus.notebookFiled('t-new'); });
+    expect(await screen.findByRole('link', { name: 'Calculus I' })).toBeTruthy();
+  });
+
   it('shows only the way to the notebooks for a loose conversation', async () => {
     routes['GET /api/thread/t-loose/notebook'] = () => ({ body: null });
     render(<NotebookCrumb threadId="t-loose" />);
@@ -311,5 +323,26 @@ describe('NotebooksSection', () => {
     expect((await screen.findByRole('link', { name: 'Calculus I' })).getAttribute('href')).toBe('#/notebooks/nb-calc');
     expect(screen.getByText('2 due')).toBeTruthy();
     expect(screen.getByRole('img').getAttribute('aria-label')).toBe('Topics: 1 mastered, 1 practicing, 1 not started');
+  });
+});
+
+describe('NotebookPicker', () => {
+  it('files this conversation under the chosen notebook, then says so', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [summary], unfiled: [] } });
+    routes['PUT /api/notebooks/nb-calc/threads/t-here'] = () => ({ body: { id: 'nb-calc', title: 'Calculus I' } });
+    const filed: string[] = [];
+    const off = panelBus.subscribe((e) => { if (e.type === 'notebookFiled') filed.push(e.threadId); });
+    render(<NotebookPicker threadId="t-here" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Calculus I/ }));
+    await waitFor(() => expect(filed).toEqual(['t-here']));
+    off();
+    expect(calls.some((c) => c.method === 'PUT' && c.url === '/api/notebooks/nb-calc/threads/t-here')).toBe(true);
+  });
+
+  it('shows nothing when there are no notebooks', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [], unfiled: [] } });
+    const { container } = render(<NotebookPicker threadId="t-here" />);
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(container.innerHTML).toBe('');
   });
 });

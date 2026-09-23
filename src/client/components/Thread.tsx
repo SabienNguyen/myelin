@@ -8,7 +8,7 @@ import { askAside } from '../lib/api.js';
 import { AsidePart } from './AsidePart.js';
 import { CommandEditor, type CommandEditorHandle } from './CommandEditor.js';
 import { MarkdownText } from './MarkdownText.js';
-import { NotebookIntro, useConversationNotebook } from './Notebooks.js';
+import { NotebookIntro, NotebookPicker, useConversationNotebook } from './Notebooks.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
 import { takePendingAsk } from '../lib/pendingAsk.js';
@@ -414,6 +414,7 @@ function EmptyHero({ threadId }: { threadId?: string }) {
         tutor session.
       </p>
       <SessionPlanCta plan={plan} />
+      {threadId && <NotebookPicker threadId={threadId} />}
       {/* The example asks taught their lesson (any subject works) on day one; for a returner they
           are noise beside the plan, and the composer is right below for anything new. */}
       {!returning && <ExampleAsks />}

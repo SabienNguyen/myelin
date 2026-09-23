@@ -3268,3 +3268,13 @@ p.quiz-expected { margin: 0.3rem 0 0; }
 .nb-library-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.75rem; }
 .nb-library-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; font-size: 0.9rem; }
 .nb-library { margin-bottom: 1.5rem; }
+
+/* The general empty chat's way into a notebook (Notebooks.tsx NotebookPicker). */
+.nb-picker-row { display: flex; flex-direction: column; align-items: center; gap: 0.45rem; margin: 0 0 1.2rem; }
+.nb-picker-lede { font-size: 0.85rem; color: var(--text-muted); }
+.nb-picker-row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem; }
+.nb-picker-row .chip-btn {
+  display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem;
+  padding: 0.3rem 0.75rem; border-radius: 999px;
+}
+.nb-picker-due { color: var(--warn); }

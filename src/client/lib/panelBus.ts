@@ -14,7 +14,11 @@ export type PanelEvent =
   // subscriber, reusing the composer's own send path). PagePanel's "claim you know this" is the
   // emitter today; a bus event for the same reason as focusMode — nothing threads composer access
   // through SidePanel's props.
-  | { type: 'askTutor'; text: string };
+  | { type: 'askTutor'; text: string }
+  // A conversation was filed under a notebook from inside the workspace (NotebookPicker). Every
+  // reader of "which notebook is this conversation in" — the topbar crumb, the empty state, the
+  // graph's notebook scope — looked once per conversation and would otherwise go on saying none.
+  | { type: 'notebookFiled'; threadId: string };
 
 type Fn = (e: PanelEvent) => void;
 const subs = new Set<Fn>();
@@ -26,6 +30,7 @@ export const panelBus = {
   setTab(tab: PanelTab) { this.emit({ type: 'setTab', tab }); },
   setFocusMode(on: boolean) { this.emit({ type: 'focusMode', on }); },
   askTutor(text: string) { this.emit({ type: 'askTutor', text }); },
+  notebookFiled(threadId: string) { this.emit({ type: 'notebookFiled', threadId }); },
 };
 
 /** Segments a markdown string so a blanket text transform skips what must stay verbatim: fenced
