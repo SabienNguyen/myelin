@@ -10,6 +10,7 @@ import { FocusRail } from './components/FocusRail.js';
 import { FirstRun } from './components/FirstRun.js';
 import { AddMaterial } from './components/AddMaterial.js';
 import { NotebookCrumb, NotebookView, NotebooksHome } from './components/Notebooks.js';
+import { CommandPalette } from './components/CommandPalette.js';
 import { panelBus } from './lib/panelBus.js';
 import { parseHash, parseNotebookRoute, serializeHash } from './lib/urlState.js';
 
@@ -102,6 +103,7 @@ export function App() {
         <div className="app">
           <header className="topbar">
             {brand}
+            <CommandPalette />
             <TopbarStatus />
             <AddMaterial />
           </header>
@@ -126,6 +128,7 @@ export function App() {
         <header className="topbar">
           {brand}
           <NotebookCrumb threadId={threadId} />
+          <CommandPalette />
           <HistoryMenu activeId={threadId} onSelect={selectThread} />
           <TopbarStatus />
           {/* THE add entry point — one control for every kind of material (file, git URL, local

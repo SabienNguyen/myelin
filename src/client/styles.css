@@ -3193,3 +3193,42 @@ button.nb-delete:hover { background: var(--bg-inset); }
 .stage-pages-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .stage-pages-level { flex: none; color: var(--text-muted); font-size: 0.78rem; }
 .stage-empty:has(.stage-pages) { margin-top: 1.25rem; }
+
+/* ── Command palette (CommandPalette.tsx) ─────────────────────────────────────────────────────── */
+.palette { position: relative; }
+.palette-trigger { gap: 0.4rem; color: var(--text-muted); font-size: 0.85rem; }
+.palette-trigger:hover { color: var(--text); }
+.palette-kbd {
+  font-family: var(--font-mono); font-size: 0.68rem; color: var(--text-muted);
+  padding: 0.05rem 0.35rem; border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+/* Centred under the topbar like Linear's: fixed to the viewport, so it is the same box from every
+   screen, and solid — surfaces separate by fill and hairline here, never by blur. */
+.palette-panel {
+  position: fixed; z-index: 30; top: 4.5rem; left: 50%; transform: translateX(-50%);
+  width: min(36rem, calc(100vw - 1rem)); max-height: min(28rem, 70vh);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-shell);
+}
+.palette-input {
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent;
+  padding: 0.85rem 1rem; font-size: 1rem;
+}
+.palette-input:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--accent); }
+.palette-empty { margin: 0; padding: 0.8rem 1rem; color: var(--text-muted); font-size: 0.88rem; }
+.palette-list { list-style: none; margin: 0; padding: 0.35rem; overflow-y: auto; }
+.palette-option { cursor: pointer; border-radius: var(--radius-sm); }
+.palette-group {
+  display: block; padding: 0.55rem 0.6rem 0.25rem; font-family: var(--font-mono); font-size: 0.68rem;
+  font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
+}
+.palette-row { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.45rem 0.6rem; border-radius: var(--radius-sm); }
+.palette-option.active .palette-row { background: var(--accent-soft); color: var(--accent); }
+.palette-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-detail { flex: none; font-size: 0.78rem; color: var(--text-muted); }
+.palette-option.active .palette-detail { color: inherit; }
+@media (max-width: 640px) {
+  .palette-kbd { display: none; }
+  .palette-trigger-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .palette-panel { top: 3.2rem; }
+}
