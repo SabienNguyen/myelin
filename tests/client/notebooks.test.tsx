@@ -153,7 +153,7 @@ describe('NotebookView', () => {
     fireEvent.click(screen.getByRole('button', { name: /Quiz me/ }));
     await waitFor(() => expect(location.hash).toMatch(/^#\/t\/t-[a-z0-9]+$/));
     const ask = takePendingAsk(location.hash.slice('#/t/'.length));
-    expect(ask).toEqual({ text: 'Quiz me across Calculus I: Derivative, Limits. One question per page, mixed in order.', command: 'quiz' });
+    expect(ask).toEqual({ text: 'Quiz me across Calculus I. One question per page, mixed in order: Derivative, Limits.', command: 'quiz' });
   });
 
   it('does not open a conversation when filing it failed, and says why', async () => {

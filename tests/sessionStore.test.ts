@@ -209,6 +209,16 @@ describe('listThreads', () => {
     expect(threads[0].title).toBe('no-user-text');
   });
 
+  it('titles from the first sentence when it is a real one', () => {
+    const vault = makeVault();
+    saveThread(vault, 't-studio', [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'Quiz me across Calculus I. One question per page, mixed in order: Limits, Derivatives, Chain rule.' }] }]);
+    saveThread(vault, 't-short', [{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'Why? Because the derivative is a limit of slopes, and I want to see it.' }] }]);
+    const byId = Object.fromEntries(listThreads(vault).map((t) => [t.id, t.title]));
+    expect(byId['t-studio']).toBe('Quiz me across Calculus I.');
+    // "Why?" is too short to stand as a title, so the opening keeps going.
+    expect(byId['t-short']).toBe('Why? Because the derivative is a limit of slopes, and I want…');
+  });
+
   it('trims long titles to ~60 chars', () => {
     const vault = makeVault();
     saveThread(vault, 'longone', [{ role: 'user', parts: [{ type: 'text', text: 'x'.repeat(120) }] }]);

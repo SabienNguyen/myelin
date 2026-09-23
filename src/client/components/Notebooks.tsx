@@ -56,19 +56,19 @@ export function studioActions(detail: Pick<NotebookDetail, 'notebook' | 'topics'
   return [
     {
       label: 'Study guide', hint: 'key ideas, an example and a common mistake per page',
-      ask: { text: `Write a study guide for ${title} from its pages: ${pages}. For each page give the key idea, one worked example and one common mistake, and name the page each part comes from.` },
+      ask: { text: `Write a study guide for ${title}. Cover its pages (${pages}): for each, the key idea, one worked example and one common mistake, naming the page each part comes from.` },
     },
     {
       label: 'Quiz me', hint: 'one quiz across the whole notebook',
-      ask: { text: `Quiz me across ${title}: ${pages}. One question per page, mixed in order.`, command: 'quiz' },
+      ask: { text: `Quiz me across ${title}. One question per page, mixed in order: ${pages}.`, command: 'quiz' },
     },
     {
       label: 'Glossary', hint: 'the terms these pages use, defined',
-      ask: { text: `Make a glossary for ${title}: the terms its pages use (${pages}), each with a one-line definition and the page it comes from.` },
+      ask: { text: `Make a glossary for ${title}. Take the terms its pages use (${pages}), each with a one-line definition and the page it comes from.` },
     },
     {
       label: 'How it connects', hint: 'which ideas build on which',
-      ask: { text: `Explain how the ideas in ${title} connect: ${pages}. Which build on which, and why does the order matter?` },
+      ask: { text: `Explain how the ideas in ${title} connect. Which of these build on which, and why does the order matter: ${pages}?` },
     },
   ];
 }

@@ -153,7 +153,11 @@ function titleFor(messages: unknown[], id: string): string {
     .filter((t): t is string => !!t);
   const trimmed = userTexts.find((t) => t.length >= 12) ?? userTexts[0];
   if (!trimmed) return id;
-  return trimmed.length > TITLE_MAX ? `${trimmed.slice(0, TITLE_MAX)}…` : trimmed;
+  // The first sentence when it is a real one: an opening like "Quiz me across Calculus I. One
+  // question per page: …" titles as its first sentence rather than 60 characters cut mid-list.
+  const sentence = trimmed.split(/(?<=[.?!])\s+/)[0];
+  const title = sentence.length >= 12 ? sentence : trimmed;
+  return title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX)}…` : title;
 }
 
 /** Scan vault/.harness/sessions/*.json for a thread-picker list. Skips any file that isn't a
