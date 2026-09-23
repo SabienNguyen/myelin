@@ -15,15 +15,16 @@ const LEVEL_LABEL: Record<Level, string> = {
 
 interface Row { slug: string; title: string; level: Level }
 
-export function ConversationPages({ messages }: { messages: UIMessage[] }) {
+export function ConversationPages({ messages, isRunning = false }: { messages: UIMessage[]; isRunning?: boolean }) {
   const slugs = useMemo(() => pagesTouched(messages), [messages]);
   const key = slugs.join('\n');
   const [known, setKnown] = useState<Map<string, { title: string; level: Level }>>(new Map());
 
-  // Titles and levels come from the graph payload, which the server caches; refetched only when
-  // the SET of pages changes, so a streaming turn does not refetch per token.
+  // Titles and levels come from the graph payload, which the server caches. Refetched when the SET
+  // of pages changes and again whenever a turn settles — evidence recorded on a page already in the
+  // list changes its level without changing the set — but never mid-turn, per streamed token.
   useEffect(() => {
-    if (slugs.length === 0) return;
+    if (slugs.length === 0 || isRunning) return;
     let cancelled = false;
     getGraph()
       .then((g) => {
@@ -41,7 +42,7 @@ export function ConversationPages({ messages }: { messages: UIMessage[] }) {
       // Without the graph the list still shows, by slug and without a level — logged, not hidden.
       .catch((e) => console.error('[stage] could not load page titles:', e));
     return () => { cancelled = true; };
-  }, [key]);
+  }, [key, isRunning]);
 
   if (slugs.length === 0) return null;
   const rows: Row[] = slugs.map((slug) => ({

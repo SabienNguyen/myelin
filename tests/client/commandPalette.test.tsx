@@ -81,4 +81,26 @@ describe('CommandPalette', () => {
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: /Search/ }));
   });
+
+  it('an arrow pressed while results load does not break Enter once they arrive', async () => {
+    render(<CommandPalette threadId="t-held" />);
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const input = await screen.findByRole('combobox');
+    fireEvent.keyDown(input, { key: 'ArrowDown' }); // nothing loaded yet
+    await screen.findByRole('option', { name: /^Calculus I/ });
+    expect(input.getAttribute('aria-activedescendant')).toBe('palette-opt-0');
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(location.hash).toBe('#/notebooks/nb-calc'));
+  });
+
+  it('opens pages in the conversation App holds, not the one the hash names', async () => {
+    location.hash = '#/notebooks';
+    render(<CommandPalette threadId="t-held" />);
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const input = await screen.findByRole('combobox');
+    await screen.findByRole('option', { name: /^Calculus I/ });
+    fireEvent.change(input, { target: { value: 'chain' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(location.hash).toBe('#/t/t-held/page/chain-rule'));
+  });
 });

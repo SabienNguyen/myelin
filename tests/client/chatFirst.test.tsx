@@ -6,7 +6,8 @@
 // through the "study this" chip) makes the tutor sticky until the composer's `end` clears it.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
-import { useState } from 'react';
+import { StrictMode, useState } from 'react';
+import { setPendingAsk } from '../../src/client/lib/pendingAsk.js';
 import { Thread } from '../../src/client/components/Thread.js';
 import { Runtime } from '../../src/client/runtime.js';
 import type { UIMessage } from '../../src/shared/uiMessages.js';
@@ -230,5 +231,51 @@ describe('"quiz me on this" on a selected passage', () => {
     await waitFor(() => expect(chats).toHaveLength(1));
     expect(lastUserText(chats[0])).toBe('Quiz me on this:\n\n> monad');
     expect(chats[0].command).toBeUndefined();
+  });
+});
+
+describe('a first message handed over from another screen', () => {
+  it('is sent exactly once, with its command, even under StrictMode', async () => {
+    setPendingAsk('test', { text: 'Quiz me across Calculus I. One question per page.', command: 'quiz' });
+    const chats = stubServer([], [LONG_ANSWER]);
+    function Strict() {
+      const [mode, setMode] = useState('');
+      return (
+        <StrictMode>
+          <Runtime mode={mode} threadId="test" onSetMode={setMode}>
+            <Thread mode={mode} onModeChange={setMode} threadId="test" />
+          </Runtime>
+        </StrictMode>
+      );
+    }
+    await act(async () => { render(<Strict />); });
+    await screen.findByText(/A monad is a way to chain computations/);
+    await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
+    expect(chats).toHaveLength(1);
+    expect(chats[0].command).toBe('quiz');
+    expect(lastUserText(chats[0])).toBe('Quiz me across Calculus I. One question per page.');
+  });
+});
+
+describe('"try again" after a failed grading turn', () => {
+  it('resubmits the answer instead of asking the question again', async () => {
+    const staged: UIMessage[] = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'check me' }] },
+      { id: 'a1', role: 'assistant', parts: [
+        { type: 'step-start' },
+        { type: 'tool-quick_check', toolCallId: 'qc1', state: 'input-available',
+          input: { question: 'What is 2+2?', mode: 'choice', choices: ['3', '4'], expected: '4', pageSlug: 'arith' } } as any,
+      ] },
+    ];
+    const chats = stubServer(staged, [`${FAILED}The tutor model returned nothing for this turn.`, 'Right — four.']);
+    await renderThread();
+    fireEvent.click(await screen.findByRole('button', { name: '4' }));
+    const retry = await screen.findByRole('button', { name: 'try again' });
+    fireEvent.click(retry);
+    await waitFor(() => expect(chats).toHaveLength(2));
+    // The same history goes back, answer included, with no new question appended.
+    const users = (body: ChatBody) => body.messages.filter((m) => m.role === 'user').length;
+    expect(users(chats[1])).toBe(users(chats[0]));
+    expect(chats[1].messages.at(-1)?.role).toBe('assistant');
   });
 });

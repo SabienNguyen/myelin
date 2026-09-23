@@ -57,6 +57,14 @@ describe('ToolStatusChip', () => {
     expect(container.textContent).toBe('evidence recorded on epsilon delta');
   });
 
+  it('reads a thrown tool (the isError prop, result { error }) as a failure too', () => {
+    const { container } = render(
+      <ToolStatusChip toolName="record_evidence" args={{ slug: 'limits' }} result={{ error: 'boom' }} isError />,
+    );
+    expect(container.textContent).toBe('✗ evidence not recorded');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
   it('keeps the plain failure copy — a failed read names no page as if it were read', () => {
     const { container } = render(<ToolStatusChip toolName="read_page" args={{ slug: 'x' }} result={{ isError: true }} />);
     expect(container.textContent).toBe('✗ could not read the page');

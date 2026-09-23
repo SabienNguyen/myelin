@@ -443,19 +443,40 @@ function awaitsAnswer(message: UIMessage): boolean {
 function RetryFailed({ drafting }: { drafting: boolean }) {
   const store = useChatStore();
   const { messages, isRunning, lastTurnFailed } = useSyncExternalStore(store.subscribe, store.getState);
-  if (drafting || isRunning || !lastTurnFailed || messages.at(-1)?.role !== 'assistant') return null;
+  const last = messages.at(-1);
+  if (drafting || isRunning || !lastTurnFailed || last?.role !== 'assistant') return null;
+  // The turn that failed was a GRADING continuation when an answered block on the message still has
+  // no grade: retrying it means resubmitting the answer, not asking the question that staged the
+  // block again — that would stage a fresh block and leave the learner's answer ungraded.
+  if (answerAwaitingGrade(last)) {
+    return (
+      <div className="follow-ups">
+        <button type="button" onClick={() => store.resubmit()}>try again</button>
+      </div>
+    );
+  }
   const asked = [...messages].reverse().find((m) => m.role === 'user');
   if (!asked) return null;
   const text = asked.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
   const command = (asked.parts.find((p) => p.type === 'data-command') as { data?: { command?: Command } } | undefined)?.data?.command;
-  if (!text.trim() && command === undefined) return null;
+  // Attachments ride along: "what is this?" retried without its photo is a different question.
+  const files = asked.parts.filter((p): p is FileUIPart => p.type === 'file');
+  if (!text.trim() && command === undefined && files.length === 0) return null;
   return (
     <div className="follow-ups">
-      <button type="button" onClick={() => store.sendMessage(text, [], command !== undefined ? { command } : {})}>
+      <button type="button" onClick={() => store.sendMessage(text, files, command !== undefined ? { command } : {})}>
         try again
       </button>
     </div>
   );
+}
+
+/** An answered block on this message whose grade never arrived. */
+function answerAwaitingGrade(message: UIMessage): boolean {
+  return message.parts.some((p) => isToolUIPart(p)
+    && (BLOCK_TOOL_NAMES as readonly string[]).includes(getToolName(p))
+    && p.state === 'output-available'
+    && !(p.output as { grading?: unknown } | undefined)?.grading);
 }
 
 /**

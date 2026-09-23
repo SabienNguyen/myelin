@@ -49,8 +49,7 @@ export function rankItems(items: PaletteItem[], query: string): PaletteItem[] {
 
 const plural = (n: number, one: string) => `${n} ${n === 1 ? one : `${one}s`}`;
 
-async function loadItems(): Promise<PaletteItem[]> {
-  const here = parseHash(location.hash).threadId;
+async function loadItems(here: string): Promise<PaletteItem[]> {
   // Each source is optional: a palette with no pages (graph down) still finds notebooks.
   const [notebooks, threads, graph] = await Promise.all([
     getNotebooks().catch((e) => { console.error('[palette] notebooks:', e); return null; }),
@@ -93,7 +92,9 @@ async function loadItems(): Promise<PaletteItem[]> {
   return items;
 }
 
-export function CommandPalette() {
+/** `threadId` is the conversation App holds — also while the notebooks screens show, when the hash
+ *  names no thread and would send "Open the graph" and every page to the default conversation. */
+export function CommandPalette({ threadId }: { threadId?: string }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<PaletteItem[] | null>(null);
   const [query, setQuery] = useState('');
@@ -120,7 +121,7 @@ export function CommandPalette() {
     setItems(null);
     inputRef.current?.focus();
     let cancelled = false;
-    loadItems().then((i) => { if (!cancelled) setItems(i); });
+    loadItems(threadId ?? parseHash(location.hash).threadId).then((i) => { if (!cancelled) setItems(i); });
     const onDown = (e: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
@@ -129,7 +130,9 @@ export function CommandPalette() {
   }, [open]);
 
   const results = useMemo(() => (items ? rankItems(items, query) : []), [items, query]);
-  useEffect(() => { setActive(0); }, [query]);
+  // Reset on new results too: an ArrowDown pressed while loading must not leave the selection
+  // pointing past a list that did not exist yet.
+  useEffect(() => { setActive(0); }, [query, items]);
 
   function close() {
     setOpen(false);
@@ -142,7 +145,7 @@ export function CommandPalette() {
   }
   function onInputKey(e: React.KeyboardEvent) {
     if (e.key === 'Escape') { e.preventDefault(); close(); return; }
-    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.min(a + 1, results.length - 1)); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.max(0, Math.min(a + 1, results.length - 1))); }
     if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
     if (e.key === 'Enter') { e.preventDefault(); go(results[active]); }
   }

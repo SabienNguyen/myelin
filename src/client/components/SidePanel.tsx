@@ -143,7 +143,7 @@ export function SidePanel() {
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
         <section className="stage-empty">
-          <ConversationPages messages={messages} />
+          <ConversationPages messages={messages} isRunning={chat?.isRunning ?? false} />
           <h2>Your workspace</h2>
           <p>Exercises and feedback appear here as you learn.</p>
           <div className="stage-empty-actions">

@@ -157,6 +157,24 @@ describe('NotebookView', () => {
     expect(ask).toEqual({ text: 'Quiz me across Calculus I. One question per page, mixed in order: Derivative, Limits.', command: 'quiz' });
   });
 
+  it('starts one conversation for a double-click, not two', async () => {
+    render(<NotebookView id="nb-calc" />);
+    await screen.findByRole('heading', { name: 'Calculus I' });
+    let release!: () => void;
+    (fetch as any).mockImplementation(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: undefined });
+      await new Promise<void>((r) => { release = r; });
+      return { ok: true, status: 200, json: async () => ({ id: 'nb-calc', title: 'Calculus I' }) } as Response;
+    });
+    const button = screen.getByRole('button', { name: 'New conversation' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    release();
+    await waitFor(() => expect(location.hash).toMatch(/^#\/t\//));
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+  });
+
   it('does not open a conversation when filing it failed, and says why', async () => {
     render(<NotebookView id="nb-calc" />);
     await screen.findByRole('heading', { name: 'Calculus I' });

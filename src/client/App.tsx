@@ -103,13 +103,15 @@ export function App() {
         <div className="app">
           <header className="topbar">
             {brand}
-            <CommandPalette />
+            <CommandPalette threadId={threadId} />
             <TopbarStatus />
             <AddMaterial />
           </header>
           <main className="notebooks-main">
             {notebookRoute.notebookId
-              ? <NotebookView id={notebookRoute.notebookId} />
+              // Keyed: notebook A's state (a load in flight, an open delete confirmation) must never
+              // carry over to notebook B.
+              ? <NotebookView key={notebookRoute.notebookId} id={notebookRoute.notebookId} />
               : <NotebooksHome />}
           </main>
         </div>
@@ -128,7 +130,7 @@ export function App() {
         <header className="topbar">
           {brand}
           <NotebookCrumb threadId={threadId} />
-          <CommandPalette />
+          <CommandPalette threadId={threadId} />
           <HistoryMenu activeId={threadId} onSelect={selectThread} />
           <TopbarStatus />
           {/* THE add entry point — one control for every kind of material (file, git URL, local

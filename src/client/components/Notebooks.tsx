@@ -5,7 +5,7 @@
 // filed under. Everything a card shows (topics, mastery, due) comes from notebookRoutes.ts, which
 // derives it from the student ledger on every read; this file only renders it and sends the
 // learner's edits back.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NotebookIcon as NotebookGlyph } from '@phosphor-icons/react/dist/csr/Notebook';
 import {
   ApiError, createNotebook, deleteNotebook, fileThread, getNotebook, getNotebooks, getPageNotebooks, getThreadNotebook,
@@ -363,22 +363,38 @@ export function NotebookView({ id }: { id: string }) {
   const [allThreads, setAllThreads] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
+  // Guards a load from landing after this view has moved on. App also keys the view by notebook id,
+  // so a jump from A to B mounts a fresh view; this covers a reload (after rename, sources)
+  // racing an unmount.
+  const alive = useRef(true);
+  // Set on every mount, not only initialised: StrictMode mounts, cleans up and mounts again, and a
+  // flag only ever cleared would drop every load after that first cleanup.
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   function load() {
-    getNotebook(id).then((d) => { setDetail(d); setError(null); })
+    getNotebook(id).then((d) => { if (alive.current) { setDetail(d); setError(null); } })
       // getJson's 404 copy ("Nothing written for … yet") is about pages; a notebook that 404s was
       // deleted, or the link is stale.
-      .catch((e) => setError(e instanceof ApiError && e.status === 404
-        ? 'This notebook no longer exists — it may have been deleted.'
-        : e instanceof Error ? e.message : String(e)));
+      .catch((e) => {
+        if (!alive.current) return;
+        setError(e instanceof ApiError && e.status === 404
+          ? 'This notebook no longer exists — it may have been deleted.'
+          : e instanceof Error ? e.message : String(e));
+      });
   }
   useEffect(() => { setDetail(null); load(); }, [id]);
 
+  // One conversation per click: a fast double-click filed two threads and queued two first
+  // messages, one of them never sent. Every button that starts a conversation checks this.
+  const [starting, setStarting] = useState(false);
   async function newConversation(first?: PendingAsk) {
+    if (starting) return;
+    setStarting(true);
     setActionError(null);
     try {
       await startConversation(id, first);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
+      setStarting(false);
     }
   }
   async function remove() {
@@ -418,11 +434,11 @@ export function NotebookView({ id }: { id: string }) {
           {/* Anki's "Study now": one click from the deck to the reviews it is waiting on. Offered
               only when something is due, so it never starts a session with nothing to do. */}
           {studyNow && (
-            <button type="button" className="primary" onClick={() => newConversation({ text: studyNow })}>
+            <button type="button" className="primary" disabled={starting} onClick={() => newConversation({ text: studyNow })}>
               Review {plural(detail.topics.filter((t) => t.due).length, 'due topic')}
             </button>
           )}
-          <button type="button" className={studyNow ? '' : 'primary'} onClick={() => newConversation()}>
+          <button type="button" className={studyNow ? '' : 'primary'} disabled={starting} onClick={() => newConversation()}>
             New conversation
           </button>
         </div>
@@ -441,7 +457,7 @@ export function NotebookView({ id }: { id: string }) {
           <ul>
             {studio.map((a) => (
               <li key={a.label}>
-                <button type="button" onClick={() => newConversation(a.ask)}>
+                <button type="button" disabled={starting} onClick={() => newConversation(a.ask)}>
                   <span className="nb-studio-label">{a.label}</span>
                   <span className="nb-studio-hint">{a.hint}</span>
                 </button>

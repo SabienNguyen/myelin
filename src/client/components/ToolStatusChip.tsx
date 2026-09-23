@@ -49,8 +49,11 @@ function pageLabel(args: any, result: any, slug: string): string {
   return typeof title === 'string' && title.trim() ? title : slug.replace(/-/g, ' ');
 }
 
-export function ToolStatusChip({ toolName, args, result }: any) {
-  const failed = result && typeof result === 'object' && (result as any).isError;
+export function ToolStatusChip({ toolName, args, result, isError }: any) {
+  // Two shapes of failure: a tool that threw reaches here as the isError prop with `{ error }` as
+  // its result (runtimeAdapter.ts), an MCP error as a result carrying isError. Either one must
+  // never render as success — least of all as a link to the page it failed to touch.
+  const failed = isError === true || (result && typeof result === 'object' && (result as any).isError === true);
   const [done, notDone] = LABELS[toolName] ?? [toolName, `${toolName} failed`];
   const slug = typeof args?.slug === 'string' && args.slug ? args.slug : null;
   const verb = PAGE_VERBS[toolName];
