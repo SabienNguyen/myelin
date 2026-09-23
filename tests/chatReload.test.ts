@@ -49,7 +49,10 @@ describe('chat survives a page reload', () => {
     const vite = await createServer({ configFile: false, root: resolve('.'),
       server: { host: '127.0.0.1', port: 0, proxy: { '/api': `http://127.0.0.1:${address.port}` } } });
     await vite.listen();
-    const browser = await chromium.launch({ headless: true });
+    // Same escape hatch as playwright.config.ts: a sandbox image that ships a pinned Chromium other
+    // than the build this @playwright/test wants names it here instead of failing to launch.
+    const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+    const browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     try {
       const page = await browser.newPage();
       let posts = 0;
