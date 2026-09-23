@@ -2,89 +2,51 @@
 // project's NodeNext resolution it is treated as a CommonJS module. TS's CJS/ESM interop then folds
 // this module's `export default` into "the default import IS the whole module namespace" (which
 // mirrors Node's real runtime behaviour for a plain `module.exports = fn` package) — so the type of
-// the default import loses `assign`/`inferSettings`, which exist only on the private, un-exported
+// the default import loses `assign`, which exists only on the private, un-exported
 // `IForceAtlas2Layout` interface attached to that default value in the library's own index.d.ts.
 // Confirmed with `node -e "import('graphology-layout-forceatlas2').then(m => console.log(typeof
-// m.default.assign))"` that the runtime value genuinely has both methods; the cast below only
+// m.default.assign))"` that the runtime value genuinely has the method; the cast below only
 // restores type information NodeNext's interop fails to expose, it does not paper over a real gap.
-// The worker subpath needs an explicit `.js` extension — this package has no "exports" map, so
-// NodeNext's extension-less subpath resolution (which works for the package's main entry via
-// "main") does not apply to subpaths. The same CJS-interop fold hits its default export too (a
-// `export default class FA2LayoutSupervisor {...}`), which is why the import below is unusable
-// both as a type (`Cannot use namespace 'FA2LayoutSupervisor' as a type`) and as a constructor
-// (`This expression is not constructable`) without the same restorative cast.
 import forceAtlas2Import, { type ForceAtlas2Settings } from 'graphology-layout-forceatlas2';
-import FA2LayoutSupervisorImport from 'graphology-layout-forceatlas2/worker.js';
-import type { MasteryGraph } from './buildGraph.js';
+// The package's own worker SUPERVISOR (worker.js) is not used: it owns the position matrix, so a
+// node dragged mid-run was invisible to the worker (every result snapped it back to where the drag
+// began, and its neighbours never followed the cursor), and every result it receives is written to
+// the graph at once. That second part made sigma re-process every node per iteration, which the
+// first WebGL version worked around by pacing iterations to animation frames — and that tied layout
+// progress to the frame rate: under software WebGL (headless Chromium, ~300ms frames at 5,000
+// nodes) a whole vault got a few dozen iterations before the run cap and stayed a hairball. The loop
+// below keeps the package's algorithm (webworker.js wraps iterate.js) and its matrix builder, and
+// owns the rest. Declarations for these two internal modules: forceatlas2.d.ts.
+import workerFunction from 'graphology-layout-forceatlas2/webworker.js';
+import { createWorker, graphToByteArrays } from 'graphology-layout-forceatlas2/helpers.js';
+import type { MasteryGraph, Point } from './buildGraph.js';
 
 interface ForceAtlas2Module {
   assign(graph: MasteryGraph, params: { iterations: number; settings: ForceAtlas2Settings }): void;
-  inferSettings(graph: MasteryGraph): ForceAtlas2Settings;
 }
 const forceAtlas2 = forceAtlas2Import as unknown as ForceAtlas2Module;
 
-interface FA2LayoutInstance {
-  isRunning(): boolean;
-  start(): void;
-  stop(): void;
-  kill(): void;
-}
-interface FA2LayoutConstructor {
-  new (graph: MasteryGraph, params?: { settings?: ForceAtlas2Settings }): FA2LayoutInstance;
-}
-const FA2LayoutSupervisor = FA2LayoutSupervisorImport as unknown as FA2LayoutConstructor;
-
-// FA2LayoutSupervisor's own message loop (worker.js's handleMessage, confirmed by reading
-// node_modules/graphology-layout-forceatlas2/worker.js at the pinned 0.10.1) re-requests the next
-// iteration the INSTANT the previous one's result arrives, with no pacing at all — worker.js's
-// webworker.js does exactly one iterate() per message, so the round trip is only as slow as one
-// iteration's compute plus a structured-clone postMessage. Measured against the 5,000-node /
-// 12,000-edge fixture (graph-perf.e2e.ts), that loop ran far faster than the display can show
-// anything: EVERY message calls graph.updateEachNodeAttributes (helpers.assignLayoutChanges),
-// which fires graphology's `eachNodeAttributesUpdated` — and sigma's own handler for that event
-// (bindGraphHandlers in node_modules/sigma) synchronously re-touches and re-uploads EVERY node's
-// GPU buffer data on EVERY firing, not just the ones that actually get drawn (only the final WebGL
-// draw call is rAF-debounced; the buffer-update loop is not). Left unthrottled, that starved the
-// main thread badly enough that even OUR OWN 250ms settle-check interval was observed firing only
-// a handful of times over 20+ seconds instead of ~90 — the settle/cap machinery in beginSettleWatch
-// and start() below cannot do its job on a thread this saturated. `askForIterations` isn't part of
-// the package's public API/.d.ts (see worker.d.ts), but it's a plain own-instance method (assigned
-// in the constructor, not a closure), so replacing it after construction is a normal, narrow
-// override — not a patch to the installed package — that every call site (both start()'s own
-// initial request and handleMessage's repeated ones) picks up because they invoke it via `this.`.
-// Pacing it to one request per animation frame caps the render-buffer-touching cost to what the
-// display can show anyway, which is the same ceiling sigma's own scheduleRender already accepts.
-function throttleIterationRequests(instance: FA2LayoutInstance): void {
-  const target = instance as unknown as { askForIterations: (withEdges?: boolean) => void };
-  const original = target.askForIterations.bind(target);
-  let scheduled = false;
-  target.askForIterations = (withEdges?: boolean) => {
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(() => {
-      scheduled = false;
-      original(withEdges);
-    });
-  };
-}
+// The node matrix layout graphToByteArrays builds and iterate.js reads: PPN floats per node, in
+// graph.forEachNode order at the time it was built.
+const PPN = 10;
+const NODE_X = 0;
+const NODE_Y = 1;
+const NODE_FIXED = 9;
 
 export const LAYOUT = {
   barnesHutAbove: 500, slowDown: 6, gravity: 0.6, scalingRatio: 8,
-  // Diagnosed against a real 5,000-node / 12,000-edge run (graph-perf.e2e.ts): ForceAtlas2 with
-  // scalingRatio 8 operates at a coordinate scale where the bbox diagonal is in the hundreds to
-  // low thousands of graph units, and the mean per-node displacement between 250ms settle checks
-  // was measured at 50-300+ units WHILE the layout was still visibly spreading out — an absolute
-  // epsilon of 0.15 (the old value) is three orders of magnitude below that scale and is never
-  // reached while the graph is still moving at all; only a threshold relative to the graph's own
-  // extent is scale-free across a 2-node contextual view and a 5,000-node whole vault alike.
-  settleCheckMs: 250, settleRelativeEpsilon: 0.0015, settleChecks: 2,
+  // Relative to the graph's own extent, because ForceAtlas2's coordinate scale runs from hundreds to
+  // thousands of units (an absolute epsilon of 0.15 was never reached while anything moved). 1%, not
+  // the 0.15% the first version used: with the worker iterating freely (hundreds of iterations per
+  // check), a converged layout still jitters by 0.4-0.7% of its diagonal per check — measured on a
+  // 60-page graph whose extent had stopped changing — so 0.15% was only ever met by the run cap.
+  settleCheckMs: 250, settleRelativeEpsilon: 0.01, settleChecks: 2,
   releaseRunMs: 1500, syncIterations: 150,
   // Hard ceiling on how long the worker is allowed to run before we stop it and treat it as
   // settled regardless — see maxRunMsFor. Without this, a graph whose layout never converges
-  // (a dense hairball still slowly drifting, or a genuine settle-detection bug) runs the FA2
-  // worker forever, and every worker message forces sigma to walk and re-upload every node's GPU
-  // buffer (see GraphPanel.tsx's WebGL settings comment) — that is what starved panning in the
-  // measured run (panning p50 137ms against a 20ms target) far more than panning itself costs.
+  // (a dense hairball still slowly drifting, or a genuine settle-detection bug) runs the worker
+  // forever, and every frame of the run makes sigma re-process and re-upload every node — the
+  // cost that starved panning in the first measured run (p50 137ms against a 20ms target).
   maxRunMsCeiling: 12_000, maxRunMsFloor: 3_000, maxRunMsPerNode: 3,
 } as const;
 
@@ -151,26 +113,26 @@ export function snapshot(graph: MasteryGraph): Float64Array {
   return out;
 }
 
-// A whole-vault screenshot at ~400 nodes (well under barnesHutAbove) showed a hairball: nodes
-// overlapping heavily rather than separated by visible gaps. adjustSizes (FA2's own anti-overlap
-// term, which factors node radius into repulsion) stops two node CENTRES landing closer than their
-// combined on-screen radii, at a real per-iteration cost the plan deliberately avoided for the
-// 5,000-node case — so it is scoped to graphs small enough that the extra cost is free in practice,
-// well below barnesHutAbove where the O(n²) term it adds would compound with Barnes-Hut's own
-// overhead. adjustSizes alone was not enough, though: sigma's default itemSizesReference ('screen')
-// renders every node at close to the same PIXEL size regardless of zoom (only sqrt(cameraRatio)-
-// scaled), while adjustSizes' gap is a GRAPH-space quantity — at the zoom a few hundred nodes need
-// to fit the frame, that gap shrinks to a few screen pixels even though the constant-pixel circles
-// stay full size, so they visually overlapped anyway. A much larger scalingRatio for this same
-// graph-size band pushes the GRAPH-space equilibrium spacing well past what any reasonable zoom
-// compresses back down to overlapping — confirmed by screenshot at 400 nodes, not by formula.
+// A whole-vault screenshot at ~400 nodes showed a hairball: nodes overlapping heavily rather than
+// separated by visible gaps. adjustSizes (FA2's own anti-overlap term, which factors node radius
+// into repulsion) keeps two node centres at least their combined radii apart, at a per-iteration
+// cost the plan deliberately avoided for the 5,000-node case — so it is scoped to graphs small
+// enough that the cost is free in practice. It works in GRAPH units while sigma draws sizes in
+// SCREEN pixels, so it only stops visual overlap together with buildGraph.ts's densityScale, which
+// shrinks nodes as a view gets denser.
 const ADJUST_SIZES_BELOW = 2_000;
 
+/** Complete, because the worker receives them verbatim: nothing fills in the package defaults on the
+ *  way (its supervisor did, and layout.ts no longer uses it), and a missing edgeWeightInfluence or
+ *  barnesHutTheta is NaN inside iterate.js — NaN positions are nodes that vanish from the canvas. */
 function settingsFor(graph: MasteryGraph): ForceAtlas2Settings {
   return {
-    ...forceAtlas2.inferSettings(graph),
-    // inferSettings turns this on by design (Gephi's own heuristic favours it for anything but a
-    // tiny graph) — it replaces gravity's normal 1/distance falloff with a CONSTANT pull toward the
+    linLogMode: false,
+    outboundAttractionDistribution: false,
+    edgeWeightInfluence: 1,
+    barnesHutTheta: 0.5,
+    // Gephi's own heuristic (the package's inferSettings) turns this on for anything but a
+    // tiny graph — it replaces gravity's normal 1/distance falloff with a CONSTANT pull toward the
     // centre (iterate.js: `factor = coefficient * mass * g`, which algebraically cancels
     // `coefficient` entirely, making the pull independent of scalingRatio). That constant pull is
     // what packed a 400-node fixture into one dense, gapless clump regardless of how far
@@ -194,14 +156,129 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
   // just log the same failure repeatedly for no benefit — the failure is almost always permanent
   // (no WebWorker support, blocked Blob URLs), so we stick to the synchronous path from then on.
   let useSyncFallback = opts.reducedMotion === true;
-  let supervisor: FA2LayoutInstance | null = null;
   let running = false;
+  let worker: Worker | null = null;
+  let settings: ForceAtlas2Settings | null = null;
+  // Matrix offset of each node for the current run — graphToByteArrays' forEachNode order.
+  let offsets = new Map<string, number>();
+  // Where the cursor holds each dragged node. Written into every request so the worker lays the rest
+  // out around it, and over every result the graph takes so the node stays under the cursor.
+  const pins = new Map<string, Point>();
+  // Released since the last request: the worker still has them fixed until told otherwise.
+  const unpinned = new Set<string>();
+  // The worker iterates as fast as it can; the graph takes only the newest result, once per frame.
+  let latest: Float32Array | null = null;
+  let applyFrame: number | null = null;
+  let restartTimer: ReturnType<typeof setTimeout> | null = null;
   let settleInterval: ReturnType<typeof setInterval> | null = null;
   let releaseTimer: ReturnType<typeof setTimeout> | null = null;
   let maxRunTimer: ReturnType<typeof setTimeout> | null = null;
   let prevSnapshot: Float64Array | null = null;
   let prevOrder = -1;
   let belowCount = 0;
+  // Settling is judged on positions that actually LANDED, not on wall-clock windows. A check window
+  // with nothing applied in it (a stalled frame, a background tab) says nothing about movement, but
+  // used to count as "stopped moving" — two such windows froze a 5,000-node layout mid-spread about
+  // a second in (graph-perf.e2e.ts, on roughly every other run). Results land through
+  // graph.updateEachNodeAttributes (applyLatest), so that event is the count.
+  let applied = 0;
+  let appliedAtCheck = 0;
+  const countApplied = () => { applied += 1; };
+  graph.on('eachNodeAttributesUpdated', countApplied);
+
+  function writePins(nodes: Float32Array): void {
+    for (const [node, p] of pins) {
+      const i = offsets.get(node);
+      if (i === undefined) continue;
+      nodes[i + NODE_X] = p.x;
+      nodes[i + NODE_Y] = p.y;
+      nodes[i + NODE_FIXED] = 1;
+    }
+    for (const node of unpinned) {
+      const i = offsets.get(node);
+      if (i !== undefined) nodes[i + NODE_FIXED] = 0;
+    }
+    unpinned.clear();
+  }
+
+  function applyLatest(): void {
+    const m = latest;
+    latest = null;
+    if (!m || m.length !== graph.order * PPN) return;
+    let i = 0;
+    graph.updateEachNodeAttributes((node, attrs) => {
+      const pin = pins.get(node);
+      attrs.x = pin ? pin.x : m[i + NODE_X];
+      attrs.y = pin ? pin.y : m[i + NODE_Y];
+      i += PPN;
+      return attrs;
+    }, { attributes: ['x', 'y'] });
+  }
+
+  function onResult(from: Worker, event: MessageEvent<{ nodes: ArrayBuffer }>): void {
+    if (from !== worker || !running || !settings) return;
+    const nodes = new Float32Array(event.data.nodes);
+    writePins(nodes);
+    // Copied because `nodes` is transferred straight back to the worker below.
+    latest = nodes.slice();
+    if (applyFrame === null) {
+      applyFrame = requestAnimationFrame(() => {
+        applyFrame = null;
+        applyLatest();
+      });
+    }
+    from.postMessage({ settings, nodes: nodes.buffer }, [nodes.buffer]);
+  }
+
+  function endWorker(): void {
+    worker?.terminate();
+    worker = null;
+    latest = null;
+    if (applyFrame !== null) {
+      cancelAnimationFrame(applyFrame);
+      applyFrame = null;
+    }
+  }
+
+  /** Starts a worker on the graph as it is now. False when no worker can be made at all. */
+  function spawn(): boolean {
+    let w: Worker;
+    try {
+      w = createWorker(workerFunction);
+    } catch (err) {
+      console.error('[graph] layout worker failed, laying out on the main thread:', err);
+      useSyncFallback = true;
+      return false;
+    }
+    settings = settingsFor(graph);
+    const matrices = graphToByteArrays(graph, () => 1);
+    offsets = new Map();
+    let j = 0;
+    graph.forEachNode((node) => { offsets.set(node, j); j += PPN; });
+    writePins(matrices.nodes);
+    worker = w;
+    w.addEventListener('message', (event) => onResult(w, event as MessageEvent<{ nodes: ArrayBuffer }>));
+    w.postMessage(
+      { settings, nodes: matrices.nodes.buffer, edges: matrices.edges.buffer },
+      [matrices.nodes.buffer, matrices.edges.buffer],
+    );
+    return true;
+  }
+
+  // The matrices are indexed by the node order at spawn time, so ANY change to the node or edge set
+  // mid-run (a poll adding a page) makes them wrong. Coalesced: one sync can add thousands of edges.
+  const onStructureChange = () => {
+    if (!running || restartTimer !== null) return;
+    latest = null;
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      if (!running) return;
+      endWorker();
+      if (!spawn()) runSync();
+    }, 0);
+  };
+  const STRUCTURE_EVENTS = ['nodeAdded', 'nodeDropped', 'edgeAdded', 'edgeDropped', 'edgesCleared', 'cleared'] as const;
+  for (const name of STRUCTURE_EVENTS) graph.on(name, onStructureChange);
 
   function clearReleaseTimer(): void {
     if (releaseTimer !== null) {
@@ -220,18 +297,24 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
     belowCount = 0;
   }
 
-  function clearMaxRunTimer(): void {
+  function clearTimers(): void {
+    clearReleaseTimer();
+    clearSettleWatch();
     if (maxRunTimer !== null) {
       clearTimeout(maxRunTimer);
       maxRunTimer = null;
     }
+    if (restartTimer !== null) {
+      clearTimeout(restartTimer);
+      restartTimer = null;
+    }
   }
 
   function stop(): void {
-    clearReleaseTimer();
-    clearSettleWatch();
-    clearMaxRunTimer();
-    if (supervisor && running) supervisor.stop();
+    clearTimers();
+    // What the worker computed since the last frame is the layout's final word — keep it.
+    if (running) applyLatest();
+    endWorker();
     running = false;
   }
 
@@ -244,6 +327,7 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
     prevSnapshot = snapshot(graph);
     prevOrder = graph.order;
     belowCount = 0;
+    appliedAtCheck = applied;
     settleInterval = setInterval(() => {
       // The node count changed mid-layout (syncGraph added/removed nodes): the old snapshot no
       // longer lines up with forEachNode's order, so restart the baseline instead of comparing
@@ -252,8 +336,13 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
         prevOrder = graph.order;
         prevSnapshot = snapshot(graph);
         belowCount = 0;
+        appliedAtCheck = applied;
         return;
       }
+      // Nothing landed since the last check: no evidence either way. The baseline stays put, so
+      // the next check measures across the whole gap.
+      if (applied === appliedAtCheck) return;
+      appliedAtCheck = applied;
       const displacement = prevSnapshot ? meanDisplacement(prevSnapshot, graph) : Infinity;
       prevSnapshot = snapshot(graph);
       // Scale-free: see LAYOUT.settleRelativeEpsilon's comment for why an absolute threshold
@@ -273,35 +362,21 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
 
   function runSync(): void {
     forceAtlas2.assign(graph, { iterations: LAYOUT.syncIterations, settings: settingsFor(graph) });
-    running = false;
+    stop();
     for (const cb of listeners) cb();
   }
 
   function start(): void {
-    if (running) return;
-    if (useSyncFallback) {
+    if (running || graph.order === 0) return;
+    if (useSyncFallback || !spawn()) {
       runSync();
       return;
     }
-    let instance: FA2LayoutInstance;
-    try {
-      instance = new FA2LayoutSupervisor(graph, { settings: settingsFor(graph) });
-    } catch (err) {
-      console.error('[graph] layout worker failed, laying out on the main thread:', err);
-      useSyncFallback = true;
-      runSync();
-      return;
-    }
-    supervisor = instance;
-    throttleIterationRequests(instance);
-    supervisor.start();
     running = true;
     beginSettleWatch();
     // Safety valve: without this, a graph that never satisfies the relative-displacement check
     // (a genuinely non-converging layout, or a future settle-detection bug) runs the worker
-    // forever. Every worker message forces sigma to re-touch every node (see GraphPanel.tsx's
-    // WebGL settings comment on hideEdgesOnMove/hideLabelsOnMove), which is real, measured cost —
-    // stopping unconditionally after a size-scaled ceiling bounds that cost even in the worst case.
+    // forever, and every frame it runs re-processes every node in sigma.
     const cap = maxRunMsFor(graph.order);
     maxRunTimer = setTimeout(() => {
       maxRunTimer = null;
@@ -311,13 +386,12 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
   }
 
   function kill(): void {
-    clearReleaseTimer();
-    clearSettleWatch();
-    clearMaxRunTimer();
-    if (supervisor) supervisor.kill();
-    supervisor = null;
+    clearTimers();
+    endWorker();
     running = false;
     listeners.clear();
+    graph.removeListener('eachNodeAttributesUpdated', countApplied);
+    for (const name of STRUCTURE_EVENTS) graph.removeListener(name, onStructureChange);
   }
 
   return {
@@ -326,10 +400,16 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
     kill,
     isRunning: () => running,
     pin(node, x, y) {
+      pins.set(node, { x, y });
+      unpinned.delete(node);
       graph.mergeNodeAttributes(node, { x, y, fixed: true });
+      // A new grab within releaseRunMs of the last release must not be stopped by that release.
+      clearReleaseTimer();
       if (!running && !useSyncFallback) start();
     },
     release(node) {
+      pins.delete(node);
+      unpinned.add(node);
       graph.mergeNodeAttributes(node, { fixed: false });
       if (!running) return;
       clearReleaseTimer();

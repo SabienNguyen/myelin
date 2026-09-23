@@ -164,7 +164,7 @@ describe('LAYOUT constants', () => {
   it('exposes the exact tuned values', () => {
     expect(LAYOUT).toEqual({
       barnesHutAbove: 500, slowDown: 6, gravity: 0.6, scalingRatio: 8,
-      settleCheckMs: 250, settleRelativeEpsilon: 0.0015, settleChecks: 2,
+      settleCheckMs: 250, settleRelativeEpsilon: 0.01, settleChecks: 2,
       releaseRunMs: 1500, syncIterations: 150,
       maxRunMsCeiling: 12_000, maxRunMsFloor: 3_000, maxRunMsPerNode: 3,
     });
@@ -202,6 +202,12 @@ class FakeWorker {
   terminate(): void {}
 }
 
+/** One worker iteration's worth of movement, landed the way FA2's supervisor lands it
+ *  (helpers.assignLayoutChanges → updateEachNodeAttributes) — which is what settle detection counts. */
+function landIteration(graph: MasteryGraph, xs: Record<string, number>): void {
+  graph.updateEachNodeAttributes((node, attrs) => (node in xs ? { ...attrs, x: xs[node] } : attrs));
+}
+
 describe('createLayout — settle detection is scale-free', () => {
   const originalWorker = (globalThis as unknown as { Worker?: unknown }).Worker;
 
@@ -213,7 +219,7 @@ describe('createLayout — settle detection is scale-free', () => {
   it('settles on relative displacement even when absolute displacement is large', () => {
     // At a bbox diagonal of ~100,000 graph units (ForceAtlas2's own scale at scalingRatio 8 on a
     // real graph — see LAYOUT.settleRelativeEpsilon's comment), a per-tick displacement of 0.2
-    // units is settled (relative ~0.000002, under settleRelativeEpsilon 0.0015) even though 0.2 is
+    // units is settled (relative ~0.000002, far under settleRelativeEpsilon) even though 0.2 is
     // well above the OLD absolute epsilon (0.15) that this test would have failed to settle under.
     (globalThis as unknown as { Worker: unknown }).Worker = FakeWorker;
     vi.useFakeTimers();
@@ -230,12 +236,13 @@ describe('createLayout — settle detection is scale-free', () => {
     expect(layout.isRunning()).toBe(true);
 
     // Two consecutive small nudges (settleChecks: 2), each comfortably bigger than the old 0.15
-    // absolute epsilon but tiny relative to the graph's own scale.
-    graph.mergeNodeAttributes('b', { x: 100_000.4, y: 0 });
+    // absolute epsilon but tiny relative to the graph's own scale. Landed through
+    // updateEachNodeAttributes, as every real worker iteration is.
+    landIteration(graph, { b: 100_000.4 });
     vi.advanceTimersByTime(LAYOUT.settleCheckMs);
     expect(onSettle).not.toHaveBeenCalled();
 
-    graph.mergeNodeAttributes('b', { x: 100_000.8, y: 0 });
+    landIteration(graph, { b: 100_000.8 });
     vi.advanceTimersByTime(LAYOUT.settleCheckMs);
 
     expect(onSettle).toHaveBeenCalledTimes(1);
@@ -259,7 +266,7 @@ describe('createLayout — settle detection is scale-free', () => {
     let bump = 0;
     const mutator = setInterval(() => {
       bump += 1;
-      graph.mergeNodeAttributes('b', { x: 10 + bump * 5, y: 0 });
+      landIteration(graph, { b: 10 + bump * 5 });
     }, LAYOUT.settleCheckMs);
 
     const layout = createLayout(graph);
@@ -278,6 +285,178 @@ describe('createLayout — settle detection is scale-free', () => {
     expect(layout.isRunning()).toBe(false);
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('[graph]'));
     warnSpy.mockRestore();
+  });
+});
+
+describe('createLayout — settle needs iterations to judge', () => {
+  const originalWorker = (globalThis as unknown as { Worker?: unknown }).Worker;
+  afterEach(() => {
+    (globalThis as unknown as { Worker?: unknown }).Worker = originalWorker;
+    vi.useRealTimers();
+  });
+
+  // Iterations are paced one per animation frame. A frame longer than settleCheckMs (software WebGL
+  // at 5,000 nodes takes 300-500ms) left two checks in a row with nothing landed between them, which
+  // read as "stopped moving" and froze the layout mid-spread about a second after it started.
+  it('does not settle while no iteration has landed, however many checks pass', () => {
+    (globalThis as unknown as { Worker: unknown }).Worker = FakeWorker;
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const graph = freshGraph();
+    addNode(graph, 'a', 0, 0);
+    addNode(graph, 'b', 100, 0);
+    const layout = createLayout(graph);
+    const onSettle = vi.fn();
+    layout.onSettle(onSettle);
+    layout.start();
+
+    vi.advanceTimersByTime(LAYOUT.settleCheckMs * 6);
+    expect(onSettle).not.toHaveBeenCalled();
+    expect(layout.isRunning()).toBe(true);
+
+    // Iterations that barely move anything are what settling looks like.
+    for (let i = 0; i < LAYOUT.settleChecks + 1; i++) {
+      landIteration(graph, { b: 100 + (i + 1) * 0.001 });
+      vi.advanceTimersByTime(LAYOUT.settleCheckMs);
+    }
+    expect(onSettle).toHaveBeenCalledTimes(1);
+    layout.kill();
+  });
+});
+
+// Records what the layout sends and lets a test answer as the worker would: one iteration per
+// request, the node matrix back in `nodes`.
+class ScriptedWorker {
+  static live = new Set<ScriptedWorker>();
+  posted: Array<{ settings: Record<string, unknown>; nodes: Float32Array; edges?: Float32Array }> = [];
+  private listener: ((event: { data: { nodes: ArrayBuffer } }) => void) | null = null;
+  constructor() { ScriptedWorker.live.add(this); }
+  addEventListener(_type: string, fn: (event: { data: { nodes: ArrayBuffer } }) => void): void { this.listener = fn; }
+  removeEventListener(): void {}
+  postMessage(payload: { settings: Record<string, unknown>; nodes: ArrayBuffer; edges?: ArrayBuffer }): void {
+    this.posted.push({
+      settings: payload.settings,
+      nodes: new Float32Array(payload.nodes.slice(0)),
+      edges: payload.edges ? new Float32Array(payload.edges.slice(0)) : undefined,
+    });
+  }
+  terminate(): void { ScriptedWorker.live.delete(this); }
+  /** Reply to the latest request with `move` applied to its matrix (node offset → new x/y). */
+  reply(move: (nodes: Float32Array) => void): void {
+    const nodes = new Float32Array(this.posted.at(-1)!.nodes);
+    move(nodes);
+    this.listener!({ data: { nodes: nodes.buffer } });
+  }
+}
+const PPN = 10;
+
+describe('createLayout — the worker loop', () => {
+  const originalWorker = (globalThis as unknown as { Worker?: unknown }).Worker;
+  afterEach(() => {
+    (globalThis as unknown as { Worker?: unknown }).Worker = originalWorker;
+    ScriptedWorker.live.clear();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+  function setup() {
+    (globalThis as unknown as { Worker: unknown }).Worker = ScriptedWorker;
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const graph = freshGraph();
+    addNode(graph, 'a', 0, 0);
+    addNode(graph, 'b', 10, 0);
+    graph.addEdge('a', 'b', { kind: 'prereq', color: '#000', size: 1 });
+    const layout = createLayout(graph);
+    return { graph, layout, worker: () => [...ScriptedWorker.live].at(-1)! };
+  }
+
+  // The worker gets settings verbatim — nothing fills in defaults on the way. A missing
+  // edgeWeightInfluence or barnesHutTheta is NaN inside iterate.js, and NaN positions are nodes that
+  // silently vanish from the canvas (a 60-page graph drew 16).
+  it('sends the worker every setting iterate.js reads', () => {
+    const { layout, worker } = setup();
+    layout.start();
+    const { settings } = worker().posted[0];
+    for (const key of ['linLogMode', 'outboundAttractionDistribution', 'adjustSizes', 'edgeWeightInfluence',
+      'scalingRatio', 'strongGravityMode', 'gravity', 'slowDown', 'barnesHutOptimize', 'barnesHutTheta']) {
+      expect(settings[key], key).toBeDefined();
+    }
+    layout.kill();
+  });
+
+  // Every drag after a settle and every membership change starts a run. A worker left behind by an
+  // earlier run is a thread that never goes away.
+  it('keeps exactly one worker alive across runs, and none once stopped or killed', () => {
+    const { graph, layout } = setup();
+    for (let run = 0; run < 3; run++) {
+      layout.start();
+      expect(ScriptedWorker.live.size).toBe(1);
+      layout.stop();
+      expect(ScriptedWorker.live.size).toBe(0);
+    }
+    layout.start();
+    addNode(graph, 'c', 5, 5); // a structure change mid-run replaces the worker, never adds one
+    vi.advanceTimersByTime(1);
+    expect(ScriptedWorker.live.size).toBe(1);
+    layout.kill();
+    expect(ScriptedWorker.live.size).toBe(0);
+  });
+
+  // The old supervisor owned the matrix: a node dragged mid-run snapped back to where the drag began
+  // on every result, and its neighbours never followed the cursor.
+  it('a node dragged mid-run is where the cursor is, fixed, in the next request and on the graph', () => {
+    const { graph, layout, worker } = setup();
+    layout.start();
+    layout.pin('b', 42, 43);
+    worker().reply((m) => { m[PPN] = 99; m[PPN + 1] = 99; }); // the worker moved b
+    const next = worker().posted.at(-1)!.nodes;
+    expect([next[PPN], next[PPN + 1], next[PPN + 9]]).toEqual([42, 43, 1]);
+    vi.advanceTimersByTime(20); // one animation frame
+    expect(graph.getNodeAttribute('b', 'x')).toBe(42);
+    expect(graph.getNodeAttribute('b', 'y')).toBe(43);
+
+    layout.release('b');
+    worker().reply(() => {});
+    expect(worker().posted.at(-1)!.nodes[PPN + 9]).toBe(0);
+    layout.kill();
+  });
+
+  // sigma re-processes every node per update, so results must not each become one; but the worker
+  // must not wait on frames either, or layout progress is tied to the frame rate.
+  it('asks for the next iteration at once, and lands only the newest result per frame', () => {
+    const { graph, layout, worker } = setup();
+    const updates = vi.fn();
+    graph.on('eachNodeAttributesUpdated', updates);
+    layout.start();
+    for (let k = 1; k <= 3; k++) worker().reply((m) => { m[0] = k; });
+    expect(worker().posted).toHaveLength(4); // the first request plus one per result
+    expect(updates).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(20);
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(graph.getNodeAttribute('a', 'x')).toBe(3);
+    layout.kill();
+  });
+
+  it('restarts on a structure change with matrices for the new node set', () => {
+    const { graph, layout, worker } = setup();
+    layout.start();
+    const first = worker();
+    addNode(graph, 'c', 5, 5);
+    vi.advanceTimersByTime(1);
+    expect(worker()).not.toBe(first);
+    expect(worker().posted[0].nodes).toHaveLength(3 * PPN);
+    expect(worker().posted[0].edges).toBeDefined();
+    layout.kill();
+  });
+
+  it('a new grab within releaseRunMs of a release keeps the layout running', () => {
+    const { layout } = setup();
+    layout.pin('a', 1, 1);
+    layout.release('a');
+    layout.pin('b', 2, 2);
+    vi.advanceTimersByTime(LAYOUT.releaseRunMs + 1);
+    expect(layout.isRunning()).toBe(true);
+    layout.kill();
   });
 });
 
