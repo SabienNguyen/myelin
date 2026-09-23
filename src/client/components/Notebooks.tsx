@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { NotebookIcon as NotebookGlyph } from '@phosphor-icons/react/dist/csr/Notebook';
 import {
-  ApiError, createNotebook, deleteNotebook, fileThread, getNotebook, getNotebooks, getThreadNotebook,
+  ApiError, createNotebook, deleteNotebook, fileThread, getNotebook, getNotebooks, getPageNotebooks, getThreadNotebook,
   renameNotebook, setNotebookSources,
   type NotebookDetail, type NotebookLevel, type NotebookRef, type NotebookSummary, type NotebooksPayload,
 } from '../lib/api.js';
@@ -640,5 +640,30 @@ export function NotebookIntro({ detail, onAsk }: { detail: NotebookDetail; onAsk
         </ul>
       )}
     </div>
+  );
+}
+
+/** The Page tab's "in <notebook>" links: which notebooks this page belongs to, one click back to
+ *  each — the page's side of the notebook's topic list. Nothing for a page no notebook covers. */
+export function PageNotebooks({ slug }: { slug: string }) {
+  const [refs, setRefs] = useState<NotebookRef[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    setRefs([]);
+    getPageNotebooks(slug)
+      .then((r) => { if (!cancelled) setRefs(Array.isArray(r) ? r : []); })
+      // Navigation sugar only: the page itself is unaffected. Logged so a broken route shows.
+      .catch((e) => console.error('[notebooks] could not look up this page’s notebooks:', e));
+    return () => { cancelled = true; };
+  }, [slug]);
+  return (
+    <>
+      {refs.map((nb) => (
+        <a key={nb.id} className="page-chip page-notebook" href={notebookHash(nb.id)}>
+          <NotebookGlyph size={12} weight="duotone" aria-hidden="true" />
+          <span className="visually-hidden">in notebook</span>{' '}{nb.title}
+        </a>
+      ))}
+    </>
   );
 }

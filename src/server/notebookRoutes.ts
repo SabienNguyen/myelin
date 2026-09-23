@@ -146,6 +146,17 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     }
   });
 
+  // Which notebooks cover a page, for the Page tab's "in <notebook>" links. No student state and no
+  // existence check needed: the page was just opened, and membership is all that is asked.
+  app.get('/api/page/:slug/notebooks', (c) => {
+    const slug = c.req.param('slug');
+    const sources = readSources(cfg.vault);
+    const touched = (threadId: string) => pagesTouched(loadThread(cfg.vault, threadId) as UIMessage[]);
+    return c.json(readNotebooks(cfg.vault)
+      .filter((nb) => notebookTopics(nb, touched, sources, () => true).includes(slug))
+      .map((nb) => ({ id: nb.id, title: nb.title })));
+  });
+
   app.get('/api/thread/:id/notebook', (c) => {
     const nb = notebookForThread(cfg.vault, c.req.param('id'));
     return c.json(nb ? { id: nb.id, title: nb.title } : null);

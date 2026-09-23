@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
-import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
+import { NotebookCrumb, NotebookIntro, NotebookView, NotebooksHome, PageNotebooks, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
 import { takePendingAsk } from '../../src/client/lib/pendingAsk.js';
 
 const now = new Date().toISOString();
@@ -287,5 +287,17 @@ describe('pendingAsk', () => {
     expect(takePendingAsk('t-x')).toBeNull();
     sessionStorage.setItem('myelin.pendingAsk.t-y', JSON.stringify({ text: 'hi', command: 'not-a-command' }));
     expect(takePendingAsk('t-y')).toEqual({ text: 'hi' });
+  });
+});
+
+describe('PageNotebooks', () => {
+  it('links the page to every notebook that covers it, and shows nothing for one that none cover', async () => {
+    routes['GET /api/page/chain-rule/notebooks'] = () => ({ body: [{ id: 'nb-calc', title: 'Calculus I' }] });
+    routes['GET /api/page/alkanes/notebooks'] = () => ({ body: [] });
+    const { rerender } = render(<PageNotebooks slug="chain-rule" />);
+    const link = await screen.findByRole('link', { name: 'in notebook Calculus I' });
+    expect(link.getAttribute('href')).toBe('#/notebooks/nb-calc');
+    rerender(<PageNotebooks slug="alkanes" />);
+    await waitFor(() => expect(screen.queryByRole('link')).toBeNull());
   });
 });

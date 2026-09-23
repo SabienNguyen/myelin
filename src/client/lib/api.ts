@@ -206,3 +206,5 @@ export const deleteNotebook = (id: string) =>
 export const fileThread = (id: string, threadId: string) =>
   sendJson<NotebookRef>('PUT', `/api/notebooks/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}`,
     undefined, 'file the conversation');
+export const getPageNotebooks = (slug: string) =>
+  getJson<NotebookRef[]>(`/api/page/${encodeURIComponent(slug)}/notebooks`, 'the notebooks this page is in');

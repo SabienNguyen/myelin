@@ -88,6 +88,11 @@ describe('notebook routes', () => {
     expect(threads.find((t: any) => t.id === 't-1').notebook).toEqual({ id, title: 'Calculus I' });
     expect(threads.find((t: any) => t.id === 't-loose').notebook).toBeNull();
 
+    // The page's own view of the same membership: from a conversation, and from a source.
+    expect(await (await app.request('/api/page/derivative/notebooks')).json()).toEqual([{ id, title: 'Calculus I' }]);
+    expect(await (await app.request('/api/page/limits/notebooks')).json()).toEqual([{ id, title: 'Calculus I' }]);
+    expect(await (await app.request('/api/page/continuity/notebooks')).json()).toEqual([]);
+
     const of = await (await app.request('/api/thread/t-1/notebook')).json();
     expect(of).toEqual({ id, title: 'Calculus I' });
     expect(await (await app.request('/api/thread/t-loose/notebook')).json()).toBeNull();

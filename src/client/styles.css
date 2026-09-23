@@ -3246,3 +3246,10 @@ button.nb-delete:hover { background: var(--bg-inset); }
 }
 .nb-studio-label { font-weight: 600; }
 .nb-studio-hint { font-size: 0.78rem; color: var(--text-muted); }
+
+/* A page's notebooks, in its meta row (Notebooks.tsx PageNotebooks): a link, so the accent. */
+.page-chip.page-notebook {
+  display: inline-flex; align-items: center; gap: 0.25rem; text-decoration: none;
+  color: var(--accent); background: var(--accent-soft); border-color: transparent;
+}
+.page-chip.page-notebook:hover { filter: brightness(1.08); }
