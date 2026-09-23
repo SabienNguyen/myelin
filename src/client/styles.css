@@ -819,6 +819,13 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
 .tool-note.skipped { font-weight: 500; letter-spacing: 0.04em; }
+/* The page a tool acted on, as a link into the Page tab: the name keeps its own case (a title,
+   not chrome) and takes the accent, so the source list reads as clickable. */
+.tool-note-page {
+  font: inherit; text-transform: none; letter-spacing: 0.01em; color: var(--accent);
+  background: none; border: 0; padding: 0; border-radius: 2px; cursor: pointer;
+}
+.tool-note-page:hover { background: none; text-decoration: underline; text-underline-offset: 2px; }
 .tool-note.skipped::before { content: "\2013\00a0"; color: var(--text-muted); }
 
 /* ── model thinking: collapsed by default, quiet like the tool chips ── */
@@ -3166,3 +3173,16 @@ button.nb-delete:hover { background: var(--bg-inset); }
 }
 .nb-starter-kind--review { color: var(--warn); }
 .nb-starter-kind--quiz { color: var(--mastery-practicing); }
+
+/* ── Stage at rest: the conversation's pages (ConversationPages.tsx) ───────────────────────── */
+.stage-pages { margin: 0 0 2rem; }
+.stage-pages h2 { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.5rem; }
+.stage-pages ul { list-style: none; margin: 0; padding: 0; }
+.stage-pages button {
+  width: 100%; display: flex; align-items: center; gap: 0.55rem; text-align: left;
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; padding: 0.55rem 0.2rem;
+}
+.stage-pages button:hover { background: var(--bg-inset); }
+.stage-pages-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.stage-pages-level { flex: none; color: var(--text-muted); font-size: 0.78rem; }
+.stage-empty:has(.stage-pages) { margin-top: 1.25rem; }

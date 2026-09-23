@@ -1,3 +1,5 @@
+import { panelBus } from '../lib/panelBus.js';
+
 // Fallback UI for MCP (server-side) tool calls in the transcript. The learner should see a
 // quiet status line — "✓ evidence recorded" — never raw JSON args, retries, or tool plumbing.
 //
@@ -30,9 +32,38 @@ const LABELS: Record<string, [string, string]> = {
   WebFetch: ['read a web page', 'could not read the page'],
 };
 
-export function ToolStatusChip({ toolName, result }: any) {
+// Tools that act on ONE page, and the verb their chip leads with. "read a page" twice in a row
+// told the learner nothing about which pages the answer drew on; naming them, as a link into the
+// Page tab, turns the marginalia into the answer's source list — what Perplexity and NotebookLM
+// show under a reply.
+const PAGE_VERBS: Record<string, string> = {
+  read_page: 'read',
+  write_page: 'wrote',
+  record_evidence: 'evidence recorded on',
+};
+
+/** The page's title when the call carries one (read_page's result, write_page's input), else the
+ *  slug with its hyphens read as spaces — still recognisable, never invented. */
+function pageLabel(args: any, result: any, slug: string): string {
+  const title = result?.page?.meta?.title ?? args?.title;
+  return typeof title === 'string' && title.trim() ? title : slug.replace(/-/g, ' ');
+}
+
+export function ToolStatusChip({ toolName, args, result }: any) {
   const failed = result && typeof result === 'object' && (result as any).isError;
   const [done, notDone] = LABELS[toolName] ?? [toolName, `${toolName} failed`];
+  const slug = typeof args?.slug === 'string' && args.slug ? args.slug : null;
+  const verb = PAGE_VERBS[toolName];
+  if (!failed && verb && slug) {
+    return (
+      <span className="tool-note" title={toolName}>
+        {verb}{' '}
+        <button type="button" className="tool-note-page" onClick={() => panelBus.openPage(slug)}>
+          {pageLabel(args, result, slug)}
+        </button>
+      </span>
+    );
+  }
   // Deliberately typographic, not a pill — reads as quiet marginalia, not UI chrome.
   return (
     <span className={`tool-note${failed ? ' failed' : ''}`} title={toolName}>

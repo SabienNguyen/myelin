@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ChatStoreContext } from '../chatCore/index.js';
 import { StageSummary } from './StageSummary.js';
+import { ConversationPages } from './ConversationPages.js';
 import { getGraph } from '../lib/api.js';
 import { panelBus, type PanelTab } from '../lib/panelBus.js';
 import { parseHash, parseNotebookRoute, serializeHash } from '../lib/urlState.js';
@@ -142,6 +143,7 @@ export function SidePanel() {
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
         <section className="stage-empty">
+          <ConversationPages messages={messages} />
           <h2>Your workspace</h2>
           <p>Exercises and feedback appear here as you learn.</p>
           <div className="stage-empty-actions">
