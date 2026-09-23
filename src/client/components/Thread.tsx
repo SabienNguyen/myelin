@@ -290,7 +290,7 @@ function AskTutorBridge() {
   return null;
 }
 
-interface PlanItem {
+export interface PlanItem {
   kind: string; slug: string; title: string; why: string; transfer?: string;
   /** For a `quiz` item: every page the one block should cover. */
   covers?: string[];
@@ -303,7 +303,7 @@ interface PlanItem {
  * default: the heading asks what to explore, and this is one answer. The whole plan travels in the
  * message so the tutor works through it in order.
  */
-function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
+function SessionPlanCta({ plan, label = 'Start today’s session' }: { plan: PlanItem[]; label?: string }) {
   const store = useChatStore();
   if (plan.length === 0) return null;
 
@@ -337,7 +337,7 @@ function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
   return (
     <div className="session-plan">
       <button type="button" className="session-plan-start" onClick={start}>
-        Start today’s session ({plan.length} {plan.length === 1 ? 'item' : 'items'})
+        {label} ({plan.length} {plan.length === 1 ? 'item' : 'items'})
       </button>
       <ol className="session-plan-preview">
         {plan.map((p) => (
@@ -349,6 +349,20 @@ function SessionPlanCta({ plan }: { plan: PlanItem[] }) {
       </ol>
     </div>
   );
+}
+
+/**
+ * The session plan narrowed to one notebook's pages: in a Calculus notebook, a plan row for
+ * organic chemistry is someone else's session. A quiz row keeps only the pages it covers inside
+ * the notebook and is dropped when none are left. Pure.
+ */
+export function planWithin(plan: PlanItem[], slugs: readonly string[]): PlanItem[] {
+  const inScope = new Set(slugs);
+  return plan.flatMap((p) => {
+    if (!p.covers?.length) return inScope.has(p.slug) ? [p] : [];
+    const covers = p.covers.filter((c) => inScope.has(c));
+    return covers.length ? [{ ...p, covers }] : [];
+  });
 }
 
 /**
@@ -380,7 +394,10 @@ function EmptyHero({ threadId }: { threadId?: string }) {
     return (
       <div className="thread-empty">
         <NotebookIntro detail={notebook} onAsk={(text) => { composer.setText(text); composer.send(); }} />
-        <SessionPlanCta plan={plan} />
+        <SessionPlanCta
+          plan={planWithin(plan, notebook.topics.map((t) => t.slug))}
+          label={`Study ${notebook.notebook.title}`}
+        />
       </div>
     );
   }
