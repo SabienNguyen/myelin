@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within, act } from '@testing-library/react';
-import { NotebookCrumb, NotebookIntro, NotebookPicker, NotebookView, NotebooksHome, NotebooksSection, PageNotebooks, notebookStarters, studioActions, studyNowMessage } from '../../src/client/components/Notebooks.js';
+import { NotebookCrumb, NotebookIntro, NotebookPicker, NotebookView, NotebooksHome, NotebooksSection, PageNotebooks, notebookStarters, studioActions, studyNowMessage, topicAsk, topicVerb } from '../../src/client/components/Notebooks.js';
 import { takePendingAsk } from '../../src/client/lib/pendingAsk.js';
 import { panelBus } from '../../src/client/lib/panelBus.js';
 
@@ -362,5 +362,27 @@ describe('NotebookPicker', () => {
     const { container } = render(<NotebookPicker threadId="t-here" />);
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(container.innerHTML).toBe('');
+  });
+});
+
+describe('topic actions', () => {
+  it('reviews what is due, teaches what is new, and practises the rest', () => {
+    expect(topicVerb({ due: true, level: 'mastered' })).toBe('review');
+    expect(topicVerb({ due: false, level: 'unseen' })).toBe('learn');
+    expect(topicVerb({ due: false, level: 'exposed' })).toBe('practice');
+    expect(topicAsk({ due: false, level: 'unseen', title: 'Continuity' })).toBe('Teach me Continuity.');
+  });
+
+  it('a topic row starts a filed conversation about that topic', async () => {
+    routes['GET /api/notebooks/nb-calc'] = () => ({ body: detail });
+    render(<NotebookView id="nb-calc" />);
+    await screen.findByRole('heading', { name: 'Calculus I' });
+    (fetch as any).mockImplementationOnce(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: undefined });
+      return { ok: true, status: 200, json: async () => ({ id: 'nb-calc', title: 'Calculus I' }) } as Response;
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'review Derivative' }));
+    await waitFor(() => expect(location.hash).toMatch(/^#\/t\/t-[a-z0-9]+$/));
+    expect(takePendingAsk(location.hash.slice('#/t/'.length))).toEqual({ text: 'Review Derivative with me. Check me before reteaching anything.' });
   });
 });

@@ -10,7 +10,7 @@ import { NotebookIcon as NotebookGlyph } from '@phosphor-icons/react/dist/csr/No
 import {
   ApiError, createNotebook, deleteNotebook, fileThread, getNotebook, getNotebooks, getPageNotebooks, getThreadNotebook,
   renameNotebook, setNotebookSources,
-  type NotebookDetail, type NotebookLevel, type NotebookRef, type NotebookSummary, type NotebooksPayload,
+  type NotebookDetail, type NotebookLevel, type NotebookRef, type NotebookSummary, type NotebooksPayload, type NotebookTopic,
 } from '../lib/api.js';
 import { notebookHash, serializeHash } from '../lib/urlState.js';
 import { panelBus } from '../lib/panelBus.js';
@@ -40,6 +40,20 @@ async function startConversation(notebookId: string, first?: PendingAsk): Promis
   await fileThread(notebookId, threadId);
   if (first) setPendingAsk(threadId, first);
   location.hash = threadHref(threadId);
+}
+
+/** What to do with one topic, from where it stands: review it when due, learn it when not started,
+ *  practise it otherwise. Pure. */
+export function topicVerb(t: Pick<NotebookTopic, 'due' | 'level'>): 'review' | 'learn' | 'practice' {
+  if (t.due) return 'review';
+  return t.level === 'unseen' ? 'learn' : 'practice';
+}
+
+export function topicAsk(t: Pick<NotebookTopic, 'due' | 'level' | 'title'>): string {
+  const verb = topicVerb(t);
+  if (verb === 'review') return `Review ${t.title} with me. Check me before reteaching anything.`;
+  if (verb === 'learn') return `Teach me ${t.title}.`;
+  return `Give me practice on ${t.title}. Check what I can do before explaining.`;
 }
 
 export interface StudioAction { label: string; hint: string; ask: PendingAsk }
@@ -524,6 +538,17 @@ export function NotebookView({ id }: { id: string }) {
                       ? <a href={threadHref(latest, t.slug)} className="nb-row-title">{t.title}</a>
                       : <span className="nb-row-title">{t.title}</span>}
                     {t.due && <span className="nb-pill nb-pill--due">due</span>}
+                    {/* The outline's rows are also ways in, as Khan Academy puts "practice" beside
+                        each skill: what to do with a topic follows from where it stands. */}
+                    <button
+                      type="button"
+                      className="ghost-btn nb-small nb-action"
+                      disabled={starting}
+                      aria-label={`${topicVerb(t)} ${t.title}`}
+                      onClick={() => newConversation({ text: topicAsk(t) })}
+                    >
+                      {topicVerb(t)}
+                    </button>
                     <span className="nb-row-time">
                       {LEVEL_LABEL[t.level]}
                       {/* Anki shows when a card comes back; this shows when a level would start
