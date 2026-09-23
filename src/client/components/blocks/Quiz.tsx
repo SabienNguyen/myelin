@@ -43,7 +43,7 @@ export function QuizInner({ args, addResult }: {
             )}
         </div>
       ))}
-      <button type="button" onClick={() => addResult({
+      <button type="button" className="block-submit" onClick={() => addResult({
         answers: args.items.map((item: any) => ({ id: item.id, answer: answers[item.id] ?? '' })),
       })}>Submit</button>
     </div>

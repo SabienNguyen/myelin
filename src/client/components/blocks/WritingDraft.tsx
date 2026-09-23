@@ -249,7 +249,7 @@ export function WritingDraftInner({ args, result, addResult }: {
       <HarperReview lints={lints} onApply={applyLint} />
       {/* The mechanical-issue count rides into the result so grading can weigh the draft's mechanics
           on a machine signal, not the model's read of them. */}
-      <button onClick={() => addResult({ draft, mechanicalIssues: lints.length })}>Submit</button>
+      <button type="button" className="block-submit" onClick={() => addResult({ draft, mechanicalIssues: lints.length })}>Submit</button>
     </div>
   );
 }

@@ -630,12 +630,17 @@ button.badge:hover { color: var(--text); }
 /* Writing-draft scoped to the pre-submit card only: the DONE card grew its own buttons (.cite-link,
    .revise-btn) that a bare `.writing-draft button` dressed as solid-accent primaries — the exact
    over-broad-selector bug the note above warns about. */
-.quiz > button:last-child, .math-scratchpad > button:last-child, .writing-draft:not(.done) > button {
+/* An explicit class, not position: the old `> button:last-child` selectors missed structured_check's
+   Submit entirely, so one block's primary action looked secondary beside the other three. */
+.block .block-submit {
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
   font-weight: 600;
 }
+/* The shared button:hover swaps in --accent-soft, which under --accent-text is dark-on-dark in the
+   dark theme: a hovered Submit was all but unreadable. Keep the fill, lift it slightly. */
+.block .block-submit:hover { background: var(--accent); filter: brightness(1.08); }
 
 math-field { display: block; width: 100%; margin: 0.5rem 0; border-radius: var(--radius-sm); }
 /* MathLive's default focus ring is its own orange — the one saturated hue nothing else in this

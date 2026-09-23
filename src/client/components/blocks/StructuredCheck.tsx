@@ -264,7 +264,7 @@ export function StructuredCheckInner({ args, addResult }: {
         );
       })()}
 
-      <button type="button" onClick={submit}>Submit</button>
+      <button type="button" className="block-submit" onClick={submit}>Submit</button>
     </div>
   );
 }
