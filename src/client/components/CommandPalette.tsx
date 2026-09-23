@@ -7,11 +7,14 @@ import { MagnifyingGlassIcon as MagnifyingGlass } from '@phosphor-icons/react/di
 import { getGraph, getNotebooks } from '../lib/api.js';
 import { notebookHash, parseHash, serializeHash } from '../lib/urlState.js';
 
-export type PaletteKind = 'notebook' | 'conversation' | 'page';
+export type PaletteKind = 'action' | 'notebook' | 'conversation' | 'page';
 export interface PaletteItem { kind: PaletteKind; key: string; label: string; detail: string; href: string }
 
-const GROUP_LABEL: Record<PaletteKind, string> = { notebook: 'Notebooks', conversation: 'Conversations', page: 'Pages' };
-const KINDS: PaletteKind[] = ['notebook', 'conversation', 'page'];
+const GROUP_LABEL: Record<PaletteKind, string> = {
+  action: 'Actions', notebook: 'Notebooks', conversation: 'Conversations', page: 'Pages',
+};
+// Actions rank last among equals: typing "no" should find the notebook before "Go to notebooks".
+const KINDS: PaletteKind[] = ['notebook', 'conversation', 'page', 'action'];
 const PER_GROUP = 6;
 
 /** Match quality of `query` against `label`: 3 prefix, 2 word start, 1 anywhere, 0 in order with
@@ -54,7 +57,16 @@ async function loadItems(): Promise<PaletteItem[]> {
     fetch('/api/threads').then((r) => (r.ok ? r.json() : [])).catch((e) => { console.error('[palette] threads:', e); return []; }),
     getGraph().catch((e) => { console.error('[palette] graph:', e); return null; }),
   ]);
-  const items: PaletteItem[] = [];
+  // The app's few verbs, as Raycast lists commands beside places. Each is still just a hash.
+  const items: PaletteItem[] = [
+    { kind: 'action', key: 'a:notebooks', label: 'Go to notebooks', detail: '', href: notebookHash() },
+    {
+      kind: 'action', key: 'a:new', label: 'New conversation', detail: '',
+      href: serializeHash({ threadId: `t-${Date.now().toString(36)}`, tab: 'stage', pageSlug: null }),
+    },
+    { kind: 'action', key: 'a:graph', label: 'Open the graph', detail: '', href: serializeHash({ threadId: here, tab: 'graph', pageSlug: null }) },
+    { kind: 'action', key: 'a:library', label: 'Open the library', detail: 'progress, reviews, sources', href: serializeHash({ threadId: here, tab: 'library', pageSlug: null }) },
+  ];
   for (const nb of notebooks?.notebooks ?? []) {
     items.push({
       kind: 'notebook', key: `n:${nb.id}`, label: nb.title, href: notebookHash(nb.id),

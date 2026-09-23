@@ -25,6 +25,12 @@ describe('rankItems', () => {
   it('shows everything, in original order, for an empty query', () => {
     expect(rankItems(items, '').map((i) => i.kind)).toEqual(['notebook', 'conversation', 'page', 'page', 'page']);
   });
+  it('ranks an action below a place that matches as well', () => {
+    const withAction = [...items, item('action', 'Go to notebooks')];
+    expect(rankItems(withAction, 'go')[0].kind).toBe('action'); // only the action starts with "go"
+    expect(rankItems([item('notebook', 'Calculus I'), item('action', 'Calculus tools')], 'calc').map((i) => i.kind))
+      .toEqual(['notebook', 'action']);
+  });
 });
 
 describe('CommandPalette', () => {
@@ -53,6 +59,10 @@ describe('CommandPalette', () => {
     fireEvent.change(input, { target: { value: 'chain' } });
     const only = screen.getAllByRole('option');
     expect(only.map((o) => o.textContent)).toEqual(['PagesChain rulepracticing']);
+    // Actions are there for the empty query too, after the places.
+    fireEvent.change(input, { target: { value: 'library' } });
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['ActionsOpen the libraryprogress, reviews, sources']);
+    fireEvent.change(input, { target: { value: 'chain' } });
     expect(only[0].getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(location.hash).toBe('#/t/t-here/page/chain-rule'));
