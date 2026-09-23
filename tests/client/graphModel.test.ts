@@ -316,3 +316,19 @@ describe('edgeReducer', () => {
     expect(reduce('e1', { size: 1, color: 'orig' })).toEqual({ size: 1, color: 'rgba(0,0,0,0.35)', zIndex: 0 });
   });
 });
+
+describe('notebookSubgraph', () => {
+  it('keeps only the notebook’s pages and the links between them', async () => {
+    const { notebookSubgraph } = await import('../../src/client/components/GraphPanel.js');
+    const nodes = ['a', 'b', 'c', 'd'].map((slug) => ({ slug, daysLeft: null }));
+    const edges = [
+      { src: 'a', dst: 'b', type: 'prereq' as const },
+      { src: 'b', dst: 'c', type: 'deepens' as const }, // c is outside the notebook
+      { src: 'd', dst: 'a', type: 'prereq' as const },
+    ];
+    const sub = notebookSubgraph(nodes, edges, ['a', 'b', 'd']);
+    expect(sub.nodes.map((n) => n.slug)).toEqual(['a', 'b', 'd']);
+    expect(sub.edges.map((e) => `${e.src}>${e.dst}`)).toEqual(['a>b', 'd>a']);
+    expect(sub.seedSlug).toBeNull();
+  });
+});

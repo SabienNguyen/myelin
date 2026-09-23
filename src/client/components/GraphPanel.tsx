@@ -17,6 +17,7 @@ import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
 import { graphMeta, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
 import { parseHash } from '../lib/urlState.js';
+import { useConversationNotebook } from './Notebooks.js';
 import {
   densityScale, resolveGraphColors, syncGraph, type MasteryGraph, type GraphColors,
 } from '../graph/buildGraph.js';
@@ -58,6 +59,19 @@ function labelsFor(sub: Subgraph<GraphNodeMeta>): boolean | ReadonlySet<string> 
 // At or below this many pages the canvas keeps its 260px cap and the topic list takes the room (see
 // .graph-panel.is-sparse in styles.css): a tall canvas around one or two dots is empty space.
 const SPARSE_NODES = 3;
+
+/** The notebook scope: only the pages a notebook covers, and only the links between them — the
+ *  map of one subject, the way the notebook's own topic list is its outline. Pure. */
+export function notebookSubgraph<N extends ContextualNode>(
+  nodes: N[], edges: LaidOutEdge[], slugs: readonly string[],
+): Subgraph<N> {
+  const inScope = new Set(slugs);
+  return {
+    nodes: nodes.filter((n) => inScope.has(n.slug)),
+    edges: edges.filter((e) => inScope.has(e.src) && inScope.has(e.dst)),
+    seedSlug: null, seedInferred: false, hops: 0, truncated: false,
+  };
+}
 
 // Membership (this BFS) only ever reads `slug` (for graph structure, via `edges`) and `daysLeft`
 // (for the decay-inference fallback below) — never color/degree/etc. Keeping contextualSubgraph
@@ -236,7 +250,15 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [mode, setMode] = useState<'contextual' | 'full'>('contextual');
+  const [mode, setMode] = useState<'contextual' | 'notebook' | 'full'>('contextual');
+  // The open conversation's notebook, when it has one: offers a third scope between one topic's
+  // neighbourhood and the whole vault. GraphPanel remounts with each conversation (Runtime is
+  // keyed by thread), so reading the hash once is enough.
+  const notebook = useConversationNotebook(parseHash(location.hash).threadId);
+  const notebookSlugs = useMemo(
+    () => (notebook && Array.isArray(notebook.topics) ? notebook.topics.map((t) => t.slug) : null),
+    [notebook],
+  );
   // The "currently open page" context signal. Seeded once from the URL (covers a deep link
   // straight into a page, landed on before this component ever sees a panelBus event — GraphPanel
   // is mounted for the whole app lifetime, just CSS-hidden while another tab is active, per
@@ -585,7 +607,11 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     () => ({ nodes: meta.nodes, edges: meta.edges, seedSlug: null, seedInferred: false, hops: 0, truncated: false }),
     [meta],
   );
-  const sub = mode === 'contextual' ? contextualSub : fullSub;
+  const notebookSub = useMemo(
+    () => (notebookSlugs ? notebookSubgraph(meta.nodes, meta.edges, notebookSlugs) : null),
+    [meta, notebookSlugs],
+  );
+  const sub = mode === 'contextual' ? contextualSub : mode === 'notebook' && notebookSub ? notebookSub : fullSub;
 
   // Feeds `sub` into the graphology graph: merges metadata into already-placed nodes IN PLACE
   // (positions untouched), spawns genuinely-new nodes near an already-placed neighbour, drops
@@ -658,6 +684,17 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
             onClick={() => { setMode('contextual'); setTimeout(() => fitRef.current?.(true), 350); }}>
             This topic
           </button>
+          {/* Only when the notebook covers a page: an empty scope would show the vault's cold-start
+              "nothing in the graph yet" line, which is not true of the vault. */}
+          {notebook && notebookSlugs && notebookSlugs.length > 0 && (
+            <button type="button" role="tab" aria-selected={mode === 'notebook'}
+              tabIndex={mode === 'notebook' ? 0 : -1}
+              className={mode === 'notebook' ? 'on' : ''}
+              title={notebook.notebook.title}
+              onClick={() => { setMode('notebook'); setTimeout(() => fitRef.current?.(true), 350); }}>
+              This notebook
+            </button>
+          )}
           <button type="button" role="tab" aria-selected={mode === 'full'}
             tabIndex={mode === 'full' ? 0 : -1}
             className={mode === 'full' ? 'on' : ''}
@@ -678,6 +715,12 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         {/* Never show the "open a page" hint (nor an empty-looking canvas below) while the first
             load+layout is still in flight — both would misleadingly read as "there's nothing
             here" rather than "still working on it". */}
+        {!loading && mode === 'notebook' && notebook && (
+          <p className="graph-subtitle">
+            {notebook.notebook.title} · {sub.nodes.length} {sub.nodes.length === 1 ? 'page' : 'pages'}
+            {sub.nodes.length > 1 && sub.edges.length === 0 && ' · no links between them yet'}
+          </p>
+        )}
         {!loading && mode === 'contextual' && (
           seedTitle != null ? (
             <p className="graph-subtitle">
