@@ -54,6 +54,17 @@ describe('Stage continuity', () => {
     rerender(<StageSummary messages={[]} />);
     expect(screen.queryByRole('region')).toBeNull();
   });
+  it('lists a quiz one item per line with its answer and mark, not the answers as JSON', () => {
+    render(<StageSummary messages={[{ id: 'q', role: 'assistant', parts: [{
+      type: 'tool-quiz', toolCallId: 'quiz-1', state: 'output-available',
+      input: { title: 'Derivatives', items: [{ id: 'q1', prompt: 'd/dx of x^2' }, { id: 'q2', prompt: 'd/dx of 3' }] },
+      output: { answers: [{ id: 'q1', answer: '2x' }, { id: 'q2', answer: '1' }],
+        grading: { verdict: 'partial', detail: '1 of 2', perItem: [{ id: 'q1', correct: true }, { id: 'q2', correct: false }] } },
+    }] }]} />);
+    expect(screen.queryByText(/"id"/)).toBeNull();
+    const items = screen.getAllByRole('listitem');
+    expect(items.map((li) => li.textContent)).toEqual(['d/dx of x^2 — 2x ✓', 'd/dx of 3 — 1 ✗']);
+  });
   it('does not label an ungraded answer as graded', () => {
     const messages = structuredClone(answered);
     (messages[0].parts[0] as any).output.grading = { verdict: 'ungraded', detail: 'Could not parse this format.' };

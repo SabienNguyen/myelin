@@ -43,7 +43,7 @@ describe('citation chip (WikiLink\'s #/cite/ branch)', () => {
     const seen: string[] = [];
     const off = panelBus.subscribe((e) => { if (e.type === 'openPage') seen.push(e.slug); });
 
-    render(<RichMarkdown text="[The KV Cache](#/cite/The%20KV%20Cache)" wikiLinks />);
+    render(<RichMarkdown text="[The KV Cache](#/cite/The%20KV%20Cache)" />);
     // Async: usePageSlugForTitle only resolves once the graph fetch it triggers comes back.
     const link = await screen.findByRole('link', { name: 'source: The KV Cache' });
     expect(link.classList.contains('cite-chip')).toBe(true);
@@ -59,7 +59,7 @@ describe('citation chip (WikiLink\'s #/cite/ branch)', () => {
     const fetchMock = stubGraph([{ slug: 'kv-cache', title: 'The KV Cache' }]);
     const { RichMarkdown } = await freshRichMarkdown();
 
-    render(<RichMarkdown text="[Some Other Paper](#/cite/Some%20Other%20Paper)" wikiLinks />);
+    render(<RichMarkdown text="[Some Other Paper](#/cite/Some%20Other%20Paper)" />);
     // Let the (unsuccessful) resolve attempt actually run before asserting the negative — a
     // synchronous check right after render would pass trivially, before ensureFresh's fetch has
     // even been asked, and would not exercise the "fetched but still no match" path.
@@ -78,7 +78,7 @@ describe('citation chip (WikiLink\'s #/cite/ branch)', () => {
     stubGraph([]);
     const { RichMarkdown } = await freshRichMarkdown();
 
-    render(<RichMarkdown text="[bad](#/cite/100%)" wikiLinks />);
+    render(<RichMarkdown text="[bad](#/cite/100%)" />);
     const chip = screen.getByText('100%');
     expect(chip.tagName).toBe('SPAN');
     expect(chip.classList.contains('cite-chip')).toBe(true);

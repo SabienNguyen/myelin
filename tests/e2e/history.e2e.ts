@@ -41,8 +41,8 @@ test.describe('Conversation history', () => {
     const menu = page.locator('.history-panel');
     // Rows are titled by the first substantive user message. Other specs' threads may also be
     // listed (shared vault) — assert ours are present, not that the list is exactly ours.
-    await expect(menu.getByRole('menuitem', { name: /what is a derivative anyway/ })).toBeVisible();
-    await menu.getByRole('menuitem', { name: /what is an integral anyway/ }).click();
+    await expect(menu.getByRole('menuitem', { name: /^what is a derivative anyway/ })).toBeVisible();
+    await menu.getByRole('menuitem', { name: /^what is an integral anyway/ }).click();
 
     // Full transcript swap: B's text in, A's gone (both copies — chat and focus rail).
     await expect(page.getByText('HISTORY-B: accumulated area under a curve.').last()).toBeVisible();

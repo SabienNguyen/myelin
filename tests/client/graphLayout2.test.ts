@@ -11,7 +11,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { MultiDirectedGraph as Graph } from 'graphology';
 import type { MasteryGraph, Point } from '../../src/client/graph/buildGraph.js';
 import {
-  LAYOUT, meanDisplacement, bboxDiagonal, snapshot, createLayout, maxRunMsFor,
+  LAYOUT, meanDisplacement, bboxDiagonal, snapshot, createLayout, maxRunMsFor, packComponents,
 } from '../../src/client/graph/layout.js';
 import {
   POSITIONS_KEY, MAX_REMEMBERED, loadPositions, savePositions,
@@ -449,6 +449,46 @@ describe('createLayout — the worker loop', () => {
     layout.kill();
   });
 
+  // The release timer used to stop() without settling: no save, so a reload lost the drag.
+  it('a release that runs out its time settles, like any other end of a run', () => {
+    const { layout } = setup();
+    const onSettle = vi.fn();
+    layout.onSettle(onSettle);
+    layout.pin('a', 1, 1);
+    layout.release('a');
+    vi.advanceTimersByTime(LAYOUT.releaseRunMs - 1);
+    expect(onSettle).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(onSettle).toHaveBeenCalledTimes(1);
+    expect(layout.isRunning()).toBe(false);
+    layout.kill();
+  });
+
+  // A poll can drop the node under a held pointer; the next move and the release used to throw.
+  it('pin and release of a node that left the graph do nothing', () => {
+    const { graph, layout } = setup();
+    layout.pin('b', 1, 1);
+    graph.dropNode('b');
+    expect(() => layout.pin('b', 2, 2)).not.toThrow();
+    expect(() => layout.release('b')).not.toThrow();
+    expect(graph.hasNode('b')).toBe(false);
+    layout.kill();
+  });
+
+  it('lays out on the main thread once reduced motion is turned on mid-session', () => {
+    const { layout } = setup();
+    const onSettle = vi.fn();
+    layout.onSettle(onSettle);
+    layout.setReducedMotion(true);
+    layout.start();
+    expect(ScriptedWorker.live.size).toBe(0);
+    expect(onSettle).toHaveBeenCalledTimes(1);
+    layout.setReducedMotion(false);
+    layout.start();
+    expect(ScriptedWorker.live.size).toBe(1);
+    layout.kill();
+  });
+
   it('a new grab within releaseRunMs of a release keeps the layout running', () => {
     const { layout } = setup();
     layout.pin('a', 1, 1);
@@ -457,6 +497,63 @@ describe('createLayout — the worker loop', () => {
     vi.advanceTimersByTime(LAYOUT.releaseRunMs + 1);
     expect(layout.isRunning()).toBe(true);
     layout.kill();
+  });
+});
+
+describe('packComponents', () => {
+  function twoSubjects(): MasteryGraph {
+    const graph = freshGraph();
+    // A three-page subject near the origin and a two-page one drifted far off to the lower left.
+    addNode(graph, 'a1', 0, 0);
+    addNode(graph, 'a2', 100, 0);
+    addNode(graph, 'a3', 50, 80);
+    graph.addEdge('a1', 'a2', { kind: 'prereq', color: '#000', size: 1 });
+    graph.addEdge('a2', 'a3', { kind: 'prereq', color: '#000', size: 1 });
+    addNode(graph, 'r1', -5000, -5000);
+    addNode(graph, 'r2', -4960, -4990);
+    graph.addEdge('r1', 'r2', { kind: 'deepens', color: '#000', size: 1 });
+    return graph;
+  }
+  const at = (graph: MasteryGraph, n: string) => [graph.getNodeAttribute(n, 'x'), graph.getNodeAttribute(n, 'y')];
+
+  it('brings a drifted subject next to the others, keeping each subject\'s own shape', () => {
+    const graph = twoSubjects();
+    const before = bboxDiagonal(graph);
+    packComponents(graph);
+    expect(bboxDiagonal(graph)).toBeLessThan(before / 10);
+    const [a1x, a1y] = at(graph, 'a1');
+    const [a3x, a3y] = at(graph, 'a3');
+    expect([a3x - a1x, a3y - a1y]).toEqual([50, 80]);
+    const [r1x, r1y] = at(graph, 'r1');
+    const [r2x, r2y] = at(graph, 'r2');
+    expect([r2x - r1x, r2y - r1y]).toEqual([40, 10]);
+  });
+
+  it('leaves a gap between subjects instead of overlapping them', () => {
+    const graph = twoSubjects();
+    packComponents(graph);
+    const maxAX = Math.max(...['a1', 'a2', 'a3'].map((n) => graph.getNodeAttribute(n, 'x')));
+    const maxAY = Math.max(...['a1', 'a2', 'a3'].map((n) => graph.getNodeAttribute(n, 'y')));
+    const r1 = at(graph, 'r1');
+    expect(r1[0] > maxAX || r1[1] > maxAY).toBe(true);
+  });
+
+  it('packs the same way on every settle', () => {
+    const graph = twoSubjects();
+    packComponents(graph);
+    const once = snapshot(graph);
+    packComponents(graph);
+    expect(meanDisplacement(once, graph)).toBe(0);
+  });
+
+  it('leaves a single connected graph where it is', () => {
+    const graph = freshGraph();
+    addNode(graph, 'a', -300, 20);
+    addNode(graph, 'b', 400, 90);
+    graph.addEdge('a', 'b', { kind: 'prereq', color: '#000', size: 1 });
+    const before = snapshot(graph);
+    packComponents(graph);
+    expect(meanDisplacement(before, graph)).toBe(0);
   });
 });
 
@@ -561,6 +658,23 @@ describe('positionStore', () => {
     expect(() => savePositions(graph, throwingStorage)).not.toThrow();
     expect(warnSpy).toHaveBeenCalled();
     warnSpy.mockRestore();
+  });
+
+  // Every settle used to parse and re-serialise the whole remembered map (up to 1.4 MB).
+  it('reads the stored map once, then writes once per save', () => {
+    const storage = fakeStorage({ [POSITIONS_KEY]: JSON.stringify({ other: { x: 9, y: 9 } }) });
+    const getItem = vi.spyOn(storage, 'getItem');
+    const setItem = vi.spyOn(storage, 'setItem');
+    const graph = freshGraph();
+    addNode(graph, 'a', 1, 1);
+    loadPositions(storage);
+    savePositions(graph, storage);
+    graph.setNodeAttribute('a', 'x', 2);
+    savePositions(graph, storage);
+    expect(getItem).toHaveBeenCalledTimes(1);
+    expect(setItem).toHaveBeenCalledTimes(2);
+    expect(loadPositions(storage).get('a')).toEqual({ x: 2, y: 1 });
+    expect(JSON.parse(storage.getItem(POSITIONS_KEY) as string).other).toEqual({ x: 9, y: 9 });
   });
 
   it('a null storage (unavailable) is a safe no-op', () => {

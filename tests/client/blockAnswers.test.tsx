@@ -32,12 +32,29 @@ describe('maths in choices', () => {
 
 describe('the right answer beside a miss', () => {
   it('a wrong quick check shows the expected answer; a right one does not', () => {
-    const wrong = { answer: '$\\frac{1}{4}$', grading: { verdict: 'incorrect', detail: 'no' } };
+    const wrong = { answer: '$\\frac{1}{4}$', grading: { verdict: 'incorrect', detail: 'no', source: 'mechanical' } };
     const { container, rerender } = render(<QuickCheck args={qc} result={wrong} addResult={vi.fn()} />);
     expect(screen.getByText(/Answer:/)).toBeTruthy();
     expect(container.querySelector('.quiz-expected .katex')).toBeTruthy();
     rerender(<QuickCheck args={qc} result={{ answer: '$1$', grading: { verdict: 'correct', detail: 'yes' } }} addResult={vi.fn()} />);
     expect(screen.queryByText(/Answer:/)).toBeNull();
+  });
+
+  it('names a model-graded key as the tutor\'s, and shows it with the grader\'s reason on a partial', () => {
+    const partial = { answer: 'increasing', grading: { verdict: 'partial', detail: 'monotone, but not strictly', source: 'model' } };
+    render(<QuickCheck args={{ question: 'q?', expected: 'non-decreasing' }} result={partial} addResult={vi.fn()} />);
+    expect(screen.queryByText(/^Answer:/)).toBeNull();
+    expect(screen.getByText(/Tutor's answer: non-decreasing/)).toBeTruthy();
+    expect(screen.getByText('monotone, but not strictly')).toBeTruthy();
+  });
+
+  it('shows an answer key literally, typesetting only its delimited maths', () => {
+    const wrong = { answer: 'xyz', grading: { verdict: 'incorrect', detail: 'no', source: 'mechanical' } };
+    const { container } = render(<QuickCheck args={{ question: 'q?', expected: '__init__ or x*y*z at $x^2$' }} result={wrong} addResult={vi.fn()} />);
+    const line = container.querySelector('p.quiz-expected')!;
+    expect(line.querySelector('strong, em')).toBeNull();
+    expect(line.textContent).toContain('__init__ or x*y*z at ');
+    expect(line.querySelector('.katex')).toBeTruthy();
   });
 
   it('a quiz names the answer only on the items it marked wrong, and only when it has one', () => {

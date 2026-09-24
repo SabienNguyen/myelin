@@ -193,3 +193,21 @@ describe('PagePanel claim probe', () => {
     expect(screen.queryByRole('button', { name: 'claim you know this' })).toBeNull();
   });
 });
+
+describe('PagePanel on a payload that is not a page', () => {
+  // A slug like "stream-consumer%2Fnotebooks" routes to another endpoint that answers 200 with an
+  // array; reading page.page.meta off it used to take the whole app down.
+  it('says so instead of crashing', async () => {
+    stubPage([{ id: 'nb-1', title: 'Streams' }]);
+    render(<PagePanel slug="stream-consumer" />);
+    expect(await screen.findByText(/no page named “stream-consumer”/)).toBeTruthy();
+  });
+
+  it('dates a decayed level to when it was last proved, not to when it slipped', async () => {
+    const p = payload([]);
+    p.standing.level = 'mastered';
+    stubPage(p);
+    render(<PagePanel slug="stream-consumer" />);
+    expect(await screen.findByText(/was mastered, last proved 2026-07-27/)).toBeTruthy();
+  });
+});

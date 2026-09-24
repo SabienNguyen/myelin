@@ -10,7 +10,7 @@
 // dance for no gain. What it does mean: an unhandled throw at server boot must show as a window
 // saying so, not as an app that silently never appears — see showBootFailure below.
 
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, nativeTheme, shell } from 'electron';
 import { createServer } from 'node:net';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -61,13 +61,17 @@ async function waitForServer(port, timeoutMs = 30_000) {
   return false;
 }
 
+// styles.css --bg for each scheme, so the frame before the renderer's first paint is the app's own
+// ground rather than a flash of the wrong one.
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#101116' : '#eeeef7');
+
 function createWindow(url) {
   const win = new BrowserWindow({
     width: 1280,
     height: 860,
     minWidth: 760,
     title: 'Engram',
-    backgroundColor: '#f5f2ea', // matches --bg, so the first paint is not a white flash
+    backgroundColor: windowBackground(),
     show: false,
     webPreferences: {
       // No preload, no node integration, no bridge. The renderer is the same web app a browser
@@ -93,15 +97,15 @@ function createWindow(url) {
 }
 
 function showBootFailure(message) {
-  const win = new BrowserWindow({ width: 720, height: 420, title: 'Engram', backgroundColor: '#f5f2ea' });
+  const win = new BrowserWindow({ width: 720, height: 420, title: 'Engram', backgroundColor: windowBackground() });
   const body = `<h1>Engram could not start</h1><pre>${
     String(message).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
   }</pre>`;
   win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
     `<meta name="color-scheme" content="light dark"><style>
-       body{font:15px/1.6 system-ui;margin:2rem;color:#26241f;background:#f5f2ea}
-       pre{white-space:pre-wrap;background:#ebe6da;padding:1rem;border-radius:6px}
-       @media (prefers-color-scheme:dark){body{color:#e7e1d2;background:#1d1b16}pre{background:#2c2a22}}
+       body{font:15px/1.6 system-ui;margin:2rem;color:#edeef2;background:#101116}
+       pre{white-space:pre-wrap;background:#21242c;padding:1rem;border-radius:7px}
+       @media (prefers-color-scheme:light){body{color:#1f2128;background:#eeeef7}pre{background:#e4e5f0}}
      </style>${body}`,
   )}`);
 }

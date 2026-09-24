@@ -8,7 +8,7 @@ import { isGapUp } from './gapProxy.js';
 import type { Engram } from './mcp.js';
 import type { HarnessConfig } from './config.js';
 import { expand } from './config.js';
-import { getGraphCached, type GraphPayload } from './graphCache.js';
+import { getGraphCached, invalidateGraphCache, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
 import { isDue } from './notebookStore.js';
 import { appliedRoutesFor, missingLadder } from './appliedRoutes.js';
@@ -450,6 +450,8 @@ export function buildRestRoutes(
       return c.json({ error: 'student names are 1-40 chars: letters, digits, - and _' }, 400);
     }
     cfg.student = name;
+    // The cached graph carries the previous learner's mastery and is not keyed by student.
+    invalidateGraphCache();
     // Persist so a restart keeps the switch. Read-modify-write of the JSON on disk preserves
     // every other field (and any fields this build does not know about).
     try {

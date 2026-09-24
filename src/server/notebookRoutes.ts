@@ -7,7 +7,7 @@ import { listThreads, loadThread, type ThreadSummary } from './sessionStore.js';
 import { pagesTouched } from './session.js';
 import type { UIMessage } from '../shared/uiMessages.js';
 import {
-  NotebookNotFound, attachThread, createNotebook, deleteNotebook, getNotebook,
+  NotebookNotFound, attachThread, createNotebook, deleteNotebook, detachThread, getNotebook,
   isDue, levelOf, notebookForThread, notebookTopics, readNotebooks, summarizeNotebook,
   updateNotebook, type Level, type Notebook, type StudentEntry,
 } from './notebookStore.js';
@@ -16,6 +16,11 @@ export interface NotebookTopic {
   slug: string; title: string; level: Level; due: boolean;
   /** Days until the level decays, when it is on a clock (the student ledger's days_left). */
   daysLeft: number | null;
+  /** Decayed below the level it was earned at; `was` names that level. */
+  slipped: boolean;
+  was: Level | null;
+  /** The latest recorded misconception, as the tutor worded it. */
+  misconception: string | null;
 }
 
 export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
@@ -74,9 +79,8 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const inNotebook = new Set(notebooks.flatMap((n) => n.sources));
     return c.json({
       notebooks: notebooks.map(f.summarize).sort((a, b) => b.lastActive.localeCompare(a.lastActive)),
-      // Conversations outside every notebook still have a way back from the home screen. Every
-      // one of them, not just the newest few — NotebooksHome does its own "show recent only"
-      // paging, the same way NotebookView pages a notebook's own conversation list.
+      // Conversations outside every notebook still have a way back from the home screen. All of
+      // them: the home shows the newest few and a "show all", and an older one must stay fileable.
       unfiled: withMessages(f.threads).filter((t) => !filed.has(t.id)),
       // Library sources no notebook uses yet — each one a notebook waiting to be started.
       looseSources: f.sources.filter((s) => !inNotebook.has(s.book))
@@ -101,12 +105,24 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const [f, names] = await Promise.all([facts(), titles()]);
     const order: Record<Level, number> = { practicing: 0, exposed: 1, mastered: 2, unseen: 3 };
     const topics: NotebookTopic[] = f.topicsOf(nb)
-      .map((slug) => ({
-        slug, title: names.get(slug) ?? slug, level: levelOf(f.state[slug]), due: isDue(f.state[slug]),
-        daysLeft: typeof f.state[slug]?.days_left === 'number' ? f.state[slug]!.days_left! : null,
-      }))
-      // Due first (the thing to do next), then by level, then by name.
-      .sort((a, b) => Number(b.due) - Number(a.due) || order[a.level] - order[b.level] || a.title.localeCompare(b.title));
+      .map((slug) => {
+        const m = f.state[slug];
+        const level = levelOf(m);
+        const was = levelOf({ effective: m?.level });
+        const last = Array.isArray(m?.misconceptions) ? m!.misconceptions!.at(-1) : undefined;
+        return {
+          slug, title: names.get(slug) ?? slug, level, due: isDue(m),
+          daysLeft: typeof m?.days_left === 'number' ? m.days_left : null,
+          slipped: m?.slipped === true,
+          was: m?.slipped === true && was !== 'unseen' && was !== level ? was : null,
+          misconception: last === undefined || last === null ? null : String(last),
+        };
+      })
+      // Due first (the thing to do next), then a recorded misconception (the thing to fix), then by
+      // level, then by name.
+      .sort((a, b) => Number(b.due) - Number(a.due)
+        || Number(b.misconception !== null) - Number(a.misconception !== null)
+        || order[a.level] - order[b.level] || a.title.localeCompare(b.title));
     const bySource = (s: SourceRecord) => ({ book: s.book, title: s.title, authors: s.authors });
     return c.json({
       notebook: f.summarize(nb),
@@ -143,6 +159,15 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
   app.put('/api/notebooks/:id/threads/:threadId', (c) => {
     try {
       return c.json(attachThread(cfg.vault, c.req.param('id'), c.req.param('threadId')));
+    } catch (e) {
+      return fail(c, e);
+    }
+  });
+
+  // Unfiling: the conversation goes back to the home screen's unfiled list. Moving is the PUT above.
+  app.delete('/api/notebooks/:id/threads/:threadId', (c) => {
+    try {
+      return c.json(detachThread(cfg.vault, c.req.param('id'), c.req.param('threadId')));
     } catch (e) {
       return fail(c, e);
     }

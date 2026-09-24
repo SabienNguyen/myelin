@@ -8,7 +8,9 @@ import {
   type MasteryGraph, type GraphColors, type Point,
   withAlpha, seedPosition, syncGraph, densityScale, SEED_JITTER, resolveGraphColors,
 } from '../../src/client/graph/buildGraph.js';
-import { focusNeighbourhood, nodeReducer, edgeReducer } from '../../src/client/graph/highlight.js';
+import {
+  focusNeighbourhood, hoverLabelled, nodeReducer, edgeReducer, HOVER_LABELS,
+} from '../../src/client/graph/highlight.js';
 
 function node(slug: string, overrides: Partial<GraphNodeMeta> = {}): GraphNodeMeta {
   return {
@@ -229,6 +231,14 @@ describe('syncGraph', () => {
     expect(graph.edges()).toEqual(['prereq:a->b']);
   });
 
+  it('recolours a kept edge when the colours change (an OS scheme switch)', () => {
+    const graph = freshGraph();
+    const shape = sub([node('a'), node('b')], [{ src: 'a', dst: 'b', type: 'prereq' }]);
+    syncGraph(graph, shape, new Map(), { forceLabels: false, colors: COLORS });
+    syncGraph(graph, shape, new Map(), { forceLabels: false, colors: { ...COLORS, prereq: 'rgba(9, 9, 9, 0.75)' } });
+    expect(graph.getEdgeAttribute('prereq:a->b', 'color')).toBe('rgba(9, 9, 9, 0.75)');
+  });
+
   it('does not throw when the same pair of nodes carries both a prereq and a deepens edge', () => {
     const graph = freshGraph();
     const result = syncGraph(
@@ -294,6 +304,29 @@ describe('focusNeighbourhood', () => {
   it('returns the focus plus its neighbours in either edge direction, excluding unrelated nodes', () => {
     const set = focusNeighbourhood(graphWithEdges(), 'a');
     expect(set).toEqual(new Set(['a', 'b', 'c']));
+  });
+});
+
+describe('hoverLabelled', () => {
+  it('labels the focus and only its best-linked neighbours', () => {
+    const graph = freshGraph();
+    const spokes = Array.from({ length: HOVER_LABELS + 3 }, (_, i) => node(`n${i}`, { degree: i }));
+    syncGraph(graph, sub([node('hub', { degree: 20 }), ...spokes], spokes.map((n) => ({ src: 'hub', dst: n.slug, type: 'prereq' as const }))),
+      new Map(), { forceLabels: false, colors: COLORS });
+    const set = focusNeighbourhood(graph, 'hub');
+    const labelled = hoverLabelled(graph, 'hub', set)!;
+    expect(labelled.size).toBe(HOVER_LABELS + 1);
+    expect(labelled.has('hub')).toBe(true);
+    expect(labelled.has(`n${HOVER_LABELS + 2}`)).toBe(true);
+    expect(labelled.has('n0')).toBe(false);
+
+    const reduce = nodeReducer('hub', set, 'muted', labelled);
+    expect(reduce('n0', { label: 'n0' })).toMatchObject({ forceLabel: false, zIndex: 1, label: 'n0' });
+    expect(reduce(`n${HOVER_LABELS + 2}`, { label: 'x' })).toMatchObject({ forceLabel: true });
+  });
+
+  it('is null when nothing is focused', () => {
+    expect(hoverLabelled(freshGraph(), null, null)).toBeNull();
   });
 });
 

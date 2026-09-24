@@ -1,5 +1,5 @@
 import {
-  memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
+  memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore,
   type Dispatch, type KeyboardEvent, type SetStateAction,
 } from 'react';
 import { useThreadRuntime } from '@assistant-ui/react';
@@ -9,11 +9,13 @@ import { useThreadRuntime } from '@assistant-ui/react';
 // the mount effect below loads the real module (and nodeProgram.ts, which has the same problem)
 // lazily and routes a failure into the WebGL-unavailable fallback.
 import type Sigma from 'sigma';
-import type { MouseCoords, SigmaNodeEventPayload } from 'sigma/types';
+import type { MouseCoords, SigmaNodeEventPayload, TouchCoords } from 'sigma/types';
 import { WarningIcon as Warning } from '@phosphor-icons/react';
 import { MultiDirectedGraph as Graph } from 'graphology';
+import { ChatStoreContext } from '../chatCore/index.js';
+import { pagesTouched } from '../../shared/topics.js';
 import { getGraph } from '../lib/api.js';
-import { useColorScheme } from '../lib/colorScheme.js';
+import { LEVEL_LABEL, type MasteryLevel } from '../lib/mastery.js';
 import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
 import { graphMeta, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
@@ -22,10 +24,11 @@ import { useConversationNotebook } from './Notebooks.js';
 import {
   densityScale, resolveGraphColors, syncGraph, type MasteryGraph, type GraphColors,
 } from '../graph/buildGraph.js';
-import { makeLabelDrawers } from '../graph/labels.js';
+import { makeLabelDrawer } from '../graph/labels.js';
 import { createLayout, type LayoutController } from '../graph/layout.js';
+import { createNodeDrag } from '../graph/nodeDrag.js';
 import { loadPositions, savePositions } from '../graph/positionStore.js';
-import { focusNeighbourhood, nodeReducer, edgeReducer } from '../graph/highlight.js';
+import { focusNeighbourhood, hoverLabelled, nodeReducer, edgeReducer } from '../graph/highlight.js';
 
 export const POLL_MS = 30_000;
 
@@ -50,13 +53,27 @@ const DENSE_LABEL_DENSITY = 0.35;
 const DENSE_LABEL_GRID_CELL_SIZE = 140;
 // Forced labels are drawn whether or not they collide. Every label forced on in a 27-page topic
 // view piled a dozen titles on top of each other in its core, so past this size only the topic and
-// its direct links are forced; hovering any node still labels its whole neighbourhood.
+// its direct links are forced; hovering a node labels it and its best-linked neighbours.
 const ALL_LABELS_UP_TO = 12;
+// On a canvas this short (a phone's 338x160, a 600px-tall laptop window) even a dozen forced labels
+// pile onto one blob, so only the topic and its direct links are forced there.
+const COMPACT_CANVAS_PX = 250;
 
-function labelsFor(sub: Subgraph<GraphNodeMeta>): boolean | ReadonlySet<string> {
-  if (sub.nodes.length <= ALL_LABELS_UP_TO) return true;
+function labelsFor(sub: Subgraph<GraphNodeMeta>, compact: boolean): boolean | ReadonlySet<string> {
+  if (sub.nodes.length <= ALL_LABELS_UP_TO && !compact) return true;
   if (sub.nodes.length > CONTEXT_CAP || sub.seedSlug == null) return false;
   return new Set([sub.seedSlug, ...neighborSlugs(sub.seedSlug, sub.edges)]);
+}
+
+/** sigma pads the fitted bbox (node centres only, no radius or label width) by this many screen px
+ *  on every side. 64 is roughly a label's worth of room on a desktop canvas; on a phone's 160px-tall
+ *  one it left a 32px band for the whole graph, so it shrinks with the canvas's shorter side. */
+export function stagePaddingFor(width: number, height: number): number {
+  return Math.min(64, Math.round(0.15 * Math.min(width, height)));
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 // At or below this many pages the canvas keeps its 260px cap and the topic list takes the room (see
 // .graph-panel.is-sparse in styles.css): a tall canvas around one or two dots is empty space.
@@ -191,7 +208,7 @@ export function neighborSlugs(slug: string, edges: LaidOutEdge[]): Set<string> {
  * aria-label carried (mastery+decay had no other home once the canvas became aria-hidden), so a
  * screen-reader user loses nothing by the canvas no longer being their interaction surface. */
 function factsFor(n: GraphNodeMeta): string {
-  const facts: string[] = [n.effective];
+  const facts: string[] = [LEVEL_LABEL[n.effective]];
   if (n.daysLeft != null) facts.push(`${n.daysLeft} ${n.daysLeft === 1 ? 'day' : 'days'} until decay`);
   if (n.slipped) facts.push('slipping — due for review');
   if (n.misconceptions.length > 0) facts.push('has a recorded misconception');
@@ -199,6 +216,16 @@ function factsFor(n: GraphNodeMeta): string {
 }
 
 const FIT_ANIMATION_MS = 300;
+
+// Past this many rows the topic list stops being a list anyone scans (a 5,000-page whole vault was
+// tens of thousands of DOM nodes); it shows the pages most due for review and points at search.
+export const TOPIC_LIST_CAP = 200;
+
+/** Slipping pages first, then the nearest decay, then pages with no decay clock; stable otherwise. */
+function dueFirst(nodes: GraphNodeMeta[]): GraphNodeMeta[] {
+  const urgency = (n: GraphNodeMeta) => (n.slipped ? -1 : n.daysLeft ?? Infinity);
+  return [...nodes].sort((a, b) => urgency(a) - urgency(b));
+}
 
 interface TopicListProps {
   nodes: GraphNodeMeta[];
@@ -215,11 +242,21 @@ interface TopicListProps {
 const TopicList = memo(function TopicList({
   nodes, hasEdges, selected, onKeys, onFocusTopic, onOpen,
 }: TopicListProps) {
+  const shown = useMemo(
+    () => (nodes.length > TOPIC_LIST_CAP ? dueFirst(nodes).slice(0, TOPIC_LIST_CAP) : nodes),
+    [nodes],
+  );
   return (
     <section className="graph-topic-list" aria-label="Topics in this view">
       <h3>Topics in this view</h3>
       {!hasEdges && <p>No connections in this view yet. Open a topic to read its notes.</p>}
-      <ul onKeyDown={onKeys}>{nodes.map((n, nodeIndex) => (
+      {shown.length < nodes.length && (
+        <p>
+          The {shown.length} most due of {nodes.length} pages. Find any other with the page search
+          (Ctrl K, ⌘K on a Mac), or open one and switch to This topic.
+        </p>
+      )}
+      <ul onKeyDown={onKeys}>{shown.map((n, nodeIndex) => (
         <li key={n.slug}>
           <button type="button" aria-label={`Open ${n.title}, ${factsFor(n)}`}
             tabIndex={(selected != null ? selected === n.slug : nodeIndex === 0) ? 0 : -1}
@@ -229,7 +266,7 @@ const TopicList = memo(function TopicList({
             onMouseLeave={() => onFocusTopic((f) => (f === n.slug ? null : f))}
             onClick={() => onOpen(n.slug)}>
             <span>{n.title}</span>
-            <span className="graph-topic-standing">{n.effective}{n.slipped ? ' · due for review' : ''}</span>
+            <span className="graph-topic-standing">{LEVEL_LABEL[n.effective]}{n.slipped ? ' · due for review' : ''}</span>
           </button>
         </li>
       ))}</ul>
@@ -237,15 +274,26 @@ const TopicList = memo(function TopicList({
   );
 });
 
+type Scope = 'contextual' | 'notebook' | 'full';
+
+const noSubscribe = () => () => {};
+
+// Least to most learned, the way the node fills read.
+const LEGEND_LEVELS: readonly MasteryLevel[] = ['unseen', 'exposed', 'practicing', 'mastered'];
+
 export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const onScopeKeys = useTablistKeys();
   const onTopicKeys = useRovingKeys({ selector: '.graph-topic-list button', orientation: 'both', activateOnFocus: false });
   const threadRuntime = useThreadRuntime();
-  const colorScheme = useColorScheme();
 
   // Raw-ish per-node metadata (color, decay, degree) — cheap to (re)compute for the whole vault on
   // every poll; position lives in the graphology graph (see graphRef below), not here.
   const [meta, setMeta] = useState<{ nodes: GraphNodeMeta[]; edges: LaidOutEdge[] }>({ nodes: [], edges: [] });
+  // The last /api/graph nodes, for recomputing colours on a scheme change, and a fingerprint of
+  // them: a poll that brings the same payload skips setMeta, whose new arrays would re-render the
+  // memoized topic list (every row, on a whole vault) twice a minute for nothing.
+  const rawRef = useRef<unknown[] | null>(null);
+  const fingerprintRef = useRef<string | null>(null);
   // True until the FIRST fetch+layout has resolved. Gates the "laying out the graph…" placeholder
   // so a student switching to the Graph tab sees that instead of a misleading "open a page to
   // focus" hint or a blank canvas. A plain `let firstLoad` flag inside the load effect (rather than
@@ -253,15 +301,26 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
-  const [mode, setMode] = useState<'contextual' | 'notebook' | 'full'>('contextual');
+  // null until the learner picks a scope; see `mode` below for what shows until then.
+  const [chosenMode, setChosenMode] = useState<Scope | null>(null);
   // The open conversation's notebook, when it has one: offers a third scope between one topic's
   // neighbourhood and the whole vault. GraphPanel remounts with each conversation (Runtime is
   // keyed by thread), so reading the hash once is enough.
   const notebook = useConversationNotebook(parseHash(location.hash).threadId);
-  const notebookSlugs = useMemo(
-    () => (notebook && Array.isArray(notebook.topics) ? notebook.topics.map((t) => t.slug) : null),
-    [notebook],
-  );
+  // The notebook's topics are read once, when the conversation opens. A page this conversation
+  // writes afterwards is in the notebook too, so it joins from the conversation's own tool calls
+  // instead of waiting for a remount. A joined string, so the store's per-token updates re-render
+  // only when the set of pages changes.
+  const chatStore = useContext(ChatStoreContext);
+  const touchedKey = useSyncExternalStore(chatStore?.subscribe ?? noSubscribe, () => {
+    const state = chatStore?.getState();
+    return state ? pagesTouched(state.messages).join('\n') : '';
+  });
+  const notebookSlugs = useMemo(() => {
+    if (!notebook || !Array.isArray(notebook.topics)) return null;
+    const touched = touchedKey ? touchedKey.split('\n') : [];
+    return [...new Set([...notebook.topics.map((t) => t.slug), ...touched])];
+  }, [notebook, touchedKey]);
   // The "currently open page" context signal. Seeded once from the URL (covers a deep link
   // straight into a page, landed on before this component ever sees a panelBus event — GraphPanel
   // is mounted for the whole app lifetime, just CSS-hidden while another tab is active, per
@@ -273,6 +332,13 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // 'pending' until the mount effect below resolves; 'fallback' means Sigma's import or
   // construction failed (no WebGL — true of every jsdom test, and of a real browser without it).
   const [canvasMode, setCanvasMode] = useState<'pending' | 'ready' | 'fallback'>('pending');
+  // Bumped when a lost WebGL context is restored: sigma cannot rebuild its programs on a new
+  // context, so the renderer is mounted again from scratch.
+  const [mountKey, setMountKey] = useState(0);
+  // Bumped when the OS colour scheme or contrast preference changes; see the effect that reads it.
+  const [scheme, setScheme] = useState(0);
+  // The canvas's shorter side is under COMPACT_CANVAS_PX (see labelsFor).
+  const [compact, setCompact] = useState(false);
   // The HTML overlays' POSITIONS never pass through React state. They follow the camera, so they
   // change on every sigma frame, and a setState per frame re-rendered this whole panel (topic list
   // included) while panning: ~25ms of React work per frame at 5,000 pages, measured with a CPU
@@ -281,12 +347,6 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const teachRef = useRef<HTMLButtonElement | null>(null);
   const markEls = useRef(new Map<string, HTMLElement>());
   const placeOverlaysRef = useRef<(() => void) | null>(null);
-
-  const reducedMotionRef = useRef<boolean>(
-    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      : false,
-  );
 
   // Built once, lazily, DURING RENDER — graphology's own construction never touches WebGL, so
   // (unlike Sigma) there is no reason to defer it to an effect. It exists independent of whether
@@ -301,14 +361,8 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
   const layoutRef = useRef<LayoutController | null>(null);
   const rendererRef = useRef<Sigma | null>(null);
-  // MasteryNodeProgram is imported lazily in the mount effect below (see that effect's top-of-file
-  // comment) — there is no module-level import to reach for its static `warnColor` from the
-  // colour-scheme effect, so the class itself is stashed here once the lazy import resolves.
-  const nodeProgramRef = useRef<(typeof import('../graph/nodeProgram.js'))['MasteryNodeProgram'] | null>(null);
-  // The most recent /api/graph payload's node list, kept so a live scheme change can recompute
-  // `meta` (and thus node fills, which read --mastery-*) immediately instead of waiting for the
-  // next 30s poll in the load effect below.
-  const lastGraphNodesRef = useRef<any[] | null>(null);
+  // The lazily loaded node program class, whose static warnColor a scheme change updates.
+  const programRef = useRef<(typeof import('../graph/nodeProgram.js'))['MasteryNodeProgram'] | null>(null);
   // Sigma's nodeReducer/edgeReducer settings are handed a bare function ONCE, at construction —
   // there is no call site to swap it out when `focus` changes. These wrapper closures have a
   // stable identity and just forward to whatever highlight.ts reducer is current in the ref, so a
@@ -324,6 +378,8 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // never yanks the view out from under someone mid-inspection.
   const userAdjustedRef = useRef(false);
   const pendingFitRef = useRef(false);
+  // A scope tab was chosen: the next membership sync refits (see fitScope).
+  const scopeFitRef = useRef(false);
   // Holds the mount effect's `doFit`, so the Fit button and the scope toggle (outside that effect)
   // can trigger it without depending on the renderer having mounted at all (before it has, or in
   // the fallback branch, the ref is null and the call is simply a no-op).
@@ -336,6 +392,27 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // new selection rather than the one before it — passive effects run after every layout effect.
   useLayoutEffect(() => { selectedRef.current = selected; }, [selected]);
 
+  // The canvas's colours are resolved from CSS tokens into strings once, so an OS switch to light
+  // at sunrise left dark-scheme labels (near-white) on the light canvas until a reload. On a scheme
+  // or contrast change: resolve again, hand sigma the new label and ring colours, and recompute the
+  // node metadata, whose new fills (and, through syncGraph, edge colours) the membership sync below
+  // writes into the graph. The reducers pick the new muted colour up in the focus effect after this.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const queries = ['(prefers-color-scheme: dark)', '(prefers-contrast: more)'].map((q) => window.matchMedia(q));
+    const onChange = () => setScheme((v) => v + 1);
+    for (const q of queries) q.addEventListener('change', onChange);
+    return () => { for (const q of queries) q.removeEventListener('change', onChange); };
+  }, []);
+  useEffect(() => {
+    if (scheme === 0) return;
+    const colors = resolveGraphColors();
+    colorsRef.current = colors;
+    if (programRef.current) programRef.current.warnColor = colors.warn;
+    rendererRef.current?.setSetting('labelColor', { color: colors.label });
+    if (rawRef.current) setMeta(graphMeta(rawRef.current, new Date()));
+  }, [scheme]);
+
   // Recompute the highlight set whenever focus changes and ask the renderer to repaint with it.
   // Declared before the mount effect so its ref writes land before anything reads them the first
   // time a frame is drawn.
@@ -344,46 +421,10 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     const graph = graphRef.current!;
     const muted = colorsRef.current!.muted;
     const set = focusNeighbourhood(graph, focus);
-    nodeReducerFnRef.current = nodeReducer(focus, set, muted);
+    nodeReducerFnRef.current = nodeReducer(focus, set, muted, hoverLabelled(graph, focus, set));
     edgeReducerFnRef.current = edgeReducer(graph, set, muted);
     rendererRef.current?.refresh();
-  }, [focus]);
-
-  // sigma bakes every colour into its own state at construction — labelColor, the node/edge
-  // reducers, MasteryNodeProgram's static warnColor — and never re-reads the CSS custom properties
-  // on its own. This effect re-resolves and repaints them whenever the OS scheme actually changes
-  // after mount. It compares `colorScheme` against the scheme colorsRef was last resolved for,
-  // rather than a one-shot "skip the first render" flag: React (main.tsx runs StrictMode in dev)
-  // double-invokes a fresh mount's effects, which spends a one-shot flag before the component has
-  // really settled, so the second phantom invocation would wrongly treat itself as a real change.
-  const appliedSchemeRef = useRef(colorScheme);
-  useEffect(() => {
-    if (appliedSchemeRef.current === colorScheme) return;
-    appliedSchemeRef.current = colorScheme;
-
-    colorsRef.current = resolveGraphColors();
-    const colors = colorsRef.current;
-    // MasteryNodeProgram may not have finished its lazy import yet (a flip before WebGL is ready,
-    // or the permanent jsdom/no-WebGL fallback) — the ref is null until the mount effect sets it.
-    if (nodeProgramRef.current) nodeProgramRef.current.warnColor = colors.warn;
-
-    // Mirrors the [focus] effect above, but reads focusRef instead of depending on `focus` — this
-    // effect must run only on a scheme change, not on every hover.
-    const graph = graphRef.current!;
-    const set = focusNeighbourhood(graph, focusRef.current);
-    nodeReducerFnRef.current = nodeReducer(focusRef.current, set, colors.muted);
-    edgeReducerFnRef.current = edgeReducer(graph, set, colors.muted);
-
-    // Node fills come from graphMeta(), which reads --mastery-* off the DOM — recomputed from the
-    // last fetched payload so the flip repaints now instead of waiting for the next 30s poll.
-    if (lastGraphNodesRef.current) setMeta(graphMeta(lastGraphNodesRef.current, new Date()));
-
-    const renderer = rendererRef.current;
-    if (renderer) {
-      renderer.setSetting('labelColor', { color: colors.label });
-      renderer.refresh();
-    }
-  }, [colorScheme]);
+  }, [focus, scheme]);
 
   // ── Sigma mount (WebGL) ──────────────────────────────────────────────────
   // One Sigma instance per mount of the canvas container. Both `sigma` and nodeProgram.ts are
@@ -397,14 +438,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
     (async () => {
       let SigmaCtor: typeof Sigma;
-      let MasteryNodeProgram: (typeof import('../graph/nodeProgram.js'))['MasteryNodeProgram'];
+      let program: typeof import('../graph/nodeProgram.js');
       try {
         const [sigmaMod, programMod] = await Promise.all([
           import('sigma'),
           import('../graph/nodeProgram.js'),
         ]);
         SigmaCtor = sigmaMod.default;
-        MasteryNodeProgram = programMod.MasteryNodeProgram;
+        program = programMod;
       } catch (err) {
         if (cancelled) return;
         console.error('[graph] WebGL unavailable:', err);
@@ -414,17 +455,10 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       if (cancelled) return;
 
       const graph = graphRef.current!;
-      const colors = colorsRef.current!;
-      nodeProgramRef.current = MasteryNodeProgram;
-      MasteryNodeProgram.warnColor = colors.warn;
+      const { MasteryNodeProgram } = program;
+      MasteryNodeProgram.warnColor = colorsRef.current!.warn;
+      programRef.current = MasteryNodeProgram;
       const labelFont = getComputedStyle(document.documentElement).getPropertyValue('--font-prose').trim() || 'system-ui';
-
-      // Reads colorsRef/rendererRef at DRAW time (not captured here at construction), so a later
-      // theme update or panel resize is picked up without rebuilding the renderer — see labels.ts.
-      const { drawNodeLabel, drawNodeHover } = makeLabelDrawers(
-        () => colorsRef.current!,
-        () => rendererRef.current?.getDimensions().width ?? container.clientWidth,
-      );
 
       let renderer: Sigma;
       try {
@@ -433,19 +467,21 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           defaultNodeType: 'mastery',
           renderEdgeLabels: false,
           zIndex: true,
-          labelColor: { color: colors.label },
+          labelColor: { color: colorsRef.current!.label },
           labelFont,
           labelRenderedSizeThreshold: 6,
           labelDensity: 0.6,
-          defaultDrawNodeLabel: drawNodeLabel,
-          defaultDrawNodeHover: drawNodeHover,
-          // sigma's own fit-to-frame (which the settle/Fit reset below drives via
-          // camera.animatedReset) pads the CUSTOM bbox we hand it (getBBox() — node CENTRES only,
-          // no radius or label width) by this many screen px. The default (30) left a node's own
-          // label clipped at the canvas edge whenever that node sat near the bbox boundary — a
-          // small contextual graph zooms in enough that 30px reads as almost nothing. 64px is
-          // roughly a label's worth of breathing room at the sizes this graph actually renders.
-          stagePadding: 64,
+          // Kept in step with the canvas size by onResize below; see stagePaddingFor.
+          stagePadding: stagePaddingFor(container.offsetWidth, container.offsetHeight),
+          defaultDrawNodeHover: program.themedNodeHover(() => ({
+            fill: colorsRef.current!.background, stroke: colorsRef.current!.border,
+          })),
+          // Colour and canvas width are read at draw time, so a scheme change or a resize applies
+          // without rebuilding the renderer.
+          defaultDrawNodeLabel: makeLabelDrawer(
+            () => colorsRef.current!.label,
+            () => rendererRef.current?.getDimensions().width ?? container.clientWidth,
+          ),
           allowInvalidContainer: true,
           nodeReducer: (node, data) => nodeReducerFnRef.current(node, data),
           edgeReducer: (edge, data) => edgeReducerFnRef.current(edge, data),
@@ -459,8 +495,17 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       if (cancelled) { renderer.kill(); return; }
 
       rendererRef.current = renderer;
-      const layout = createLayout(graph, { reducedMotion: reducedMotionRef.current });
+      // Read when it is needed (doFit) and followed live (the layout), not once at mount: turning on
+      // reduce motion mid-session left fits animating until a reload.
+      const motionQuery = typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+      const layout = createLayout(graph, {
+        reducedMotion: motionQuery?.matches === true,
+        aspect: () => (container.offsetHeight > 0 ? container.offsetWidth / container.offsetHeight : 1),
+      });
       layoutRef.current = layout;
+      const onMotionChange = () => layout.setReducedMotion(prefersReducedMotion());
+      motionQuery?.addEventListener('change', onMotionChange);
       // Race with the [sub] sync effect below: that effect calls `layoutRef.current?.start()` on
       // every membership change, but sigma/nodeProgram are loaded here via a lazy, async import
       // (see this file's top-of-file comment) that can resolve AFTER the graph data fetch already
@@ -476,6 +521,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
       const camera = renderer.getCamera();
       const mouseCaptor = renderer.getMouseCaptor();
+      const touchCaptor = renderer.getTouchCaptor();
 
       // Distinguishes "we moved the camera to fit" from "the learner panned/zoomed" — camera
       // 'updated' fires for both, and only the second should ever set userAdjustedRef.
@@ -490,9 +536,15 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         if (userAdjustedRef.current && !force) return;
         // Freezes sigma's own auto-rescale to the frame computed HERE, so the layout settles
         // inside a fixed frame instead of the camera chasing every tick (see the plan's "why").
+        // getBBox is the extent the last process() computed, and setCustomBBox only schedules a
+        // render: the normalisation is rebuilt in process(), which only refresh() runs. So the
+        // custom box is cleared and the graph processed first, or a settled graph kept its stale
+        // frame and fit did nothing (Whole vault left a subject off the canvas until the next poll).
+        renderer.setCustomBBox(null);
+        renderer.refresh();
         renderer.setCustomBBox(renderer.getBBox());
         programmaticCameraMove = true;
-        if (reducedMotionRef.current) {
+        if (motionQuery?.matches) {
           camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
           programmaticCameraMove = false;
         } else {
@@ -508,59 +560,97 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         if (pendingFitRef.current) doFit(true);
       });
 
-      // Drag: pin the grabbed node under the cursor while the worker keeps running so neighbours
-      // follow; release on mouseup. A release under 4px of total movement is a click instead,
-      // matching the old d3-drag clickDistance(4) behaviour exactly.
-      let dragging: { node: string; downX: number; downY: number; moved: boolean } | null = null;
-
+      // Drag pins the grabbed node under the pointer while the worker keeps running so neighbours
+      // follow; a click or tap opens the page (nodeDrag.ts). Mouse moves come from the mouse captor
+      // and one-finger moves from the touch captor; sigma's upNode/upStage end a press of either.
+      const drag = createNodeDrag({
+        hasNode: (node) => graph.hasNode(node),
+        toGraph: (p) => renderer.viewportToGraph(p),
+        pin: (node, x, y) => layout.pin(node, x, y),
+        release: (node) => layout.release(node),
+        open: (node) => {
+          setSelected(node);
+          panelBus.openPage(node);
+        },
+      });
       const onDownNode = (payload: SigmaNodeEventPayload) => {
-        dragging = { node: payload.node, downX: payload.event.x, downY: payload.event.y, moved: false };
+        drag.down(payload.node, payload.event.x, payload.event.y);
         payload.event.preventSigmaDefault();
       };
       const onMouseMoveBody = (coords: MouseCoords) => {
-        if (!dragging) return;
-        if (Math.hypot(coords.x - dragging.downX, coords.y - dragging.downY) >= 4) dragging.moved = true;
-        const point = renderer.viewportToGraph(coords);
-        layout.pin(dragging.node, point.x, point.y);
+        if (!drag.move(coords.x, coords.y)) return;
         coords.preventSigmaDefault();
         coords.original.preventDefault();
         coords.original.stopPropagation();
       };
-      const onMouseUp = () => {
-        if (!dragging) return;
-        const { node, moved } = dragging;
-        dragging = null;
-        // Always release the pin — even a click that nudged the node under the 4px threshold must
-        // not leave it fixed in place forever.
-        layout.release(node);
-        if (!moved) {
-          setSelected(node);
-          panelBus.openPage(node);
-        }
+      // Two fingers are a pinch, which stays sigma's.
+      const onTouchMove = (coords: TouchCoords) => {
+        if (coords.touches.length !== 1 || !drag.move(coords.touches[0].x, coords.touches[0].y)) return;
+        coords.preventSigmaDefault();
       };
+      const onUp = () => drag.up();
+      const onClickNode = (payload: SigmaNodeEventPayload) => drag.click(payload.node);
       const onEnterNode = (payload: SigmaNodeEventPayload) => setFocus(payload.node);
       const onLeaveNode = () => setFocus(null);
 
       renderer.on('downNode', onDownNode);
+      renderer.on('upNode', onUp);
+      renderer.on('upStage', onUp);
+      renderer.on('clickNode', onClickNode);
       renderer.on('enterNode', onEnterNode);
       renderer.on('leaveNode', onLeaveNode);
       mouseCaptor.on('mousemovebody', onMouseMoveBody);
-      mouseCaptor.on('mouseup', onMouseUp);
+      touchCaptor.on('touchmove', onTouchMove);
+
+      const onResize = () => {
+        const width = container.offsetWidth;
+        const height = container.offsetHeight;
+        const padding = stagePaddingFor(width, height);
+        if (renderer.getSetting('stagePadding') !== padding) renderer.setSetting('stagePadding', padding);
+        setCompact(Math.min(width, height) < COMPACT_CANVAS_PX);
+      };
+      onResize();
+      const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(onResize) : null;
+      resizeObserver?.observe(container);
+
+      // A GPU reset or a mobile tab eviction loses the contexts and the canvas goes blank.
+      // preventDefault asks the browser to restore them; the topic list stands in until it does,
+      // and the restore mounts a fresh renderer (mountKey), since sigma's programs die with the
+      // context. Capture phase: the events fire on sigma's canvases and do not bubble.
+      let contextLost = false;
+      const onContextLost = (e: Event) => {
+        e.preventDefault();
+        if (contextLost) return;
+        contextLost = true;
+        console.error('[graph] WebGL context lost, showing the topic list until it is restored');
+        setCanvasMode('fallback');
+      };
+      const onContextRestored = () => {
+        if (!contextLost) return;
+        contextLost = false;
+        setMountKey((k) => k + 1);
+      };
+      container.addEventListener('webglcontextlost', onContextLost, true);
+      container.addEventListener('webglcontextrestored', onContextRestored, true);
 
       // The "Teach me this" button and misconception markers are HTML overlays (a WebGL canvas
       // can't host real, focusable/screen-readable DOM), repositioned off the renderer's own
       // afterRender — the one hook guaranteed to fire after the camera/layout has actually moved
       // the pixels these overlays must track. `visibility`, not the `hidden` attribute: the
       // stylesheet gives .graph-misconception an explicit display, which beats hidden's UA rule.
-      const placeOverlays = () => {
+      const inFrame = (slug: string): { x: number; y: number; visible: boolean } => {
         const { width, height } = renderer.getDimensions();
+        const attrs = graph.getNodeAttributes(slug);
+        const { x, y } = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
+        return { x, y, visible: x >= 0 && y >= 0 && x <= width && y <= height };
+      };
+      const placeOverlays = () => {
         const place = (el: HTMLElement, slug: string) => {
           if (!graph.hasNode(slug)) { el.style.visibility = 'hidden'; return; }
-          const attrs = graph.getNodeAttributes(slug);
-          const { x, y } = renderer.graphToViewport({ x: attrs.x, y: attrs.y });
+          const { x, y, visible } = inFrame(slug);
           el.style.left = `${x}px`;
           el.style.top = `${y}px`;
-          el.style.visibility = x < 0 || y < 0 || x > width || y > height ? 'hidden' : '';
+          el.style.visibility = visible ? '' : 'hidden';
         };
         const sel = selectedRef.current;
         if (teachRef.current && sel != null) place(teachRef.current, sel);
@@ -569,14 +659,40 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       placeOverlaysRef.current = placeOverlays;
       renderer.on('afterRender', placeOverlays);
 
+      // The e2e suite cannot look inside a WebGL canvas. Under automation (Playwright sets
+      // navigator.webdriver) it reads how many nodes are placed on screen and whether the layout
+      // still runs, so a graph that draws nothing fails a test instead of passing it.
+      const testWindow = window as unknown as { __myelinGraph?: unknown };
+      if (navigator.webdriver) {
+        testWindow.__myelinGraph = {
+          get order() { return graph.order; },
+          get finite() {
+            let placed = 0;
+            graph.forEachNode((slug, a) => {
+              if (Number.isFinite(a.x) && Number.isFinite(a.y) && inFrame(slug).visible) placed += 1;
+            });
+            return placed;
+          },
+          get running() { return layout.isRunning(); },
+        };
+      }
+
       cleanup = () => {
         camera.off('updated', onCameraUpdated);
         renderer.off('downNode', onDownNode);
+        renderer.off('upNode', onUp);
+        renderer.off('upStage', onUp);
+        renderer.off('clickNode', onClickNode);
         renderer.off('enterNode', onEnterNode);
         renderer.off('leaveNode', onLeaveNode);
         renderer.off('afterRender', placeOverlays);
         mouseCaptor.off('mousemovebody', onMouseMoveBody);
-        mouseCaptor.off('mouseup', onMouseUp);
+        touchCaptor.off('touchmove', onTouchMove);
+        motionQuery?.removeEventListener('change', onMotionChange);
+        resizeObserver?.disconnect();
+        container.removeEventListener('webglcontextlost', onContextLost, true);
+        container.removeEventListener('webglcontextrestored', onContextRestored, true);
+        delete testWindow.__myelinGraph;
         unsubscribeSettle();
       };
 
@@ -596,7 +712,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       rendererRef.current = null;
       layoutRef.current = null;
     };
-  }, [canvasEl]);
+  }, [canvasEl, mountKey]);
 
   useEffect(() => {
     if (!visible) return;
@@ -610,9 +726,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       try {
         const data = await getGraph();
         if (cancelled) return;
-        const nodes = data.nodes ?? [];
-        lastGraphNodesRef.current = nodes;
-        setMeta(graphMeta(nodes, new Date()));
+        const nodes: unknown[] = data.nodes ?? [];
+        // The hour is in it because graphMeta's decay rings also move with the clock.
+        const fingerprint = `${Math.floor(Date.now() / 3_600_000)}\n${JSON.stringify(nodes)}`;
+        if (fingerprint !== fingerprintRef.current) {
+          fingerprintRef.current = fingerprint;
+          rawRef.current = nodes;
+          setMeta(graphMeta(nodes, new Date()));
+        }
         setLoadError(null);
       } catch (e) {
         if (cancelled) return;
@@ -670,7 +791,32 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     () => (notebookSlugs ? notebookSubgraph(meta.nodes, meta.edges, notebookSlugs) : null),
     [meta, notebookSlugs],
   );
-  const sub = mode === 'contextual' ? contextualSub : mode === 'notebook' && notebookSub ? notebookSub : fullSub;
+  // Offered only with a page in the graph: a notebook whose only topic is an untouched stub (which
+  // /api/graph hides), or a page newer than the graph cache, is an empty scope, and an empty scope
+  // read as an empty vault and hid the other scope tabs.
+  const notebookOffered = notebookSub != null && notebookSub.nodes.length > 0;
+  // Until the learner picks a scope, a notebook conversation with no page open shows its notebook:
+  // the contextual seed would otherwise be a guess from decay data (the vault's most recently
+  // studied page), often in another subject entirely.
+  const guessedSeed = contextualSub.seedSlug == null || contextualSub.seedInferred;
+  const mode: Scope = chosenMode === 'notebook' && !notebookOffered
+    ? 'contextual'
+    : chosenMode ?? (notebookOffered && guessedSeed ? 'notebook' : 'contextual');
+  const sub = mode === 'contextual' ? contextualSub : mode === 'notebook' ? notebookSub! : fullSub;
+
+  // A scope switch refits: the scopes have wildly different extents. While the layout runs the fit
+  // waits for its settle; framing mid-run froze the frame with a subject still drifting outside it.
+  const fitScope = () => {
+    userAdjustedRef.current = false;
+    if (layoutRef.current?.isRunning()) pendingFitRef.current = true;
+    else fitRef.current?.(true);
+  };
+  const chooseScope = (next: Scope) => {
+    setChosenMode(next);
+    // The same scope again changes no membership, so no sync runs to fit it.
+    if (next === mode) fitScope();
+    else scopeFitRef.current = true;
+  };
 
   // Feeds `sub` into the graphology graph: merges metadata into already-placed nodes IN PLACE
   // (positions untouched), spawns genuinely-new nodes near an already-placed neighbour, drops
@@ -682,7 +828,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     const graph = graphRef.current!;
     const colors = colorsRef.current!;
     const { added, removed } = syncGraph(graph, sub, loadPositions(), {
-      forceLabels: labelsFor(sub), colors,
+      forceLabels: labelsFor(sub, compact), colors,
       sizeScale: densityScale(sub.nodes.length, CONTEXT_CAP),
     });
     if (focusRef.current != null && !graph.hasNode(focusRef.current)) setFocus(null);
@@ -705,7 +851,11 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       renderer.setSetting('labelGridCellSize', dense ? DENSE_LABEL_GRID_CELL_SIZE : 100);
       renderer.refresh();
     }
-  }, [sub]);
+    if (scopeFitRef.current) {
+      scopeFitRef.current = false;
+      fitScope();
+    }
+  }, [sub, compact]);
 
   const marked = useMemo(() => sub.nodes.filter((n) => n.misconceptions.length > 0), [sub]);
   // A newly mounted overlay has no position until something places it, and sigma only fires
@@ -722,8 +872,9 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
   // `hidden` alone does nothing here: the attribute's UA rule is `display: none`, which any explicit
   // `display` in the stylesheet beats — and .graph-controls is `display: flex`. Keep the attribute
-  // for semantics and add the class the stylesheet actually acts on.
-  const controlsHidden = !loading && sub.nodes.length === 0;
+  // for semantics and add the class the stylesheet actually acts on. Keyed on the vault, not the
+  // scope, and never over a load error: neither is an empty vault.
+  const controlsHidden = !loading && !loadError && meta.nodes.length === 0;
 
   return (
     <div className={`graph-panel${sub.nodes.length <= SPARSE_NODES ? ' is-sparse' : ''}`}>
@@ -733,31 +884,25 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       <div className={`graph-controls${controlsHidden ? ' is-hidden' : ''}`} hidden={controlsHidden}>
         <div className="graph-row">
         <div className="graph-mode-toggle" role="tablist" aria-label="Graph scope" onKeyDown={onScopeKeys}>
-          {/* Scope switches re-fit: the two scopes have wildly different extents, and the audit
-              found "Whole vault" leaving most of a 17-node vault outside the viewport until the
-              learner discovered the separate fit button. A short delay lets the layout spread
-              before framing it. */}
           <button type="button" role="tab" aria-selected={mode === 'contextual'}
             tabIndex={mode === 'contextual' ? 0 : -1}
             className={mode === 'contextual' ? 'on' : ''}
-            onClick={() => { setMode('contextual'); setTimeout(() => fitRef.current?.(true), 350); }}>
+            onClick={() => chooseScope('contextual')}>
             This topic
           </button>
-          {/* Only when the notebook covers a page: an empty scope would show the vault's cold-start
-              "nothing in the graph yet" line, which is not true of the vault. */}
-          {notebook && notebookSlugs && notebookSlugs.length > 0 && (
+          {notebook && notebookOffered && (
             <button type="button" role="tab" aria-selected={mode === 'notebook'}
               tabIndex={mode === 'notebook' ? 0 : -1}
               className={mode === 'notebook' ? 'on' : ''}
               title={notebook.notebook.title}
-              onClick={() => { setMode('notebook'); setTimeout(() => fitRef.current?.(true), 350); }}>
+              onClick={() => chooseScope('notebook')}>
               This notebook
             </button>
           )}
           <button type="button" role="tab" aria-selected={mode === 'full'}
             tabIndex={mode === 'full' ? 0 : -1}
             className={mode === 'full' ? 'on' : ''}
-            onClick={() => { setMode('full'); setTimeout(() => fitRef.current?.(true), 350); }}>
+            onClick={() => chooseScope('full')}>
             Whole vault
           </button>
         </div>
@@ -783,7 +928,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         {!loading && mode === 'contextual' && (
           seedTitle != null ? (
             <p className="graph-subtitle">
-              around {seedTitle} · {sub.hops} hops
+              around {seedTitle}{sub.seedInferred && ' (last studied)'} · {sub.hops} hops
               {sub.nodes.length === 1 && ' · no linked pages yet'}
               {sub.truncated && ' · showing closest matches'}
             </p>
@@ -794,6 +939,10 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       </div>
       {loading ? (
         <p className="graph-subtitle hint graph-loading">laying out the graph…</p>
+      ) : loadError ? (
+        <p className="graph-subtitle hint graph-error" role="status">
+          {loadError} The graph will reappear on its own once it loads.
+        </p>
       ) : sub.nodes.length === 0 ? (
         // Cold start: an empty vault rendered an empty canvas under a full mastery legend — a key
         // to nothing, and no indication that the way to fill it is to go and ask. This is the
@@ -802,10 +951,6 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         <p className="graph-subtitle graph-empty" role="status">
           Nothing in the graph yet. Ask your tutor about anything you want to learn — pages and the
           links between them are written as you go.
-        </p>
-      ) : loadError ? (
-        <p className="graph-subtitle hint graph-error" role="status">
-          {loadError} The graph will reappear on its own once it loads.
         </p>
       ) : (
         <div className="graph-canvas-wrap">
@@ -848,10 +993,9 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         {/* var(--mastery-*), not literal hex: the tokens in styles.css are the single source these
             swatches and lib/graphLayout.ts's node fills both read, so the legend can no longer
             disagree with the graph it describes, and both follow the colour scheme. */}
-        <span><i className="dot" style={{ background: 'var(--mastery-unseen)' }} /> unseen</span>
-        <span><i className="dot" style={{ background: 'var(--mastery-exposed)' }} /> exposed</span>
-        <span><i className="dot" style={{ background: 'var(--mastery-practicing)' }} /> practicing</span>
-        <span><i className="dot" style={{ background: 'var(--mastery-mastered)' }} /> mastered</span>
+        {LEGEND_LEVELS.map((level) => (
+          <span key={level}><i className="dot" style={{ background: `var(--mastery-${level})` }} /> {LEVEL_LABEL[level]}</span>
+        ))}
         <span><i className="ring" /> time till decay</span>
         <span><i className="ring slipping" /> slipping</span>
         <span><Warning size={12} weight="bold" color="var(--bad)" aria-hidden /> misconception</span>

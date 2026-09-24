@@ -15,8 +15,8 @@ let app: Hono;
 
 const PAGES: Record<string, string> = { limits: 'Limits', derivative: 'Derivative', continuity: 'Continuity' };
 const STATE = {
-  limits: { effective: 'mastered', days_left: 30 },
-  derivative: { effective: 'practicing', slipped: true },
+  limits: { effective: 'mastered', level: 'mastered', days_left: 30, misconceptions: ['thinks every limit is f(a)'] },
+  derivative: { effective: 'practicing', level: 'mastered', slipped: true },
 };
 
 const lw = {
@@ -77,8 +77,8 @@ describe('notebook routes', () => {
 
     const detail = await (await app.request(`/api/notebooks/${id}`)).json();
     expect(detail.topics).toEqual([
-      { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true, daysLeft: null },
-      { slug: 'limits', title: 'Limits', level: 'mastered', due: false, daysLeft: 30 },
+      { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true, daysLeft: null, slipped: true, was: 'mastered', misconception: null },
+      { slug: 'limits', title: 'Limits', level: 'mastered', due: false, daysLeft: 30, slipped: false, was: null, misconception: 'thinks every limit is f(a)' },
     ]);
     expect(detail.threads.map((t: any) => t.id)).toEqual(['t-1']);
     expect(detail.sources).toEqual([{ book: 'spivak', title: 'Spivak, Calculus', authors: ['Michael Spivak'] }]);
@@ -162,6 +162,37 @@ describe('notebook routes', () => {
     expect((await app.request(`/api/notebooks/${id}`, json('PATCH', {}))).status).toBe(400);
     expect((await app.request(`/api/notebooks/${id}/threads/..%2Fescape`, { method: 'PUT' })).status).toBe(400);
     expect(readNotebooks(vault).map((n) => n.title)).toEqual(['A']);
+  });
+
+  it('unfiles a conversation back to the home screen, and lists every unfiled one', async () => {
+    const { id } = await create('A');
+    for (let i = 0; i < 10; i++) {
+      saveThread(vault, `t-${i}`, [{ id: `u${i}`, role: 'user', parts: [{ type: 'text', text: `conversation number ${i}` }] }]);
+    }
+    await app.request(`/api/notebooks/${id}/threads/t-0`, { method: 'PUT' });
+    expect((await (await app.request('/api/notebooks')).json()).unfiled).toHaveLength(9);
+
+    const res = await app.request(`/api/notebooks/${id}/threads/t-0`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(readNotebooks(vault)[0].threads).toEqual([]);
+    expect((await (await app.request('/api/notebooks')).json()).unfiled).toHaveLength(10);
+    expect(await (await app.request('/api/thread/t-0/notebook')).json()).toBeNull();
+    expect((await app.request('/api/notebooks/nb-nope/threads/t-0', { method: 'DELETE' })).status).toBe(404);
+  });
+
+  it('refuses a stale tab resending a deleted conversation, but lets a new one reuse the id', async () => {
+    const history = [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello there friend' }] }];
+    saveThread(vault, 't-1', history);
+    expect((await app.request('/api/thread/t-1', { method: 'DELETE' })).status).toBe(204);
+
+    const stale = await app.request('/api/thread/t-1', json('PUT', [...history, { id: 'a1', role: 'assistant', parts: [] }]));
+    expect(stale.status).toBe(409);
+    expect(await (await app.request('/api/thread/t-1')).json()).toEqual([]);
+    const staleTurn = await app.request('/api/chat', json('POST', { threadId: 't-1', messages: history }));
+    expect(staleTurn.status).toBe(409);
+
+    const fresh = await app.request('/api/thread/t-1', json('PUT', [{ id: 'u9', role: 'user', parts: [] }]));
+    expect(fresh.status).toBe(200);
   });
 
   it('renames and deletes, and deleting a conversation takes it out of its notebook', async () => {

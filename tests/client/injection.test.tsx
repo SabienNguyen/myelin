@@ -25,9 +25,8 @@ describe('markdown rendering is inert against injected content', () => {
 
   it('defangs javascript: hrefs in markdown links', () => {
     render(<BlockProse text={'[click me](javascript:window.pwned=true)'} />);
-    const a = screen.getByText('click me').closest('a');
-    expect(a).not.toBeNull();
-    expect(a!.getAttribute('href') ?? '').not.toMatch(/^javascript:/i);
+    // Rendered as text: an emptied href left an <a href=""> that opened a second copy of the app.
+    expect(screen.getByText('click me').closest('a')).toBeNull();
   });
 
   it('keeps ordinary https links working', () => {

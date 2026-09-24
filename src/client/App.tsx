@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BookOpenTextIcon as BookOpenText } from '@phosphor-icons/react';
 import { getGraph } from './lib/api.js';
 import { Runtime } from './runtime.js';
@@ -11,6 +11,7 @@ import { FirstRun } from './components/FirstRun.js';
 import { AddMaterial } from './components/AddMaterial.js';
 import { NotebookCrumb, NotebookView, NotebooksHome } from './components/Notebooks.js';
 import { CommandPalette } from './components/CommandPalette.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { panelBus } from './lib/panelBus.js';
 import { parseHash, parseNotebookRoute, serializeHash } from './lib/urlState.js';
 
@@ -21,13 +22,27 @@ export function App() {
   // system saying so. A study-family command (/study, /review, /quiz, /freeform) makes its mode
   // sticky until the learner ends it from the composer chip or sends /chat; see the design at
   // docs/superpowers/specs/2026-07-31-one-mode-design.html and plans/2026-09-22-chat-first.md.
-  const [mode, setMode] = useState('');
+  // A study session belongs to the conversation it was started in, so the sticky mode is kept per
+  // thread: a look at another conversation opens that one in chat and leaves this one studying.
+  // A single value reset on every switch ended the session with no sign it had ended.
+  const [modes, setModes] = useState<Record<string, string>>({});
   const [threadId, setThreadId] = useState(() => parseHash(location.hash).threadId);
+  const mode = modes[threadId] ?? '';
+  const setMode = (next: string) => setModes((prev) => ({ ...prev, [threadId]: next }));
   // The notebooks screens (#/notebooks, #/notebooks/<id>) replace the chat workspace; null means
   // a conversation is open. The thread id above is kept while they show, so Back returns to it.
   const [notebookRoute, setNotebookRoute] = useState(() => parseNotebookRoute(location.hash));
-  // A study session belongs to the conversation it was started in; another thread opens in chat.
-  useEffect(() => { setMode(''); }, [threadId]);
+
+  // A hash route swaps the whole main region with no page load, so nothing tells a screen reader
+  // the screen changed. Empty until the first change: the initial screen came with a page load.
+  const routeKey = notebookRoute ? `nb:${notebookRoute.notebookId ?? ''}` : `t:${threadId}`;
+  const [announcement, setAnnouncement] = useState('');
+  const announcedRoute = useRef(routeKey);
+  useEffect(() => {
+    if (announcedRoute.current === routeKey) return;
+    announcedRoute.current = routeKey;
+    setAnnouncement(notebookRoute ? (notebookRoute.notebookId ? 'notebook opened' : 'notebooks opened') : 'conversation opened');
+  }, [routeKey, notebookRoute]);
 
   // Whether the vault has anything real to teach from. This used to pick a MODE (coldStartMode:
   // an empty vault opened in freeform, because teaching modes could not write and a newcomer's
@@ -72,12 +87,15 @@ export function App() {
   // tab flips, which replace) so Back returns to the prior conversation.
   function selectThread(id: string) {
     setThreadId(id);
-    // pushState below never fires hashchange/popstate, so a pick made from the notebooks topbar's
-    // own HistoryMenu must leave that route by hand — otherwise the URL moves to the conversation
+    // pushState below never fires hashchange/popstate, so a pick made from the notebooks screen's
+    // history menu must leave that route by hand — otherwise the URL moves to the conversation
     // but the notebooks screen stays on screen underneath it.
     setNotebookRoute(null);
     const current = parseHash(location.hash);
-    const nextHash = serializeHash({ ...current, threadId: id });
+    // Stage is named outright: serializeHash leaves it implicit, and the remounted SidePanel's
+    // map-as-home reads an implicit tab as "nothing chosen" and moved a learner on Stage to Graph.
+    const serialized = serializeHash({ ...current, threadId: id });
+    const nextHash = current.tab === 'stage' ? `${serialized}/stage` : serialized;
     if (nextHash !== location.hash) history.pushState(null, '', nextHash);
   }
 
@@ -99,13 +117,12 @@ export function App() {
 
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
-  // The wordmark returns to the stage of the conversation App is still holding underneath the
-  // notebooks screens — see notebookRoute below, which keeps threadId around rather than clearing
-  // it.
+  // The wordmark returns to the Stage of the conversation App still holds under the notebooks
+  // screens. Stage is named outright for the same reason selectThread names it.
   const brand = (
     <h1>
       <a
-        href={serializeHash({ threadId, tab: 'stage', pageSlug: null })}
+        href={`${serializeHash({ threadId, tab: 'stage', pageSlug: null })}/stage`}
         aria-label="Myelin — back to your conversation"
       >
         <BookOpenText size={20} weight="duotone" aria-hidden="true" /> <span className="brand-word">Myelin</span>
@@ -113,56 +130,60 @@ export function App() {
     </h1>
   );
 
-  if (notebookRoute) {
-    return (
+  // The topbar sits OUTSIDE <Runtime key={threadId}>: inside it, every thread switch remounted
+  // the header (focus dropped to <body> mid-HistoryMenu) and a failed thread load left only an
+  // error line with no history menu to leave by.
+  return (
+    <ErrorBoundary
+      label="the app"
+      // App's own route state lives above the boundary, so following the link re-renders it with
+      // a new resetKey and the broken screen is dropped.
+      resetKey={routeKey}
+      fallback={(
+        <main className="app-crash" role="alert">
+          <p>something on this screen failed — reload, or <a href="#/notebooks">go to your notebooks</a></p>
+        </main>
+      )}
+    >
+      {/* Setup gate first: with no API key there is no tutor, so a Runtime that cannot answer must
+          not mount and invite a question. Renders `children` untouched once the key is in place. */}
       <FirstRun>
-        <div className="app">
+        <div className={notebookRoute ? 'app' : appClass}>
+          <p className="visually-hidden" role="status">{announcement}</p>
           <header className="topbar">
             {brand}
+            {!notebookRoute && <NotebookCrumb threadId={threadId} />}
             <CommandPalette threadId={threadId} />
             <HistoryMenu activeId={threadId} onSelect={selectThread} />
             <TopbarStatus />
+            {/* THE add entry point — one control for every kind of material (file, git URL, local
+                folder). Not one button per artifact; AddMaterial routes by what it was given. */}
             <AddMaterial threadId={threadId} />
           </header>
-          <main className="notebooks-main">
-            {notebookRoute.notebookId
-              // Keyed: notebook A's state (a load in flight, an open delete confirmation) must never
-              // carry over to notebook B.
-              ? <NotebookView key={notebookRoute.notebookId} id={notebookRoute.notebookId} />
-              : <NotebooksHome />}
-          </main>
+          {notebookRoute ? (
+            <main className="notebooks-main">
+              {notebookRoute.notebookId
+                // Keyed: notebook A's state (a load in flight, an open delete confirmation) must
+                // never carry over to notebook B.
+                ? <NotebookView key={notebookRoute.notebookId} id={notebookRoute.notebookId} />
+                : <NotebooksHome />}
+            </main>
+          ) : (
+            // onSetMode: a /study-family command makes its mode sticky here (and /chat clears it)
+            // — the server only overrides the one turn the command rides; persistence is this
+            // state's job.
+            <Runtime key={threadId} mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={setMode}>
+              <main className="workspace">
+                <div className="thread-column">
+                  <FocusRail peek={peek} onTogglePeek={() => setPeek((p) => !p)} />
+                  <Thread mode={mode} onModeChange={setMode} threadId={threadId} />
+                </div>
+                <SidePanel />
+              </main>
+            </Runtime>
+          )}
         </div>
       </FirstRun>
-    );
-  }
-
-  return (
-    // Setup gate first: with no API key there is no tutor, so a Runtime that cannot answer must not
-    // mount and invite a question. Renders `children` untouched once the key is in place.
-    <FirstRun>
-    {/* onSetMode: a /study-family command makes its mode sticky here (and /chat clears it) — the
-        server only overrides the one turn the command rides; persistence is this state's job. */}
-    <Runtime key={threadId} mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={setMode}>
-      <div className={appClass}>
-        <header className="topbar">
-          {brand}
-          <NotebookCrumb threadId={threadId} />
-          <CommandPalette threadId={threadId} />
-          <HistoryMenu activeId={threadId} onSelect={selectThread} />
-          <TopbarStatus />
-          {/* THE add entry point — one control for every kind of material (file, git URL, local
-              folder). Not one button per artifact; AddMaterial routes by what it was given. */}
-          <AddMaterial threadId={threadId} />
-        </header>
-        <main className="workspace">
-          <div className="thread-column">
-            <FocusRail peek={peek} onTogglePeek={() => setPeek((p) => !p)} />
-            <Thread mode={mode} onModeChange={setMode} threadId={threadId} />
-          </div>
-          <SidePanel />
-        </main>
-      </div>
-    </Runtime>
-    </FirstRun>
+    </ErrorBoundary>
   );
 }

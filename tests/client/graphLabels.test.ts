@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fitLabel, hoverLabelBox } from '../../src/client/graph/labels.js';
+import { fitLabel } from '../../src/client/graph/labels.js';
 
 // Real canvas measureText depends on font metrics; a flat 7px/char stand-in keeps every expected
 // number in this file arithmetic instead of tied to whatever font the test runner has installed.
@@ -44,29 +44,5 @@ describe('fitLabel', () => {
     // Node centred in a 30px canvas: both sides have exactly 3px of room, far under the ~21px
     // (ellipsis + 2 chars) floor — nothing legible would fit, so skip the label entirely.
     expect(fitLabel('Node', 15, 5, 30, measure)).toBeNull();
-  });
-});
-
-describe('hoverLabelBox', () => {
-  it('places a padded box to the right of the node when it fits there', () => {
-    expect(hoverLabelBox('Softmax', 50, 8, 300, measure)).toEqual({ x: 61, width: 57, textX: 65 });
-  });
-
-  it('never truncates, unlike fitLabel, even under the exact geometry that forces fitLabel to cut the label', () => {
-    const label = 'B'.repeat(40);
-    const box = hoverLabelBox(label, 80, 5, 120, measure);
-    // Full 40-char label plus padding, not the 8-char truncation fitLabel produces for these
-    // same inputs (see the fitLabel truncation test above).
-    expect(box.width).toBe(measure(label) + 8);
-  });
-
-  it('clamps to stay within [0, canvasWidth] when neither side fits, without shrinking the label', () => {
-    // Node centred in a 100px canvas; the 78px box (70px label + padding) fits neither the right
-    // (only 42px of room past the node) nor the left (only 42px before it), so it clamps.
-    const box = hoverLabelBox('Ten Chars!', 50, 5, 100, measure);
-    expect(box.x).toBeGreaterThanOrEqual(0);
-    expect(box.x + box.width).toBeLessThanOrEqual(100);
-    expect(box.width).toBe(measure('Ten Chars!') + 8);
-    expect(box).toEqual({ x: 22, width: 78, textX: 26 });
   });
 });

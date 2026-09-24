@@ -12,10 +12,6 @@ export interface ChatState {
   messages: UIMessage[];
   isRunning: boolean;
   error?: string;
-  /** The last turn ended failed but explained itself in the message (the server's own note, e.g.
-   *  "returned nothing for this turn") rather than raising `error`. Only the live stream knows:
-   *  the note is plain text, so a reloaded thread cannot tell. */
-  lastTurnFailed?: boolean;
 }
 
 export interface ChatStoreOptions {
@@ -28,8 +24,6 @@ export interface ChatStoreOptions {
     /** Empty string means "derive it" — see chatStore's send. */
     mode: string;
     writeUp: boolean;
-    /** Kinds in the current session plan, leading item first. */
-    planKinds?: string[];
     emptyVault?: boolean;
   };
   /** A mode slash command (/study, /learn, /review, /quiz, /freeform, /chat) must set the sticky
@@ -52,6 +46,10 @@ export class ChatStore {
   // the race: its addToolResult wrote into the stream's own working state). Cleared at run
   // start: by then any patch is already part of the history being POSTed.
   private midRunOutputs = new Map<string, { output: unknown; isError: boolean }>();
+  // Parts added while a stream is RUNNING (an aside asked on an earlier message), keyed by
+  // messageId + part id. Same hazard as midRunOutputs: the next chunk's snapshot knows nothing of
+  // them, so the aside showed for one chunk and vanished until a reload.
+  private midRunParts = new Map<string, { messageId: string; part: UIPart & { id?: string } }>();
   // The slash command riding the NEXT run only — armed by sendMessage, consumed by run(), so a
   // block-answer resubmit (which reuses run()) never replays the command that staged the block.
   private pendingCommand: Command | undefined;
@@ -93,18 +91,13 @@ export class ChatStore {
    * message is gone, which the caller cannot be responsible for by the time an async answer
    * resolves. */
   addPartToMessage(messageId: string, part: UIPart & { id?: string }): void {
-    const index = this.state.messages.findIndex((m) => m.id === messageId);
-    if (index === -1) {
+    const messages = withPart(this.state.messages, messageId, part);
+    if (messages === null) {
       console.error(`addPartToMessage: no message "${messageId}" in the thread`);
       return;
     }
-    const message = this.state.messages[index]!;
-    const partIndex = part.id === undefined ? -1 : message.parts.findIndex((p) => 'id' in p && p.id === part.id);
-    const parts = [...message.parts];
-    if (partIndex === -1) parts.push(part); else parts[partIndex] = part;
-    const messages = [...this.state.messages];
-    messages[index] = { ...message, parts };
     this.setState({ messages });
+    if (this.state.isRunning) this.midRunParts.set(`${messageId}\0${part.id ?? this.midRunParts.size}`, { messageId, part });
   }
 
   sendMessage(text: string, files: FileUIPart[] = [], opts: { command?: Command } = {}): void {
@@ -176,6 +169,18 @@ export class ChatStore {
     return true;
   }
 
+  /** Run the learner's last message again when it never got an answer (the harness refused it or
+   * was unreachable). The message is re-POSTed as it stands, so the transcript keeps one copy of
+   * the question; its attachments are already parts of it, and its slash command is re-armed
+   * because the server reads the command from the request body, not from the message. */
+  resendLast(): void {
+    const last = this.state.messages[this.state.messages.length - 1];
+    if (this.state.isRunning || last?.role !== 'user') return;
+    const command = last.parts.find((p) => p.type === 'data-command') as { data?: { command?: Command } } | undefined;
+    this.pendingCommand = command?.data?.command;
+    void this.run();
+  }
+
   /** Reattach by polling saved state, never by replaying a POST or model call. */
   async recover(signal: AbortSignal): Promise<void> {
     const generation = ++this.recoveryGeneration;
@@ -195,7 +200,10 @@ export class ChatStore {
         const status = await res.json() as { running: boolean; messages: UIMessage[] };
         if (signal.aborted || generation !== this.recoveryGeneration || this.inflight) return;
         if (!Array.isArray(status.messages)) return;
-        this.setState({ messages: status.messages, isRunning: status.running });
+        // A dropped stream set `error` before recovery started. Once the server shows the turn
+        // still running, or finished with an answer, the saved state supersedes that note.
+        const reattached = status.running || status.messages[status.messages.length - 1]?.role === 'assistant';
+        this.setState({ messages: status.messages, isRunning: status.running, ...(reattached ? { error: undefined } : {}) });
         if (!status.running) return;
         await new Promise<void>(resolve => setTimeout(resolve, 500));
       }
@@ -215,12 +223,16 @@ export class ChatStore {
     this.setState({ isRunning: false });
   }
 
-  /** Re-apply mid-run tool outputs over a stream snapshot (they are absent from the assembler's
-   * view of the message). A patch that no longer finds its part passes through unchanged. */
+  /** Re-apply mid-run tool outputs and added parts over a stream snapshot (they are absent from
+   * the assembler's view of the message). A patch that no longer finds its target passes through
+   * unchanged. */
   private withMidRunOutputs(messages: UIMessage[]): UIMessage[] {
     let out = messages;
     for (const [toolCallId, { output, isError }] of this.midRunOutputs) {
       out = patchToolOutput(out, toolCallId, output, isError) ?? out;
+    }
+    for (const { messageId, part } of this.midRunParts.values()) {
+      out = withPart(out, messageId, part) ?? out;
     }
     return out;
   }
@@ -231,14 +243,15 @@ export class ChatStore {
     const controller = new AbortController();
     this.inflight = controller;
     this.midRunOutputs.clear();
+    this.midRunParts.clear();
     const command = this.pendingCommand;
     this.pendingCommand = undefined; // one-shot, same lifetime rule as writeUp
-    const { mode, writeUp, planKinds, emptyVault } = this.opts.requestContext();
+    const { mode, writeUp, emptyVault } = this.opts.requestContext();
     // Clearing a previous turn's error re-clones the last message: assistant-ui's converter
     // caches per message reference and an explicit error status is sticky in that cache, so
     // without a fresh identity the error bubble would survive into the retry.
     const messages = this.state.error !== undefined ? refreshLast(this.state.messages) : this.state.messages;
-    this.setState({ messages, isRunning: true, error: undefined, lastTurnFailed: undefined });
+    this.setState({ messages, isRunning: true, error: undefined });
 
     let finished: UIMessage[] | null = null;
     let turnFailed = false;
@@ -249,7 +262,6 @@ export class ChatStore {
         // the server to derive it (deriveMode.ts) from what the learner just said plus the plan —
         // the selector asked a human to answer a question the harness answers better.
         ...(mode ? { mode } : {}),
-        ...(planKinds?.length ? { planKinds } : {}),
         ...(emptyVault ? { emptyVault } : {}),
         ...(command !== undefined ? { command } : {}),
       },
@@ -269,10 +281,13 @@ export class ChatStore {
 
     if (finished === null) {
       this.setState({ isRunning: false });
+      // The server keeps running a turn whose stream was cut, then saves it; the half answer on
+      // screen is not the last word. Reattach the way a reload would.
+      if (result === 'dropped') void this.recover(new AbortController().signal);
       return;
     }
     const settled = this.withMidRunOutputs(finished);
-    this.setState({ messages: settled, isRunning: false, lastTurnFailed: turnFailed });
+    this.setState({ messages: settled, isRunning: false });
     // Response-side persistence: the server's chatRoute only saves the REQUEST side; the
     // assembled response is saved here. Fire-and-forget, same as the runtime it replaces.
     void this.fetchImpl(`/api/thread/${this.opts.threadId}`, {
@@ -325,6 +340,20 @@ function patchToolOutput(messages: UIMessage[], toolCallId: string, output: unkn
     return next;
   }
   return null;
+}
+
+/** Insert (or replace, matched by part.id) `part` on message `messageId`; null when the message
+ * is not in the history. */
+function withPart(messages: UIMessage[], messageId: string, part: UIPart & { id?: string }): UIMessage[] | null {
+  const index = messages.findIndex((m) => m.id === messageId);
+  if (index === -1) return null;
+  const message = messages[index]!;
+  const partIndex = part.id === undefined ? -1 : message.parts.findIndex((p) => 'id' in p && p.id === part.id);
+  const parts = [...message.parts];
+  if (partIndex === -1) parts.push(part); else parts[partIndex] = part;
+  const next = [...messages];
+  next[index] = { ...message, parts };
+  return next;
 }
 
 function refreshLast(messages: UIMessage[]): UIMessage[] {

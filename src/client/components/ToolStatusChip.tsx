@@ -1,4 +1,4 @@
-import { panelBus } from '../lib/panelBus.js';
+import { panelBus, scrubModelArtifacts } from '../lib/panelBus.js';
 import { usePageTitle } from '../lib/pageTitles.js';
 
 // Fallback UI for MCP (server-side) tool calls in the transcript. The learner should see a
@@ -43,18 +43,40 @@ const PAGE_VERBS: Record<string, string> = {
   record_evidence: 'evidence recorded on',
 };
 
-/** The page's title: write_page's own input already carries the title it just set, so that wins
- *  over a lookup that might still be loading; otherwise the graph payload's title once it
- *  resolves (usePageTitle); otherwise the slug with its hyphens read as spaces — still
- *  recognisable, never invented. Deliberately NOT a read of `result` — a real read_page result
- *  reaches the client as an MCP envelope (`{ content: [{ type: 'text', text: '<JSON>' }] }`), not
- *  the parsed `{ page: { meta: { title } } }` shape a naive read expects, and record_evidence's
- *  result carries no title at all either way. */
-function pageLabel(args: any, graphTitle: string | undefined, slug: string): string {
-  const argsTitle = args?.title;
-  if (typeof argsTitle === 'string' && argsTitle.trim()) return argsTitle;
-  if (typeof graphTitle === 'string' && graphTitle.trim()) return graphTitle;
-  return slug.replace(/-/g, ' ');
+// A call still running — or one the learner stopped, whose outcome the server never reported.
+// Done copy here claimed "evidence recorded" for a record_evidence nobody saw land.
+const PENDING: Record<string, string> = {
+  record_evidence: 'recording evidence…',
+  read_page: 'reading a page…',
+  write_page: 'writing a page…',
+  search: 'searching the vault…',
+  web_search: 'searching the web…',
+  read_url: 'reading a web page…',
+};
+
+/** read_page's title from the MCP result as it arrives ({content:[{type:'text', text:<JSON>}]}). */
+function readTitle(result: any): unknown {
+  const text = result?.content?.[0]?.text;
+  if (typeof text !== 'string') return undefined;
+  try {
+    return JSON.parse(text)?.page?.meta?.title;
+  } catch {
+    return undefined; // not JSON (an engram error string) — the slug stands in
+  }
+}
+
+/** The title the call itself carries: read_page's result, or write_page's input. */
+function carriedTitle(args: any, result: any): string | undefined {
+  const title = readTitle(result) ?? args?.title;
+  return typeof title === 'string' && title.trim() ? title : undefined;
+}
+
+/** The carried title, else the graph's title for that slug (record_evidence carries none), else
+ *  the slug with its hyphens read as spaces — still recognisable, never invented. Titles are model
+ *  or vault text, so they are scrubbed of leaked ChatML tokens like any other model output. */
+function pageLabel(title: string | undefined, slug: string): string {
+  const clean = title ? scrubModelArtifacts(title).trim() : '';
+  return clean || slug.replace(/-/g, ' ');
 }
 
 export function ToolStatusChip({ toolName, args, result, isError }: any) {
@@ -65,15 +87,20 @@ export function ToolStatusChip({ toolName, args, result, isError }: any) {
   const [done, notDone] = LABELS[toolName] ?? [toolName, `${toolName} failed`];
   const slug = typeof args?.slug === 'string' && args.slug ? args.slug : null;
   const verb = PAGE_VERBS[toolName];
-  // Called on every render, never inside the branch below — React requires the same hooks in the
-  // same order every time, including for a failed call or a page tool whose args lack a slug.
-  const graphTitle = usePageTitle(slug);
+  const carried = carriedTitle(args, result);
+  // Asked only when the call carries no title of its own, and called before the early returns
+  // below: React needs the same hooks in the same order on every render, and a pending call turns
+  // into a finished one on the next render.
+  const graphTitle = usePageTitle(verb && slug && !carried ? slug : null);
+  if (result === undefined && !failed) {
+    return <span className="tool-note" title={toolName}>{PENDING[toolName] ?? 'working…'}</span>;
+  }
   if (!failed && verb && slug) {
     return (
       <span className="tool-note" title={toolName}>
         {verb}{' '}
         <button type="button" className="tool-note-page" onClick={() => panelBus.openPage(slug)}>
-          {pageLabel(args, graphTitle, slug)}
+          {pageLabel(carried ?? graphTitle, slug)}
         </button>
       </span>
     );

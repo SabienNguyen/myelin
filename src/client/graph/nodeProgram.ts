@@ -7,8 +7,8 @@
 // of anti-aliasing. It adds two attributes — a_ringFraction (decay arc, -1 when there is none) and
 // a_slipped (0/1) — and draws them as a second ring just outside the disc.
 import type { Attributes } from 'graphology-types';
-import { NodeProgram, numberToGLSLFloat } from 'sigma/rendering';
-import type { ProgramInfo } from 'sigma/rendering';
+import { drawDiscNodeLabel, NodeProgram, numberToGLSLFloat } from 'sigma/rendering';
+import type { NodeHoverDrawingFunction, ProgramInfo } from 'sigma/rendering';
 import { colorToArray, floatColor } from 'sigma/utils';
 import type { NodeDisplayData, RenderParams } from 'sigma/types';
 
@@ -219,4 +219,39 @@ export class MasteryNodeProgram<
     const [r, g, b, a] = colorToArray(MasteryNodeProgram.warnColor);
     gl.uniform4f(u_warnColor, r / 255, g / 255, b / 255, a / 255);
   }
+}
+
+/** sigma's drawDiscNodeHover (the same label box: a pill hugging the disc) filled with the panel's
+ *  colours. sigma's own fills the box '#FFF' and then draws the label in labelColor, which is
+ *  --text: in dark mode a hovered name was near-white on white. No shadow, per the design's
+ *  surfaces-separate-by-hairline rule. `box` is read at draw time so a scheme change applies. */
+export function themedNodeHover(box: () => { fill: string; stroke: string }): NodeHoverDrawingFunction {
+  return (context, data, settings) => {
+    const size = settings.labelSize;
+    context.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
+    const { fill, stroke } = box();
+    context.fillStyle = fill;
+    context.strokeStyle = stroke;
+    context.lineWidth = 1;
+    const PADDING = 2;
+    context.beginPath();
+    if (typeof data.label === 'string') {
+      const boxWidth = Math.round(context.measureText(data.label).width + 5);
+      const boxHeight = Math.round(size + 2 * PADDING);
+      const radius = Math.max(data.size, size / 2) + PADDING;
+      const angle = Math.asin(boxHeight / 2 / radius);
+      const xDelta = Math.sqrt(Math.abs(radius ** 2 - (boxHeight / 2) ** 2));
+      context.moveTo(data.x + xDelta, data.y + boxHeight / 2);
+      context.lineTo(data.x + radius + boxWidth, data.y + boxHeight / 2);
+      context.lineTo(data.x + radius + boxWidth, data.y - boxHeight / 2);
+      context.lineTo(data.x + xDelta, data.y - boxHeight / 2);
+      context.arc(data.x, data.y, radius, angle, -angle);
+    } else {
+      context.arc(data.x, data.y, data.size + PADDING, 0, Math.PI * 2);
+    }
+    context.closePath();
+    context.fill();
+    context.stroke();
+    drawDiscNodeLabel(context, data, settings);
+  };
 }

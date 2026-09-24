@@ -89,10 +89,10 @@ describe('Notebooks screens — a way back to the conversation', () => {
     });
 
     const wordmark = await screen.findByRole('link', { name: /myelin/i });
-    expect(wordmark.getAttribute('href')).toBe('#/t/t-existing');
+    expect(wordmark.getAttribute('href')).toBe('#/t/t-existing/stage');
 
     fireEvent.click(screen.getByRole('button', { name: 'Conversation history' }));
-    const chosenRow = await screen.findByRole('menuitem', { name: /derivatives/i });
+    const chosenRow = await screen.findByRole('menuitem', { name: /^derivatives/i });
     fireEvent.click(chosenRow);
 
     // The workspace's composer is the concrete sign the notebooks screen is gone, not just some

@@ -6,7 +6,7 @@
 // @tiptap/suggestion's render lifecycle — anchored above the composer with CSS, so no floating-ui
 // wiring and no portal.
 import { useMemo, useRef, useState, type RefObject } from 'react';
-import { Extension, Node, type Editor as TiptapEditor } from '@tiptap/core';
+import { Extension, Node, type Editor as TiptapEditor, type JSONContent } from '@tiptap/core';
 import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
@@ -110,11 +110,16 @@ export interface CommandEditorHandle {
  * button, and the attach flow; this component owns only the editable area. `handleRef` is the
  * parent's imperative line to the doc at submit time; `onEnter` fires for a bare Enter
  * (Shift+Enter inserts a paragraph break instead, and Enter with the slash menu open selects).
+ * `onEscape` gets a bare Escape (the slash menu takes it while open) and returns whether it acted.
+ * `initialContent` restores a draft; `onChange` reports every edit so the parent can keep one.
  */
-export function CommandEditor({ handleRef, onEnter, onEmptyChange }: {
+export function CommandEditor({ handleRef, onEnter, onEmptyChange, onEscape, initialContent, onChange }: {
   handleRef: RefObject<CommandEditorHandle | null>;
   onEnter: () => void;
   onEmptyChange: (empty: boolean) => void;
+  onEscape?: () => boolean;
+  initialContent?: JSONContent | null;
+  onChange?: (doc: JSONContent, empty: boolean) => void;
 }) {
   const [menu, setMenu] = useState<MenuState | null>(null);
   // Refs, not deps: the extensions are built once (useMemo []) and must always see the current
@@ -125,6 +130,10 @@ export function CommandEditor({ handleRef, onEnter, onEmptyChange }: {
   onEnterRef.current = onEnter;
   const onEmptyRef = useRef(onEmptyChange);
   onEmptyRef.current = onEmptyChange;
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const extensions = useMemo(() => [
     Document, Paragraph, Text, UndoRedo,
@@ -142,6 +151,7 @@ export function CommandEditor({ handleRef, onEnter, onEmptyChange }: {
             return true;
           },
           'Shift-Enter': () => this.editor.commands.splitBlock(),
+          Escape: () => (menuRef.current === null ? onEscapeRef.current?.() ?? false : false),
         };
       },
     }),
@@ -193,7 +203,8 @@ export function CommandEditor({ handleRef, onEnter, onEmptyChange }: {
 
   const editor = useEditor({
     extensions,
-    autofocus: true,
+    ...(initialContent ? { content: initialContent } : {}),
+    autofocus: initialContent ? 'end' : true,
     // jsdom lacks the layout APIs Tiptap's coordinate code touches on immediate render; the
     // browser behavior is identical either way.
     immediatelyRender: false,
@@ -208,7 +219,12 @@ export function CommandEditor({ handleRef, onEnter, onEmptyChange }: {
         'aria-label': 'Ask your tutor…',
       },
     },
-    onUpdate: ({ editor: e }) => onEmptyRef.current(e.isEmpty),
+    // A restored draft makes the editor non-empty before any update fires.
+    onCreate: ({ editor: e }) => { if (!e.isEmpty) onEmptyRef.current(false); },
+    onUpdate: ({ editor: e }) => {
+      onEmptyRef.current(e.isEmpty);
+      onChangeRef.current?.(e.getJSON(), e.isEmpty);
+    },
   });
 
   // Rebuild the handle every render — cheap, and it always closes over the live editor.

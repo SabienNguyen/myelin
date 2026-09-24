@@ -14,6 +14,32 @@ describe('graphCache', () => {
     expect(calls).toBe(1); // second call is a cache hit
   });
 
+  it('concurrent cold callers share one fetch; a failed one is not cached', async () => {
+    let calls = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const fetch = async () => { calls += 1; await gate; return payload(`v${calls}`); };
+    const all = Promise.all([getGraphCached(fetch), getGraphCached(fetch), getGraphCached(fetch)]);
+    release();
+    expect((await all).map((p) => p.summary)).toEqual(['v1', 'v1', 'v1']);
+    expect(calls).toBe(1);
+
+    invalidateGraphCache();
+    await expect(getGraphCached(async () => { throw new Error('engram down'); })).rejects.toThrow('engram down');
+    expect((await getGraphCached(async () => payload('after'))).summary).toBe('after');
+  });
+
+  it('a caller arriving after an invalidation does not join the pre-write cold fetch', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    const first = getGraphCached(async () => { await gate; return payload('pre-write'); });
+    invalidateGraphCache();
+    const second = getGraphCached(async () => payload('post-write'));
+    release();
+    expect((await first).summary).toBe('pre-write');
+    expect((await second).summary).toBe('post-write');
+  });
+
   it('invalidation forces the next call to re-fetch', async () => {
     let calls = 0;
     const fetch = async () => { calls += 1; return payload(`v${calls}`); };

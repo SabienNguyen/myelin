@@ -34,7 +34,11 @@ describe('rankItems', () => {
 });
 
 describe('CommandPalette', () => {
+  // jsdom has no scrollIntoView; record what the palette scrolls to instead.
+  let scrolled: Element[] = [];
   beforeEach(() => {
+    scrolled = [];
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
     location.hash = '#/t/t-here';
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
       const body = url === '/api/notebooks'
@@ -45,7 +49,11 @@ describe('CommandPalette', () => {
       return { ok: true, status: 200, json: async () => body } as Response;
     }));
   });
-  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
 
   it('opens on Ctrl+K, finds across notebooks, conversations and pages, and goes on Enter', async () => {
     render(<CommandPalette />);
@@ -57,13 +65,17 @@ describe('CommandPalette', () => {
     expect(screen.queryByRole('option', { name: /Stubby/ })).toBeNull();
 
     fireEvent.change(input, { target: { value: 'chain' } });
-    const only = screen.getAllByRole('option');
-    expect(only.map((o) => o.textContent)).toEqual(['PagesChain rulepracticing']);
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['PagesChain rulepracticing']);
     // Actions are there for the empty query too, after the places.
     fireEvent.change(input, { target: { value: 'library' } });
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['ActionsOpen the libraryprogress, reviews, sources']);
+    // A selection moved under one query starts over on the next.
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(input.getAttribute('aria-activedescendant')).toBe('palette-opt-1');
     fireEvent.change(input, { target: { value: 'chain' } });
-    expect(only[0].getAttribute('aria-selected')).toBe('true');
+    expect(input.getAttribute('aria-activedescendant')).toBe('palette-opt-0');
+    expect(screen.getByRole('option', { name: /Chain rule/ }).getAttribute('aria-selected')).toBe('true');
     fireEvent.keyDown(input, { key: 'Enter' });
     await waitFor(() => expect(location.hash).toBe('#/t/t-here/page/chain-rule'));
     expect(screen.queryByRole('combobox')).toBeNull();
@@ -80,6 +92,39 @@ describe('CommandPalette', () => {
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(document.activeElement).toBe(screen.getByRole('button', { name: /Search/ }));
+  });
+
+  it('still closes on Escape after focus has left the input, and Tab stays in the panel', async () => {
+    render(<><CommandPalette /><button type="button">elsewhere</button></>);
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const input = await screen.findByRole('combobox');
+    await screen.findByRole('option', { name: /^Calculus I/ });
+    fireEvent.keyDown(input, { key: 'Tab' });
+    expect(document.activeElement).toBe(input);
+    screen.getByRole('button', { name: 'elsewhere' }).focus();
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Search/ }));
+  });
+
+  it('ignores the Enter that commits an IME composition', async () => {
+    render(<CommandPalette />);
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const input = await screen.findByRole('combobox');
+    await screen.findByRole('option', { name: /^Calculus I/ });
+    fireEvent.keyDown(input, { key: 'Enter', isComposing: true, keyCode: 229 });
+    expect(screen.getByRole('combobox')).toBe(input);
+    expect(location.hash).toBe('#/t/t-here');
+  });
+
+  it('scrolls the active option into view as the arrows move it', async () => {
+    render(<CommandPalette />);
+    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+    const input = await screen.findByRole('combobox');
+    await screen.findByRole('option', { name: /^Calculus I/ });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    expect(scrolled.at(-1)).toBe(screen.getAllByRole('option')[2]);
   });
 
   it('an arrow pressed while results load does not break Enter once they arrive', async () => {

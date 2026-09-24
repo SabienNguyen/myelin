@@ -27,6 +27,13 @@ describe('buildStaticRoutes', () => {
     expect((await app.request('/assets/app.js')).status).toBe(200);
   });
 
+  it('limits images to this origin and inline data', async () => {
+    const { app } = buildStaticRoutes(dir);
+    for (const path of ['/', '/t/abc/page/x']) {
+      expect((await app.request(path)).headers.get('content-security-policy')).toBe("img-src 'self' data: blob:");
+    }
+  });
+
   it('falls back to index.html for a deep link that is not a file', async () => {
     const { app } = buildStaticRoutes(dir);
     const deep = await app.request('/t/abc/page/x');

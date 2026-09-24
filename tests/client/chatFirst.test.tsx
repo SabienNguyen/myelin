@@ -32,6 +32,7 @@ afterEach(async () => {
   // (threadAside.test.tsx explains the unhandled error this avoids).
   await new Promise((resolve) => setTimeout(resolve, 10));
   vi.unstubAllGlobals();
+  sessionStorage.clear(); // a typed draft is kept per thread and would reach the next test
 });
 
 const LONG_ANSWER = 'A monad is a way to chain computations that carry context — optional values, '
@@ -56,10 +57,14 @@ const FAILED = 'failed:';
 interface ChatBody { mode?: string; command?: string; messages: UIMessage[] }
 
 /** Serves the thread load, an empty session plan, and each /api/chat POST from `replies` in order,
- *  recording every chat body. */
-function stubServer(initial: UIMessage[], replies: string[] = [], plan: unknown[] = []) {
+ *  recording every chat body. `routes` answers other GETs first (a notebook, a failing plan). */
+function stubServer(
+  initial: UIMessage[], replies: string[] = [], plan: unknown[] = [],
+  routes: Record<string, () => unknown> = {},
+) {
   const chats: ChatBody[] = [];
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    if (routes[url]) return routes[url]() as Response;
     if (url === '/api/thread/test') return { ok: true, json: async () => initial } as Response;
     if (url === '/api/session-plan') return { ok: true, json: async () => ({ plan }) } as Response;
     if (url === '/api/chat') {
@@ -75,17 +80,17 @@ function stubServer(initial: UIMessage[], replies: string[] = [], plan: unknown[
   return chats;
 }
 
-function Harness() {
+function Harness({ threadId }: { threadId?: string }) {
   const [mode, setMode] = useState('');
   return (
     <Runtime mode={mode} threadId="test" onSetMode={setMode}>
-      <Thread mode={mode} onModeChange={setMode} />
+      <Thread mode={mode} onModeChange={setMode} threadId={threadId} />
     </Runtime>
   );
 }
 
-async function renderThread() {
-  await act(async () => { render(<Harness />); });
+async function renderThread(threadId?: string) {
+  await act(async () => { render(<Harness threadId={threadId} />); });
   // The composer's editor autofocuses once, asynchronously; let it settle before interacting.
   await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
 }
@@ -277,5 +282,102 @@ describe('"try again" after a failed grading turn', () => {
     const users = (body: ChatBody) => body.messages.filter((m) => m.role === 'user').length;
     expect(users(chats[1])).toBe(users(chats[0]));
     expect(chats[1].messages.at(-1)?.role).toBe('assistant');
+  });
+});
+
+const json = (body: unknown, status = 200) => () => ({ ok: status < 400, status, json: async () => body });
+
+describe('a conversation filed under a notebook', () => {
+  const detail = {
+    notebook: { id: 'calc', title: 'Calculus I', sources: 1, topics: 2, due: 1, lastActive: '2026-09-22T00:00:00.000Z', mastery: {} },
+    threads: [], sources: [], library: [],
+    topics: [
+      { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true },
+      { slug: 'limits', title: 'Limits', level: 'unseen', due: false },
+    ],
+  };
+  const plan = [
+    { kind: 'review', slug: 'derivative', title: 'Derivative', why: 'due' },
+    { kind: 'review', slug: 'entropy', title: 'Entropy', why: 'due in Thermodynamics' },
+  ];
+
+  it('opens on the notebook, starts from its topics, and studies only its pages', async () => {
+    const chats = stubServer([], [LONG_ANSWER, LONG_ANSWER], plan, {
+      '/api/thread/test/notebook': json({ id: 'calc', title: 'Calculus I' }),
+      '/api/notebooks/calc': json(detail),
+    });
+    await renderThread('test');
+    await waitFor(() => expect(document.querySelector('.nb-intro')).not.toBeNull());
+    expect(screen.queryByText('Entropy')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Review Derivative with me/ }));
+    await waitFor(() => expect(chats).toHaveLength(1));
+    expect(lastUserText(chats[0])).toBe('Review Derivative with me');
+  });
+
+  it('its session plan names no other notebook\'s page', async () => {
+    const chats = stubServer([], [LONG_ANSWER], plan, {
+      '/api/thread/test/notebook': json({ id: 'calc', title: 'Calculus I' }),
+      '/api/notebooks/calc': json(detail),
+    });
+    await renderThread('test');
+    fireEvent.click(await screen.findByRole('button', { name: /Study Calculus I \(1 item\)/ }));
+    await waitFor(() => expect(chats).toHaveLength(1));
+    expect(lastUserText(chats[0])).toMatch(/"derivative"/);
+    expect(lastUserText(chats[0])).not.toMatch(/entropy/i);
+  });
+});
+
+describe('a session plan that fails to load', () => {
+  it('says so instead of showing the newcomer\'s example asks', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    stubServer([], [], [], { '/api/session-plan': json({ error: 'boom' }, 500) });
+    await renderThread();
+    expect(await screen.findByText('could not load today’s session')).not.toBeNull();
+    expect(screen.queryByRole('button', { name: /Teach me how derivatives work/ })).toBeNull();
+  });
+});
+
+describe('"try again" for every failure the learner can see', () => {
+  const photo = { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA', filename: 'graph.png' } as const;
+  const asked: UIMessage = { id: 'u1', role: 'user', parts: [
+    { type: 'data-command', data: { command: 'quiz' } }, photo, { type: 'text', text: 'quiz me on this graph' },
+  ] };
+
+  it('survives a reload of a failed turn, and resends its command and attachment', async () => {
+    const chats = stubServer([
+      asked,
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'The tutor model returned nothing for this turn.' }], metadata: { failed: true } },
+    ], [LONG_ANSWER]);
+    await renderThread();
+    fireEvent.click(await screen.findByRole('button', { name: 'try again' }));
+    await waitFor(() => expect(chats).toHaveLength(1));
+    expect(chats[0].command).toBe('quiz');
+    const resent = chats[0].messages.at(-1)!;
+    expect(resent.role).toBe('user');
+    expect(resent.parts).toContainEqual(photo);
+    expect(lastUserText(chats[0])).toBe('quiz me on this graph');
+  });
+
+  it('after a refused request, re-posts the unanswered question without a second copy', async () => {
+    const chats: ChatBody[] = [];
+    let refused = false;
+    stubServer(answered, [], [], {
+      '/api/chat': () => {
+        if (!refused) {
+          refused = true;
+          return { ok: false, status: 409, body: null, json: async () => ({ error: 'The previous turn is still shutting down.' }) };
+        }
+        return sseResponse(sseText(answerChunks('reply-2', LONG_ANSWER)));
+      },
+    });
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await renderThread();
+    fireEvent.click(await screen.findByRole('button', { name: 'check my understanding' }));
+    expect(await screen.findByText(/still shutting down/)).not.toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'try again' }));
+    await waitFor(() => expect(screen.queryByText(/still shutting down/)).toBeNull());
+    for (const [url, init] of fetchMock.mock.calls) if (url === '/api/chat') chats.push(JSON.parse(String(init.body)));
+    expect(chats).toHaveLength(2);
+    expect(chats[1].messages).toEqual(chats[0].messages);
   });
 });

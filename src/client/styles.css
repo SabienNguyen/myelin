@@ -88,7 +88,9 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   outline-offset: 1px;
 }
 
-.app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+/* minmax(0, 1fr): an implicit column grows to the topbar's min-content width, so on a phone a long
+   notebook crumb pushed Add material past the right edge instead of shrinking itself. */
+.app { display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); height: 100%; }
 
 /* ── Top bar ─────────────────────────────────────────── */
 .topbar {
@@ -139,9 +141,10 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .history-panel {
   position: absolute;
   top: calc(100% + 0.4rem);
-  left: 0;
+  right: 0;
   z-index: 10;
-  /* Wide enough for a title AND its notebook tag; capped to the viewport on a phone. */
+  /* Wide enough for a title AND its notebook tag; capped to the viewport on a phone. Anchored
+     right: the trigger sits on the right of the bar, and a left anchor ran the panel off-screen. */
   width: min(25rem, calc(100vw - 1rem));
   max-height: 22rem;
   overflow-y: auto;
@@ -168,7 +171,7 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .history-row:hover { background: var(--bg-inset); border-color: transparent; }
 .history-row.active { background: var(--accent-soft); color: var(--accent); }
 .history-row.history-new { color: var(--accent); font-weight: 600; margin-bottom: 0.15rem; }
-.history-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-title { flex: 1; unicode-bidi: plaintext; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-time { flex: none; color: var(--text-muted); font-size: 0.78rem; }
 /* On the active row's accent-soft background, --text-muted is 4.09:1 in dark — under AA for
    small text (axe color-contrast, caught with the menu open). The row's accent foreground
@@ -177,10 +180,18 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
 .history-empty { padding: 0.5rem 0.6rem; color: var(--text-muted); font-size: 0.85rem; }
 .history-notebook {
   flex: none; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  /* plaintext: an RTL title keeps its leading words and loses its tail, not the reverse. */
+  unicode-bidi: plaintext;
   font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);
   padding: 0.05rem 0.4rem; border-radius: var(--radius-sm); background: var(--bg-inset);
 }
 .history-row.active .history-notebook { color: inherit; background: transparent; }
+.history-item { display: flex; align-items: center; gap: 0.15rem; }
+.history-item .history-row { flex: 1; min-width: 0; }
+.history-delete { flex: none; color: var(--text-muted); }
+.history-delete:hover { color: var(--bad); }
+.history-row.history-more { color: var(--accent); justify-content: center; }
+.thread-confirm { padding: 0.5rem 0.6rem; font-size: 0.85rem; }
 
 .topbar-status { display: flex; gap: 0.4rem; align-items: center; }
 .badge {
@@ -368,6 +379,8 @@ button.badge:hover { color: var(--text); }
 .composer-row > .composer-editor > .symbol-keyboard { grid-column: 2; grid-row: 2; margin: 0; }
 .composer-row > .composer-attach { grid-column: 1; grid-row: 2; }
 .composer-row > button[type="submit"] { grid-column: 3; grid-row: 2; }
+/* Stop takes Send's cell while a turn runs (a type=button, so the rule above misses it). */
+.composer-row > button.composer-stop { grid-column: 3; grid-row: 2; }
 .composer-row .tiptap { border-color: transparent; padding: .6rem; min-height: 3.5rem; }
 .composer-row .symbol-panel {
   position: absolute;
@@ -918,7 +931,6 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   margin: 0.4rem 0;
   padding: 0.6rem 0.75rem;
   background: var(--bg-inset);
-  border-left: 2px solid var(--accent);
   border-radius: var(--radius-sm);
 }
 .aside-form blockquote {
@@ -945,6 +957,26 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .aside-composer-error { font-size: 0.8rem; margin: 0.3rem 0; }
 .aside-composer-error { color: var(--bad); }
 .aside-composer-status { color: var(--text-muted); }
+.aside-form textarea.aside-form-quote { min-height: 4.5rem; margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-muted); }
+/* A message's own actions: out of the way until the message is hovered or holds focus, always
+   there on touch screens, which have no hover. */
+.msg-actions { display: flex; gap: 0.35rem; margin-top: 0.25rem; opacity: 0; }
+.msg.assistant:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
+@media (hover: none) { .msg-actions { opacity: 1; } }
+.msg-actions button {
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+}
+.msg-actions button:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
+.msg-actions button:disabled { opacity: 0.45; cursor: default; }
+.part-error { margin: 0.4rem 0; font-size: 0.85rem; color: var(--text-muted); font-style: italic; }
+.session-plan-failed { margin: 0.4rem 0 0; font-size: 0.85rem; color: var(--text-muted); }
+.app-crash { max-width: 40rem; margin: 3rem auto; padding: 0 1.25rem; color: var(--text); }
+.thread-load-error { margin: 1rem 1.25rem; }
 
 /* model thinking's own summary treatment, reused for the aside note so a side question reads
    with the same quiet weight as a collapsed thinking block. */
@@ -955,7 +987,6 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   margin: 0.4rem 0 0;
   padding: 0.5rem 0.75rem;
   background: var(--bg-inset);
-  border-left: 2px solid var(--accent);
   border-radius: var(--radius-sm);
 }
 .aside-part-sources { margin: 0.4rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; }
@@ -1112,6 +1143,8 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tab-body { flex: 1; overflow: auto; padding: 1.1rem 1.25rem; }
 
 .stage-summary .stage-math-work { margin-block: 1.25rem; }
+.stage-quiz { margin: 0.5rem 0; padding-left: 1.1rem; }
+.stage-quiz li { padding: 0.2rem 0; }
 .stage-math-work h4 { margin: 1.5rem 0 .65rem; font-family: var(--font-prose); font-size: .8rem; font-weight: 600; color: var(--text-muted); }
 .stage-math-work .stage-problem { padding-block: .5rem; font-size: 1.2rem; }
 .stage-math-work ol { margin: 0; padding-left: 1.75rem; }
@@ -1218,7 +1251,8 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   overflow: hidden;
   touch-action: none;
   border-radius: var(--radius-sm);
-  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  background: var(--bg);
   cursor: grab;
 }
 .graph-canvas:active { cursor: grabbing; }
@@ -1361,8 +1395,10 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   cursor: pointer;
 }
 .wiki-link:hover { border-bottom-style: solid; }
+/* A remote image in model output, held back as a link (MarkdownImage). */
+.md-image-foreign { font-family: var(--font-mono); font-size: 0.8em; color: var(--text-muted); }
 
-/* A citation chip (WikiLink's `#/cite/<title>` branch, MarkdownText.tsx): an <a> when the title
+/* A citation chip (MarkdownLink's `#/cite/<title>` branch, MarkdownText.tsx): an <a> when the title
    resolves to a page, a plain <span> when it doesn't. Sized down and ellipsised — a model-cited
    title runs long and sits mid-sentence, so it must read as a marginal source note, not prose. */
 .cite-chip {
@@ -1421,20 +1457,20 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
   overflow-x: auto;
 }
 .page-panel pre code { background: none; padding: 0; }
-.page-panel table {
+.page-panel table, .msg.assistant table {
   border-collapse: collapse;
   margin: 0.6rem 0;
   font-size: 0.92em;
   display: block;
   overflow-x: auto;
 }
-.page-panel th, .page-panel td {
+.page-panel th, .page-panel td, .msg.assistant th, .msg.assistant td {
   text-align: left;
   padding: 0.3rem 0.9rem 0.3rem 0;
   border-bottom: 1px solid var(--border);
   line-height: 1.5;
 }
-.page-panel th {
+.page-panel th, .msg.assistant th {
   font-family: var(--font-ui);
   font-size: 0.75rem;
   letter-spacing: 0.04em;
@@ -2976,7 +3012,6 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
 .thread-empty-examples button { text-align: left; border-left: 2px solid var(--border); }
 .thread-empty-examples button:hover { border-left-color: var(--accent); }
 
-.graph-canvas { border: 1px solid var(--border); background: var(--bg); }
 .models-chips { max-height: 10rem; overflow-y: auto; }
 .models-chip { overflow-wrap: anywhere; text-align: left; }
 @media (max-width: 640px) {
@@ -3130,7 +3165,7 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
   flex: none; font-family: var(--font-mono); font-size: 0.72rem; white-space: nowrap;
   padding: 0.1rem 0.5rem; border-radius: 999px; background: var(--bg-inset); color: var(--text-muted);
 }
-.nb-pill--due { color: var(--warn); border: 1px solid var(--warn); background: transparent; }
+.nb-pill--due { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
 
 .nb-meter { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--bg-inset); }
 .nb-meter--empty { opacity: 0.6; }
@@ -3142,6 +3177,12 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
    fourth colour competing with the three that mean something. */
 .nb-level-unseen { background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--mastery-unseen); }
 .nb-dot { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; }
+/* High Contrast maps every level to one system colour and drops the unseen ring, so the bar and
+   the dots stop meaning anything. Keep their own colours; separate bar segments with a Canvas line. */
+@media (forced-colors: active) {
+  .nb-dot, .nb-meter-seg { forced-color-adjust: none; }
+  .nb-meter-seg + .nb-meter-seg { box-shadow: inset 1px 0 0 Canvas; }
+}
 .nb-legend {
   list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.9rem;
   color: var(--text-muted); font-size: 0.78rem;
@@ -3166,14 +3207,23 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
 .nb-stats { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .nb-list { list-style: none; margin: 0; padding: 0; }
 .nb-row {
-  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
   padding: 0.45rem 0; border-bottom: 1px solid var(--border); font-size: 0.9rem;
 }
-.nb-row-title { flex: 1; min-width: 0; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+/* An 8rem basis wraps the action and level under a narrow title instead of squeezing it. */
+.nb-row-title { flex: 1 1 8rem; min-width: 0; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
 a.nb-row-title:hover { color: var(--accent); }
 .nb-row-time { flex: none; color: var(--text-muted); font-size: 0.78rem; }
-.nb-row select { font-size: 0.8rem; padding: 0.2rem 0.4rem; }
-.nb-row .panel-error { flex-basis: 100%; }
+.nb-row select { font-size: 0.8rem; padding: 0.2rem 0.4rem; max-width: 12rem; min-width: 0; }
+/* Topic rows: a fixed slot for the level text, so each row's action lands at the same x. */
+.nb-row .nb-action { min-width: 4.5rem; justify-content: center; }
+.nb-row .nb-action + .nb-row-time { flex: 0 0 9.5rem; }
+.nb-row .panel-error, .nb-row .thread-confirm { flex-basis: 100%; }
+.nb-topic-misconception {
+  flex-basis: 100%; display: flex; align-items: baseline; gap: 0.35rem; margin: 0;
+  color: var(--bad); font-size: 0.8rem; overflow-wrap: anywhere;
+}
+.nb-topic-misconception svg { flex: none; }
 .nb-picker { display: flex; flex-direction: column; gap: 0.4rem; margin: 0; padding: 0.6rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .nb-pick { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.9rem; }
 .nb-pick input { margin-top: 0.2rem; accent-color: var(--accent); }
@@ -3192,10 +3242,28 @@ button.nb-delete:hover { background: var(--bg-inset); }
 }
 .notebook-crumb-link:hover { color: var(--accent); }
 .notebook-crumb-sep { color: var(--border); }
+.nb-crumb-menu { position: relative; display: flex; min-width: 0; }
+button.nb-crumb-trigger { border: none; background: transparent; padding: 0; font: inherit; }
+button.nb-crumb-trigger:hover { background: transparent; }
+.nb-crumb-panel {
+  position: absolute; top: calc(100% + 0.4rem); left: 0; z-index: 10;
+  width: min(18rem, calc(100vw - 1rem)); max-height: 22rem; overflow-y: auto;
+  display: flex; flex-direction: column; padding: 0.35rem;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.nb-crumb-panel a.history-row { color: inherit; text-decoration: none; }
+.nb-crumb-panel .panel-error { margin: 0.3rem 0.6rem; }
+@media (max-width: 640px) {
+  /* .notebook-crumb clips its overflow at this width; anchor to the (position: relative) bar. */
+  .nb-crumb-menu { position: static; }
+  .nb-crumb-panel { left: 0.5rem; right: 0.5rem; width: auto; }
+}
 @media (max-width: 640px) {
   .nb-page { padding-inline: 0.9rem; }
-  .notebook-crumb-link { max-width: 9rem; }
 }
+/* Ellipsis needs a box of its own: text-overflow has no effect on an inline-flex link's anonymous
+   text. Every site that truncates a learner's title with this also sets title= to the full name. */
+.truncate-1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: plaintext; }
 
 /* ── Phone-width top bar: one row ─────────────────────────────────────────────────────────────
    At 390px the bar used to wrap into two rows (brand and history, then badges and Add material),
@@ -3210,9 +3278,14 @@ button.nb-delete:hover { background: var(--bg-inset); }
     position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
   }
   .add-material-trigger { padding: 0.4rem 0.55rem; }
-  .notebook-crumb-link { max-width: 6.5rem; }
+  .notebook-crumb { flex: 0 1 auto; overflow: hidden; }
+  .notebook-crumb-link { max-width: 6.5rem; min-width: 0; }
   .topbar-status { gap: 0.25rem; min-width: 0; }
   .topbar-status .badge { padding-inline: 0.45rem; max-width: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The one-row bar puts these triggers mid-screen, so a panel anchored to its own trigger ran off
+     one edge or the other. Anchor both to the whole (position: relative) bar, as Add material does. */
+  .history-menu, .models-menu { position: static; }
+  .history-panel, .models-panel { top: calc(100% + 0.4rem); left: 0.5rem; right: 0.5rem; width: auto; }
 }
 
 /* ── A notebook's own opening (Notebooks.tsx NotebookIntro) ─────────────────────────────────── */
@@ -3235,10 +3308,13 @@ button.nb-delete:hover { background: var(--bg-inset); }
   padding: 0.1rem 0.4rem; border-radius: var(--radius-sm); background: var(--bg-inset); color: var(--text-muted);
 }
 .nb-starter-kind--review { color: var(--warn); }
-.nb-starter-kind--quiz { color: var(--mastery-practicing); }
+.nb-starter-kind--quiz { color: var(--accent); }
 
 /* ── Stage at rest: the conversation's pages (ConversationPages.tsx) ───────────────────────── */
-.stage-pages { margin: 0 0 2rem; }
+/* Its own child of #stage-root: at rest it follows the (hidden) placeholder, so it takes the
+   placeholder's column and drop; under a Latest exercise card it sits close beneath. */
+.stage-pages { max-width: 24rem; margin: 1.25rem auto 2rem; padding: 0 1rem; }
+.stage-empty + .stage-pages { margin-top: clamp(2rem, 12vh, 8rem); }
 .stage-pages h2 { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.5rem; }
 .stage-pages ul { list-style: none; margin: 0; padding: 0; }
 .stage-pages button {
@@ -3248,7 +3324,6 @@ button.nb-delete:hover { background: var(--bg-inset); }
 .stage-pages button:hover { background: var(--bg-inset); }
 .stage-pages-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .stage-pages-level { flex: none; color: var(--text-muted); font-size: 0.78rem; }
-.stage-empty:has(.stage-pages) { margin-top: 1.25rem; }
 
 /* ── Command palette (CommandPalette.tsx) ─────────────────────────────────────────────────────── */
 .palette { position: relative; }
@@ -3270,7 +3345,7 @@ button.nb-delete:hover { background: var(--bg-inset); }
   border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent;
   padding: 0.85rem 1rem; font-size: 1rem;
 }
-.palette-input:focus-visible { outline: none; box-shadow: inset 0 -2px 0 var(--accent); }
+.palette-input:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .palette-empty { margin: 0; padding: 0.8rem 1rem; color: var(--text-muted); font-size: 0.88rem; }
 .palette-list { list-style: none; margin: 0; padding: 0.35rem; overflow-y: auto; }
 .palette-option { cursor: pointer; border-radius: var(--radius-sm); }
@@ -3280,7 +3355,7 @@ button.nb-delete:hover { background: var(--bg-inset); }
 }
 .palette-row { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.45rem 0.6rem; border-radius: var(--radius-sm); }
 .palette-option.active .palette-row { background: var(--accent-soft); color: var(--accent); }
-.palette-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette-label { flex: 1; min-width: 0; unicode-bidi: plaintext; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-detail { flex: none; font-size: 0.78rem; color: var(--text-muted); }
 .palette-option.active .palette-detail { color: inherit; }
 @media (max-width: 640px) {
@@ -3307,6 +3382,7 @@ button.nb-delete:hover { background: var(--bg-inset); }
 .page-chip.page-notebook {
   display: inline-flex; align-items: center; gap: 0.25rem; text-decoration: none;
   color: var(--accent); background: var(--accent-soft); border-color: transparent;
+  max-width: 100%; overflow-wrap: anywhere;
 }
 .page-chip.page-notebook:hover { filter: brightness(1.08); }
 
@@ -3325,7 +3401,7 @@ p.quiz-expected { margin: 0.3rem 0 0; }
 .nb-picker-row ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem; }
 .nb-picker-row .chip-btn {
   display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.85rem;
-  padding: 0.3rem 0.75rem; border-radius: 999px;
+  padding: 0.3rem 0.75rem; border-radius: 999px; max-width: min(22rem, 100%);
 }
 .nb-picker-due { color: var(--warn); }
 

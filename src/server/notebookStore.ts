@@ -170,6 +170,17 @@ export function attachThread(vault: string, id: string, threadId: string): Noteb
   });
 }
 
+/** Takes a thread out of a notebook, back to the unfiled list — the undo for a filing mistake. */
+export function detachThread(vault: string, id: string, threadId: string): Notebook {
+  assertThreadId(threadId);
+  return mutate(vault, (notebooks) => {
+    const nb = notebooks.find((n) => n.id === id);
+    if (!nb) throw new NotebookNotFound(id);
+    const updated = { ...nb, threads: nb.threads.filter((t) => t !== threadId) };
+    return { next: notebooks.map((n) => (n.id === id ? updated : n)), result: updated };
+  });
+}
+
 /** Removes the grouping only. Its conversations and sources stay where they always were, and show
  *  up again under history and the Library. */
 export function deleteNotebook(vault: string, id: string): void {
@@ -197,7 +208,12 @@ export function forgetThread(vault: string, threadId: string): void {
 
 export type Level = 'mastered' | 'practicing' | 'exposed' | 'unseen';
 
-export interface StudentEntry { effective?: string; days_left?: number | null; slipped?: boolean }
+export interface StudentEntry {
+  effective?: string; days_left?: number | null; slipped?: boolean;
+  /** The level as last earned, before decay; `effective` is what it has decayed to. */
+  level?: string;
+  misconceptions?: unknown[];
+}
 
 export interface NotebookSummary {
   id: string;

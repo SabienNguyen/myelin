@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { BrainIcon as Brain, UserCircleIcon as UserCircle } from '@phosphor-icons/react';
 import { LocalModelGetter } from './LocalModelGetter.js';
 import { CodexConnectionPanel } from './CodexConnectionPanel.js';
+import { useDismissableDialog } from '../lib/useDismissableDialog.js';
 
 type Status = { anki?: 'up' | 'down' | 'backlog'; student?: string; tutor?: string };
 
@@ -10,6 +11,14 @@ const ANKI_LABEL: Record<string, string> = {
   down: 'Anki closed — reviews sync when it opens',
   backlog: 'Anki has a review backlog',
 };
+
+const ROUTES: [string, string][] = [
+  ['ollama:', 'local model via Ollama'],
+  ['oai:', 'OpenAI API'],
+  ['openai:', 'OpenAI-compatible endpoint'],
+  ['openrouter:', 'OpenRouter'],
+  ['groq:', 'Groq'],
+];
 
 /**
  * The tutor model, said in words rather than in a model id.
@@ -24,25 +33,15 @@ export function modelLabel(id: string): { name: string; how: string } {
     .replace(/-(\d)-(\d)$/, ' $1.$2')     // haiku-4-5 -> haiku 4.5
     .replace(/-(\d+)$/, ' $1')             // sonnet-5   -> sonnet 5
     .replace(/^(.)/, (c) => c.toUpperCase());
-  if (id.startsWith('ollama:')) {
-    return { name: id.slice('ollama:'.length), how: 'local model via Ollama' };
-  }
-  // The openai: route needed its own branch, not the Anthropic fallthrough: the badge exists to
+  // The openai: route needed its own entry, not the Anthropic fallthrough: the badge exists to
   // answer "which model, and whose bill", and it was naming the wrong vendor for every
   // OpenAI-compatible model. The id is shown verbatim too — `pretty()` title-cases and rewrites
   // trailing digits for `claude-sonnet-5`, which turned `openai:gpt-5.6-luna` into
   // `Openai:gpt-5.6-luna`, an id that exists nowhere.
-  if (id.startsWith('oai:')) {
-    return { name: id.slice('oai:'.length), how: 'OpenAI API' };
-  }
-  if (id.startsWith('openai:')) {
-    return { name: id.slice('openai:'.length), how: 'OpenAI-compatible endpoint' };
-  }
-  if (id.startsWith('openrouter:')) {
-    return { name: id.slice('openrouter:'.length), how: 'OpenRouter' };
-  }
-  if (id.startsWith('groq:')) {
-    return { name: id.slice('groq:'.length), how: 'Groq' };
+  for (const [prefix, how] of ROUTES) {
+    // A bare prefix (an older config saved `oai:` with the model field cleared) shows the id
+    // rather than an empty badge.
+    if (id.startsWith(prefix)) return { name: id.slice(prefix.length).trim() || id, how };
   }
   return { name: pretty(id), how: 'Anthropic API' };
 }
@@ -105,31 +104,27 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
     fetch('/api/students').then((r) => r.json())
       .then((d) => setStudents(d.students ?? [])).catch(() => {});
     fetch('/api/voice').then((r) => r.json()).then((d) => setVoice(d.voice ?? '')).catch(() => {});
-    const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    // Dismissal mirrors AddMaterial and HistoryMenu: Escape closes and returns focus to the
-    // trigger — this was the one topbar popup where Escape did nothing.
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setOpen(false); badgeRef.current?.focus(); }
-    };
-    document.addEventListener('mousedown', onDoc);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      window.removeEventListener('keydown', onKey);
-    };
   }, [open]);
+  useDismissableDialog({ open, rootRef, triggerRef: badgeRef, onClose: () => setOpen(false) });
 
   const switchTo = async (name: string) => {
-    const res = await fetch('/api/student', {
-      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/student', {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+      });
+    } catch {
+      setNote('can’t reach the harness — still the same student');
+      return;
+    }
     const d = await res.json().catch(() => ({}));
     if (!res.ok) { setNote(d.error ?? 'could not switch'); return; }
-    setNote(d.warning ?? '');
+    // Every panel holds the previous learner's mastery (notebook cards, topic levels, the Stage,
+    // the palette), so a switch reloads the app rather than repainting only this badge. A warning
+    // stays on screen instead, since a reload would erase it.
+    if (!d.warning) { location.reload(); return; }
+    setNote(`${d.warning} — reload to see ${d.current}’s progress`);
     onSwitched(d.current);
-    setOpen(false);
     setFresh('');
   };
 
@@ -361,7 +356,11 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       setLoadFailed(true);
       setNote({ text: 'could not load current models — reopen this to retry before saving', err: true });
     };
-    fetch('/api/setup/models').then((r) => r.json()).then(takeState).catch(failed);
+    fetch('/api/setup/models').then(async (r) => {
+      const d = await r.json();
+      if (!r.ok || !d?.roles || !d?.env) throw new Error(d?.error ?? `models state returned ${r.status}`);
+      takeState(d as ModelsState);
+    }).catch(failed);
     fetch('/api/usage').then((r) => r.json()).then(setUsage).catch(failed);
     setFreeModels(null);
     setCatalogError('');
@@ -378,19 +377,8 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
     fetch('/api/setup').then((r) => r.json())
       .then((d) => setAnthropicMeta({ present: Boolean(d?.apiKey?.present), source: d?.apiKey?.source ?? null }))
       .catch(failed);
-    const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { setOpen(false); badgeRef.current?.focus(); }
-    };
-    document.addEventListener('mousedown', onDoc);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDoc);
-      window.removeEventListener('keydown', onKey);
-    };
   }, [open]);
+  useDismissableDialog({ open, rootRef, triggerRef: badgeRef, onClose: () => setOpen(false) });
 
   useEffect(() => { if (open) firstRef.current?.focus(); }, [open]);
 

@@ -82,36 +82,40 @@ async function stopFrameCollection(page: Page): Promise<number[]> {
   });
 }
 
-async function readPositionsCount(page: Page): Promise<{ count: number; raw: string | null }> {
+async function readPositionsCount(page: Page): Promise<{ count: number }> {
   return page.evaluate((key) => {
     try {
       const raw = localStorage.getItem(key);
-      if (!raw) return { count: 0, raw: null };
-      return { count: Object.keys(JSON.parse(raw)).length, raw };
+      return { count: raw ? Object.keys(JSON.parse(raw)).length : 0 };
     } catch {
-      return { count: 0, raw: null };
+      return { count: 0 };
     }
   }, POSITIONS_KEY);
 }
 
-/** Polls localStorage's remembered-positions blob until it both covers every synthetic node and
- *  stops changing across two consecutive reads (the ForceAtlas2 worker settling, per layout.ts's
- *  own settleChecks logic), or `ceilingMs` elapses — whichever comes first. */
+interface GraphProbe { order: number; finite: number; running: boolean }
+
+/** GraphPanel's test hook (window.__myelinGraph, present under automation): nodes in the graph,
+ *  nodes at a finite position inside the canvas, and whether the layout still runs. */
+async function readProbe(page: Page): Promise<GraphProbe | null> {
+  return page.evaluate(() => {
+    const g = (window as unknown as { __myelinGraph?: GraphProbe }).__myelinGraph;
+    return g ? { order: g.order, finite: g.finite, running: g.running } : null;
+  });
+}
+
+/** Waits until the layout has every synthetic node, has stopped running, and has saved their
+ *  positions (the settle handler saves), or `ceilingMs` elapses. */
 async function waitForSettle(
   page: Page, expectedCount: number, ceilingMs: number,
 ): Promise<{ settled: boolean; elapsedMs: number }> {
   const start = Date.now();
-  let prevRaw: string | null = null;
-  let stableStreak = 0;
   while (Date.now() - start < ceilingMs) {
-    const { count, raw } = await readPositionsCount(page);
-    if (count >= expectedCount && raw === prevRaw) {
-      stableStreak++;
-      if (stableStreak >= 2) return { settled: true, elapsedMs: Date.now() - start };
-    } else {
-      stableStreak = 0;
+    const probe = await readProbe(page);
+    if (probe && probe.order === expectedCount && !probe.running) {
+      const { count } = await readPositionsCount(page);
+      if (count >= expectedCount) return { settled: true, elapsedMs: Date.now() - start };
     }
-    prevRaw = raw;
     await page.waitForTimeout(300);
   }
   return { settled: false, elapsedMs: ceilingMs };
@@ -177,6 +181,8 @@ test.describe('Graph performance — synthetic large vault', () => {
     expect(realEdgeCount).toBeGreaterThanOrEqual(TARGET_EDGE_COUNT);
 
     await page.route('**/api/graph', (route) => route.fulfill({ json: payload }));
+    const consoleLines: string[] = [];
+    page.on('console', (msg) => consoleLines.push(msg.text()));
     // Cleared before the app's own scripts run (addInitScript fires ahead of page scripts on every
     // navigation) so a stale positions blob from an earlier spec in this shared browser context
     // can't make settle detection below pass instantly on data it never actually laid out.
@@ -197,8 +203,7 @@ test.describe('Graph performance — synthetic large vault', () => {
     // contextualSubgraph (GraphPanel.tsx) already falls back to the whole, unfiltered graph — the
     // ForceAtlas2 worker is therefore already running by the time this line executes. Switching to
     // "Whole vault" doesn't change node membership here (same slugs either way) and so does NOT
-    // restart the layout — it only forces a re-fit. That's a real property of this component, not a
-    // test bug: logged as a finding in the report rather than worked around.
+    // restart the layout; its fit waits for the running layout's settle.
     await page.getByRole('tab', { name: 'Whole vault' }).click();
 
     await page.waitForTimeout(3_000);
@@ -207,6 +212,12 @@ test.describe('Graph performance — synthetic large vault', () => {
 
     const { settled, elapsedMs: settleElapsedFromRestart } = await waitForSettle(page, NODE_COUNT, SETTLE_CEILING_MS);
     console.log(`[graph-perf] settle: ${settled ? 'reached' : 'DID NOT settle within ceiling'} after +${settleElapsedFromRestart}ms past the 3s settling sample (ceiling ${SETTLE_CEILING_MS}ms)`);
+    expect(settled).toBe(true);
+    // A settle forced by layout.ts's run cap is a layout that never converged, not a settled one.
+    expect(consoleLines.filter((line) => line.includes('run cap'))).toEqual([]);
+    // Every node drawn somewhere the learner can see once the settle's fit lands: NaN positions and
+    // a stale frame both left nodes off the canvas while the old wall-clock check still passed.
+    await expect.poll(async () => (await readProbe(page))?.finite, { timeout: 5_000 }).toBe(NODE_COUNT);
 
     await startFrameCollection(page);
     await panFor(page, 2_000);

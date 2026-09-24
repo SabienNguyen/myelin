@@ -3,21 +3,15 @@
 // once rendered "✗ evidence recorded" — success copy under a failure mark, caught on an audit
 // screenshot. These pin that the failed column of the label table is actually used.
 //
-// The page-naming tests use the REAL shapes production sends, not a convenient stand-in: a
-// read_page result is an MCP envelope (`{ content: [{ type: 'text', text: '<JSON>' }] }`), and the
-// title comes from a stubbed /api/graph via usePageTitle — never from parsing that envelope. An
-// earlier version of this file passed a hand-shaped `{ page: { meta: { title } } }` result that
-// production never produces, which is why the chip's fallback-to-slug bug survived a passing suite.
-//
-// Those two tests import ToolStatusChip (and panelBus, for the click-through test) fresh via
-// vi.resetModules() rather than the file's top-level import. pageTitles.ts's cache is a
-// module-level singleton throttled to one /api/graph call per 15s across every caller — the
-// throttle is shared by whichever test asks first, in THIS file and any other client test file
-// Vitest happens to run in the same process. A fresh module per test sidesteps that instead of
-// betting on suite-wide execution order and timing.
+// The page-naming tests use the shapes production sends: a read_page result is an MCP envelope
+// (`{ content: [{ type: 'text', text: '<JSON>' }] }`) whose title the chip parses, and a
+// record_evidence result carries no title, so that chip takes the page's title from /api/graph
+// via usePageTitle. The graph tests import ToolStatusChip fresh (vi.resetModules()) because
+// pageTitles.ts's cache is a module-level singleton, throttled across every caller.
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import { ToolStatusChip } from '../../src/client/components/ToolStatusChip.js';
+import { panelBus } from '../../src/client/lib/panelBus.js';
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -74,22 +68,17 @@ describe('ToolStatusChip', () => {
     expect(container.textContent).toBe('✗ mystery_tool failed');
   });
 
-  it('names the page a page tool acted on and opens it in the Page tab — from the graph, not the MCP envelope', async () => {
-    stubGraph([{ slug: 'chain-rule', title: 'Chain rule' }]);
-    const { ToolStatusChip: FreshChip, panelBus: freshBus } = await freshChip();
+  it('names the page a read_page chip acted on from its MCP result, and opens it in the Page tab', () => {
     const seen: string[] = [];
-    const off = freshBus.subscribe((e) => { if (e.type === 'openPage') seen.push(e.slug); });
-    // The real shape a read_page result reaches the client in: an MCP envelope whose title is
-    // buried in a JSON-encoded text blob, not the parsed object a naive `result.page.meta.title`
-    // read expects. The chip must ignore this entirely and resolve the title from the graph.
-    const result = {
-      content: [{ type: 'text', text: JSON.stringify({ page: { slug: 'chain-rule', meta: { title: 'Chain rule' } } }) }],
-    };
-    const { container } = render(<FreshChip toolName="read_page" args={{ slug: 'chain-rule' }} result={result} />);
-    // The title arrives async (the graph fetch), so this must wait rather than assert immediately.
-    const link = await screen.findByRole('button', { name: 'Chain rule' });
+    const off = panelBus.subscribe((e) => { if (e.type === 'openPage') seen.push(e.slug); });
+    const { container } = render(
+      <ToolStatusChip
+        toolName="read_page" args={{ slug: 'chain-rule' }}
+        result={{ content: [{ type: 'text', text: JSON.stringify({ page: { slug: 'chain-rule', meta: { title: 'Chain rule' } } }) }] }}
+      />,
+    );
     expect(container.textContent).toBe('read Chain rule');
-    fireEvent.click(link);
+    fireEvent.click(screen.getByRole('button', { name: 'Chain rule' }));
     expect(seen).toEqual(['chain-rule']);
     off();
   });
@@ -118,6 +107,19 @@ describe('ToolStatusChip', () => {
   it('keeps the plain failure copy — a failed read names no page as if it were read', () => {
     const { container } = render(<ToolStatusChip toolName="read_page" args={{ slug: 'x' }} result={{ isError: true }} />);
     expect(container.textContent).toBe('✗ could not read the page');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('scrubs leaked control tokens from a page title', () => {
+    const { container } = render(
+      <ToolStatusChip toolName="write_page" args={{ slug: 'limits', title: '<|im_start|>assistant\nLimits' }} result={{ content: [] }} />,
+    );
+    expect(container.textContent).toBe('wrote Limits');
+  });
+
+  it('shows an unfinished call as pending, with no page link', () => {
+    const { container } = render(<ToolStatusChip toolName="record_evidence" args={{ slug: 'limits' }} />);
+    expect(container.textContent).toBe('recording evidence…');
     expect(container.querySelector('button')).toBeNull();
   });
 });

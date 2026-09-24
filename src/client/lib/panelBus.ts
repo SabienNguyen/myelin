@@ -18,7 +18,10 @@ export type PanelEvent =
   // A conversation was filed under a notebook from inside the workspace (NotebookPicker). Every
   // reader of "which notebook is this conversation in" — the topbar crumb, the empty state, the
   // graph's notebook scope — looked once per conversation and would otherwise go on saying none.
-  | { type: 'notebookFiled'; threadId: string };
+  // Also emitted when the crumb moves or unfiles the conversation.
+  | { type: 'notebookFiled'; threadId: string }
+  // Open the command palette (CommandPalette.tsx) from another control.
+  | { type: 'openPalette' };
 
 type Fn = (e: PanelEvent) => void;
 const subs = new Set<Fn>();
@@ -31,6 +34,7 @@ export const panelBus = {
   setFocusMode(on: boolean) { this.emit({ type: 'focusMode', on }); },
   askTutor(text: string) { this.emit({ type: 'askTutor', text }); },
   notebookFiled(threadId: string) { this.emit({ type: 'notebookFiled', threadId }); },
+  openPalette() { this.emit({ type: 'openPalette' }); },
 };
 
 /** Segments a markdown string so a blanket text transform skips what must stay verbatim: fenced
@@ -110,7 +114,7 @@ function escapeLooseDollarsInText(text: string): string {
 const CITATION_SPAN = /(\s?)\uE200cite\uE202([^\uE201]*)\uE201/g;
 
 /** A ref prefixed "Vault: " names a page the model read with read_page and becomes a `#/cite/`
- * link — WikiLink (MarkdownText.tsx) turns that into a citation chip that resolves back to the
+ * link — MarkdownLink (MarkdownText.tsx) turns that into a citation chip that resolves back to the
  * page. Every other ref is an opaque web-search id (`turn0search0`, `turn1view2`, …): the
  * web_search tool chip already shows that source, so there is nothing useful to link and the
  * whole span is dropped, including the leading space it would otherwise leave dangling before

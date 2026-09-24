@@ -6,9 +6,12 @@
 // passive-voice or redundancy flag — so the mechanics of a draft can be graded the honest way, and
 // the model is left to judge only what a rule engine can't (argument, structure, taste).
 //
-// Loaded through a dynamic import so the ~MB WASM binary is a lazy chunk that costs nothing until a
-// learner actually opens a writing exercise — and so importing this module (e.g. from a test that
-// renders the block) never drags the binary into a Node/jsdom context that can't run it.
+// Loaded through a dynamic import so nothing loads until a learner actually opens a writing
+// exercise — and so importing this module (e.g. from a test that renders the block) never drags the
+// binary into a Node/jsdom context that can't run it. `binary`, not `binaryInlined`: the inlined
+// build is a 23 MB base64 string the main thread decoded before compiling; `binary` points at the
+// .wasm file, which Vite emits as an asset (new URL(…, import.meta.url)) and the browser compiles
+// while it downloads.
 
 export interface DraftLint {
   start: number;
@@ -28,8 +31,8 @@ function getLinter() {
   if (!linterPromise) {
     linterPromise = (async () => {
       const { LocalLinter } = await import('harper.js');
-      const { binaryInlined } = await import('harper.js/binaryInlined');
-      const linter = new LocalLinter({ binary: binaryInlined });
+      const { binary } = await import('harper.js/binary');
+      const linter = new LocalLinter({ binary });
       await linter.setup();
       return {
         lint: async (text: string): Promise<DraftLint[]> => {
@@ -61,7 +64,8 @@ export async function lintDraft(text: string): Promise<DraftLint[]> {
   try {
     const linter = await getLinter();
     return await linter.lint(text);
-  } catch {
+  } catch (e) {
+    console.error('[writing] Harper failed to load or lint; mechanics feedback is off for this draft:', e);
     linterPromise = null; // let a later attempt retry the load
     return [];
   }

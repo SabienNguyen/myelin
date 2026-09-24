@@ -1,7 +1,7 @@
 // One slug <-> title lookup shared by every surface that must name a page from a slug alone, or
 // find a page from its title alone: the tool-call chips in the transcript (ToolStatusChip), an
-// unlabeled `[[slug]]` wiki link (WikiLink, in MarkdownText.tsx), and a `#/cite/<title>` citation
-// chip (also WikiLink) that must resolve back to the page it names. These used to invent a
+// unlabeled `[[slug]]` wiki link (MarkdownLink, in MarkdownText.tsx), and a `#/cite/<title>` citation
+// chip (also MarkdownLink) that must resolve back to the page it names. These used to invent a
 // "title" by reading the slug's hyphens as spaces, because neither a real read_page result (an
 // MCP envelope, `{ content: [{ type: 'text', text: '<JSON>' }] }`, not a parsed object) nor a bare
 // `[[slug]]` carries a title. The graph payload the server already caches does — `getGraph()`
@@ -20,7 +20,7 @@ const REFETCH_MS = 15_000;
 
 let titles = new Map<string, string>();
 // Reverse of `titles`, built alongside it in the same load() — a citation chip names a page by
-// title (WikiLink's `#/cite/<title>` href) and must resolve it back to a slug without a second
+// title (MarkdownLink's `#/cite/<title>` href) and must resolve it back to a slug without a second
 // fetch or a second cache. Exact title first; `byTitleLower` is the fallback for a model that
 // paraphrased a page's title's casing when it cited it.
 let byTitle = new Map<string, string>();
@@ -65,7 +65,7 @@ function load(): Promise<void> {
       notify();
     })
     .catch((err) => {
-      // Callers fall back to the slug read as words (ToolStatusChip, WikiLink) — a learner never
+      // Callers fall back to the slug read as words (ToolStatusChip, MarkdownLink) — a learner never
       // sees this fail. Logged so a persistently-unreachable /api/graph is still visible to someone.
       console.error('[titles] could not load page titles:', err);
     })
@@ -110,7 +110,7 @@ export function usePageTitle(slug: string | null | undefined): string | undefine
 /**
  * The slug for a page named by its title, resolved from the same cached graph payload
  * usePageTitle reads — the reverse direction, for a citation chip that names a source by title
- * (WikiLink's `#/cite/<title>` href) and must turn it back into an in-app page link. `undefined`
+ * (MarkdownLink's `#/cite/<title>` href) and must turn it back into an in-app page link. `undefined`
  * while it can't be answered yet, for the same reasons as usePageTitle: not fetched, the fetch
  * failed, or no page has this title (an opaque web-search citation was already dropped before
  * reaching here — see citationLinks in panelBus.ts).

