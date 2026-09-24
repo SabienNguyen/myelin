@@ -219,7 +219,7 @@ describe('ingestRepo mining pass', () => {
     expect(builtinCalls).toBe(1);
     const entry = readQueue(vault).find((e) => e.mode === 'repo');
     expect(entry?.status).toBe('done');
-    expect(entry?.phase).toContain('ready to practise');
+    expect(entry?.phase).toContain('ready to practice');
   });
 });
 

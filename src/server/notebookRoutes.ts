@@ -74,8 +74,10 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const inNotebook = new Set(notebooks.flatMap((n) => n.sources));
     return c.json({
       notebooks: notebooks.map(f.summarize).sort((a, b) => b.lastActive.localeCompare(a.lastActive)),
-      // Conversations outside every notebook still have a way back from the home screen.
-      unfiled: withMessages(f.threads).filter((t) => !filed.has(t.id)).slice(0, 8),
+      // Conversations outside every notebook still have a way back from the home screen. Every
+      // one of them, not just the newest few — NotebooksHome does its own "show recent only"
+      // paging, the same way NotebookView pages a notebook's own conversation list.
+      unfiled: withMessages(f.threads).filter((t) => !filed.has(t.id)),
       // Library sources no notebook uses yet — each one a notebook waiting to be started.
       looseSources: f.sources.filter((s) => !inNotebook.has(s.book))
         .map((s) => ({ book: s.book, title: s.title, authors: s.authors })),

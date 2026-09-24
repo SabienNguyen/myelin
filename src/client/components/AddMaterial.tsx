@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PlusIcon as Plus } from '@phosphor-icons/react/dist/csr/Plus';
 import { panelBus } from '../lib/panelBus.js';
 import { isVideoUrl } from '../../shared/videoUrl.js';
+import { parseNotebookRoute, serializeHash } from '../lib/urlState.js';
 
 const FILE_KINDS = '.pdf, .epub, .docx, .md, .txt';
 
@@ -25,7 +26,7 @@ type Recommendation = {
 };
 type ReadingList = { topic: string; recommendations: Recommendation[]; sourceErrors: string[] };
 
-export function AddMaterial() {
+export function AddMaterial({ threadId }: { threadId: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -57,6 +58,18 @@ export function AddMaterial() {
 
   useEffect(() => { if (open) sourceRef.current?.focus(); }, [open]);
 
+  // Where a successful add's "see Library" points: the workspace's SidePanel owns a library tab
+  // panelBus can flip to (and it preserves whatever page was open). The notebooks screens
+  // (#/notebooks, #/notebooks/<id>) mount no SidePanel at all, so that event used to have nothing
+  // to reach — route there by hash instead.
+  function goToLibrary() {
+    if (parseNotebookRoute(location.hash)) {
+      location.hash = serializeHash({ threadId, tab: 'library', pageSlug: null });
+    } else {
+      panelBus.setTab('library');
+    }
+  }
+
   async function ingestFile(file: File) {
     setBusy(true);
     setStatus(null);
@@ -68,7 +81,7 @@ export function AddMaterial() {
       if (res.ok) {
         setStatus(`${data.book}: converting in the background — see Library`);
         setOpen(false);
-        panelBus.setTab('library');
+        goToLibrary();
       } else {
         setStatus(`ingest failed: ${data.error ?? res.statusText}`);
       }
@@ -105,7 +118,7 @@ export function AddMaterial() {
           setStatus(`${data.book}: converting in the background — see Library`);
           setSource('');
           setOpen(false);
-          panelBus.setTab('library');
+          goToLibrary();
         } else {
           setStatus(`ingest failed: ${data.error ?? res.statusText}`);
         }
@@ -126,7 +139,7 @@ export function AddMaterial() {
           setStatus(`${data.book}: transcript fetched — compiling in the background, see Library`);
           setSource('');
           setOpen(false);
-          panelBus.setTab('library');
+          goToLibrary();
         } else {
           setStatus(`ingest failed: ${data.error ?? res.statusText}`);
         }
@@ -146,7 +159,7 @@ export function AddMaterial() {
         setSource('');
         setStatus(`${data.name}: ingesting in the background`);
         setOpen(false);
-        panelBus.setTab('library');
+        goToLibrary();
       } else {
         setStatus(`add failed: ${data.error ?? res.statusText}`);
       }
@@ -196,7 +209,7 @@ export function AddMaterial() {
       if (res.ok) {
         setStatus(`${data.book}: converting in the background — see Library`);
         setOpen(false);
-        panelBus.setTab('library');
+        goToLibrary();
       } else {
         setStatus(`ingest failed: ${data.error ?? res.statusText}`);
       }

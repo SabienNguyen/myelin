@@ -139,7 +139,7 @@ describe('ingestRepo orchestration (local path source)', () => {
     const entry = readQueue(vault).find((e) => e.book === placeholderBook && e.mode === 'repo')!;
     expect(entry.status).toBe('done');
     expect(entry.phase).toContain('docs: 1 queued');
-    expect(entry.phase).toContain('1 exercise ready to practise in the Library');
+    expect(entry.phase).toContain('1 exercise ready to practice in the Library');
 
     // docs pass queued exactly one normal pending chapter (README's single H1-split section).
     const docEntries = readQueue(vault).filter((e) => e.book === placeholderBook && e.mode !== 'repo');
@@ -215,7 +215,7 @@ describe('ingestRepo orchestration (local path source)', () => {
     await until(() => readQueue(vault).find((e) => e.book === result.name && e.status === 'done'));
     const entry = readQueue(vault).find((e) => e.book === result.name)!;
     expect(builtinRan).toBe(true);
-    expect(entry.phase).toContain('2 exercises ready to practise in the Library');
+    expect(entry.phase).toContain('2 exercises ready to practice in the Library');
   });
 
   it('a nonexistent local path 400s synchronously (throws before any ledger write)', () => {

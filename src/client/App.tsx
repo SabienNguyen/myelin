@@ -72,6 +72,10 @@ export function App() {
   // tab flips, which replace) so Back returns to the prior conversation.
   function selectThread(id: string) {
     setThreadId(id);
+    // pushState below never fires hashchange/popstate, so a pick made from the notebooks topbar's
+    // own HistoryMenu must leave that route by hand — otherwise the URL moves to the conversation
+    // but the notebooks screen stays on screen underneath it.
+    setNotebookRoute(null);
     const current = parseHash(location.hash);
     const nextHash = serializeHash({ ...current, threadId: id });
     if (nextHash !== location.hash) history.pushState(null, '', nextHash);
@@ -95,7 +99,19 @@ export function App() {
 
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
-  const brand = <h1><BookOpenText size={20} weight="duotone" aria-hidden="true" /> <span className="brand-word">Myelin</span></h1>;
+  // The wordmark returns to the stage of the conversation App is still holding underneath the
+  // notebooks screens — see notebookRoute below, which keeps threadId around rather than clearing
+  // it.
+  const brand = (
+    <h1>
+      <a
+        href={serializeHash({ threadId, tab: 'stage', pageSlug: null })}
+        aria-label="Myelin — back to your conversation"
+      >
+        <BookOpenText size={20} weight="duotone" aria-hidden="true" /> <span className="brand-word">Myelin</span>
+      </a>
+    </h1>
+  );
 
   if (notebookRoute) {
     return (
@@ -104,8 +120,9 @@ export function App() {
           <header className="topbar">
             {brand}
             <CommandPalette threadId={threadId} />
+            <HistoryMenu activeId={threadId} onSelect={selectThread} />
             <TopbarStatus />
-            <AddMaterial />
+            <AddMaterial threadId={threadId} />
           </header>
           <main className="notebooks-main">
             {notebookRoute.notebookId
@@ -135,7 +152,7 @@ export function App() {
           <TopbarStatus />
           {/* THE add entry point — one control for every kind of material (file, git URL, local
               folder). Not one button per artifact; AddMaterial routes by what it was given. */}
-          <AddMaterial />
+          <AddMaterial threadId={threadId} />
         </header>
         <main className="workspace">
           <div className="thread-column">

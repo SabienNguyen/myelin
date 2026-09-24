@@ -5,14 +5,56 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { panelBus, chatPreprocess } from '../lib/panelBus.js';
+import { usePageTitle, usePageSlugForTitle } from '../lib/pageTitles.js';
 import { Mermaid } from './Mermaid.js';
+
+/** A citation title reaches here percent-encoded (citationLinks, panelBus.ts); a hand-typed or
+ *  otherwise garbled href with an invalid escape must render as something rather than crash the
+ *  whole message — same tolerance urlState.ts applies to a malformed page-slug hash. */
+function decodeCiteTitle(encoded: string): string {
+  try {
+    return decodeURIComponent(encoded);
+  } catch {
+    return encoded;
+  }
+}
 
 export function WikiLink(props: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
   const m = props.href?.match(/^#\/page\/(.+)$/);
-  if (!m) return <a {...props} target="_blank" rel="noreferrer" />;
+  const slug = m ? m[1] : null;
+  const citeMatch = props.href?.match(/^#\/cite\/(.+)$/);
+  const citeTitle = citeMatch ? decodeCiteTitle(citeMatch[1]) : null;
+  // wikiPreprocess (panelBus.ts) emits `[label || slug](#/page/slug)` — the tutor rarely writes a
+  // label, so an unlabeled link's visible text IS the raw slug. react-markdown sometimes wraps a
+  // lone text child in a one-element array rather than handing it over bare, so both shapes count.
+  const child = Array.isArray(props.children) && props.children.length === 1 ? props.children[0] : props.children;
+  const unlabeled = slug !== null && typeof child === 'string' && child === slug;
+  // Both hooks are called on every render, before either branch below returns — a conditional
+  // hook call would break React's same-hooks-every-render rule the moment a chat message mixes
+  // wiki links, citation chips, and an ordinary external link.
+  const title = usePageTitle(unlabeled ? slug : null);
+  const citeSlug = usePageSlugForTitle(citeTitle);
+  if (citeTitle !== null) {
+    // citationLinks only ever emits this href for a "Vault: <title>" ref — an opaque web-search
+    // ref is dropped before it becomes a link — so resolving is purely "do we have this page
+    // cached yet", not "does this citation deserve a link at all".
+    const label = `source: ${citeTitle}`;
+    if (citeSlug) {
+      return (
+        <a className="cite-chip" href={`#/page/${citeSlug}`} title={citeTitle} aria-label={label}
+          onClick={(e) => { e.preventDefault(); panelBus.openPage(citeSlug); }}>
+          {citeTitle}
+        </a>
+      );
+    }
+    return <span className="cite-chip" title={citeTitle} aria-label={label}>{citeTitle}</span>;
+  }
+  if (!slug) return <a {...props} target="_blank" rel="noreferrer" />;
   return (
     <a {...props} className="wiki-link" href={props.href}
-      onClick={(e) => { e.preventDefault(); panelBus.openPage(m[1]); }} />
+      onClick={(e) => { e.preventDefault(); panelBus.openPage(slug); }}>
+      {unlabeled && title ? title : props.children}
+    </a>
   );
 }
 

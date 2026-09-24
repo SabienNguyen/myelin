@@ -1,4 +1,5 @@
 import { panelBus } from '../lib/panelBus.js';
+import { usePageTitle } from '../lib/pageTitles.js';
 
 // Fallback UI for MCP (server-side) tool calls in the transcript. The learner should see a
 // quiet status line — "✓ evidence recorded" — never raw JSON args, retries, or tool plumbing.
@@ -42,11 +43,18 @@ const PAGE_VERBS: Record<string, string> = {
   record_evidence: 'evidence recorded on',
 };
 
-/** The page's title when the call carries one (read_page's result, write_page's input), else the
- *  slug with its hyphens read as spaces — still recognisable, never invented. */
-function pageLabel(args: any, result: any, slug: string): string {
-  const title = result?.page?.meta?.title ?? args?.title;
-  return typeof title === 'string' && title.trim() ? title : slug.replace(/-/g, ' ');
+/** The page's title: write_page's own input already carries the title it just set, so that wins
+ *  over a lookup that might still be loading; otherwise the graph payload's title once it
+ *  resolves (usePageTitle); otherwise the slug with its hyphens read as spaces — still
+ *  recognisable, never invented. Deliberately NOT a read of `result` — a real read_page result
+ *  reaches the client as an MCP envelope (`{ content: [{ type: 'text', text: '<JSON>' }] }`), not
+ *  the parsed `{ page: { meta: { title } } }` shape a naive read expects, and record_evidence's
+ *  result carries no title at all either way. */
+function pageLabel(args: any, graphTitle: string | undefined, slug: string): string {
+  const argsTitle = args?.title;
+  if (typeof argsTitle === 'string' && argsTitle.trim()) return argsTitle;
+  if (typeof graphTitle === 'string' && graphTitle.trim()) return graphTitle;
+  return slug.replace(/-/g, ' ');
 }
 
 export function ToolStatusChip({ toolName, args, result, isError }: any) {
@@ -57,12 +65,15 @@ export function ToolStatusChip({ toolName, args, result, isError }: any) {
   const [done, notDone] = LABELS[toolName] ?? [toolName, `${toolName} failed`];
   const slug = typeof args?.slug === 'string' && args.slug ? args.slug : null;
   const verb = PAGE_VERBS[toolName];
+  // Called on every render, never inside the branch below — React requires the same hooks in the
+  // same order every time, including for a failed call or a page tool whose args lack a slug.
+  const graphTitle = usePageTitle(slug);
   if (!failed && verb && slug) {
     return (
       <span className="tool-note" title={toolName}>
         {verb}{' '}
         <button type="button" className="tool-note-page" onClick={() => panelBus.openPage(slug)}>
-          {pageLabel(args, result, slug)}
+          {pageLabel(args, graphTitle, slug)}
         </button>
       </span>
     );

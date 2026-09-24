@@ -13,6 +13,7 @@ import type { MouseCoords, SigmaNodeEventPayload } from 'sigma/types';
 import { WarningIcon as Warning } from '@phosphor-icons/react';
 import { MultiDirectedGraph as Graph } from 'graphology';
 import { getGraph } from '../lib/api.js';
+import { useColorScheme } from '../lib/colorScheme.js';
 import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
 import { graphMeta, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
@@ -21,6 +22,7 @@ import { useConversationNotebook } from './Notebooks.js';
 import {
   densityScale, resolveGraphColors, syncGraph, type MasteryGraph, type GraphColors,
 } from '../graph/buildGraph.js';
+import { makeLabelDrawers } from '../graph/labels.js';
 import { createLayout, type LayoutController } from '../graph/layout.js';
 import { loadPositions, savePositions } from '../graph/positionStore.js';
 import { focusNeighbourhood, nodeReducer, edgeReducer } from '../graph/highlight.js';
@@ -239,6 +241,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const onScopeKeys = useTablistKeys();
   const onTopicKeys = useRovingKeys({ selector: '.graph-topic-list button', orientation: 'both', activateOnFocus: false });
   const threadRuntime = useThreadRuntime();
+  const colorScheme = useColorScheme();
 
   // Raw-ish per-node metadata (color, decay, degree) — cheap to (re)compute for the whole vault on
   // every poll; position lives in the graphology graph (see graphRef below), not here.
@@ -298,6 +301,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
   const layoutRef = useRef<LayoutController | null>(null);
   const rendererRef = useRef<Sigma | null>(null);
+  // MasteryNodeProgram is imported lazily in the mount effect below (see that effect's top-of-file
+  // comment) — there is no module-level import to reach for its static `warnColor` from the
+  // colour-scheme effect, so the class itself is stashed here once the lazy import resolves.
+  const nodeProgramRef = useRef<(typeof import('../graph/nodeProgram.js'))['MasteryNodeProgram'] | null>(null);
+  // The most recent /api/graph payload's node list, kept so a live scheme change can recompute
+  // `meta` (and thus node fills, which read --mastery-*) immediately instead of waiting for the
+  // next 30s poll in the load effect below.
+  const lastGraphNodesRef = useRef<any[] | null>(null);
   // Sigma's nodeReducer/edgeReducer settings are handed a bare function ONCE, at construction —
   // there is no call site to swap it out when `focus` changes. These wrapper closures have a
   // stable identity and just forward to whatever highlight.ts reducer is current in the ref, so a
@@ -338,6 +349,42 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
     rendererRef.current?.refresh();
   }, [focus]);
 
+  // sigma bakes every colour into its own state at construction — labelColor, the node/edge
+  // reducers, MasteryNodeProgram's static warnColor — and never re-reads the CSS custom properties
+  // on its own. This effect re-resolves and repaints them whenever the OS scheme actually changes
+  // after mount. It compares `colorScheme` against the scheme colorsRef was last resolved for,
+  // rather than a one-shot "skip the first render" flag: React (main.tsx runs StrictMode in dev)
+  // double-invokes a fresh mount's effects, which spends a one-shot flag before the component has
+  // really settled, so the second phantom invocation would wrongly treat itself as a real change.
+  const appliedSchemeRef = useRef(colorScheme);
+  useEffect(() => {
+    if (appliedSchemeRef.current === colorScheme) return;
+    appliedSchemeRef.current = colorScheme;
+
+    colorsRef.current = resolveGraphColors();
+    const colors = colorsRef.current;
+    // MasteryNodeProgram may not have finished its lazy import yet (a flip before WebGL is ready,
+    // or the permanent jsdom/no-WebGL fallback) — the ref is null until the mount effect sets it.
+    if (nodeProgramRef.current) nodeProgramRef.current.warnColor = colors.warn;
+
+    // Mirrors the [focus] effect above, but reads focusRef instead of depending on `focus` — this
+    // effect must run only on a scheme change, not on every hover.
+    const graph = graphRef.current!;
+    const set = focusNeighbourhood(graph, focusRef.current);
+    nodeReducerFnRef.current = nodeReducer(focusRef.current, set, colors.muted);
+    edgeReducerFnRef.current = edgeReducer(graph, set, colors.muted);
+
+    // Node fills come from graphMeta(), which reads --mastery-* off the DOM — recomputed from the
+    // last fetched payload so the flip repaints now instead of waiting for the next 30s poll.
+    if (lastGraphNodesRef.current) setMeta(graphMeta(lastGraphNodesRef.current, new Date()));
+
+    const renderer = rendererRef.current;
+    if (renderer) {
+      renderer.setSetting('labelColor', { color: colors.label });
+      renderer.refresh();
+    }
+  }, [colorScheme]);
+
   // ── Sigma mount (WebGL) ──────────────────────────────────────────────────
   // One Sigma instance per mount of the canvas container. Both `sigma` and nodeProgram.ts are
   // loaded lazily here (see the top-of-file comment) — an import OR constructor failure both mean
@@ -368,8 +415,16 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
       const graph = graphRef.current!;
       const colors = colorsRef.current!;
+      nodeProgramRef.current = MasteryNodeProgram;
       MasteryNodeProgram.warnColor = colors.warn;
       const labelFont = getComputedStyle(document.documentElement).getPropertyValue('--font-prose').trim() || 'system-ui';
+
+      // Reads colorsRef/rendererRef at DRAW time (not captured here at construction), so a later
+      // theme update or panel resize is picked up without rebuilding the renderer — see labels.ts.
+      const { drawNodeLabel, drawNodeHover } = makeLabelDrawers(
+        () => colorsRef.current!,
+        () => rendererRef.current?.getDimensions().width ?? container.clientWidth,
+      );
 
       let renderer: Sigma;
       try {
@@ -382,6 +437,8 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           labelFont,
           labelRenderedSizeThreshold: 6,
           labelDensity: 0.6,
+          defaultDrawNodeLabel: drawNodeLabel,
+          defaultDrawNodeHover: drawNodeHover,
           // sigma's own fit-to-frame (which the settle/Fit reset below drives via
           // camera.animatedReset) pads the CUSTOM bbox we hand it (getBBox() — node CENTRES only,
           // no radius or label width) by this many screen px. The default (30) left a node's own
@@ -553,7 +610,9 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       try {
         const data = await getGraph();
         if (cancelled) return;
-        setMeta(graphMeta(data.nodes ?? [], new Date()));
+        const nodes = data.nodes ?? [];
+        lastGraphNodesRef.current = nodes;
+        setMeta(graphMeta(nodes, new Date()));
         setLoadError(null);
       } catch (e) {
         if (cancelled) return;

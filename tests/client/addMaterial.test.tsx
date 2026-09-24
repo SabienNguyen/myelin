@@ -6,12 +6,15 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { AddMaterial } from '../../src/client/components/AddMaterial.js';
+import { panelBus, type PanelEvent } from '../../src/client/lib/panelBus.js';
+
+const THREAD_ID = 't-thread-1';
 
 function jsonRes(body: unknown, ok = true) {
   return { ok, json: async () => body } as any;
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); location.hash = ''; });
 
 function openPanel() {
   fireEvent.click(screen.getByRole('button', { name: /add material/i }));
@@ -21,7 +24,7 @@ function openPanel() {
 describe('AddMaterial — the one entry point', () => {
   it('renders exactly one add affordance until opened', () => {
     vi.stubGlobal('fetch', vi.fn());
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     expect(screen.getAllByRole('button')).toHaveLength(1);
     expect(screen.getByRole('button', { name: /add material/i })).not.toBeNull();
   });
@@ -29,7 +32,7 @@ describe('AddMaterial — the one entry point', () => {
   it('a pasted git URL routes to /api/ingest/repo and reports the queued ingest', async () => {
     const fetchMock = vi.fn(async () => jsonRes({ name: 'widgets', ingesting: true }));
     vi.stubGlobal('fetch', fetchMock);
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
 
     fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
@@ -49,7 +52,7 @@ describe('AddMaterial — the one entry point', () => {
   it('a browsed file routes to /api/ingest as multipart and points at the Library', async () => {
     const fetchMock = vi.fn(async (_url: string, _init?: any) => jsonRes({ book: 'midterm-2', converting: true }));
     vi.stubGlobal('fetch', fetchMock);
-    const { container } = render(<AddMaterial />);
+    const { container } = render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
 
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
@@ -71,7 +74,7 @@ describe('AddMaterial — the one entry point', () => {
     // `.markdown` is 8 chars — the old 5-char extension cap misrouted it to /api/ingest/repo.
     const fetchMock = vi.fn(async () => jsonRes({ book: 'sgd-notes' }));
     vi.stubGlobal('fetch', fetchMock);
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
 
     fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
@@ -89,7 +92,7 @@ describe('AddMaterial — the one entry point', () => {
   it('a pasted local folder path (no extension) still routes to /api/ingest/repo', async () => {
     const fetchMock = vi.fn(async () => jsonRes({ name: 'myrepo', ingesting: true }));
     vi.stubGlobal('fetch', fetchMock);
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
 
     fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
@@ -104,7 +107,7 @@ describe('AddMaterial — the one entry point', () => {
   it('a pasted YouTube URL routes to /api/ingest as a caption transcript, same field', async () => {
     const fetchMock = vi.fn(async () => jsonRes({ book: 'The essence of calculus', converting: true }));
     vi.stubGlobal('fetch', fetchMock);
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
 
     fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
@@ -122,7 +125,7 @@ describe('AddMaterial — the one entry point', () => {
 
   it('a video ingest failure (e.g. yt-dlp missing) keeps the panel open and names it', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ error: 'yt-dlp is not installed — fetching a video’s captions needs it.' }, false)));
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
     fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
       target: { value: 'https://youtu.be/WUvTyaaNkzM' },
@@ -135,7 +138,7 @@ describe('AddMaterial — the one entry point', () => {
 
   it('a failed repo ingest keeps the panel open and names the failure', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ error: 'no such path' }, false)));
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
     fireEvent.change(screen.getByLabelText(/git url, a youtube link, or a local folder path/i), {
       target: { value: '/nowhere' },
@@ -148,7 +151,7 @@ describe('AddMaterial — the one entry point', () => {
 
   it('Escape closes the panel', () => {
     vi.stubGlobal('fetch', vi.fn());
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -181,7 +184,7 @@ describe('AddMaterial — ask who to read', () => {
 
   async function ask(fetchMock: any, topic = 'spaced repetition') {
     vi.stubGlobal('fetch', fetchMock);
-    render(<AddMaterial />);
+    render(<AddMaterial threadId={THREAD_ID} />);
     openPanel();
     fireEvent.change(screen.getByLabelText(/ask who to read/i), { target: { value: topic } });
     fireEvent.click(screen.getByRole('button', { name: /^ask$/i }));
@@ -246,5 +249,43 @@ describe('AddMaterial — ask who to read', () => {
     await screen.findByText(/could not reach Crossref: Crossref responded 503/i);
     // The one reachable index's row still shows — one source down does not blank the other.
     expect(screen.getByText('Veritasium')).not.toBeNull();
+  });
+});
+
+// Where a successful add sends the learner next. The notebooks screens (#/notebooks,
+// #/notebooks/<id>) mount no SidePanel, so the panelBus 'setTab' event this used to fire always
+// had nothing to reach — see App.tsx. There, AddMaterial routes there by hash instead; everywhere
+// else it keeps the panelBus event, which SidePanel needs to preserve an open page.
+describe('AddMaterial — where a successful add sends you', () => {
+  function browseFile(container: HTMLElement) {
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['1. What is 2+2?'], 'midterm-2.md', { type: 'text/markdown' });
+    fireEvent.change(input, { target: { files: [file] } });
+  }
+
+  it('on the notebooks screen, a successful add navigates to the library tab by hash', async () => {
+    location.hash = '#/notebooks';
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ book: 'midterm-2', converting: true })));
+    const { container } = render(<AddMaterial threadId={THREAD_ID} />);
+    openPanel();
+    browseFile(container);
+
+    await screen.findByText(/midterm-2: converting in the background/i);
+    expect(location.hash).toBe(`#/t/${THREAD_ID}/library`);
+  });
+
+  it('in the workspace, a successful add flips the side panel tab via panelBus and leaves the hash alone', async () => {
+    location.hash = `#/t/${THREAD_ID}`;
+    const events: PanelEvent[] = [];
+    const unsubscribe = panelBus.subscribe((e) => events.push(e));
+    vi.stubGlobal('fetch', vi.fn(async () => jsonRes({ book: 'midterm-2', converting: true })));
+    const { container } = render(<AddMaterial threadId={THREAD_ID} />);
+    openPanel();
+    browseFile(container);
+
+    await screen.findByText(/midterm-2: converting in the background/i);
+    unsubscribe();
+    expect(events).toContainEqual({ type: 'setTab', tab: 'library' });
+    expect(location.hash).toBe(`#/t/${THREAD_ID}`);
   });
 });

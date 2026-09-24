@@ -1,6 +1,6 @@
 import { isToolUIPart, getToolName, type UIMessage } from '../../shared/uiMessages.js';
 import { BlockProse } from './BlockProse.js';
-import { Verdict } from './blocks/Verdict.js';
+import { Mark, Verdict } from './blocks/Verdict.js';
 import { Latex } from './blocks/MathScratchpad.js';
 
 const EXERCISES = new Set([
@@ -20,11 +20,23 @@ export function StageSummary({ messages, isRunning = false, onRetry }: {
   if (!last) return null;
   const input = (last.input ?? {}) as Record<string, unknown>;
   const output = (last.output ?? {}) as Record<string, unknown>;
-  const grading = output.grading as { verdict: string; detail: string; retryable?: boolean } | undefined;
+  const grading = output.grading as { verdict: string; detail: string; retryable?: boolean;
+    perItem?: { id: string; correct: boolean; source?: string }[] } | undefined;
   const prompt = [input.prompt, input.question, input.title].find((v) => typeof v === 'string') as string | undefined;
-  const answer = output.values ?? output.answer ?? output.answers;
+  const isQuiz = getToolName(last) === 'quiz';
+  // Quiz's output is { answers: [{id, answer}] } — not a string, and JSON.stringify-ing that
+  // into the "You:" line is the bug this branch exists to avoid. Render one row per item instead,
+  // matching Quiz.tsx's own done card, joined to the input by item id.
+  const quizItems: { id: string; type: string; prompt: string }[] =
+    isQuiz && Array.isArray(input.items) ? input.items : [];
+  const quizAnswers: { id: string; answer: string }[] =
+    isQuiz && Array.isArray(output.answers) ? output.answers : [];
+  const byId = new Map((grading?.perItem ?? []).map((p) => [p.id, p]));
+  const answer = output.values ?? output.answer;
   const answerText = typeof answer === 'string' ? answer
-    : Array.isArray(answer) ? answer.map((v) => typeof v === 'string' ? v : JSON.stringify(v)).join(', ') : null;
+    // Skip, never stringify, an entry that isn't plain text — see the quiz branch above for the
+    // one block whose answers are objects.
+    : Array.isArray(answer) ? answer.filter((v): v is string => typeof v === 'string').join(', ') : null;
   return (
     <section className="block stage-summary" aria-label="Latest exercise">
       <h3>Latest exercise</h3>
@@ -43,7 +55,25 @@ export function StageSummary({ messages, isRunning = false, onRetry }: {
         <h4>Final answer</h4>
         <div className="stage-final"><Latex tex={String(output.finalLatex ?? '')} /></div>
       </div>}
-      {answerText && <p>You: {answerText}</p>}
+      {isQuiz && quizItems.length > 0 && (
+        <ul>
+          {quizItems.map((item) => {
+            const learnerAnswer = quizAnswers.find((a) => a.id === item.id)?.answer;
+            const scored = byId.get(item.id);
+            // A choice answer is one of the tutor's own choices, maths included, so it renders
+            // like one; a typed answer is the learner's text and stays literal — same rule as
+            // the Quiz done card.
+            const shown = !learnerAnswer ? '(blank)'
+              : item.type === 'choice' ? <BlockProse text={learnerAnswer} inline /> : learnerAnswer;
+            return (
+              <li key={item.id}>
+                <BlockProse text={item.prompt} inline /> — {shown} {scored != null && <Mark ok={scored.correct} />}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {!isQuiz && answerText && <p>You: {answerText}</p>}
       <Verdict grading={grading} />
       {grading?.verdict === 'ungraded' && grading.retryable && onRetry && (
         <button type="button" disabled={isRunning} onClick={() => onRetry(last.toolCallId)}>Retry grading</button>

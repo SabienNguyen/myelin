@@ -355,9 +355,9 @@ export function CodeExerciseInner({ args, addResult, Editor = RungEditor }: {
         <p className="cxu-body">
           {failure.offline
             ? 'The coding sandbox that runs and marks your code isn’t responding, so there’s nothing '
-              + 'to practise against yet. Nothing has been recorded against you.'
+              + 'to practice against yet. Nothing has been recorded against you.'
             : `No coding exercise has been written for “${args.pattern}” yet, so there is nothing to `
-              + 'practise here. Nothing has been recorded against you.'}
+              + 'practice here. Nothing has been recorded against you.'}
         </p>
         <div className="cxu-actions">
           {/* Retry is offered only for an offline sandbox. Re-fetching an intact ladder that simply

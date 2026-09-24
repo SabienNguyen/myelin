@@ -60,6 +60,17 @@ describe('NotebooksHome', () => {
     expect(screen.getByRole('link', { name: 'something unrelated' }).getAttribute('href')).toBe('#/t/t-loose');
   });
 
+  it('shows the six most recent unfiled conversations, and all of them on request', async () => {
+    const unfiled = Array.from({ length: 9 }, (_, i) => ({ id: `t-${i}`, title: `conversation ${i}`, updatedAt: now, messages: 2 }));
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [], unfiled } });
+    render(<NotebooksHome />);
+    const region = await screen.findByRole('region', { name: 'Conversations outside a notebook' });
+    expect(within(region).getAllByRole('link')).toHaveLength(6);
+    fireEvent.click(within(region).getByRole('button', { name: 'show all 9' }));
+    expect(within(region).getAllByRole('link')).toHaveLength(9);
+    expect(within(region).getByRole('button', { name: 'show recent only' }).getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('files a loose conversation under a notebook and refreshes', async () => {
     routes['GET /api/notebooks'] = () => ({ body: { notebooks: [summary], unfiled: [{ id: 't-loose', title: 'something unrelated', updatedAt: now, messages: 2 }] } });
     routes['PUT /api/notebooks/nb-calc/threads/t-loose'] = () => ({ body: { id: 'nb-calc', title: 'Calculus I' } });

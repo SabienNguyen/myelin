@@ -76,7 +76,7 @@ function standingLine(st: { applied: number; explained: number; rubric?: number;
 const MASTERY_LABEL: Record<string, string> = {
   unseen: 'not started',
   exposed: 'seen once',
-  practicing: 'practising',
+  practicing: 'practicing',
   mastered: 'mastered',
 };
 

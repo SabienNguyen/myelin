@@ -31,6 +31,7 @@ export interface EdgeAttrs { kind: 'prereq' | 'deepens'; color: string; size: nu
 
 export interface GraphColors {
   prereq: string; deepens: string; muted: string; label: string; warn: string; bad: string; background: string;
+  border: string;
 }
 
 // radiusForDegree(px) → sigma size. 0.5 made the decay-arc ring (drawn just outside the node disc,
@@ -68,7 +69,8 @@ function cssVar(name: string, fallback: string): string {
 
 /** Resolved from CSS tokens (--text-muted, --border, --text, --warn, --bad, --bg-panel) with
  *  hex fallbacks for jsdom, same pattern as graphLayout.ts's masteryColors. Edge colours carry
- *  alpha via rgba(): prereq = --text-muted @0.75, deepens = --text-muted @0.4, muted = --border @0.35. */
+ *  alpha via rgba(): prereq = --text-muted @0.75, deepens = --text-muted @0.4, muted = --border @0.35.
+ *  `border` is also exposed raw (no alpha) for the hover label box's 1px stroke. */
 export function resolveGraphColors(): GraphColors {
   const textMuted = cssVar('--text-muted', FALLBACK.textMuted);
   const border = cssVar('--border', FALLBACK.border);
@@ -80,6 +82,7 @@ export function resolveGraphColors(): GraphColors {
     warn: cssVar('--warn', FALLBACK.warn),
     bad: cssVar('--bad', FALLBACK.bad),
     background: cssVar('--bg-panel', FALLBACK.bgPanel),
+    border,
   };
 }
 
@@ -188,10 +191,16 @@ export function syncGraph(
     if (!wanted.has(key)) graph.dropEdge(key);
   }
   for (const [key, e] of wanted) {
-    if (graph.hasEdge(key)) continue;
+    const color = opts.colors[e.type];
+    if (graph.hasEdge(key)) {
+      // A same-membership poll re-syncs this edge every 30s with an unchanged palette — only write
+      // when a scheme flip actually moved the colour, so an ordinary poll fires no attribute event.
+      if (graph.getEdgeAttribute(key, 'color') !== color) graph.setEdgeAttribute(key, 'color', color);
+      continue;
+    }
     graph.addEdgeWithKey(key, e.src, e.dst, {
       kind: e.type,
-      color: opts.colors[e.type],
+      color,
       size: e.type === 'prereq' ? 1 : 0.8,
     });
   }

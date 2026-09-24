@@ -10,15 +10,19 @@ import { defineConfig } from '@playwright/test';
 // rule; global-setup.ts and the specs derive the same paths from their own import.meta.url.
 const REPO_ROOT = dirname(fileURLToPath(import.meta.url));
 const E2E_DIR = join(REPO_ROOT, 'tests', 'e2e');
-// Where the core is checked out, mirroring resolveEngram()'s search: a sibling (dev machines),
-// a child (CI uses `actions/checkout` with `path: engram`, landing it inside the workspace), and
-// the pre-rename `loreweaver` name for a checkout that predates the Engram rename. First match wins.
-const ENGRAM_SRC = [
+// Where the core is checked out. An explicit ENGRAM_ENTRY (or the pre-rename LOREWEAVER_ENTRY)
+// wins first — the same precedence resolveEngram() (src/server/config.ts) gives it, for a
+// checkout whose layout doesn't match the search below (e.g. a worktree). Otherwise this mirrors
+// that search: a sibling (dev machines), a child (CI uses `actions/checkout` with `path: engram`,
+// landing it inside the workspace), and the pre-rename `loreweaver` name for a checkout that
+// predates the Engram rename. First match wins.
+const explicitEngram = process.env.ENGRAM_ENTRY ?? process.env.LOREWEAVER_ENTRY;
+const ENGRAM_SRC = explicitEngram || ([
   join(REPO_ROOT, '..', 'engram', 'src', 'server.ts'),
   join(REPO_ROOT, 'engram', 'src', 'server.ts'),
   join(REPO_ROOT, '..', 'loreweaver', 'src', 'server.ts'),
   join(REPO_ROOT, 'loreweaver', 'src', 'server.ts'),
-].find(existsSync) ?? join(REPO_ROOT, '..', 'engram', 'src', 'server.ts');
+].find(existsSync) ?? join(REPO_ROOT, '..', 'engram', 'src', 'server.ts'));
 // The env the harness backends read the portable fixture paths from (config `${E2E_DIR}` etc.).
 // MYELIN_CONFIG_DIR keeps the fixture backends away from the developer's real
 // ~/.config/myelin/settings.json — see credentials.ts.

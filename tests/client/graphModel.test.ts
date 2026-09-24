@@ -6,7 +6,7 @@ import type { GraphNodeMeta } from '../../src/client/lib/graphLayout.js';
 import type { Subgraph } from '../../src/client/components/GraphPanel.js';
 import {
   type MasteryGraph, type GraphColors, type Point,
-  withAlpha, seedPosition, syncGraph, densityScale, SEED_JITTER,
+  withAlpha, seedPosition, syncGraph, densityScale, SEED_JITTER, resolveGraphColors,
 } from '../../src/client/graph/buildGraph.js';
 import { focusNeighbourhood, nodeReducer, edgeReducer } from '../../src/client/graph/highlight.js';
 
@@ -23,7 +23,7 @@ function sub(nodes: GraphNodeMeta[], edges: Subgraph['edges'] = []): Subgraph<Gr
 
 const COLORS: GraphColors = {
   prereq: 'rgba(1, 2, 3, 0.75)', deepens: 'rgba(1, 2, 3, 0.4)', muted: 'rgba(4, 5, 6, 0.35)',
-  label: '#edeef2', warn: '#e5c17e', bad: '#f09c95', background: '#17191f',
+  label: '#edeef2', warn: '#e5c17e', bad: '#f09c95', background: '#17191f', border: '#3a3e4a',
 };
 
 function freshGraph(): MasteryGraph {
@@ -39,6 +39,16 @@ describe('withAlpha', () => {
     expect(() => withAlpha('red', 0.5)).toThrow();
     expect(() => withAlpha('#123', 0.5)).toThrow();
     expect(() => withAlpha('rgba(1,2,3,1)', 0.5)).toThrow();
+  });
+});
+
+describe('resolveGraphColors', () => {
+  // jsdom loads no stylesheet, so getComputedStyle returns '' for every custom property and every
+  // field falls back to buildGraph.ts's own FALLBACK constants (the dark-theme defaults).
+  it('exposes the raw border token, alongside the alpha-blended edge colours it feeds', () => {
+    const colors = resolveGraphColors();
+    expect(colors.border).toBe('#3a3e4a');
+    expect(colors.muted).toBe(withAlpha(colors.border, 0.35));
   });
 });
 
@@ -167,6 +177,25 @@ describe('syncGraph', () => {
     );
     expect(graph.edges()).toEqual(['deepens:a->b']);
     expect(graph.getEdgeAttribute('deepens:a->b', 'size')).toBe(0.8);
+  });
+
+  // A scheme flip re-syncs the SAME edge set with a new GraphColors — syncGraph used to only set an
+  // edge's colour at creation (`if (graph.hasEdge(key)) continue;`), so a surviving edge kept its
+  // colour from whichever scheme was active when it was first drawn.
+  it('recolours a surviving edge on a later sync, not only edges newly added', () => {
+    const graph = freshGraph();
+    const shape = sub([node('a'), node('b'), node('c')], [
+      { src: 'a', dst: 'b', type: 'prereq' },
+      { src: 'b', dst: 'c', type: 'deepens' },
+    ]);
+    syncGraph(graph, shape, new Map(), { forceLabels: false, colors: COLORS });
+    expect(graph.getEdgeAttribute('prereq:a->b', 'color')).toBe(COLORS.prereq);
+    expect(graph.getEdgeAttribute('deepens:b->c', 'color')).toBe(COLORS.deepens);
+
+    const LIGHT_COLORS: GraphColors = { ...COLORS, prereq: 'rgba(9, 8, 7, 0.75)', deepens: 'rgba(9, 8, 7, 0.4)' };
+    syncGraph(graph, shape, new Map(), { forceLabels: false, colors: LIGHT_COLORS });
+    expect(graph.getEdgeAttribute('prereq:a->b', 'color')).toBe(LIGHT_COLORS.prereq);
+    expect(graph.getEdgeAttribute('deepens:b->c', 'color')).toBe(LIGHT_COLORS.deepens);
   });
 
   // Every 30s poll re-syncs the same graph. Each edge event wakes sigma's reindexing and restarts a

@@ -6,7 +6,15 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
     await page.goto(`/#/t/polish-${colorScheme}/stage`);
     await expect(page.getByRole('heading', { name: 'Your workspace' })).toBeVisible();
-    await page.getByRole('button', { name: 'Browse library', exact: true }).click();
+    const browseLibrary = page.getByRole('button', { name: 'Browse library', exact: true });
+    const browseLibraryBorder = await browseLibrary.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return { style: style.borderTopStyle, width: style.borderTopWidth, color: style.borderTopColor };
+    });
+    expect(browseLibraryBorder.style).not.toBe('none');
+    expect(browseLibraryBorder.width).not.toBe('0px');
+    expect(browseLibraryBorder.color).not.toBe('rgba(0, 0, 0, 0)');
+    await browseLibrary.click();
     await expect(page.getByRole('tab', { name: /^library/ })).toHaveAttribute('aria-selected', 'true');
     await page.getByRole('tab', { name: 'stage', exact: true }).click();
     for (const width of [1440, 390]) {

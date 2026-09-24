@@ -131,6 +131,18 @@ describe('PagePanel standing misconceptions', () => {
   });
 });
 
+// The level label is learner-visible copy and must match the US spelling used everywhere else
+// standing shows up (graph legend, topic lists, the Library, mastery tokens) — "practicing", not
+// the British "practising" that only this label used to carry.
+describe('PagePanel standing level label', () => {
+  it('shows "practicing" for a page whose effective level is practicing', async () => {
+    stubPage(payload([]));
+    render(<PagePanel slug="stream-consumer" />);
+    await screen.findByText('Stream consumer');
+    expect(screen.getByText('practicing')).toBeTruthy();
+  });
+});
+
 // The claim probe: a page nothing has proven yet offers "claim you know this", which hands the
 // tutor a ready-made applied-check request over panelBus (Thread.tsx sends it as a real message).
 describe('PagePanel claim probe', () => {

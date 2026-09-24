@@ -252,6 +252,7 @@ function UnfiledRow({ thread, notebooks, onFiled }: {
 export function NotebooksHome() {
   const [data, setData] = useState<NotebooksPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [allUnfiled, setAllUnfiled] = useState(false);
   function load() {
     getNotebooks().then((d) => { setData(d); setError(null); })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
@@ -285,11 +286,17 @@ export function NotebooksHome() {
           {data.unfiled.length > 0 && (
             <section className="nb-section" aria-labelledby="nb-unfiled-h">
               <h3 id="nb-unfiled-h" className="nb-subheading">Conversations outside a notebook</h3>
-              <ul className="nb-list">
-                {data.unfiled.map((t) => (
+              <ul className="nb-list" id="nb-unfiled-list">
+                {(allUnfiled ? data.unfiled : data.unfiled.slice(0, RECENT_THREADS)).map((t) => (
                   <UnfiledRow key={t.id} thread={t} notebooks={data.notebooks} onFiled={load} />
                 ))}
               </ul>
+              {data.unfiled.length > RECENT_THREADS && (
+                <button type="button" className="ghost-btn nb-small" aria-expanded={allUnfiled}
+                  aria-controls="nb-unfiled-list" onClick={() => setAllUnfiled((v) => !v)}>
+                  {allUnfiled ? 'show recent only' : `show all ${data.unfiled.length}`}
+                </button>
+              )}
             </section>
           )}
         </>
