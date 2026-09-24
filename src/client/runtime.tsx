@@ -24,7 +24,8 @@ export function Runtime({ mode, emptyVault = false, threadId = 'default', onSetM
       .then((msgs) => setInitial(Array.isArray(msgs) ? (dedupeById(msgs) as UIMessage[]) : []))
       .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
   }, [threadId]);
-  if (loadError) return <p className="panel-error" role="status">{loadError}</p>;
+  // Rendered in App's shell, under the topbar, so the history menu is still there to leave by.
+  if (loadError) return <p className="panel-error thread-load-error" role="status">{loadError}</p>;
   if (initial === null) return null; // one settled frame while the thread restores
   return <RuntimeInner mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={onSetMode} initial={initial}>{children}</RuntimeInner>;
 }

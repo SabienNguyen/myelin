@@ -1,3 +1,5 @@
+import { CheckIcon as Check } from '@phosphor-icons/react';
+
 /** The grading verdict on a done card, as a live region every block shares.
  *
  *  Rendered from SUBMIT time, empty until grading lands. The order matters: aria-live announces
@@ -49,6 +51,23 @@ export function Mark({ ok }: { ok: boolean }) {
   return (
     <span className={ok ? 'mark-ok' : 'mark-bad'} role="img" aria-label={ok ? 'correct' : 'incorrect'}>
       {ok ? '✓' : '✗'}
+    </span>
+  );
+}
+
+/** The done card's badge. 'ungraded' is the grader failing, so a card that only checked "does
+ *  grading exist" said "graded" above a verdict reading "ungraded". One word per state, shared by
+ *  every block and the Stage's Latest exercise. */
+export function gradedLabel(grading?: { verdict: string } | null): 'not graded' | 'graded' | 'submitted' {
+  if (!grading) return 'submitted';
+  return grading.verdict === 'ungraded' ? 'not graded' : 'graded';
+}
+
+export function GradedTag({ grading }: { grading?: { verdict: string } | null }) {
+  const label = gradedLabel(grading);
+  return (
+    <span className="graded-tag">
+      {label === 'graded' && <><Check size={12} weight="bold" aria-hidden /> </>}{label}
     </span>
   );
 }

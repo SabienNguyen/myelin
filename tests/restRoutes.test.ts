@@ -912,6 +912,17 @@ describe('student profiles — one vault, several learners', () => {
     expect(onDisk.keep).toBe('me');                   // read-modify-write preserved the rest
   });
 
+  it('a switch drops the cached graph, which carries the previous learner’s mastery', async () => {
+    const cfg = mkCfg();
+    const { lw: graphLw } = fakeLw();
+    const app = buildRestRoutes(graphLw, cfg);
+    expect((await (await app.request('/api/graph')).json()).summary.fetchNum).toBe(1);
+    await app.request('/api/student', {
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'bob' }),
+    });
+    expect((await (await app.request('/api/graph')).json()).summary.fetchNum).toBe(2);
+  });
+
   it('rejects names that could not be a state filename', async () => {
     const res = await buildRestRoutes(lw, mkCfg()).request('/api/student', {
       method: 'PUT', headers: { 'content-type': 'application/json' },

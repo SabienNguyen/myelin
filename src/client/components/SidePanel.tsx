@@ -10,11 +10,21 @@ import { LibraryPanel } from './LibraryPanel.js';
 import { PagePanel } from './PagePanel.js';
 import { SourceReader } from './SourceReader.js';
 import { useTablistKeys } from '../lib/tablist.js';
+import { ErrorBoundary } from './ErrorBoundary.js';
 
 // How often the tab strip re-asks how much is due. Slow on purpose: due-ness changes on the scale
 // of days; the only same-session change is reinforcement clearing an item, and switching to the
 // Library re-fetches anyway.
 const DUE_POLL_MS = 5 * 60_000;
+
+/** One tab's crash (a malformed page payload, a graph bug) costs that tab, not the whole window. */
+function TabBoundary({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <ErrorBoundary label={label} fallback={<p className="panel-error" role="alert">the {label} could not be shown — reload, or pick another tab</p>}>
+      {children}
+    </ErrorBoundary>
+  );
+}
 
 export function SidePanel() {
   // Optional on purpose: SidePanel can mount outside the chat runtime (standalone panel tests),
@@ -143,7 +153,6 @@ export function SidePanel() {
       </nav>
       <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
         <section className="stage-empty">
-          <ConversationPages messages={messages} isRunning={chat?.isRunning ?? false} />
           <h2>Your workspace</h2>
           <p>Exercises and feedback appear here as you learn.</p>
           <div className="stage-empty-actions">
@@ -151,15 +160,29 @@ export function SidePanel() {
             <button type="button" onClick={() => panelBus.setTab('graph')}>Explore knowledge graph</button>
           </div>
         </section>
-        <StageSummary messages={messages} isRunning={chat?.isRunning ?? false} onRetry={(id) => store?.retryGrading(id)} />
+        {/* Siblings of the placeholder, not inside it: the :has rule that hides the placeholder once
+            anything else is on the Stage hid the outline with it after the first answered block. */}
+        <TabBoundary label="exercise summary">
+          <StageSummary messages={messages} isRunning={chat?.isRunning ?? false} onRetry={(id) => store?.retryGrading(id)} />
+        </TabBoundary>
+        <TabBoundary label="page outline">
+          <ConversationPages messages={messages} isRunning={chat?.isRunning ?? false} />
+        </TabBoundary>
       </div>
-      <div hidden={tab !== 'graph'} id="panel-graph" className="tab-body" role="tabpanel" aria-labelledby="tab-graph"><GraphPanel visible={tab === 'graph'} /></div>
+      <div hidden={tab !== 'graph'} id="panel-graph" className="tab-body" role="tabpanel" aria-labelledby="tab-graph">
+        <TabBoundary label="graph"><GraphPanel visible={tab === 'graph'} /></TabBoundary>
+      </div>
       <div hidden={tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page">
-        {source
-          ? <SourceReader path={source.path} title={source.title} onClose={() => setSource(null)} />
-          : <PagePanel slug={pageSlug} visible={tab === 'page'} />}
+        {/* Keyed by what it shows, so opening another page recovers from one that crashed. */}
+        <TabBoundary key={source ? `src:${source.path}` : `page:${pageSlug}`} label="page">
+          {source
+            ? <SourceReader path={source.path} title={source.title} onClose={() => setSource(null)} />
+            : <PagePanel slug={pageSlug} visible={tab === 'page'} />}
+        </TabBoundary>
       </div>
-      <div hidden={tab !== 'library'} id="panel-library" className="tab-body" role="tabpanel" aria-labelledby="tab-library"><LibraryPanel visible={tab === 'library'} /></div>
+      <div hidden={tab !== 'library'} id="panel-library" className="tab-body" role="tabpanel" aria-labelledby="tab-library">
+        <TabBoundary label="library"><LibraryPanel visible={tab === 'library'} /></TabBoundary>
+      </div>
     </aside>
   );
 }

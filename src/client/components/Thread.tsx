@@ -1,17 +1,21 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive, ErrorPrimitive, useComposerRuntime, useMessage, useThread, useThreadRuntime } from '@assistant-ui/react';
-import { ArrowUpIcon as ArrowUp, FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, XIcon as X } from '@phosphor-icons/react';
+import { ArrowUpIcon as ArrowUp, FilePdfIcon as FilePdf, PaperclipIcon as Paperclip, StopIcon as Stop, XIcon as X } from '@phosphor-icons/react';
 import { BLOCK_TOOL_NAMES } from '../../shared/blocks.js';
 import { getToolName, isToolUIPart, type FileUIPart, type UIMessage } from '../../shared/uiMessages.js';
+import { turnFailed } from '../../shared/uiMessageReducer.js';
 import { useChatStore } from '../chatCore/index.js';
 import { askAside } from '../lib/api.js';
 import { AsidePart } from './AsidePart.js';
+import { ErrorBoundary } from './ErrorBoundary.js';
 import { CommandEditor, type CommandEditorHandle } from './CommandEditor.js';
 import { MarkdownText } from './MarkdownText.js';
 import { NotebookIntro, NotebookPicker, useConversationNotebook } from './Notebooks.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
 import { takePendingAsk } from '../lib/pendingAsk.js';
+import { loadDraft, saveDraft } from '../lib/composerDraft.js';
+import type { JSONContent } from '@tiptap/core';
 import type { Command } from '../../shared/commands.js';
 
 // P1 FIX (docs/superpowers/plans/2026-07-20-gap-integration.md — post-review): these two must be
@@ -93,9 +97,15 @@ const MAX_ASIDE_QUOTE = 600;
 function AsideAsk({ messageId, children }: { messageId: string; children: ReactNode }) {
   const store = useChatStore();
   const running = useThread((s) => s.isRunning);
+  // The message still streaming is not saved yet, so the aside route cannot find it (a raw 404).
+  const beingWritten = useMessage((m) => m.isLast) && running;
+  // The error placeholder and a tool-only turn have no words to ask about.
+  const hasText = useMessage((m) => m.content.some((p) => p.type === 'text' && p.text.trim() !== ''));
   const bodyRef = useRef<HTMLDivElement>(null);
   const [pick, setPick] = useState<{ text: string; x: number; y: number } | null>(null);
-  const [form, setForm] = useState<{ quote: string } | null>(null);
+  // `editable`: the keyboard path quotes the whole message, which the learner trims to the part
+  // they mean; a mouse selection already is that part.
+  const [form, setForm] = useState<{ quote: string; editable?: boolean } | null>(null);
   const [question, setQuestion] = useState('');
   const [status, setStatus] = useState<'idle' | 'pending'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +143,14 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
   };
   const cancel = () => { setForm(null); setQuestion(''); setError(null); };
 
+  // Selecting a passage needs a pointer, or caret browsing, or a screen reader's selection
+  // commands. This is the way in from the keyboard alone.
+  const openFormOnMessage = () => {
+    const message = store.getState().messages.find((m) => m.id === messageId);
+    const text = (message?.parts ?? []).map((p) => (p.type === 'text' ? p.text : '')).join('\n').trim();
+    setForm({ quote: text.length > MAX_ASIDE_QUOTE ? `${text.slice(0, MAX_ASIDE_QUOTE)}…` : text, editable: true });
+  };
+
   // A turn, not an aside: the learner asked to be tested on exactly this passage. The message's
   // own words ("Quiz me") are what route it (deriveMode's QUIZ patterns), so no command rides it.
   const quizOnPick = () => {
@@ -144,15 +162,18 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
   };
 
   const submit = async () => {
-    if (!form) return;
+    // A second Enter or click while the first is out would run a second model loop and save a
+    // second answer under the message.
+    if (!form || status === 'pending') return;
+    const quote = form.quote.trim();
     setStatus('pending');
     setError(null);
     try {
       const part = await askAside({
         threadId: store.threadId,
         messageId,
-        question: question.trim() || `Explain "${form.quote}"`,
-        quote: form.quote,
+        question: question.trim() || (quote ? `Explain "${quote}"` : 'Explain this another way'),
+        ...(quote ? { quote } : {}),
       });
       store.addPartToMessage(messageId, part);
       setForm(null);
@@ -165,6 +186,8 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // The Enter that accepts an IME conversion is not a submit.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(); }
     else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
   };
@@ -174,7 +197,7 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
       {children}
       {pick && !form && (
         <div className="aside-ask" style={{ left: pick.x, top: pick.y + 8 }}>
-          <button type="button" onClick={openForm}>ask aside</button>
+          <button type="button" onClick={openForm} disabled={beingWritten}>ask aside</button>
           <button type="button" onClick={quizOnPick} disabled={running}>quiz me on this</button>
         </div>
       )}
@@ -183,7 +206,17 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
           className="aside-form"
           onSubmit={(e) => { e.preventDefault(); void submit(); }}
         >
-          <blockquote>{form.quote}</blockquote>
+          {form.editable ? (
+            <>
+              <label htmlFor={`aside-quote-${messageId}`}>quoted passage</label>
+              <textarea
+                id={`aside-quote-${messageId}`}
+                className="aside-form-quote"
+                value={form.quote}
+                onChange={(e) => setForm({ quote: e.target.value, editable: true })}
+              />
+            </>
+          ) : <blockquote>{form.quote}</blockquote>}
           <label htmlFor={`aside-question-${messageId}`}>aside question</label>
           <textarea
             id={`aside-question-${messageId}`}
@@ -193,10 +226,17 @@ function AsideAsk({ messageId, children }: { messageId: string; children: ReactN
             autoFocus
           />
           <div className="aside-form-actions">
-            <button type="submit">submit</button>
+            <button type="submit" disabled={status === 'pending'}>submit</button>
             <button type="button" onClick={cancel}>cancel</button>
           </div>
         </form>
+      )}
+      {!form && hasText && (
+        <div className="msg-actions">
+          <button type="button" onClick={openFormOnMessage} disabled={beingWritten} aria-label="ask aside about this answer">
+            ask aside
+          </button>
+        </div>
       )}
       {status === 'pending' && <p className="aside-composer-status" role="status">answering aside…</p>}
       {error && <p className="aside-composer-error" role="alert">{error}</p>}
@@ -209,12 +249,17 @@ function AssistantMessage() {
   return (
     <MessagePrimitive.Root className="msg assistant">
       <AsideAsk messageId={messageId}>
-        <MessagePrimitive.Parts components={{
-          Text: MarkdownText,
-          Reasoning: ReasoningPart,
-          tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
-          data: { by_name: { aside: AsidePart } },
-        }} />
+        {/* One malformed part (a hand-edited thread file, a tool output of the wrong shape) costs
+            this message, not the whole app: an uncaught render error unmounts the root, and the
+            hash reopens the same thread on reload. */}
+        <ErrorBoundary label={`message ${messageId}`} fallback={<p className="part-error">this part could not be shown</p>}>
+          <MessagePrimitive.Parts components={{
+            Text: MarkdownText,
+            Reasoning: ReasoningPart,
+            tools: { Fallback: ToolStatusChip }, // MCP tools → quiet status chip, not JSON
+            data: { by_name: { aside: AsidePart } },
+          }} />
+        </ErrorBoundary>
       </AsideAsk>
       <MessagePrimitive.Error>
         <ErrorPrimitive.Root className="error-bubble">
@@ -357,13 +402,28 @@ function SessionPlanCta({ plan, label = 'Start today’s session' }: { plan: Pla
  * The session plan narrowed to one notebook's pages: in a Calculus notebook, a plan row for
  * organic chemistry is someone else's session. A quiz row keeps only the pages it covers inside
  * the notebook and is dropped when none are left. Pure.
+ *
+ * A narrowed quiz row is rebuilt, not just filtered: the server names the row after its FIRST
+ * page and lists every page in `why`, so keeping those showed "QUIZ Chain Rule" in a Linear
+ * algebra notebook and sent the tutor a why naming other subjects' pages. One page left is a
+ * review, not a one-item quiz.
  */
-export function planWithin(plan: PlanItem[], slugs: readonly string[]): PlanItem[] {
-  const inScope = new Set(slugs);
-  return plan.flatMap((p) => {
-    if (!p.covers?.length) return inScope.has(p.slug) ? [p] : [];
-    const covers = p.covers.filter((c) => inScope.has(c));
-    return covers.length ? [{ ...p, covers }] : [];
+export function planWithin(plan: PlanItem[], topics: readonly { slug: string; title: string }[]): PlanItem[] {
+  const titles = new Map(topics.map((t) => [t.slug, t.title]));
+  return plan.flatMap((p): PlanItem[] => {
+    if (!p.covers?.length) return titles.has(p.slug) ? [p] : [];
+    const covers = p.covers.filter((c) => titles.has(c));
+    if (covers.length === p.covers.length) return [p];
+    if (covers.length === 0) return [];
+    const [first] = covers;
+    const title = titles.get(first) ?? first;
+    if (covers.length === 1) {
+      return [{ kind: 'review', slug: first, title, why: 'due for review', ...(p.transfer ? { transfer: p.transfer } : {}) }];
+    }
+    return [{
+      ...p, slug: first, title, covers,
+      why: `${covers.length} of your due pages, quizzed together: ${covers.join(', ')}`,
+    }];
   });
 }
 
@@ -378,12 +438,23 @@ function EmptyHero({ threadId }: { threadId?: string }) {
   const composer = useComposerRuntime();
   const notebook = useConversationNotebook(threadId);
   const [plan, setPlan] = useState<PlanItem[] | null>(null); // null = still deciding
+  // A failed plan fetch is not the newcomer state: treating it as one showed a returning learner
+  // with reviews due the day-one example asks and no sign their session was missing.
+  const [planFailed, setPlanFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetch('/api/session-plan')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled) setPlan(d?.plan ?? []); })
-      .catch(() => { if (!cancelled) setPlan([]); }); // no plan is the newcomer state, not an error
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<{ plan?: PlanItem[] }>;
+      })
+      .then((d) => { if (!cancelled) setPlan(Array.isArray(d?.plan) ? d.plan : []); })
+      .catch((e: unknown) => {
+        console.error('[session-plan] could not load today’s session:', e);
+        if (cancelled) return;
+        setPlanFailed(true);
+        setPlan([]);
+      });
     return () => { cancelled = true; };
   }, []);
   // Both lookups decide the copy, so nothing renders until both resolve — no flash from the
@@ -397,14 +468,15 @@ function EmptyHero({ threadId }: { threadId?: string }) {
       <div className="thread-empty">
         <NotebookIntro detail={notebook} onAsk={(text) => { composer.setText(text); composer.send(); }} />
         <SessionPlanCta
-          plan={planWithin(plan, notebook.topics.map((t) => t.slug))}
+          plan={planWithin(plan, notebook.topics)}
           label={`Study ${notebook.notebook.title}`}
         />
+        {planFailed && <p className="session-plan-failed">could not load today’s session</p>}
       </div>
     );
   }
 
-  const returning = plan.length > 0;
+  const returning = plan.length > 0 || planFailed;
   return (
     <div className="thread-empty">
       <h2>What do you want to explore?</h2>
@@ -414,6 +486,7 @@ function EmptyHero({ threadId }: { threadId?: string }) {
         tutor session.
       </p>
       <SessionPlanCta plan={plan} />
+      {planFailed && <p className="session-plan-failed">could not load today’s session</p>}
       {threadId && <NotebookPicker threadId={threadId} />}
       {/* The example asks taught their lesson (any subject works) on day one; for a returner they
           are noise beside the plan, and the composer is right below for anything new. */}
@@ -434,27 +507,32 @@ function awaitsAnswer(message: UIMessage): boolean {
 }
 
 /**
- * "try again" under a turn that failed — what its closing note tells the learner to do, as one
- * click. It re-sends the last question (text and any slash command) rather than rewriting history:
- * the failed turn and its note stay in the transcript, as they do on disk, so the live view and a
- * reload agree. Only offered while the failure is live (lastTurnFailed), and never while a turn
- * runs or the learner is typing.
+ * "try again" under a turn that failed — what its closing note or the error bubble tells the
+ * learner to do, as one click. Offered for every failure the learner can see: a turn the server
+ * ended as failed (marked on the message, so the offer survives a reload), a refused or
+ * unreachable request, and a dropped stream that recovery could not bring back. Never while a
+ * turn runs or the learner is typing.
+ *
+ * It resends text, slash command and attachments. A question that never got an answer is
+ * re-POSTed as it stands; after an answer that failed, the question is asked again as a new
+ * message, so the failed turn and its note stay in the transcript as they do on disk.
  */
 function RetryFailed({ drafting }: { drafting: boolean }) {
   const store = useChatStore();
-  const { messages, isRunning, lastTurnFailed } = useSyncExternalStore(store.subscribe, store.getState);
+  const { messages, isRunning, error } = useSyncExternalStore(store.subscribe, store.getState);
   const last = messages.at(-1);
-  if (drafting || isRunning || !lastTurnFailed || last?.role !== 'assistant') return null;
+  if (drafting || isRunning || last === undefined) return null;
+  if (error === undefined && !(last.role === 'assistant' && turnFailed(last))) return null;
+  const retry = (onClick: () => void) => (
+    <div className="follow-ups">
+      <button type="button" onClick={onClick}>try again</button>
+    </div>
+  );
+  if (last.role === 'user') return retry(() => store.resendLast());
   // The turn that failed was a GRADING continuation when an answered block on the message still has
   // no grade: retrying it means resubmitting the answer, not asking the question that staged the
   // block again — that would stage a fresh block and leave the learner's answer ungraded.
-  if (answerAwaitingGrade(last)) {
-    return (
-      <div className="follow-ups">
-        <button type="button" onClick={() => store.resubmit()}>try again</button>
-      </div>
-    );
-  }
+  if (answerAwaitingGrade(last)) return retry(() => store.resubmit());
   const asked = [...messages].reverse().find((m) => m.role === 'user');
   if (!asked) return null;
   const text = asked.parts.map((p) => (p.type === 'text' ? p.text : '')).join('');
@@ -462,13 +540,7 @@ function RetryFailed({ drafting }: { drafting: boolean }) {
   // Attachments ride along: "what is this?" retried without its photo is a different question.
   const files = asked.parts.filter((p): p is FileUIPart => p.type === 'file');
   if (!text.trim() && command === undefined && files.length === 0) return null;
-  return (
-    <div className="follow-ups">
-      <button type="button" onClick={() => store.sendMessage(text, files, command !== undefined ? { command } : {})}>
-        try again
-      </button>
-    </div>
-  );
+  return retry(() => store.sendMessage(text, files, command !== undefined ? { command } : {}));
 }
 
 /** An answered block on this message whose grade never arrived. */
@@ -488,10 +560,10 @@ function answerAwaitingGrade(message: UIMessage): boolean {
  */
 function FollowUps({ drafting }: { drafting: boolean }) {
   const store = useChatStore();
-  const { messages, isRunning, error, lastTurnFailed } = useSyncExternalStore(store.subscribe, store.getState);
+  const { messages, isRunning, error } = useSyncExternalStore(store.subscribe, store.getState);
   const last = messages[messages.length - 1];
-  if (drafting || isRunning || error !== undefined || lastTurnFailed
-    || last?.role !== 'assistant' || awaitsAnswer(last)) return null;
+  if (drafting || isRunning || error !== undefined
+    || last?.role !== 'assistant' || turnFailed(last) || awaitsAnswer(last)) return null;
   const said = last.parts.map((p) => (p.type === 'text' ? p.text : '')).join('').trim();
   if (said.length < MIN_FOLLOW_UP_CHARS) return null;
   return (
@@ -541,8 +613,33 @@ export function Composer({ mode = '', onEndMode, onDraftingChange, testEditorHan
   testEditorHandleRef?: RefObject<CommandEditorHandle | null>;
 } = {}) {
   const store = useChatStore();
+  const composer = useComposerRuntime();
+  const running = useThread((s) => s.isRunning);
   const [files, setFiles] = useState<FileUIPart[]>([]);
   const [note, setNote] = useState<string | null>(null);
+  const [initialDraft] = useState(() => loadDraft(store.threadId));
+  // Debounced: a keystroke's JSON is small, but writing storage on every one is not free. The
+  // unmount flush keeps the last 300ms when the learner clicks away mid-sentence.
+  const pendingDraft = useRef<{ doc: JSONContent; empty: boolean } | null>(null);
+  const draftTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const flushDraft = useRef(() => {});
+  flushDraft.current = () => {
+    clearTimeout(draftTimer.current);
+    const draft = pendingDraft.current;
+    pendingDraft.current = null;
+    if (draft) saveDraft(store.threadId, draft.empty ? null : draft.doc);
+  };
+  useEffect(() => () => flushDraft.current(), []);
+  const onDraftChange = (doc: JSONContent, empty: boolean) => {
+    pendingDraft.current = { doc, empty };
+    clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(() => flushDraft.current(), 300);
+  };
+  const discardDraft = () => {
+    clearTimeout(draftTimer.current);
+    pendingDraft.current = null;
+    saveDraft(store.threadId, null);
+  };
   // The send gate: tracks the EDITOR's emptiness (a lone command chip counts as content — a bare
   // "/beginner" is a valid send), and must also open for a files-only message.
   const [editorEmpty, setEditorEmpty] = useState(true);
@@ -578,19 +675,27 @@ export function Composer({ mode = '', onEndMode, onDraftingChange, testEditorHan
   // see slashCommands.ts's ComposerCommand note): it calls askAside directly against the latest
   // ASSISTANT message, and the returned part lands on that message via addPartToMessage, exactly
   // as the selection-driven AsideAsk flow does.
+  // The editor keeps the question until the aside lands, so a failed one can be sent again
+  // without retyping; asidePending stops a second submit meanwhile.
   const submitAside = (question: string) => {
+    if (asidePending) return;
     const last = [...store.getState().messages].reverse().find((m) => m.role === 'assistant');
     if (!last) {
       setAsideError('no tutor message to ask about yet');
       return;
     }
+    if (files.length > 0) {
+      setAsideError('an aside can’t carry attachments — remove them, or send this as a message');
+      return;
+    }
     setAsideError(null);
-    editorRef.current?.clear();
-    setFiles([]);
-    setNote(null);
     setAsidePending(true);
     askAside({ threadId: store.threadId, messageId: last.id, question })
-      .then((part) => { store.addPartToMessage(last.id, part); })
+      .then((part) => {
+        store.addPartToMessage(last.id, part);
+        editorRef.current?.clear();
+        discardDraft();
+      })
       .catch((e: unknown) => { setAsideError(e instanceof Error ? e.message : String(e)); })
       .finally(() => setAsidePending(false));
   };
@@ -603,8 +708,16 @@ export function Composer({ mode = '', onEndMode, onDraftingChange, testEditorHan
     if (payload.command === 'aside') { submitAside(payload.text); return; }
     store.sendMessage(payload.text, files, { command: payload.command });
     editorRef.current?.clear();
+    discardDraft();
     setFiles([]);
     setNote(null);
+  };
+
+  // Escape stops a running turn, same as the Stop button; otherwise it is the editor's.
+  const stopOnEscape = () => {
+    if (!running) return false;
+    composer.cancel();
+    return true;
   };
 
   const submit = (e: FormEvent) => {
@@ -655,13 +768,22 @@ export function Composer({ mode = '', onEndMode, onDraftingChange, testEditorHan
           hidden
           onChange={(e) => { addFiles(e.currentTarget.files); e.currentTarget.value = ''; }}
         />
-        <CommandEditor handleRef={editorRef} onEnter={doSubmit}
+        <CommandEditor handleRef={editorRef} onEnter={doSubmit} onEscape={stopOnEscape}
+          initialContent={initialDraft} onChange={onDraftChange}
           onEmptyChange={(empty) => { setEditorEmpty(empty); onDraftingChange?.(!empty); }} />
-        {/* Not ComposerPrimitive.Send: its disabled state reads assistant-ui's canSend, which
-            knows nothing of the local editor or files and would stay disabled on both. */}
-        <button type="submit" className="composer-send" aria-label="Send" disabled={editorEmpty && files.length === 0}>
-          <ArrowUp size={16} weight="bold" aria-hidden="true" />
-        </button>
+        {running ? (
+          // Cancel reaches the runtime's onCancel → store.abort(), which stops the server's turn
+          // too; a reload alone never did (recover() reattaches to the still-running turn).
+          <ComposerPrimitive.Cancel className="composer-send composer-stop" aria-label="Stop">
+            <Stop size={14} weight="fill" aria-hidden="true" />
+          </ComposerPrimitive.Cancel>
+        ) : (
+          // Not ComposerPrimitive.Send: its disabled state reads assistant-ui's canSend, which
+          // knows nothing of the local editor or files and would stay disabled on both.
+          <button type="submit" className="composer-send" aria-label="Send" disabled={editorEmpty && files.length === 0}>
+            <ArrowUp size={16} weight="bold" aria-hidden="true" />
+          </button>
+        )}
       </div>
       {MODE_CHIP[mode] !== undefined && (
         <div className="composer-mode">

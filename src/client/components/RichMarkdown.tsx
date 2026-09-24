@@ -4,7 +4,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import 'katex/dist/katex.min.css';
 import { escapeLooseDollars, scrubModelArtifacts } from '../lib/panelBus.js';
-import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
+import { MarkdownLink, MarkdownImage, CodeOrDiagram } from './MarkdownText.js';
 
 /**
  * The one way this app renders a markdown STRING: GitHub-flavoured markdown, `$…$` maths through
@@ -21,12 +21,11 @@ import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
  * chat path owns \(…\) because only free chat prose emits them.
  *
  * (MarkdownText stays separate: it renders the assistant-ui message part it is mounted inside, not
- * an arbitrary string, so it can't share this component — but it shares the same WikiLink and
- * CodeOrDiagram, so the two still agree on what `$…$` and a mermaid fence mean.)
+ * an arbitrary string, so it can't share this component — but it shares the same link, image and
+ * CodeOrDiagram components, so the two agree on what `$…$`, a mermaid fence, a link and an image
+ * mean. See MarkdownLink and MarkdownImage for that policy.)
  *
- * `wikiLinks` turns `#/page/slug` anchors into in-app page opens (the vault's own pages link to each
- * other; an external source does not). `inline` drops the wrapping `<p>` for a prompt spliced into a
- * sentence.
+ * `inline` drops the wrapping `<p>` for a prompt spliced into a sentence.
  *
  * `text` is model output whenever this renders a block prompt (BlockProse) or a page the compile
  * role wrote — the same untrusted-text status MarkdownText's `chatPreprocess` treats a chat turn as.
@@ -35,7 +34,7 @@ import { WikiLink, CodeOrDiagram } from './MarkdownText.js';
  * guard judges what's left.
  */
 export function RichMarkdown(
-  { text, wikiLinks = false, inline = false }: { text: string; wikiLinks?: boolean; inline?: boolean },
+  { text, inline = false }: { text: string; inline?: boolean },
 ) {
   return (
     <Markdown
@@ -43,7 +42,8 @@ export function RichMarkdown(
       rehypePlugins={[rehypeKatex]}
       components={{
         code: CodeOrDiagram,
-        ...(wikiLinks ? { a: WikiLink } : {}),
+        a: MarkdownLink,
+        img: MarkdownImage,
         // A prompt spliced into a sentence must not open a block element mid-line.
         ...(inline ? { p: ({ children }: { children?: React.ReactNode }) => <>{children}</> } : {}),
       }}

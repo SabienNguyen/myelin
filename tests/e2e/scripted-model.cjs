@@ -9,11 +9,13 @@ const fs = require('node:fs');
  * One factory, one script format:
  *   { turns: [ { when？: string, toolCalls？: [{ toolName, input }], text？: string } ] }
  *
- * A turn with `when` is KEYED: it is served, once, to the first request whose current user text
+ * A turn with `when` is KEYED: it is served to the first request whose current user text
  * (every user-role text after the request's last assistant message — the learner's words on a
  * fresh turn, the harness's tail notes on a grading continuation, the question on an aside call)
  * contains that string, case-blind. Unkeyed turns are served in order to every other request, as
- * before. Keys let two spec files share one backend without depending on which runs first, and
+ * before. Once every turn a request could take is used, a keyed turn answers its key again: a
+ * Playwright retry, --repeat-each, or a reused backend replays the same request, and served once
+ * only, the replay got an empty tutor turn. Keys let two spec files share one backend without depending on which runs first, and
  * make a turn an assertion about its request: a reply keyed on a harness note only arrives if
  * that note reached the model.
  *
@@ -87,6 +89,7 @@ function popTurn(scriptPath, method, req) {
   const said = currentUserText(req);
   let index = st.turns.findIndex((t, i) => !st.used.has(i) && t.when && said.includes(t.when.toLowerCase()));
   if (index === -1) index = st.turns.findIndex((t, i) => !st.used.has(i) && !t.when);
+  if (index === -1) index = st.turns.findLastIndex((t) => t.when && said.includes(t.when.toLowerCase()));
   const turn = index === -1 ? undefined : st.turns[index];
   if (index !== -1) st.used.add(index);
   trace(method, index, turn);

@@ -32,6 +32,9 @@ function topicSlugs(messages: UIMessage[]): string[] {
     if (!Array.isArray(parts)) continue;
     for (const p of parts) {
       if (typeof p?.type !== 'string' || !isToolUIPart(p) || !TOPIC_TOOLS.has(getToolName(p))) continue;
+      // A failed call worked on nothing: a made-up read_page slug listed as "not started" beside
+      // the real pages. Errors arrive as the loop's output-error or as MCP's {isError} output.
+      if (p.state === 'output-error' || (p.output as { isError?: unknown } | undefined)?.isError) continue;
       const slug = (p.input as { slug?: unknown } | undefined)?.slug;
       if (typeof slug === 'string') slugs.push(slug);
     }

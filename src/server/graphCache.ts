@@ -29,6 +29,7 @@ interface CacheEntry {
 
 let cached: CacheEntry | null = null;
 let refreshing: Promise<void> | null = null;
+let cold: { gen: number; promise: Promise<GraphPayload> } | null = null;
 // Bumped on every invalidation. A fetch (cold or background) captures this before it starts and
 // commits its result only if the count still matches — so a write_page that invalidates WHILE a
 // refresh reads the pre-write vault can't have that in-flight refresh re-install its stale payload
@@ -51,12 +52,26 @@ export function invalidateGraphCache(): void {
  */
 export async function getGraphCached(fetchGraph: () => Promise<GraphPayload>): Promise<GraphPayload> {
   if (!cached) {
+    // Callers that arrive while a cold fetch runs share it: a notebook view opens four panels that
+    // each GET /api/graph, and after every write_page they all missed and recomputed in parallel.
+    // A fetch started before an invalidation is not shared, so no caller waits on a pre-write read.
+    if (cold && cold.gen === generation) return cold.promise;
     const gen = generation;
-    const value = await fetchGraph();
-    // Install only if no invalidation raced this fetch — otherwise return the value to THIS caller
-    // but leave the cache empty, so the next caller re-fetches and picks up the write.
-    if (gen === generation) cached = { value, fetchedAt: Date.now() };
-    return value;
+    const promise: Promise<GraphPayload> = fetchGraph().then(
+      (value) => {
+        if (cold?.promise === promise) cold = null;
+        // Install only if no invalidation raced this fetch — otherwise return the value to THIS
+        // caller but leave the cache empty, so the next caller re-fetches and picks up the write.
+        if (gen === generation) cached = { value, fetchedAt: Date.now() };
+        return value;
+      },
+      (e) => {
+        if (cold?.promise === promise) cold = null;
+        throw e;
+      },
+    );
+    cold = { gen, promise };
+    return promise;
   }
 
   const isStale = Date.now() - cached.fetchedAt >= TTL_MS;

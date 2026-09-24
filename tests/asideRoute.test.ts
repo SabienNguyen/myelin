@@ -159,6 +159,27 @@ describe('POST /api/aside — grounding computed from the actual tool sequence',
     expect(part.data.fromMemory).toBe(false);
   });
 
+  it('a failed read_page or a refused read_url grounds nothing', async () => {
+    seedThread('failed-read-thread');
+    const model = turnsModel([
+      { toolCalls: [
+        { toolName: 'read_page', input: { slug: 'arithmetic-nope' } },
+        { toolName: 'read_url', input: { url: 'http://127.0.0.1:1/x' } },
+      ] },
+      { text: 'A sum adds two numbers together. (from memory — not checked against a source)' },
+    ]);
+    const app = buildAsideRoute(lw, cfg(), { model, now: () => new Date('2026-09-22T00:00:00.000Z') });
+    const res = await app.request('/api/aside', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ threadId: 'failed-read-thread', messageId: 'a1', question: 'what is a sum?' }),
+    });
+    expect(res.status).toBe(200);
+    const { part } = await res.json();
+    expect(part.data.vaultPages).toEqual([]);
+    expect(part.data.sources).toEqual([]);
+    expect(part.data.fromMemory).toBe(true);
+  });
+
   it('collects sources from a provider-executed web search (server-tool-result)', async () => {
     seedThread('search-thread');
     const calls: ChatRequest[] = [];

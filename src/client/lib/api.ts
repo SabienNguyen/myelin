@@ -34,6 +34,12 @@ async function getJson<T>(path: string, subject: string): Promise<T> {
     // normal state in a vault whose graph can name a prereq before it exists. Saying so beats
     // reporting a status code the learner can do nothing with.
     if (res.status === 404) throw new ApiError(path, 404, `Nothing written for ${subject} yet.`);
+    // The server's own {error} names the actual problem ("no such source: X"); the status copy is
+    // for bodies that carry none — an HTML proxy page or an empty 502.
+    const reason = await res.json().then((b) => b?.error, () => undefined);
+    if (typeof reason === 'string' && reason) {
+      throw new ApiError(path, res.status, `Couldn’t load ${subject}: ${reason.replace(/\.$/, '')}.`);
+    }
     throw new ApiError(path, res.status, res.status >= 500
       ? `Couldn’t load ${subject} — the harness hit an error (${res.status}).`
       : `Couldn’t load ${subject} — the harness returned ${res.status}.`);
@@ -47,9 +53,49 @@ async function getJson<T>(path: string, subject: string): Promise<T> {
   }
 }
 
-export const getGraph = () => getJson<any>('/api/graph', 'the concept graph');
+// restRoutes.ts fetchGraph. `mastery` is the learner's get_student_state record for the page.
+export interface GraphNode {
+  slug: string; title: string; difficulty?: number; status?: string;
+  prereqs: string[]; deepens: string[];
+  mastery: { level?: string; effective?: string; last_reinforced?: string; misconceptions?: string[] } | null;
+}
+export interface GraphPayload { nodes: GraphNode[]; goal: string | null; summary: unknown }
+
+// One notebook view mounts four panels that each want the graph within ~50 ms; callers that ask
+// while a request is in flight share it. Nothing is kept after it settles — a panel refetching
+// after a turn must see that turn's evidence, not a result from a moment before it.
+let graphInFlight: Promise<GraphPayload> | null = null;
+export function getGraph(): Promise<GraphPayload> {
+  if (graphInFlight) return graphInFlight;
+  const promise = getJson<GraphPayload>('/api/graph', 'the concept graph');
+  graphInFlight = promise;
+  const clear = () => { if (graphInFlight === promise) graphInFlight = null; };
+  promise.then(clear, clear);
+  return promise;
+}
+
+// restRoutes.ts GET /api/page/:slug: engram's read_page plus the harness's derived fields.
+export interface PageEdge { src: string; dst: string; type: string }
+export interface PageStanding {
+  level: string; effective: string; lastReinforced: string;
+  applied: number; explained: number; rubric: number; struggled: number;
+  daysLeft: number | null; slipped: boolean;
+  misconceptions: string[]; repaired: { date: string; text: string }[];
+}
+export interface PagePayload {
+  page: {
+    slug: string; body?: string; domain?: string; warnings?: string[];
+    meta: { title?: string; difficulty?: number; status?: string; prereqs?: string[]; deepens?: string[] };
+  };
+  edges?: { out?: PageEdge[]; in?: PageEdge[] };
+  neighbors: Record<string, { title: string | null; mastery: string | null }>;
+  standing: PageStanding | null;
+  routes: { block: string; ask: string; why: string }[];
+  noLadder: boolean;
+}
+// Encoded: a slug is model- and hash-supplied, and `..%2Fstatus` unencoded fetched /api/status.
 // Subject includes the slug so the panel needs no prefix of its own — see PagePanel.
-export const getPage = (slug: string) => getJson<any>(`/api/page/${slug}`, `“${slug}”`);
+export const getPage = (slug: string) => getJson<PagePayload>(`/api/page/${encodeURIComponent(slug)}`, `“${slug}”`);
 export const getStatus = () => getJson<any>('/api/status', 'the harness status');
 // The chat store's saved turns for one thread. Runtime.tsx used to fetch this with a bare
 // `fetch().then(r => r.json()).catch(() => setInitial([]))`, which folded "the server is down"
@@ -157,7 +203,13 @@ export interface NotebooksPayload {
   looseSources?: NotebookSource[];
 }
 export interface NotebookSource { book: string; title: string; authors: string[] }
-export interface NotebookTopic { slug: string; title: string; level: NotebookLevel; due: boolean; daysLeft?: number | null }
+export interface NotebookTopic {
+  slug: string; title: string; level: NotebookLevel; due: boolean; daysLeft?: number | null;
+  /** Decayed below the level it was earned at, which `was` names. Optional: older servers omit them. */
+  slipped?: boolean; was?: NotebookLevel | null;
+  /** The latest recorded misconception, model-worded. */
+  misconception?: string | null;
+}
 export interface NotebookDetail {
   notebook: NotebookSummary;
   threads: ThreadRow[];
@@ -166,6 +218,10 @@ export interface NotebookDetail {
   topics: NotebookTopic[];
 }
 export interface NotebookRef { id: string; title: string }
+/** A saved conversation as GET /api/threads lists it, newest first, with the notebook it is filed
+ *  under (chatRoute.ts). */
+export interface ThreadSummary extends ThreadRow { notebook: NotebookRef | null }
+export const getThreads = () => getJson<ThreadSummary[]>('/api/threads', 'your conversations');
 
 export const getNotebooks = () => getJson<NotebooksPayload>('/api/notebooks', 'your notebooks');
 export const getNotebook = (id: string) => getJson<NotebookDetail>(`/api/notebooks/${encodeURIComponent(id)}`, 'this notebook');
@@ -206,5 +262,10 @@ export const deleteNotebook = (id: string) =>
 export const fileThread = (id: string, threadId: string) =>
   sendJson<NotebookRef>('PUT', `/api/notebooks/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}`,
     undefined, 'file the conversation');
+export const unfileThread = (id: string, threadId: string) =>
+  sendJson<NotebookRef>('DELETE', `/api/notebooks/${encodeURIComponent(id)}/threads/${encodeURIComponent(threadId)}`,
+    undefined, 'remove the conversation from the notebook');
+export const deleteThread = (threadId: string) =>
+  sendJson<null>('DELETE', `/api/thread/${encodeURIComponent(threadId)}`, undefined, 'delete the conversation');
 export const getPageNotebooks = (slug: string) =>
   getJson<NotebookRef[]>(`/api/page/${encodeURIComponent(slug)}/notebooks`, 'the notebooks this page is in');

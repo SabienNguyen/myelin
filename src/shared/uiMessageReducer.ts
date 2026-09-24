@@ -44,6 +44,17 @@ export function generateMessageId(): string {
   return id;
 }
 
+function metadataRecord(message: UIMessage): Record<string, unknown> {
+  const m = message.metadata;
+  return m !== null && typeof m === 'object' && !Array.isArray(m) ? m as Record<string, unknown> : {};
+}
+
+/** The server ended this assistant turn with finishReason 'error' and wrote its explanation into
+ * the message as text (see the 'finish' case below). */
+export function turnFailed(message: UIMessage): boolean {
+  return metadataRecord(message).failed === true;
+}
+
 /** Applies each chunk to a working assistant message. Seeded from the last original message when
  * that message is the continued assistant message (block resubmit), so new parts merge into IT. */
 export class MessageAssembler {
@@ -166,6 +177,15 @@ export class MessageAssembler {
         return;
       }
       case 'finish':
+        // The failure verdict rides the message, so both saves (the server's onEnd and the
+        // client's PUT) persist it and "try again" is still offered after a reload. A grading
+        // continuation that later finishes cleanly on the same message clears it.
+        if (chunk.finishReason === 'error') this.message.metadata = { ...metadataRecord(this.message), failed: true };
+        else if (turnFailed(this.message)) {
+          const { failed: _failed, ...rest } = metadataRecord(this.message);
+          this.message.metadata = rest;
+        }
+        return;
       case 'error':
         return;
       default: {

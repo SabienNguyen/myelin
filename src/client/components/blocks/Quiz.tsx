@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { SymbolInput } from '../SymbolInput.js';
-import { CheckIcon as Check, ListChecksIcon as ListChecks } from '@phosphor-icons/react';
+import { ListChecksIcon as ListChecks } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
 import { BlockProse } from '../BlockProse.js';
-import { Mark, Verdict } from './Verdict.js';
+import { GradedTag, Mark, Verdict } from './Verdict.js';
+import { AnswerText } from './AnswerText.js';
 
 export function QuizInner({ args, addResult }: {
   args: any; addResult: (r: any) => void;
@@ -29,7 +30,7 @@ export function QuizInner({ args, addResult }: {
                   aria-pressed={answers[item.id] === ch}
                   className={answers[item.id] === ch ? 'on' : ''}
                   onClick={() => setAnswer(item.id, ch)}
-                ><BlockProse text={ch} inline /></button>
+                ><AnswerText text={ch} /></button>
               ))
             : (
               // The prompt sits right above (BlockProse), but it isn't programmatically tied to the
@@ -61,22 +62,21 @@ export function Quiz(props: { args: any; result: any; addResult: (r: any) => voi
     const answers: { id: string; answer: string }[] = Array.isArray(props.result.answers) ? props.result.answers : [];
     return (
       <div className="block quiz done">
-        <span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
+        <GradedTag grading={props.result.grading} />
         <h2>{props.args.title}</h2>
         <ul>
           {props.args.items.map((item: any) => {
             const answer = answers.find((a) => a.id === item.id)?.answer;
             const scored = byId.get(item.id);
-            // A choice answer is one of the tutor's own choices, maths included, so it renders like
-            // one; a typed answer is the learner's text and stays literal.
-            const shown = item.type === 'choice' && answer ? <BlockProse text={answer} inline /> : answer;
+            const shown = answer ? <AnswerText text={answer} /> : answer;
             return (
               <li key={item.id}>
                 <BlockProse text={item.prompt} inline /> — {shown} {scored != null && <Mark ok={scored.correct} />}
                 {/* A ✗ with no right answer leaves the learner to guess what they missed; every
                     flashcard app shows it. Only when the item carried an expected answer. */}
                 {scored != null && !scored.correct && item.expected && (
-                  <span className="quiz-expected"> · answer: <BlockProse text={item.expected} inline /></span>
+                  // A model-judged item was not compared against the key, so it is the tutor's answer.
+                  <span className="quiz-expected"> · {scored.source === 'model' ? 'tutor\'s answer' : 'answer'}: <AnswerText text={item.expected} /></span>
                 )}
                 {/* Which verdicts are a machine's and which are a model's opinion — the evidence
                     note already said "(model-graded)", but the learner could not see WHICH items.

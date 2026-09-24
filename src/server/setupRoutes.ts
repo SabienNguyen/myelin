@@ -440,6 +440,12 @@ export function buildSetupRoutes(
     const removed = ids.filter(([, id]) => id.trim().startsWith('claude-sdk:'))
       .map(([role, id]) => `${role}: "${id}"`);
     if (removed.length) return c.json({ error: removedRouteMessage(removed, 'this request') }, 400);
+    // Choosing OpenAI and clearing the model field saved a bare `oai:`: every tutor call then sent
+    // an empty model id and the badge went blank.
+    const bare = ids.find(([, id]) => /^(oai|openai|openrouter|groq|ollama):\s*$/.test(id.trim()));
+    if (bare) {
+      return c.json({ error: `${bare[0]}: "${bare[1].trim()}" names a route but no model — add the model id after the colon` }, 400);
+    }
     // An openai: role with no base URL anywhere would fail mid-lesson (models.ts throws at call
     // time); refuse the save here instead, where the fix is the field right below.
     const openaiRole = ids.find(([, id]) => id.trim().startsWith('openai:'));

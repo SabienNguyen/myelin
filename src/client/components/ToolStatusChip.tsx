@@ -1,4 +1,4 @@
-import { panelBus } from '../lib/panelBus.js';
+import { panelBus, scrubModelArtifacts } from '../lib/panelBus.js';
 
 // Fallback UI for MCP (server-side) tool calls in the transcript. The learner should see a
 // quiet status line — "✓ evidence recorded" — never raw JSON args, retries, or tool plumbing.
@@ -42,11 +42,35 @@ const PAGE_VERBS: Record<string, string> = {
   record_evidence: 'evidence recorded on',
 };
 
+// A call still running — or one the learner stopped, whose outcome the server never reported.
+// Done copy here claimed "evidence recorded" for a record_evidence nobody saw land.
+const PENDING: Record<string, string> = {
+  record_evidence: 'recording evidence…',
+  read_page: 'reading a page…',
+  write_page: 'writing a page…',
+  search: 'searching the vault…',
+  web_search: 'searching the web…',
+  read_url: 'reading a web page…',
+};
+
+/** read_page's title from the MCP result as it arrives ({content:[{type:'text', text:<JSON>}]}). */
+function readTitle(result: any): unknown {
+  const text = result?.content?.[0]?.text;
+  if (typeof text !== 'string') return undefined;
+  try {
+    return JSON.parse(text)?.page?.meta?.title;
+  } catch {
+    return undefined; // not JSON (an engram error string) — the slug stands in
+  }
+}
+
 /** The page's title when the call carries one (read_page's result, write_page's input), else the
- *  slug with its hyphens read as spaces — still recognisable, never invented. */
+ *  slug with its hyphens read as spaces — still recognisable, never invented. Titles are model or
+ *  vault text, so they are scrubbed of leaked ChatML tokens like any other model output. */
 function pageLabel(args: any, result: any, slug: string): string {
-  const title = result?.page?.meta?.title ?? args?.title;
-  return typeof title === 'string' && title.trim() ? title : slug.replace(/-/g, ' ');
+  const title = readTitle(result) ?? args?.title;
+  const clean = typeof title === 'string' ? scrubModelArtifacts(title).trim() : '';
+  return clean || slug.replace(/-/g, ' ');
 }
 
 export function ToolStatusChip({ toolName, args, result, isError }: any) {
@@ -57,6 +81,9 @@ export function ToolStatusChip({ toolName, args, result, isError }: any) {
   const [done, notDone] = LABELS[toolName] ?? [toolName, `${toolName} failed`];
   const slug = typeof args?.slug === 'string' && args.slug ? args.slug : null;
   const verb = PAGE_VERBS[toolName];
+  if (result === undefined && !failed) {
+    return <span className="tool-note" title={toolName}>{PENDING[toolName] ?? 'working…'}</span>;
+  }
   if (!failed && verb && slug) {
     return (
       <span className="tool-note" title={toolName}>

@@ -51,6 +51,7 @@ afterEach(async () => {
   // before a later-registered longer one, so this ordering is deterministic, not a coin flip.
   await new Promise((resolve) => setTimeout(resolve, 10));
   vi.unstubAllGlobals();
+  sessionStorage.clear(); // the composer keeps a per-thread draft there
 });
 
 function selectWithin(node: Node, from: number, to: number) {
@@ -195,6 +196,73 @@ describe('inline asides — selection flow (real Thread wiring)', () => {
   });
 });
 
+describe('inline asides — the form holds one request at a time', () => {
+  const initial: UIMessage[] = [
+    { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'How do I take a derivative?' }] },
+    { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: ASSISTANT_TEXT }] },
+  ];
+  const openForm = async () => {
+    selectWithin(screen.getByText(new RegExp(ASSISTANT_TEXT.slice(0, 20))), 4, 24);
+    await act(async () => { await new Promise((r) => setTimeout(r, 250)); });
+    fireEvent.click(await screen.findByRole('button', { name: 'ask aside' }));
+    return await screen.findByRole('textbox', { name: /aside question/i }) as HTMLTextAreaElement;
+  };
+
+  it('a double click and a second Enter while the answer is out send one request', async () => {
+    let asked = 0;
+    let release!: () => void;
+    await renderApp(initial, () => {
+      asked += 1;
+      return new Promise((resolve) => {
+        release = () => resolve({ ok: true, json: async () => ({ part: {
+          type: 'data-aside', id: 'aside-1',
+          data: { asideId: 'aside-1', question: 'q', answer: 'held answer', sources: [], vaultPages: [], fromMemory: true, createdAt: '2026-09-22T00:00:00.000Z' },
+        } }) });
+      });
+    });
+    const textarea = await openForm();
+    const submit = screen.getByRole('button', { name: 'submit' });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(asked).toBe(1);
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => { release(); });
+    expect(await screen.findByText('held answer')).not.toBeNull();
+    expect(asked).toBe(1);
+  });
+
+  it('the Enter that accepts an IME conversion does not submit', async () => {
+    let asked = 0;
+    await renderApp(initial, () => { asked += 1; return { ok: true, json: async () => ({}) }; });
+    const textarea = await openForm();
+    fireEvent.keyDown(textarea, { key: 'Enter', isComposing: true, keyCode: 229 });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(asked).toBe(0);
+    expect(screen.getByRole('textbox', { name: /aside question/i })).toBe(textarea);
+  });
+
+  it('from the keyboard: the message\'s own "ask aside" opens the form quoting it, and the quote can be trimmed', async () => {
+    let asideBody: any = null;
+    await renderApp(initial, (body) => {
+      asideBody = body;
+      return { ok: true, json: async () => ({ part: {
+        type: 'data-aside', id: 'aside-2',
+        data: { asideId: 'aside-2', question: body.question, answer: 'trimmed answer', sources: [], vaultPages: [], fromMemory: true, createdAt: '2026-09-22T00:00:00.000Z' },
+      } }) };
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'ask aside about this answer' }));
+    const quote = await screen.findByRole('textbox', { name: 'quoted passage' }) as HTMLTextAreaElement;
+    expect(quote.value).toBe(ASSISTANT_TEXT);
+    fireEvent.change(quote, { target: { value: 'two x' } });
+    fireEvent.change(screen.getByRole('textbox', { name: /aside question/i }), { target: { value: 'why two?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'submit' }));
+    expect(await screen.findByText('trimmed answer')).not.toBeNull();
+    expect(asideBody).toMatchObject({ messageId: 'a1', quote: 'two x', question: 'why two?' });
+  });
+});
+
 // ── `/aside` composer routing (Composer alone, no contenteditable typing needed) ───────────────
 
 function TestComposerHarness({ store, editorHandleRef }: {
@@ -276,5 +344,41 @@ describe('/aside — composer routing', () => {
 
     expect(await screen.findByRole('alert')).toHaveProperty('textContent', 'no tutor message to ask about yet');
     expect(calls).toEqual([]);
+  });
+
+  it('refuses an aside with attachments, and keeps the question and files', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => { calls.push(url); return { ok: true, json: async () => ({}) } as any; }));
+    const { editorHandleRef } = await renderComposer([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'hello there' }] },
+    ]);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(['x'], 'diagram.png', { type: 'image/png' })] } });
+    await screen.findByText('diagram.png');
+    act(() => {
+      editorHandleRef.current!.editor.commands.insertContent('what is this?');
+      editorHandleRef.current!.editor.commands.setCommandChip('aside');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/can’t carry attachments/);
+    expect(calls).toEqual([]);
+    expect(screen.getByText('diagram.png')).not.toBeNull();
+    expect(editorHandleRef.current!.serialize()).toEqual({ command: 'aside', text: 'what is this?' });
+  });
+
+  it('keeps the question in the editor when the aside fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 502, json: async () => ({ error: 'the model failed' }) }) as any));
+    const { editorHandleRef } = await renderComposer([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'hello there' }] },
+    ]);
+    act(() => {
+      editorHandleRef.current!.editor.commands.insertContent('why?');
+      editorHandleRef.current!.editor.commands.setCommandChip('aside');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('the model failed');
+    expect(editorHandleRef.current!.serialize()).toEqual({ command: 'aside', text: 'why?' });
   });
 });

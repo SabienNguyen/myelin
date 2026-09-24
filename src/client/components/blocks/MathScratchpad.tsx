@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
-import { CheckIcon as Check, PencilSimpleIcon as Pencil, SigmaIcon as Sigma, XIcon as X } from '@phosphor-icons/react';
+import { PencilSimpleIcon as Pencil, SigmaIcon as Sigma, XIcon as X } from '@phosphor-icons/react';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
-import { Verdict } from './Verdict.js';
+import { GradedTag, Verdict } from './Verdict.js';
 
 /** MathLive writes its private dialect into the LaTeX it emits — typing du/dx produces
  * `\differentialD x`, the keypad's constants are `\exponentialE`/`\imaginaryI`, empty slots are
@@ -174,7 +174,7 @@ export function MathScratchpad(props: { args: any; result: any; addResult: (r: a
     // on its own line. The old one-liner spliced them with a colon ("… Find v.: 14 — …"), which
     // read as a typo whenever the problem ended in punctuation, and its leading "— " wrapped onto
     // a line of its own — the exact orphan StructuredCheck already removed.
-    return <div className="block done"><span className="graded-tag">{props.result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
+    return <div className="block done"><GradedTag grading={props.result.grading} />
       {/* The problem travels into the done card — without it the thread reads as answers to
           invisible questions when scanned later. */}
       <div className="structured-prompt"><Latex tex={props.args.problemLatex ?? ''} /></div>

@@ -160,6 +160,18 @@ describe('GET/PUT /api/setup/models', () => {
     expect(readSettings()).toEqual({});
   });
 
+  it('a bare route prefix with no model id is refused, and nothing is saved', async () => {
+    const cfg = cfgWith(plainModels());
+    const app = buildSetupRoutes(cfg);
+    for (const id of ['oai:', 'ollama: ', 'groq:']) {
+      const res = await put(app, { models: { tutor: id } });
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toMatch(/names a route but no model/);
+    }
+    expect(cfg.models.tutor.model).toBe('claude-sonnet-5');
+    expect(readSettings()).toEqual({});
+  });
+
   it('an openai: role with no base URL anywhere is refused; one in the same request saves', async () => {
     const cfg = cfgWith(plainModels());
     const app = buildSetupRoutes(cfg);

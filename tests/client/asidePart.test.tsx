@@ -58,4 +58,22 @@ describe('AsidePart', () => {
     const { container } = render(<AsidePart data={null} />);
     expect(container.textContent).toBe('');
   });
+
+  it('renders a partial part (a hand-edited or corrupted thread file) instead of throwing', () => {
+    const { container } = render(<AsidePart data={{ answer: 'x', sources: [{ title: 'no url' }, null], vaultPages: [3, 'limits'] }} />);
+    expect(container.textContent).toContain('aside ·');
+    expect(container.textContent).toContain('x');
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'limits' })).not.toBeNull();
+    cleanup();
+    expect(() => render(<AsidePart data={{ answer: 'x' }} />)).not.toThrow();
+  });
+
+  it('opens [[wiki]] links in the answer in the Page tab', () => {
+    const spy = vi.spyOn(panelBus, 'openPage');
+    render(<AsidePart data={makeAside({ answer: 'see [[chain-rule]]' })} />);
+    fireEvent.click(screen.getByRole('link', { name: 'chain-rule' }));
+    expect(spy).toHaveBeenCalledWith('chain-rule');
+    spy.mockRestore();
+  });
 });

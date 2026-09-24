@@ -16,8 +16,6 @@ export interface ChatRequestBody {
   mode?: string;
   threadId: string;
   writeUp: boolean;
-  /** Kinds in the current session plan, leading item first — an input to that derivation. */
-  planKinds?: string[];
   /** True when the vault holds nothing real to teach from. */
   emptyVault?: boolean;
   /** Structured slash command for THIS turn only (shared/commands.ts) — absent on ordinary
@@ -47,7 +45,9 @@ export interface ConsumeChatStreamOptions {
   fetchImpl?: typeof fetch;
 }
 
-export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise<'done' | 'aborted'> {
+/** 'dropped': the server accepted the turn but the stream ended without [DONE], so the turn may
+ * still be running (or finished and saved) server-side — the caller's cue to reattach. */
+export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise<'done' | 'dropped' | 'aborted'> {
   const doFetch = opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   // The 'start' chunk always carries the server's message id (fresh, or the continued assistant
   // message's id on a block resubmit) and overwrites this placeholder via apply().
@@ -60,13 +60,24 @@ export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise
     return [...messages.slice(0, -1), structuredClone(messages[messages.length - 1]!)];
   };
 
+  let res: Response;
   try {
-    const res = await doFetch('/api/chat', {
+    res = await doFetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(opts.body),
       signal: opts.signal,
     });
+  } catch (e) {
+    if (opts.signal.aborted) return 'aborted';
+    // The browser's own text ("Failed to fetch", "NetworkError when attempting…") names neither
+    // what failed nor that nothing was sent to the model.
+    console.error('[chat] /api/chat request did not reach the harness:', e);
+    opts.onError('Can’t reach the harness — check that the server is running; the tutor wasn’t asked.');
+    return 'done';
+  }
+
+  try {
     if (!res.ok || res.body === null) {
       // A 4xx is the server REACHED and refusing, with a reason in the body (an unknown command, a
       // bad thread id, a turn still shutting down). "Unreachable" sent the learner to check a
@@ -106,10 +117,13 @@ export async function consumeChatStream(opts: ConsumeChatStreamOptions): Promise
   } catch (e) {
     if (opts.signal.aborted) return 'aborted';
     opts.onError(e instanceof Error ? e.message : String(e));
-    return 'done';
+    return 'dropped';
   }
   if (opts.signal.aborted) return 'aborted';
-  if (terminated) opts.onFinish(assembler.finalMessages(), { failed });
-  else opts.onError('The connection to the tutor dropped mid-turn.');
+  if (!terminated) {
+    opts.onError('The connection to the tutor dropped mid-turn.');
+    return 'dropped';
+  }
+  opts.onFinish(assembler.finalMessages(), { failed });
   return 'done';
 }

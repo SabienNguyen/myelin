@@ -34,6 +34,12 @@ export default defineConfig({
   // @playwright/test's test() outside a Playwright runner. vitest.config.ts is out of scope here,
   // so this file is named to avoid the collision instead.
   testMatch: '**/*.e2e.ts',
+  // Frame timings mean something only on an otherwise idle machine, so the perf spec is its own
+  // project: `--project=e2e` skips it, `--project=perf` runs it alone. No flag runs both, as before.
+  projects: [
+    { name: 'e2e', testIgnore: '**/graph-perf.e2e.ts' },
+    { name: 'perf', testMatch: '**/graph-perf.e2e.ts' },
+  ],
   timeout: 45_000,
   globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false,
@@ -143,7 +149,8 @@ export default defineConfig({
     },
     // aside.e2e.ts and chat-first.e2e.ts share one pair. Their script is KEYED (scripted-model.cjs's
     // `when`): each turn answers the request that says its key, so neither file depends on which
-    // one runs first or on a reused server's counter.
+    // one runs first. A keyed turn is served fresh once, then replayed for the same key, which is
+    // what lets a retry, --repeat-each, or a leftover :4824 backend pass a second time.
     {
       command:
         'LW_MOCK_MODEL=tests/e2e/chat-script.json HARNESS_CONFIG=tests/e2e/chat.config.json npx tsx src/server/index.ts',

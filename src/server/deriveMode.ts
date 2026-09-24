@@ -104,7 +104,8 @@ export function deriveMode({ text, planKinds = [], emptyVault = false }: DeriveI
 
   // Otherwise follow the plan's own leading item. A continuation ("ok", "next") carries no ask, so
   // this is what decides — and it is exactly the signal rule 2c says should never be OVERRIDDEN by
-  // the suggestions mid-topic, only used to choose what to start.
+  // the suggestions mid-topic, only used to choose what to start. The web client sends no
+  // planKinds (see chatRoute), so for it this branch never fires.
   if (planKinds[0] === 'quiz') return 'quiz';
   if (planKinds[0] === 'review' || planKinds[0] === 'misconception') return 'review';
 

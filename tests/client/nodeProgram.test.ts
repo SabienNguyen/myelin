@@ -21,6 +21,7 @@ if (typeof (globalThis as { WebGL2RenderingContext?: unknown }).WebGL2RenderingC
 }
 
 const { NodeProgram } = await import('sigma/rendering');
+const { floatColor } = await import('sigma/utils');
 const { MasteryNodeProgram } = await import('../../src/client/graph/nodeProgram.js');
 
 describe('MasteryNodeProgram', () => {
@@ -48,5 +49,34 @@ describe('MasteryNodeProgram', () => {
     const slipped = def.ATTRIBUTES.find((a: { name: string }) => a.name === 'a_slipped');
     expect(ringFraction?.size).toBe(1);
     expect(slipped?.size).toBe(1);
+  });
+
+  // What reaches the GPU per node. Swapping two writes, or passing a NaN position through, used to
+  // pass every test while the canvas drew nothing where it should.
+  it('writes position, size, colour, id, ring and slip for one node, in attribute order', () => {
+    const program = Object.create(MasteryNodeProgram.prototype) as InstanceType<typeof MasteryNodeProgram>;
+    const array = new Float32Array(9);
+    (program as unknown as { array: Float32Array }).array = array;
+    const node = { x: 0.25, y: 0.75, size: 12, color: '#5b8def', ringFraction: 0.4, slipped: true };
+    program.processVisibleItem(3, 1, node as never);
+    expect(array[0]).toBe(0);
+    expect(Array.from(array.slice(1, 4))).toEqual([0.25, 0.75, 12]);
+    expect(array[4]).toBe(floatColor('#5b8def'));
+    expect(array[5]).toBe(3);
+    expect(array[6]).toBeCloseTo(0.4);
+    expect(array[7]).toBe(1);
+    expect(array[8]).toBe(0);
+
+    const names = MasteryNodeProgram.prototype.getDefinition().ATTRIBUTES.map((a: { name: string }) => a.name);
+    expect(names).toEqual(['a_position', 'a_size', 'a_color', 'a_id', 'a_ringFraction', 'a_slipped']);
+  });
+
+  it('writes -1 for no decay ring and 0 for a page that has not slipped', () => {
+    const program = Object.create(MasteryNodeProgram.prototype) as InstanceType<typeof MasteryNodeProgram>;
+    const array = new Float32Array(7);
+    (program as unknown as { array: Float32Array }).array = array;
+    program.processVisibleItem(0, 0, { x: 1, y: 2, size: 3, color: '#000000', ringFraction: null, slipped: false } as never);
+    expect(array[5]).toBe(-1);
+    expect(array[6]).toBe(0);
   });
 });

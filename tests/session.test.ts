@@ -1234,6 +1234,23 @@ describe('the stray-evidence detector does not fire on the turn it is meant to b
   }, 30_000);
 });
 
+describe('the UI stream carries the slug the tool actually used', () => {
+  it('a near-miss read_page slug reaches the transcript repaired, as the call was', async () => {
+    const model = turnsModel([
+      { toolCalls: [{ toolName: 'read_page', input: { slug: 'arth' } }] },
+      { text: 'Read it.' },
+    ]);
+    const session = createTutorSession(lw, { student: 'kid', vault, models: {} } as any, { model });
+    const sse = await (await session.respond(
+      [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'what is arithmetic?' }] }] as any, 'learn', 'repair-thread',
+    )).text();
+    const chunks = sse.split('\n').filter((l) => l.startsWith('data: {')).map((l) => JSON.parse(l.slice(6)));
+    const call = chunks.find((c) => c.type === 'tool-input-available' && c.toolName === 'read_page');
+    expect(call.input.slug).toBe('arith');
+    expect(chunks.some((c) => c.type === 'tool-output-available' && c.toolCallId === call.toolCallId)).toBe(true);
+  }, 30_000);
+});
+
 // Inline asides (A1): asideRoute.ts answers a side question with a SEPARATE model call and
 // persists the result as a `data-aside` part on the message it anchors to — this thread never
 // sees it as a turn. The main tutor still needs to know it happened, or the next turn re-explains

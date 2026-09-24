@@ -30,7 +30,8 @@ export interface NodeAttrs {
 export interface EdgeAttrs { kind: 'prereq' | 'deepens'; color: string; size: number }
 
 export interface GraphColors {
-  prereq: string; deepens: string; muted: string; label: string; warn: string; bad: string; background: string;
+  prereq: string; deepens: string; muted: string; label: string; warn: string; bad: string;
+  background: string; border: string;
 }
 
 // radiusForDegree(px) → sigma size. 0.5 made the decay-arc ring (drawn just outside the node disc,
@@ -80,6 +81,7 @@ export function resolveGraphColors(): GraphColors {
     warn: cssVar('--warn', FALLBACK.warn),
     bad: cssVar('--bad', FALLBACK.bad),
     background: cssVar('--bg-panel', FALLBACK.bgPanel),
+    border,
   };
 }
 
@@ -183,12 +185,16 @@ export function syncGraph(
 
   // Diffed, not cleared and re-added: every 30s poll syncs a usually unchanged graph, and each
   // edge event makes sigma reindex and the ForceAtlas2 supervisor terminate and respawn its worker.
+  // A kept edge is recoloured when the colours changed (the OS switched colour scheme).
   const wanted = new Map(sub.edges.map((e) => [`${e.type}:${e.src}->${e.dst}`, e]));
   for (const key of graph.edges()) {
     if (!wanted.has(key)) graph.dropEdge(key);
   }
   for (const [key, e] of wanted) {
-    if (graph.hasEdge(key)) continue;
+    if (graph.hasEdge(key)) {
+      if (graph.getEdgeAttribute(key, 'color') !== opts.colors[e.type]) graph.setEdgeAttribute(key, 'color', opts.colors[e.type]);
+      continue;
+    }
     graph.addEdgeWithKey(key, e.src, e.dst, {
       kind: e.type,
       color: opts.colors[e.type],

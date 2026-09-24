@@ -7,11 +7,7 @@ import type { UIMessage } from '../../shared/uiMessages.js';
 import { pagesTouched } from '../../shared/topics.js';
 import { getGraph } from '../lib/api.js';
 import { panelBus } from '../lib/panelBus.js';
-
-type Level = 'mastered' | 'practicing' | 'exposed' | 'unseen';
-const LEVEL_LABEL: Record<Level, string> = {
-  mastered: 'mastered', practicing: 'practicing', exposed: 'seen', unseen: 'not started',
-};
+import { LEVEL_LABEL, asMasteryLevel, type MasteryLevel as Level } from '../lib/mastery.js';
 
 interface Row { slug: string; title: string; level: Level }
 
@@ -31,10 +27,9 @@ export function ConversationPages({ messages, isRunning = false }: { messages: U
         if (cancelled) return;
         const m = new Map<string, { title: string; level: Level }>();
         for (const n of (g.nodes ?? []) as any[]) {
-          const e = n?.mastery?.effective;
           m.set(n.slug, {
             title: typeof n.title === 'string' ? n.title : n.slug,
-            level: e === 'mastered' || e === 'practicing' || e === 'exposed' ? e : 'unseen',
+            level: asMasteryLevel(n?.mastery?.effective),
           });
         }
         setKnown(m);

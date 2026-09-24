@@ -1,4 +1,4 @@
-import { Component as ReactComponent, type ReactNode } from 'react';
+import { Component as ReactComponent, Suspense, lazy, type ReactNode } from 'react';
 import { defineToolkit } from '@assistant-ui/react';
 import { BLOCK_TOOLS } from '../shared/blocks.js';
 import { UI_TOOLS } from '../shared/uiTools.js';
@@ -8,12 +8,15 @@ import { Quiz } from './components/blocks/Quiz.js';
 import { StructuredCheck } from './components/blocks/StructuredCheck.js';
 import { MathScratchpad } from './components/blocks/MathScratchpad.js';
 import { WritingDraft } from './components/blocks/WritingDraft.js';
-import { CodeExercise } from './components/blocks/CodeExercise.js';
 import { LabelDiagram } from './components/blocks/LabelDiagram.js';
 import { Speak } from './components/blocks/Speak.js';
 import { OfferWrite } from './components/blocks/OfferWrite.js';
 import { Pronounce } from './components/blocks/Pronounce.js';
 import { WatchVideo } from './components/blocks/WatchVideo.js';
+
+// CodeMirror and the gap ladder are ~960 kB that every load parsed for an exercise most sessions
+// never open; it loads on first use. A failed chunk load throws into BlockBoundary like any crash.
+const CodeExercise = lazy(() => import('./components/blocks/CodeExercise.js').then((m) => ({ default: m.CodeExercise })));
 
 /** Two different failures wear the error flag: a call the server REJECTED (schema mismatch —
  *  the tutor's mistake) and a call that was CANCELLED because the conversation moved on (the
@@ -72,7 +75,9 @@ const human = (name: keyof typeof BLOCK_TOOLS, description: string, Component: a
     if (!parsed.success) return malformedNote(name);
     return (
       <BlockBoundary name={name}>
-        <Component args={parsed.data} result={result} addResult={addResult} />
+        <Suspense fallback={<span className="tool-note" role="status">loading the {name.replace('_', ' ')}…</span>}>
+          <Component args={parsed.data} result={result} addResult={addResult} />
+        </Suspense>
       </BlockBoundary>
     );
   },

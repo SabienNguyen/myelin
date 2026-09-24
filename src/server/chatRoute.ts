@@ -5,7 +5,7 @@ import type { HarnessConfig } from './config.js';
 import type { Engram } from './mcp.js';
 import { createTutorSession } from './session.js';
 import { deriveMode, lastUserText } from './deriveMode.js';
-import { deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
+import { ThreadDeleted, assertNotDeleted, deleteThread, listThreads, loadThread, saveThread } from './sessionStore.js';
 import { clearStance, setStance } from './stanceStore.js';
 import { forgetThread, readNotebooks } from './notebookStore.js';
 import { MODES, type Mode } from './prompt.js';
@@ -27,8 +27,10 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
   app.post('/api/chat', async (c) => {
     const body = await c.req.json() as {
       messages: UIMessage[]; mode?: Mode; threadId?: string; writeUp?: boolean; command?: string;
-      /** Kinds in the current session plan, leading item first — lets the harness derive the mode
-       *  when the client sends none. */
+      /** Kinds in the current session plan, leading item first. The web client does not send
+       *  it: starting a plan sets a sticky mode instead, and a plan-led derivation would turn
+       *  every "ok" in chat into a review (chat-first design). deriveMode still takes it: its
+       *  tests use a plan-led baseline to catch an ask pattern that misfires. */
       planKinds?: string[];
       /** True when the vault holds nothing real to teach from. */
       emptyVault?: boolean;
@@ -74,8 +76,9 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     // stance file behind under an id that saveThread would then refuse.
     try {
       loadThread(cfg.vault, threadId);
+      assertNotDeleted(cfg.vault, threadId, body.messages ?? []);
     } catch (e: any) {
-      return c.json({ error: e?.message ?? String(e) }, 400);
+      return c.json({ error: e?.message ?? String(e) }, e instanceof ThreadDeleted ? 409 : 400);
     }
     // A send while a turn is running SUPERSEDES it, as it did before turns outlived their
     // connection: then, the client's abort closed the socket and that ended the old turn. Now the
@@ -168,7 +171,7 @@ export function buildChatRoute(lw: Engram, cfg: HarnessConfig) {
     try {
       saveThread(cfg.vault, c.req.param('id'), await c.req.json());
     } catch (e: any) {
-      return c.json({ error: e?.message ?? String(e) }, 400);
+      return c.json({ error: e?.message ?? String(e) }, e instanceof ThreadDeleted ? 409 : 400);
     }
     return c.json({ ok: true });
   });

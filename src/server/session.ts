@@ -157,6 +157,18 @@ export function sanitizeToolArgs(args: any, toolName: string, student: string, k
   return out;
 }
 
+/** The model's tool-call input with its slug repaired the way guardMcpTools' execute will repair
+ *  it, for the UI stream. The execute wrapper alone fixed the call but not the saved part, so a
+ *  record_evidence on 'derivative' that landed on 'derivatives' showed a chip linking to "nothing
+ *  written", a "not started" Stage row, and a notebook that omitted the page. Returns the input
+ *  unchanged (same object) when nothing needed repair. */
+export function withRepairedSlug(toolName: string, input: unknown, knownSlugs: string[]): unknown {
+  const slug = (input as { slug?: unknown } | null)?.slug;
+  if (!SLUG_TOOLS.includes(toolName) || typeof slug !== 'string' || !knownSlugs.length) return input;
+  const repaired = repairSlug(slug, knownSlugs);
+  return repaired === slug ? input : { ...(input as object), slug: repaired };
+}
+
 /** The prompt's slug grounding, capped for scale.
  *
  * Small vaults inline every slug — the original behavior, and the right one: small models invent
@@ -1559,7 +1571,11 @@ export function createTutorSession(
               onEvent: (e) => {
                 // The question goes to the grader the moment it is staged: it decides the answer
                 // while the learner is thinking, and the reply is compared with it (answerKey.ts).
-                if (e.type === 'tool-call') prepareKeysForBlock(e.toolName, e.toolCallId, e.input, cfg);
+                if (e.type === 'tool-call') {
+                  prepareKeysForBlock(e.toolName, e.toolCallId, e.input, cfg);
+                  const input = withRepairedSlug(e.toolName, e.input, slugs);
+                  if (input !== e.input) e = { ...e, input };
+                }
                 writer.forward(e);
               },
               onUsage: (u) => { usage = u; },
