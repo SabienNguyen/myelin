@@ -6,9 +6,9 @@
 //
 // "done watching" is the only producer of { watched: true }. It mints 'exposed' (grading.ts) —
 // an encounter, never a mastery refresh — which is why this is a block and not a UI tool.
-import { CheckIcon as Check } from '@phosphor-icons/react';
 import { atTime, mmss, videoId } from '../../../shared/videoUrl.js';
 import { BlockProse } from '../BlockProse.js';
+import { GradedTag } from './Verdict.js';
 
 function spanLabel(start?: number, end?: number): string {
   if (start == null && end == null) return '';
@@ -25,7 +25,7 @@ export function WatchVideo({ args, result, addResult }: {
   if (result) {
     return (
       <div className="block watch-video done">
-        <span className="graded-tag">{result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
+        <GradedTag grading={result.grading} />
         <p>
           {result.watched
             ? <>Watched <a href={link} target="_blank" rel="noreferrer">{label}</a>.</>

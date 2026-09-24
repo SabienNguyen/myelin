@@ -21,10 +21,24 @@ function resolveStorage(storage: Storage | null | undefined): Storage | null {
   }
 }
 
-export function loadPositions(storage?: Storage | null): Map<string, Point> {
-  const s = resolveStorage(storage);
-  if (!s) return new Map();
+// The parsed map, kept per storage: every settle used to parse and re-serialise up to
+// MAX_REMEMBERED entries (about 1.4 MB) to save a view of a dozen nodes, and every scope change
+// parsed it again to place new nodes. Only this module writes the key, so after the first read the
+// map in memory is the stored one. A write from another tab is not seen until a reload, and the
+// last tab to save wins, which is what happened before too.
+let cache: { storage: Storage; map: Map<string, Point> } | null = null;
 
+export function loadPositions(storage?: Storage | null): ReadonlyMap<string, Point> {
+  const s = resolveStorage(storage);
+  return s ? cached(s) : new Map();
+}
+
+function cached(s: Storage): Map<string, Point> {
+  if (cache?.storage !== s) cache = { storage: s, map: readPositions(s) };
+  return cache.map;
+}
+
+function readPositions(s: Storage): Map<string, Point> {
   let raw: string | null;
   try {
     raw = s.getItem(POSITIONS_KEY);
@@ -59,7 +73,7 @@ export function savePositions(graph: MasteryGraph, storage?: Storage | null): vo
 
   // Merge over whatever is already there so a save from a scoped subgraph view doesn't forget the
   // rest of the vault's remembered positions.
-  const merged = loadPositions(s);
+  const merged = cached(s);
   graph.forEachNode((slug, attrs) => {
     if (!Number.isFinite(attrs.x) || !Number.isFinite(attrs.y)) return;
     // Delete-then-set moves this slug to the end of Map's insertion order, which is how the cap

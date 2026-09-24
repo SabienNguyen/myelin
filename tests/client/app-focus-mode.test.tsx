@@ -100,7 +100,8 @@ class StubResizeObserver {
 
 function stubFetch() {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    if (url === '/api/gap/ladder') {
+    // startsWith: getLadder sends the pattern as a query.
+    if (url.startsWith('/api/gap/ladder')) {
       return {
         ok: true,
         json: async () => ({
@@ -137,10 +138,11 @@ describe('App-level wiring — P1 focus-mode remount regression', () => {
     });
 
     // Let the scripted turn's tool call render and CodeExerciseInner mount (its own effect fetches
-    // /api/gap/ladder — see stubFetch above).
+    // /api/gap/ladder — see stubFetch above). The block is a lazy chunk, so wait for the block
+    // itself: #stage-root always holds its placeholder.
     await waitFor(() => {
-      expect(document.getElementById('stage-root')?.children.length).toBeGreaterThan(0);
-    });
+      expect(document.querySelector('#stage-root .code-exercise')).not.toBeNull();
+    }, { timeout: 5000 });
 
     // Give any update-depth feedback loop a chance to manifest — the real bug threw within a
     // handful of synchronous re-render cycles right after mount, well inside this window.

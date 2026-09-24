@@ -6,7 +6,7 @@
 // carries (the dot's colour is aria-hidden, so the label is the only non-visual carrier of state).
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
-import { TopbarStatus } from '../../src/client/components/TopbarStatus.js';
+import { TopbarStatus, modelLabel } from '../../src/client/components/TopbarStatus.js';
 
 function stubStatus(status: Record<string, unknown>, extra: Record<string, unknown> = {}) {
   // /api/status on mount; StudentSwitcher fetches /api/students & /api/voice on open. `extra` lets
@@ -81,5 +81,12 @@ describe('StudentSwitcher — a popup with inputs is a dialog, not a menu', () =
     // …and nothing inside claims to be a menu or a menu item.
     expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(document.querySelector('[role="menuitem"]')).toBeNull();
+  });
+});
+
+describe('modelLabel', () => {
+  it('falls back to the id when a routed prefix carries no model', () => {
+    expect(modelLabel('oai:')).toEqual({ name: 'oai:', how: 'OpenAI API' });
+    expect(modelLabel('groq:llama-4')).toEqual({ name: 'llama-4', how: 'Groq' });
   });
 });

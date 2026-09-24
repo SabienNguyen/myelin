@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { CheckIcon as Check } from '@phosphor-icons/react';
 import { BlockProse } from '../BlockProse.js';
-import { Verdict } from './Verdict.js';
+import { GradedTag, Verdict } from './Verdict.js';
+import { AnswerText } from './AnswerText.js';
 import { ImeInput } from './ImeInput.js';
 import { useRovingKeys } from '../../lib/tablist.js';
 
@@ -20,13 +20,14 @@ export function QuickCheck({ args, result, addResult }: {
   if (result) {
     const said: Confidence | null =
       result.confidence === 'sure' || result.confidence === 'unsure' ? result.confidence : null;
+    const missed = result.grading?.verdict === 'incorrect' || result.grading?.verdict === 'partial';
     return (
       <div className="block quick-check done">
         {/* Every other answered card carries this tag; here it earns its keep in the multi-block
             turn, where grading waits for the LAST block — without it this card shows nothing
             between answering and grading, and a learner can't tell "not graded yet" from
             "never will be". */}
-        <span className="graded-tag">{result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
+        <GradedTag grading={result.grading} />
         <BlockProse text={args.question} />
         {/* QuickText submits whatever is in the field, empty string included, so a learner who
             presses Enter on a blank input got a graded card reading "You:" and nothing else. That
@@ -37,15 +38,18 @@ export function QuickCheck({ args, result, addResult }: {
         {/* The confidence echo stays on the graded card: calibration feedback only teaches if the
             learner can see which rating each verdict was paired with. */}
         <p>
-          You: {result.answer?.trim()
-            ? (args.mode === 'choice' ? <BlockProse text={result.answer} inline /> : result.answer)
-            : '(blank)'}
+          You: {result.answer?.trim() ? <AnswerText text={result.answer} /> : '(blank)'}
           <Verdict grading={result.grading} dash word />
           {said && <span className="confidence-echo"> — you said {said}</span>}
         </p>
-        {result.grading?.verdict === 'incorrect' && args.expected && (
-          <p className="quiz-expected">Answer: <BlockProse text={args.expected} inline /></p>
+        {missed && args.expected && (
+          // Only a mechanical grade compared against the key; a model grader is told not to trust
+          // it (answerKey.ts), so there it is the tutor's answer, not the answer.
+          <p className="quiz-expected">
+            {result.grading.source === 'mechanical' ? 'Answer' : 'Tutor\'s answer'}: <AnswerText text={args.expected} />
+          </p>
         )}
+        {missed && result.grading.detail && <p className="quiz-expected">{result.grading.detail}</p>}
       </div>
     );
   }
@@ -74,9 +78,9 @@ export function QuickCheck({ args, result, addResult }: {
           Telex today, so a learner types diacritics from an ASCII keyboard (ImeInput.tsx). */}
       {args.mode === 'choice'
         ? args.choices?.map((ch: string) => (
-            // Choices carry maths as often as the question does ("$\frac{1}{2}$"), so they render
-            // through the same prose renderer instead of showing LaTeX source on a button.
-            <button key={ch} type="button" onClick={() => submit(ch)}><BlockProse text={ch} inline /></button>
+            // Choices carry maths as often as the question does ("$\frac{1}{2}$"), and are exact-match
+            // targets otherwise, so only their maths is typeset.
+            <button key={ch} type="button" onClick={() => submit(ch)}><AnswerText text={ch} /></button>
           ))
         : <ImeInput name="a" lang={args.lang} onSubmit={submit} />}
     </div>

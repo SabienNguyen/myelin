@@ -36,8 +36,44 @@ function keepAsideParts(onDiskMsg: any, incomingMsg: any): any {
   return { ...incomingMsg, parts: [...incomingParts, ...missing] };
 }
 
+// A deleted thread's message ids, kept after its file is gone. Without them a second tab still
+// showing the conversation resurrects it: loadThread returns [] for the missing file, and that
+// tab's next send or save writes the whole history back (unfiled, stance-less). Keyed by message
+// id rather than thread id so a NEW conversation may reuse the id — 'default' is every fresh
+// tab's thread, and tombstoning the id itself would refuse every send there for good.
+const tombstonesPath = (vault: string) => join(vault, '.harness', 'deleted-threads.json');
+
+function readTombstones(vault: string): Record<string, string[]> {
+  const p = tombstonesPath(vault);
+  if (!existsSync(p)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(p, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (e) {
+    // Losing the tombstones costs only the resurrection guard, never a conversation.
+    console.error('[sessions] unreadable deleted-threads.json, treating as empty:', e instanceof Error ? e.message : e);
+    return {};
+  }
+}
+
+export class ThreadDeleted extends Error {
+  constructor(threadId: string) {
+    super(`conversation "${threadId}" was deleted — start a new one`);
+    this.name = 'ThreadDeleted';
+  }
+}
+
+/** Throws ThreadDeleted when `messages` carry any id from a deleted thread of the same id. */
+export function assertNotDeleted(vault: string, threadId: string, messages: unknown[]): void {
+  const dead = readTombstones(vault)[threadId];
+  if (!Array.isArray(dead) || dead.length === 0) return;
+  const deadIds = new Set(dead);
+  if ((messages as any[]).some((m) => typeof m?.id === 'string' && deadIds.has(m.id))) throw new ThreadDeleted(threadId);
+}
+
 export function saveThread(vault: string, threadId: string, messages: unknown[]) {
   assertThreadId(threadId);
+  assertNotDeleted(vault, threadId, messages);
   mkdirSync(dir(vault), { recursive: true });
   // Merge with what's on disk instead of replacing it. Two tabs on the same thread each write
   // their own view; a blind replace let the staler tab silently erase the other's entire
@@ -131,6 +167,14 @@ export function addPartToMessage<P extends { type: string; id?: unknown }>(
 export function deleteThread(vault: string, threadId: string) {
   assertThreadId(threadId);
   const p = join(dir(vault), `${threadId}.json`);
+  const ids = (loadThread(vault, threadId) as any[])
+    .map((m) => m?.id).filter((id): id is string => typeof id === 'string');
+  if (ids.length > 0) {
+    const tombstones = readTombstones(vault);
+    tombstones[threadId] = [...new Set([...(tombstones[threadId] ?? []), ...ids])];
+    mkdirSync(join(vault, '.harness'), { recursive: true });
+    atomicWrite(tombstonesPath(vault), JSON.stringify(tombstones));
+  }
   if (existsSync(p)) unlinkSync(p);
   // A thread's compaction blocks are keyed by message id, and a new thread created under the
   // same id would hold none of those ids — historyCompaction drops stale blocks on its own, but
@@ -155,9 +199,25 @@ function titleFor(messages: unknown[], id: string): string {
   if (!trimmed) return id;
   // The first sentence when it is a real one: an opening like "Quiz me across Calculus I. One
   // question per page: …" titles as its first sentence rather than 60 characters cut mid-list.
-  const sentence = trimmed.split(/(?<=[.?!])\s+/)[0];
+  const sentence = firstSentence(trimmed);
   const title = sentence.length >= 12 ? sentence : trimmed;
-  return title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX)}…` : title;
+  // Code points, not UTF-16 units: slicing an emoji at the limit left half a surrogate pair.
+  const chars = Array.from(title);
+  return chars.length > TITLE_MAX ? `${chars.slice(0, TITLE_MAX).join('')}…` : title;
+}
+
+// "Explain limits, e.g. what is x approaching…" titled as "Explain limits, e.g." — a Latin full
+// stop ends a sentence only before a capital, and never after these abbreviations.
+const ABBREVIATION = /\b(?:e\.g|i\.e|etc|vs|cf|approx|incl|mr|mrs|ms|dr|st|no|fig)\.$/i;
+
+function firstSentence(text: string): string {
+  for (const m of text.matchAll(/[.?!](?=\s+(\S))|[。？！]/g)) {
+    const head = text.slice(0, m.index + 1);
+    if (m[1] === undefined) return head;
+    if (!/\p{Lu}/u.test(m[1]) || ABBREVIATION.test(head)) continue;
+    return head;
+  }
+  return text;
 }
 
 /** Scan vault/.harness/sessions/*.json for a thread-picker list. Skips any file that isn't a

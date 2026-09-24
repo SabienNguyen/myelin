@@ -398,6 +398,111 @@ describe('ChatStore', () => {
     expect(chatCalls()).toHaveLength(1);
   });
 
+  it('an aside added to an earlier message mid-stream survives the following chunks', async () => {
+    // Every chunk replaces messages with the assembler's snapshot, which never saw the aside: it
+    // showed for one chunk and vanished until a reload.
+    const encoder = new TextEncoder();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const gatedBody = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+    const feed = (chunks: unknown[]) => {
+      for (const c of chunks) controller.enqueue(encoder.encode(`data: ${JSON.stringify(c)}\n\n`));
+    };
+    const fetchImpl = (async (input: RequestInfo | URL) => (String(input) === '/api/chat'
+      ? { ok: true, status: 200, body: gatedBody }
+      : { ok: true, status: 200, json: async () => ({ ok: true }) }) as unknown as Response) as typeof fetch;
+    const initial: UIMessage[] = [
+      { id: 'u0', role: 'user', parts: [{ type: 'text', text: 'what is a limit?' }] },
+      { id: 'a0', role: 'assistant', parts: [{ type: 'text', text: 'A limit is…' }] },
+    ];
+    const store = new ChatStore({
+      threadId: 't1', initialMessages: initial,
+      requestContext: () => ({ mode: '', writeUp: false }), fetchImpl,
+    });
+    const turn = scriptedTurnChunks();
+    store.sendMessage('go on');
+    feed(turn.slice(0, 4));
+    await vi.waitFor(() => { expect(store.getState().messages).toHaveLength(4); });
+
+    const aside = { type: 'data-aside', id: 'aside-1', data: { question: 'why?', answer: 'because' } } as const;
+    store.addPartToMessage('a0', aside);
+    feed(turn.slice(4));
+    controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+    controller.close();
+    await settled(store);
+
+    const a0 = store.getState().messages.find((m) => m.id === 'a0')!;
+    expect(a0.parts).toContainEqual(aside);
+    expect(a0.parts.filter((p) => p.type === 'data-aside')).toHaveLength(1);
+  });
+
+  it('a stream cut mid-turn reattaches and replaces the half answer with the saved one', async () => {
+    const saved: UIMessage[] = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Explain' }] },
+      { id: 'A1B2C3D4E5F6G7H8', role: 'assistant', parts: [{ type: 'text', text: 'The whole answer.' }] },
+    ];
+    const polls: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/chat') return sseResponse(sseText(scriptedTurnChunks().slice(0, 4), { done: false }));
+      polls.push(url);
+      return Response.json({ running: false, messages: saved });
+    }) as typeof fetch;
+    const store = new ChatStore({
+      threadId: 't1', initialMessages: [],
+      requestContext: () => ({ mode: '', writeUp: false }), fetchImpl,
+    });
+    store.sendMessage('Explain');
+    await vi.waitFor(() => { expect(store.getState().messages).toEqual(saved); });
+    expect(polls).toEqual(['/api/thread/t1/run']);
+    expect(store.getState().error).toBeUndefined();
+    expect(store.getState().isRunning).toBe(false);
+  });
+
+  it('resendLast re-posts an unanswered question once, with its command and attachment', async () => {
+    const photo: FileUIPart = { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA', filename: 'q.png' };
+    const fetched = fakeFetch([scriptedTurnChunks()]);
+    let refusedOnce = false;
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/chat' && !refusedOnce) {
+        refusedOnce = true;
+        return new Response(JSON.stringify({ error: 'busy' }), { status: 409 });
+      }
+      return fetched.impl(input, init);
+    }) as typeof fetch;
+    const store = new ChatStore({
+      threadId: 't1', initialMessages: [],
+      requestContext: () => ({ mode: '', writeUp: false }), fetchImpl,
+    });
+    store.sendMessage('what is this?', [photo], { command: 'quiz' });
+    await settled(store);
+    expect(store.getState().error).toBe('busy');
+
+    store.resendLast();
+    await settled(store);
+    const body = fetched.chatCalls()[0]!.body as { messages: UIMessage[]; command?: string };
+    expect(body.command).toBe('quiz');
+    expect(body.messages.filter((m) => m.role === 'user')).toHaveLength(1);
+    expect(body.messages[0]!.parts).toContainEqual(photo);
+    expect(store.getState().error).toBeUndefined();
+  });
+
+  it('a turn the server finished as failed is marked on the message, so the mark survives a save', async () => {
+    const failing = [
+      { type: 'start', messageId: 'F1F1F1F1F1F1F1F1' },
+      { type: 'start-step' },
+      { type: 'text-start', id: '0' },
+      { type: 'text-delta', id: '0', delta: 'The model returned nothing for this turn.' },
+      { type: 'text-end', id: '0' },
+      { type: 'finish-step' },
+      { type: 'finish', finishReason: 'error' },
+    ];
+    const { store, calls } = makeStore([failing], []);
+    store.sendMessage('hi');
+    await settled(store);
+    const put = calls.find((c) => c.init.method === 'PUT')!.body as UIMessage[];
+    expect(put.at(-1)!.metadata).toEqual({ failed: true });
+  });
+
   it('setMessages replaces the history (thread restore) and resubmit posts it as-is', async () => {
     const { store, chatCalls } = makeStore([continuationChunks('a1', 'tc1')], []);
     const restored = pausedBlockHistory();

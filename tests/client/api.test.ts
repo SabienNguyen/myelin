@@ -31,7 +31,7 @@ describe('client api error handling', () => {
 
   it('never puts an HTTP method or path in the message a learner reads', async () => {
     respond({ ok: false, status: 502, body: '' });
-    const err = await getPage('chain-rule').catch((e) => e as ApiError);
+    const err = await getPage('chain-rule').then(() => { throw new Error('resolved'); }, (e: ApiError) => e);
     expect(err.message).not.toMatch(/\/api\//);
     expect(err.message).not.toMatch(/\bGET\b/);
     // Still available for logging — diagnostics belong on the object, not in the copy.
@@ -41,7 +41,7 @@ describe('client api error handling', () => {
 
   it('distinguishes unreachable from answered-badly, because only one has a user action', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
-    const err = await getGraph().catch((e) => e as ApiError);
+    const err = await getGraph().then(() => { throw new Error('resolved'); }, (e: ApiError) => e);
     expect(err.status).toBe(0);
     expect(err.message).toMatch(/can’t reach the harness/i);
   });
@@ -55,9 +55,31 @@ describe('client api error handling', () => {
 
   it('reads a 404 as "not written yet" rather than as a malfunction', async () => {
     respond({ ok: false, status: 404, body: '' });
-    const err = await getPage('ghost').catch((e) => e as ApiError);
+    const err = await getPage('ghost').then(() => { throw new Error('resolved'); }, (e: ApiError) => e);
     expect(err.message).toBe('Nothing written for “ghost” yet.');
     expect(err.message).not.toMatch(/error|failed/i);
+  });
+
+  it('prefers the server’s own {error} over the status copy', async () => {
+    respond({ ok: false, status: 400, body: JSON.stringify({ error: 'no such source: calc.' }) });
+    await expect(getPaths()).rejects.toThrow('Couldn’t load your learning paths: no such source: calc.');
+  });
+
+  it('encodes the slug, so a crafted one cannot reach another route', async () => {
+    respond({ ok: true, status: 200, body: '{}' });
+    await getPage('../status');
+    expect(vi.mocked(fetch).mock.calls[0][0]).toBe('/api/page/..%2Fstatus');
+  });
+
+  it('shares one in-flight graph request between callers, and nothing once it settles', async () => {
+    respond({ ok: false, status: 502, body: '' });
+    await expect(getGraph()).rejects.toThrow(ApiError);
+    respond({ ok: true, status: 200, body: JSON.stringify({ nodes: [], goal: null }) });
+    const [a, b] = await Promise.all([getGraph(), getGraph()]);
+    expect(a).toBe(b);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    await getGraph(); // settled: a later caller gets a fresh request
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   });
 
   it('resolves normally on a good response', async () => {

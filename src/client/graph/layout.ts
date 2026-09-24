@@ -66,6 +66,7 @@ export interface LayoutController {
   pin(node: string, x: number, y: number): void;
   release(node: string): void;
   onSettle(cb: () => void): () => void;
+  setReducedMotion(reduced: boolean): void;
 }
 
 /** Mean per-node displacement between `prev` (x0,y0,x1,y1… in graph.forEachNode order) and the
@@ -113,6 +114,102 @@ export function snapshot(graph: MasteryGraph): Float64Array {
   return out;
 }
 
+// Unlinked subjects share one force system: gravity pulls each toward the common centre while
+// repulsion pushes them apart, and a small component drifts until the run cap (Rust at about
+// (-1000, -950) in a four-subject vault), so the fit frames mostly empty canvas with the rest shrunk
+// into clumps. After each settle the components are shelved row by row instead, each keeping its
+// own internal layout. The gap scales with the largest component so it reads the
+// same at any ForceAtlas2 scale, floored so single-page components do not touch.
+const PACK_GAP_FRACTION = 0.08;
+const PACK_GAP_MIN = 40;
+
+interface Component { nodes: string[]; minX: number; minY: number; w: number; h: number }
+
+function components(graph: MasteryGraph): Component[] {
+  const seen = new Set<string>();
+  const out: Component[] = [];
+  graph.forEachNode((start) => {
+    if (seen.has(start)) return;
+    seen.add(start);
+    const nodes = [start];
+    for (let i = 0; i < nodes.length; i++) {
+      graph.forEachNeighbor(nodes[i], (nb) => {
+        if (!seen.has(nb)) { seen.add(nb); nodes.push(nb); }
+      });
+    }
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      const { x, y } = graph.getNodeAttributes(n);
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    out.push({ nodes, minX, minY, w: maxX - minX, h: maxY - minY });
+  });
+  return out;
+}
+
+/** Where each component's top-left corner goes when shelved in rows no wider than `rowWidth`, and
+ *  the size of the whole. */
+function shelve(comps: Component[], gap: number, rowWidth: number): { corners: Point[]; w: number; h: number } {
+  const corners: Point[] = [];
+  let x = 0, y = 0, rowHeight = 0, w = 0;
+  for (const c of comps) {
+    if (x > 0 && x + c.w > rowWidth) {
+      x = 0;
+      y += rowHeight + gap;
+      rowHeight = 0;
+    }
+    corners.push({ x, y });
+    w = Math.max(w, x + c.w);
+    x += c.w + gap;
+    rowHeight = Math.max(rowHeight, c.h);
+  }
+  return { corners, w, h: y + rowHeight };
+}
+
+// Row widths tried per packing: enough to find a shape near the canvas's, without the cost of
+// trying every width when a whole vault has thousands of single-page components.
+const PACK_WIDTHS_TRIED = 24;
+
+/** Moves each connected component of `graph` as a whole into a shelf packing, largest first (then
+ *  by first node, so repeated settles keep their places), in rows whose width is picked so the whole
+ *  fits a canvas of `aspect` (width / height) at the largest scale. A single component, or any
+ *  non-finite position, leaves the graph as it is. */
+export function packComponents(graph: MasteryGraph, aspect = 1): void {
+  const comps = components(graph);
+  if (comps.length < 2) return;
+  if (comps.some((c) => !Number.isFinite(c.w) || !Number.isFinite(c.h))) return;
+  comps.sort((a, b) => b.nodes.length - a.nodes.length || (a.nodes[0] < b.nodes[0] ? -1 : 1));
+  const gap = Math.max(PACK_GAP_MIN, PACK_GAP_FRACTION * Math.max(comps[0].w, comps[0].h));
+  const widest = Math.max(...comps.map((c) => c.w));
+  const oneRow = comps.reduce((sum, c) => sum + c.w + gap, 0);
+  let best: ReturnType<typeof shelve> | null = null;
+  let bestScale = -Infinity;
+  for (let i = 0; i < PACK_WIDTHS_TRIED; i++) {
+    const rowWidth = widest + (oneRow - widest) * (i / (PACK_WIDTHS_TRIED - 1)) ** 2;
+    const packed = shelve(comps, gap, rowWidth);
+    const scale = Math.min(aspect / Math.max(packed.w, 1), 1 / Math.max(packed.h, 1));
+    if (scale > bestScale) { best = packed; bestScale = scale; }
+  }
+  const target = new Map<string, Point>();
+  comps.forEach((c, i) => {
+    const dx = best!.corners[i].x - c.minX;
+    const dy = best!.corners[i].y - c.minY;
+    for (const n of c.nodes) {
+      const a = graph.getNodeAttributes(n);
+      target.set(n, { x: a.x + dx, y: a.y + dy });
+    }
+  });
+  graph.updateEachNodeAttributes((node, attrs) => {
+    const p = target.get(node)!;
+    attrs.x = p.x;
+    attrs.y = p.y;
+    return attrs;
+  }, { attributes: ['x', 'y'] });
+}
+
 // A whole-vault screenshot at ~400 nodes showed a hairball: nodes overlapping heavily rather than
 // separated by visible gaps. adjustSizes (FA2's own anti-overlap term, which factors node radius
 // into repulsion) keeps two node centres at least their combined radii apart, at a per-iteration
@@ -150,12 +247,17 @@ function settingsFor(graph: MasteryGraph): ForceAtlas2Settings {
   };
 }
 
-export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolean } = {}): LayoutController {
+/** `aspect` is the canvas's width / height at settle time, which the component packing aims for. */
+export function createLayout(
+  graph: MasteryGraph, opts: { reducedMotion?: boolean; aspect?: () => number } = {},
+): LayoutController {
   const listeners = new Set<() => void>();
   // Once a worker construction has failed once, retrying it on every start() (e.g. every drag) would
   // just log the same failure repeatedly for no benefit — the failure is almost always permanent
   // (no WebWorker support, blocked Blob URLs), so we stick to the synchronous path from then on.
-  let useSyncFallback = opts.reducedMotion === true;
+  let workerFailed = false;
+  let reducedMotion = opts.reducedMotion === true;
+  const useSyncFallback = () => workerFailed || reducedMotion;
   let running = false;
   let worker: Worker | null = null;
   let settings: ForceAtlas2Settings | null = null;
@@ -167,6 +269,9 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
   // Released since the last request: the worker still has them fixed until told otherwise.
   const unpinned = new Set<string>();
   // The worker iterates as fast as it can; the graph takes only the newest result, once per frame.
+  // Every result is copied into one buffer per run (the worker's own is transferred straight back),
+  // so a run allocates once rather than once per iteration.
+  let scratch: Float32Array | null = null;
   let latest: Float32Array | null = null;
   let applyFrame: number | null = null;
   let restartTimer: ReturnType<typeof setTimeout> | null = null;
@@ -219,8 +324,9 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
     if (from !== worker || !running || !settings) return;
     const nodes = new Float32Array(event.data.nodes);
     writePins(nodes);
-    // Copied because `nodes` is transferred straight back to the worker below.
-    latest = nodes.slice();
+    if (scratch === null || scratch.length !== nodes.length) scratch = new Float32Array(nodes.length);
+    scratch.set(nodes);
+    latest = scratch;
     if (applyFrame === null) {
       applyFrame = requestAnimationFrame(() => {
         applyFrame = null;
@@ -247,10 +353,11 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
       w = createWorker(workerFunction);
     } catch (err) {
       console.error('[graph] layout worker failed, laying out on the main thread:', err);
-      useSyncFallback = true;
+      workerFailed = true;
       return false;
     }
     settings = settingsFor(graph);
+    scratch = null;
     const matrices = graphToByteArrays(graph, () => 1);
     offsets = new Map();
     let j = 0;
@@ -320,6 +427,7 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
 
   function fireSettle(): void {
     stop();
+    packComponents(graph, opts.aspect?.() ?? 1);
     for (const cb of listeners) cb();
   }
 
@@ -362,13 +470,12 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
 
   function runSync(): void {
     forceAtlas2.assign(graph, { iterations: LAYOUT.syncIterations, settings: settingsFor(graph) });
-    stop();
-    for (const cb of listeners) cb();
+    fireSettle();
   }
 
   function start(): void {
     if (running || graph.order === 0) return;
-    if (useSyncFallback || !spawn()) {
+    if (useSyncFallback() || !spawn()) {
       runSync();
       return;
     }
@@ -399,28 +506,36 @@ export function createLayout(graph: MasteryGraph, opts: { reducedMotion?: boolea
     stop,
     kill,
     isRunning: () => running,
+    // A poll can drop the node under a held pointer; the drag then has nothing left to move.
     pin(node, x, y) {
+      if (!graph.hasNode(node)) return;
       pins.set(node, { x, y });
       unpinned.delete(node);
       graph.mergeNodeAttributes(node, { x, y, fixed: true });
       // A new grab within releaseRunMs of the last release must not be stopped by that release.
       clearReleaseTimer();
-      if (!running && !useSyncFallback) start();
+      if (!running && !useSyncFallback()) start();
     },
     release(node) {
       pins.delete(node);
-      unpinned.add(node);
-      graph.mergeNodeAttributes(node, { fixed: false });
+      if (graph.hasNode(node)) {
+        unpinned.add(node);
+        graph.mergeNodeAttributes(node, { fixed: false });
+      }
       if (!running) return;
       clearReleaseTimer();
+      // A settle like any other, so the dragged positions are saved and the frame can refit.
       releaseTimer = setTimeout(() => {
         releaseTimer = null;
-        stop();
+        fireSettle();
       }, LAYOUT.releaseRunMs);
     },
     onSettle(cb) {
       listeners.add(cb);
       return () => listeners.delete(cb);
+    },
+    setReducedMotion(reduced) {
+      reducedMotion = reduced;
     },
   };
 }

@@ -44,7 +44,10 @@ describe('ToolStatusChip', () => {
     const seen: string[] = [];
     const off = panelBus.subscribe((e) => { if (e.type === 'openPage') seen.push(e.slug); });
     const { container } = render(
-      <ToolStatusChip toolName="read_page" args={{ slug: 'chain-rule' }} result={{ page: { meta: { title: 'Chain rule' } } }} />,
+      <ToolStatusChip
+        toolName="read_page" args={{ slug: 'chain-rule' }}
+        result={{ content: [{ type: 'text', text: JSON.stringify({ page: { slug: 'chain-rule', meta: { title: 'Chain rule' } } }) }] }}
+      />,
     );
     expect(container.textContent).toBe('read Chain rule');
     fireEvent.click(screen.getByRole('button', { name: 'Chain rule' }));
@@ -68,6 +71,19 @@ describe('ToolStatusChip', () => {
   it('keeps the plain failure copy — a failed read names no page as if it were read', () => {
     const { container } = render(<ToolStatusChip toolName="read_page" args={{ slug: 'x' }} result={{ isError: true }} />);
     expect(container.textContent).toBe('✗ could not read the page');
+    expect(container.querySelector('button')).toBeNull();
+  });
+
+  it('scrubs leaked control tokens from a page title', () => {
+    const { container } = render(
+      <ToolStatusChip toolName="write_page" args={{ slug: 'limits', title: '<|im_start|>assistant\nLimits' }} result={{ content: [] }} />,
+    );
+    expect(container.textContent).toBe('wrote Limits');
+  });
+
+  it('shows an unfinished call as pending, with no page link', () => {
+    const { container } = render(<ToolStatusChip toolName="record_evidence" args={{ slug: 'limits' }} />);
+    expect(container.textContent).toBe('recording evidence…');
     expect(container.querySelector('button')).toBeNull();
   });
 });

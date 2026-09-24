@@ -127,14 +127,19 @@ export function buildAsideRoute(lw: Engram | null, cfg: HarnessConfig, deps: Asi
         onEvent: (e: any) => {
           if (e.type === 'tool-call') {
             callsById.set(e.toolCallId, { name: e.toolName, input: e.input });
-            if (e.toolName === 'read_page' && typeof e.input?.slug === 'string') {
-              vaultPages.add(e.input.slug);
-            }
           } else if (e.type === 'server-tool-result') {
             addSources(sourcesFromToolPart(e.toolName, true, undefined, e.output));
           } else if (e.type === 'tool-result') {
+            // Only a read that returned something grounds the answer. Counting the call instead
+            // gave fromMemory:false with a button for a page that does not exist (aside tools skip
+            // sanitizeToolArgs, so near-miss slugs are common) and cited refused or 404 URLs.
+            // Failure shapes: the loop's isError, MCP's {isError}, read_url's {error}.
             const call = callsById.get(e.toolCallId);
-            if (call) addSources(sourcesFromToolPart(call.name, false, call.input, e.output));
+            const out = e.output as { isError?: unknown; error?: unknown } | null;
+            if (!call || e.isError || out?.isError || (out && typeof out.error === 'string')) return;
+            const slug = (call.input as { slug?: unknown } | undefined)?.slug;
+            if (call.name === 'read_page' && typeof slug === 'string') vaultPages.add(slug);
+            addSources(sourcesFromToolPart(call.name, false, call.input, e.output));
           }
         },
       });

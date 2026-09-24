@@ -13,7 +13,7 @@ import { prettyAnswer } from '../../lib/answerDisplay.js';
 import { parseNotes, playNotes } from '../../lib/audio.js';
 import { panelBus } from '../../lib/panelBus.js';
 import { StagePortal } from '../StagePortal.js';
-import { Verdict } from './Verdict.js';
+import { GradedTag, Verdict } from './Verdict.js';
 
 type Checker =
   | { kind: 'numeric'; expected: number; tolerance?: number; relative?: boolean; unit?: string }
@@ -84,7 +84,7 @@ export function StructuredCheck({ args, result, addResult }: {
             harness grades on the resubmit that fires after ALL of them are answered — until then
             this card is submitted-not-graded, and the tag saying otherwise was a lie a screenshot
             caught. */}
-        <span className="graded-tag">{g ? 'graded' : 'submitted'}</span>
+        <GradedTag grading={g} />
         <div className="structured-prompt"><BlockProse text={displayPrompt} /></div>
         <p className="structured-answer">
           {/* (result.values ?? []): a server-rejected tool call reaches here with a non-contract

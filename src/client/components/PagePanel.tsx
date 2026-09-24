@@ -5,6 +5,8 @@ import { POLL_MS } from './GraphPanel.js';
 import { RichMarkdown } from './RichMarkdown.js';
 import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
 import { PageNotebooks } from './Notebooks.js';
+import { WarningIcon as Warning } from '@phosphor-icons/react';
+import { LEVEL_LABEL, asMasteryLevel } from '../lib/mastery.js';
 
 // The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
 // system whose whole thesis is a JUSTIFIED TYPED GRAPH — every edge carries a rationale someone had
@@ -73,16 +75,9 @@ function standingLine(st: { applied: number; explained: number; rubric?: number;
   return 'Seen, but nothing recorded yet.';
 }
 
-const MASTERY_LABEL: Record<string, string> = {
-  unseen: 'not started',
-  exposed: 'seen once',
-  practicing: 'practising',
-  mastered: 'mastered',
-};
-
 function MasteryDot({ level }: { level: string | null }) {
-  const key = level ?? 'unseen';
-  const label = MASTERY_LABEL[key] ?? key;
+  const key = asMasteryLevel(level);
+  const label = LEVEL_LABEL[key];
   // The dot is a colour, and colour is never the only channel — the label carries the same fact to a
   // screen reader and to anyone who cannot separate the four hues.
   return <span className={`page-mastery-dot mastery-${key}`} role="img" aria-label={label} title={label} />;
@@ -207,6 +202,9 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
   // getPage names the slug in the message itself, so no prefix here — see PathsSection.
   if (error) return <p className="panel-error" role="status">{error}</p>;
   if (!page) return <p className="empty">Loading…</p>;
+  // A slug that routes to some other endpoint (a crafted hash, a model-supplied slug) answers 200
+  // with a payload that is not a page; reading page.page.meta off it blanked the whole app.
+  if (!page.page) return <p className="panel-error" role="status">no page named “{slug}”</p>;
 
   const meta = page.page.meta ?? {};
   const edges = page.edges ?? {};
@@ -270,12 +268,13 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
         <Collapsible id="standing" level={3} className="page-standing" title="Your standing">
           <p className="page-standing-level">
             <MasteryDot level={standing.effective} />
-            <span>{MASTERY_LABEL[standing.effective] ?? standing.effective}</span>
+            <span>{LEVEL_LABEL[asMasteryLevel(standing.effective)]}</span>
             {/* Only shown when the stored level and the decay-adjusted one disagree: that gap is
                 the single most confusing thing the mastery model does, and it is invisible today. */}
             {standing.effective !== standing.level && (
               <em className="page-standing-decayed">
-                — was {MASTERY_LABEL[standing.level] ?? standing.level}, decayed since {standing.lastReinforced}
+                {/* lastReinforced is when the level was earned, not when it slipped. */}
+                — was {LEVEL_LABEL[asMasteryLevel(standing.level)]}, last proved {standing.lastReinforced}
               </em>
             )}
           </p>
@@ -299,6 +298,8 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
                   what it was looking at (the graph carries it only in an aria-label/tooltip, the
                   plan only as a truncated chip). */}
               <p className="page-standing-misconceptions-label">
+                {/* The graph's misconception marker, so the same fact looks the same on both tabs. */}
+                <Warning size={12} weight="bold" color="var(--bad)" aria-hidden="true" />{' '}
                 recorded misconception{standing.misconceptions.length === 1 ? '' : 's'} — the tutor
                 will re-test {standing.misconceptions.length === 1 ? 'it' : 'them'}
               </p>
@@ -338,9 +339,9 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
       )}
 
       {/* The app's one markdown renderer (RichMarkdown): maths, diagrams, and the loose-dollar
-          guard, same as the chat and the source reader. `wikiLinks` because a vault page's
-          `[[links]]` (wikiPreprocess turns them into `#/page/` anchors) open other pages in-app. */}
-      <RichMarkdown text={wikiPreprocess(page.page.body)} wikiLinks />
+          guard, same as the chat and the source reader. wikiPreprocess turns a vault page's
+          `[[links]]` into `#/page/` anchors, which RichMarkdown opens in-app. */}
+      <RichMarkdown text={wikiPreprocess(page.page.body)} />
 
       {groups.length > 0 && (
         <Collapsible id="connections" level={3} className="page-edges" title="Connections">

@@ -12,7 +12,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
 });
 
 const {
-  GraphPanel, contextualSubgraph, neighborSlugs, CONTEXT_HOPS, CONTEXT_CAP, POLL_MS,
+  GraphPanel, contextualSubgraph, neighborSlugs, stagePaddingFor, CONTEXT_HOPS, CONTEXT_CAP, POLL_MS, TOPIC_LIST_CAP,
 } = await import('../../src/client/components/GraphPanel.js');
 
 function node(slug: string, overrides: Partial<GraphNodeMeta> = {}): GraphNodeMeta {
@@ -24,6 +24,8 @@ function node(slug: string, overrides: Partial<GraphNodeMeta> = {}): GraphNodeMe
 function edge(src: string, dst: string, type: LaidOutEdge['type'] = 'prereq'): LaidOutEdge {
   return { src, dst, type };
 }
+
+afterEach(() => { vi.useRealTimers(); });
 
 describe('contextualSubgraph', () => {
   it('a seed with no edges returns just the lone node, zero hops of neighbors, not truncated', () => {
@@ -285,8 +287,8 @@ describe('GraphPanel — loading state', () => {
     const opened: string[] = [];
     const unsub = panelBus.subscribe((e) => { if (e.type === 'openPage') opened.push(e.slug); });
     render(<GraphPanel visible />);
-    const link = await screen.findByRole('button', { name: 'Open Topic A, unseen' });
-    expect(screen.getByRole('region', { name: 'Topics in this view' }).textContent).toContain('unseen');
+    const link = await screen.findByRole('button', { name: 'Open Topic A, not started' });
+    expect(screen.getByRole('region', { name: 'Topics in this view' }).textContent).toContain('not started');
     expect(screen.getByText(/No connections in this view yet/)).toBeTruthy();
     fireEvent.click(link);
     expect(opened).toEqual(['a']);
@@ -348,5 +350,94 @@ describe('GraphPanel — contextual-first perf (rendering scoped to subgraph)', 
     // and, in jsdom, never even mounts — see the WebGL-fallback test above).
     expect(container.querySelectorAll('.graph-topic-list li')).toHaveLength(HOP1_COUNT + 1);
     expect(screen.queryByText('Isolated 0')).toBeNull();
+  });
+});
+
+describe('GraphPanel — scopes and states', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); location.hash = ''; });
+
+  // Calculus pages carry decay data (so a contextual seed is guessed from them); the thread's
+  // notebook is Probability.
+  const vault = [
+    { slug: 'limits', title: 'Limits', prereqs: [], deepens: [], mastery: { effective: 'practicing', days_left: 9, last_reinforced: new Date().toISOString() } },
+    { slug: 'derivs', title: 'Derivatives', prereqs: ['limits'], deepens: [], mastery: null },
+    { slug: 'independence', title: 'Independence', prereqs: [], deepens: [], mastery: null },
+  ];
+  function stub(graph: unknown, topics: string[] | null) {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/graph') {
+        return graph instanceof Error ? Promise.reject(graph) : { ok: true, json: async () => ({ nodes: graph }) } as any;
+      }
+      if (url === '/api/thread/t1/notebook') return { ok: true, json: async () => (topics ? { id: 'nb', title: 'Probability' } : null) } as any;
+      if (url === '/api/notebooks/nb') {
+        return { ok: true, json: async () => ({
+          notebook: { id: 'nb', title: 'Probability' }, threads: [], sources: [], library: [],
+          topics: (topics ?? []).map((slug) => ({ slug, title: slug })),
+        }) } as any;
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+  }
+
+  it('opens a notebook conversation with no page open on its notebook, not a guessed subject', async () => {
+    location.hash = '#/t/t1';
+    stub(vault, ['independence']);
+    render(<GraphPanel visible />);
+    const tab = await screen.findByRole('tab', { name: 'This notebook' });
+    expect(tab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByText(/Probability · 1 page/)).not.toBeNull();
+    expect(screen.queryByText('Limits')).toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'This topic' }));
+    await screen.findByText(/around Limits \(last studied\) · 2 hops/);
+  });
+
+  // A notebook whose only topic is a stub /api/graph hides: an empty scope read as an empty vault.
+  it('does not offer This notebook when none of its pages are in the graph', async () => {
+    location.hash = '#/t/t1';
+    stub(vault, ['untouched-stub']);
+    render(<GraphPanel visible />);
+    await screen.findByText(/around Limits \(last studied\)/);
+    expect(screen.queryByRole('tab', { name: 'This notebook' })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Whole vault' })).not.toBeNull();
+    expect(screen.queryByText(/Nothing in the graph yet/)).toBeNull();
+  });
+
+  it('a failed first load says so, instead of calling a full vault empty', async () => {
+    stub(new TypeError('network down'), null);
+    render(<GraphPanel visible />);
+    await screen.findByText(/Can’t reach the harness/);
+    expect(screen.queryByText(/Nothing in the graph yet/)).toBeNull();
+    expect(screen.getByRole('tablist', { name: 'Graph scope' }).closest('[hidden]')).toBeNull();
+  });
+
+  it('names the mastery levels in the legend the way every other surface does', async () => {
+    stub(vault, null);
+    const { container } = render(<GraphPanel visible />);
+    await screen.findByText(/around Limits/);
+    const legend = container.querySelector('.graph-legend')!.textContent!;
+    expect(legend).toContain('not started');
+    expect(legend).toContain('seen');
+    expect(legend).not.toContain('exposed');
+  });
+
+  it('caps a whole-vault topic list, most due first, and says where the rest are', async () => {
+    const many = Array.from({ length: TOPIC_LIST_CAP + 50 }, (_, i) => ({
+      slug: `p${i}`, title: `Page ${i}`, prereqs: [], deepens: [],
+      mastery: i === TOPIC_LIST_CAP + 40 ? { effective: 'mastered', slipped: true } : null,
+    }));
+    stub(many, null);
+    const { container } = render(<GraphPanel visible />);
+    await screen.findByText(/open a page to focus the graph/);
+    expect(container.querySelectorAll('.graph-topic-list li')).toHaveLength(TOPIC_LIST_CAP);
+    expect(container.querySelector('.graph-topic-list li')!.textContent).toContain(`Page ${TOPIC_LIST_CAP + 40}`);
+    expect(screen.getByText(new RegExp(`The ${TOPIC_LIST_CAP} most due of ${TOPIC_LIST_CAP + 50} pages`))).not.toBeNull();
+  });
+});
+
+describe('stagePaddingFor', () => {
+  it('keeps 64px on a desktop canvas and shrinks with the shorter side on a phone', () => {
+    expect(stagePaddingFor(900, 600)).toBe(64);
+    expect(stagePaddingFor(338, 160)).toBe(24);
   });
 });

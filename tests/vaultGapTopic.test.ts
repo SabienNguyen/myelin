@@ -55,6 +55,19 @@ describe('threadTopic', () => {
     expect(threadTopic(messages)).toBe('batching');
   });
 
+  it('skips a call that failed, whether the loop or engram reported it', () => {
+    const failed = (name: string, slug: string, part: object): UIMessage => ({
+      id: `f-${slug}`, role: 'assistant',
+      parts: [{ type: `tool-${name}`, toolCallId: `f-${slug}`, input: { slug }, ...part }] as any,
+    });
+    const messages = [
+      toolPart('read_page', { slug: 'batching' }),
+      failed('read_page', 'zz-nonexistent-page', { state: 'output-available', output: { isError: true, content: [] } }),
+      failed('record_evidence', 'made-up', { state: 'output-error', errorText: 'page not found' }),
+    ];
+    expect(threadTopic(messages)).toBe('batching');
+  });
+
   it('ignores unrelated tool calls entirely', () => {
     const messages = [toolPart('search', { query: 'inference infra' })];
     expect(threadTopic(messages)).toBeNull();

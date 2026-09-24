@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import { CheckIcon as Check, MapPinIcon as MapPin } from '@phosphor-icons/react';
+import { MapPinIcon as MapPin } from '@phosphor-icons/react';
 import { BlockProse } from '../BlockProse.js';
 import { StagePortal } from '../StagePortal.js';
 import { panelBus } from '../../lib/panelBus.js';
-import { Mark, Verdict } from './Verdict.js';
+import { GradedTag, Mark, Verdict } from './Verdict.js';
 
 interface Region { id: string; x: number; y: number; label: string }
 interface Args { prompt: string; pageSlug: string; svg: string; regions: Region[]; distractors?: string[] }
@@ -82,7 +82,7 @@ export function LabelDiagram({ args, result, addResult }: {
     );
     return (
       <div className="block label-diagram done">
-        <span className="graded-tag">{result.grading ? <><Check size={12} weight="bold" aria-hidden /> graded</> : 'submitted'}</span>
+        <GradedTag grading={result.grading} />
         <BlockProse text={args.prompt} />
         <ul className="label-diagram-summary">
           {args.regions.map((r) => {

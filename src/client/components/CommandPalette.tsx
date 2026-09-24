@@ -4,8 +4,11 @@
 // second way to do something.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MagnifyingGlassIcon as MagnifyingGlass } from '@phosphor-icons/react/dist/csr/MagnifyingGlass';
-import { getGraph, getNotebooks } from '../lib/api.js';
+import { getGraph, getNotebooks, getThreads } from '../lib/api.js';
+import { LEVEL_LABEL, asMasteryLevel } from '../lib/mastery.js';
+import { useDismissableDialog } from '../lib/useDismissableDialog.js';
 import { notebookHash, parseHash, serializeHash } from '../lib/urlState.js';
+import { panelBus } from '../lib/panelBus.js';
 
 export type PaletteKind = 'action' | 'notebook' | 'conversation' | 'page';
 export interface PaletteItem { kind: PaletteKind; key: string; label: string; detail: string; href: string }
@@ -53,7 +56,7 @@ async function loadItems(here: string): Promise<PaletteItem[]> {
   // Each source is optional: a palette with no pages (graph down) still finds notebooks.
   const [notebooks, threads, graph] = await Promise.all([
     getNotebooks().catch((e) => { console.error('[palette] notebooks:', e); return null; }),
-    fetch('/api/threads').then((r) => (r.ok ? r.json() : [])).catch((e) => { console.error('[palette] threads:', e); return []; }),
+    getThreads().catch((e) => { console.error('[palette] threads:', e); return []; }),
     getGraph().catch((e) => { console.error('[palette] graph:', e); return null; }),
   ]);
   // The app's few verbs, as Raycast lists commands beside places. Each is still just a hash.
@@ -72,25 +75,30 @@ async function loadItems(here: string): Promise<PaletteItem[]> {
       detail: nb.due > 0 ? `${plural(nb.due, 'review')} due` : plural(nb.topics, 'topic'),
     });
   }
-  for (const t of Array.isArray(threads) ? threads : []) {
-    if (!t?.id || !(t.messages > 0)) continue;
+  for (const t of threads) {
+    if (!(t.messages > 0)) continue;
     items.push({
-      kind: 'conversation', key: `t:${t.id}`, label: String(t.title), detail: t.notebook?.title ?? '',
+      kind: 'conversation', key: `t:${t.id}`, label: t.title, detail: t.notebook?.title ?? '',
       href: serializeHash({ threadId: t.id, tab: 'stage', pageSlug: null }),
     });
   }
   for (const n of (graph?.nodes ?? []) as any[]) {
     if (!n?.slug || n.status === 'stub') continue;
-    const level = n.mastery?.effective;
+    const level = asMasteryLevel(n.mastery?.effective);
     items.push({
       kind: 'page', key: `p:${n.slug}`, label: typeof n.title === 'string' ? n.title : n.slug,
-      detail: level && level !== 'unseen' ? level : '',
+      detail: level === 'unseen' ? '' : LEVEL_LABEL[level],
       // A page opens in the conversation you are in, where the Page tab can show it.
       href: serializeHash({ threadId: here, tab: 'page', pageSlug: n.slug }),
     });
   }
   return items;
 }
+
+const optionId = (i: number) => `palette-opt-${i}`;
+
+// Cmd+K on a Mac: Ctrl+K there is the text fields' kill-to-end-of-line.
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 /** `threadId` is the conversation App holds — also while the notebooks screens show, when the hash
  *  names no thread and would send "Open the graph" and every page to the default conversation. */
@@ -105,13 +113,15 @@ export function CommandPalette({ threadId }: { threadId?: string }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((IS_MAC ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setOpen((o) => !o);
       }
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // HistoryMenu's "search all conversations" hands its long tail to this box.
+    const off = panelBus.subscribe((e) => { if (e.type === 'openPalette') setOpen(true); });
+    return () => { window.removeEventListener('keydown', onKey); off(); };
   }, []);
 
   useEffect(() => {
@@ -122,36 +132,32 @@ export function CommandPalette({ threadId }: { threadId?: string }) {
     inputRef.current?.focus();
     let cancelled = false;
     loadItems(threadId ?? parseHash(location.hash).threadId).then((i) => { if (!cancelled) setItems(i); });
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => { cancelled = true; document.removeEventListener('mousedown', onDown); };
+    return () => { cancelled = true; };
   }, [open]);
+  useDismissableDialog({ open, rootRef, triggerRef, onClose: () => setOpen(false) });
 
   const results = useMemo(() => (items ? rankItems(items, query) : []), [items, query]);
   // Reset on new results too: an ArrowDown pressed while loading must not leave the selection
   // pointing past a list that did not exist yet.
   useEffect(() => { setActive(0); }, [query, items]);
+  // Browsers do not scroll to an aria-activedescendant target, so arrowing past the fold selected
+  // an option the learner could not see.
+  useEffect(() => {
+    if (open) document.getElementById(optionId(active))?.scrollIntoView({ block: 'nearest' });
+  }, [active, open, results]);
 
-  function close() {
-    setOpen(false);
-    triggerRef.current?.focus();
-  }
   function go(item: PaletteItem | undefined) {
     if (!item) return;
     setOpen(false);
     location.hash = item.href;
   }
   function onInputKey(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    // The Enter that commits an IME composition picks the text, not a result.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive((a) => Math.max(0, Math.min(a + 1, results.length - 1))); }
     if (e.key === 'ArrowUp') { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
     if (e.key === 'Enter') { e.preventDefault(); go(results[active]); }
   }
-
-  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-  const optionId = (i: number) => `palette-opt-${i}`;
 
   return (
     <div className="palette" ref={rootRef}>
@@ -161,15 +167,22 @@ export function CommandPalette({ threadId }: { threadId?: string }) {
         className="ghost-btn palette-trigger"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-keyshortcuts={isMac ? 'Meta+K' : 'Control+K'}
+        aria-keyshortcuts={IS_MAC ? 'Meta+K' : 'Control+K'}
         onClick={() => setOpen((o) => !o)}
       >
         <MagnifyingGlass size={16} weight="bold" aria-hidden="true" />
         <span className="palette-trigger-label">Search</span>
-        <kbd className="palette-kbd" aria-hidden="true">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
+        <kbd className="palette-kbd" aria-hidden="true">{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
       </button>
       {open && (
-        <div className="palette-panel" role="dialog" aria-label="Go to">
+        // Focus lives in the input (options select on mousedown), so Tab has nowhere useful to go:
+        // it used to land on the topbar behind the open panel.
+        <div
+          className="palette-panel"
+          role="dialog"
+          aria-label="Go to"
+          onKeyDown={(e) => { if (e.key === 'Tab') { e.preventDefault(); inputRef.current?.focus(); } }}
+        >
           <input
             ref={inputRef}
             className="palette-input"
@@ -188,7 +201,7 @@ export function CommandPalette({ threadId }: { threadId?: string }) {
           {items !== null && results.length === 0 && (
             <p className="palette-empty" role="status">Nothing matches “{query}”.</p>
           )}
-          <ul id="palette-list" role="listbox" aria-label="Results" className="palette-list">
+          <ul id="palette-list" role="listbox" aria-label="Results" className="palette-list" tabIndex={-1}>
             {results.map((item, i) => (
               <li
                 key={item.key}
@@ -205,7 +218,7 @@ export function CommandPalette({ threadId }: { threadId?: string }) {
                   <span className="palette-group" aria-hidden="true">{GROUP_LABEL[item.kind]}</span>
                 )}
                 <span className="palette-row">
-                  <span className="palette-label">{item.label}</span>
+                  <span className="palette-label" title={item.label}>{item.label}</span>
                   {item.detail && <span className="palette-detail">{item.detail}</span>}
                 </span>
               </li>

@@ -88,7 +88,7 @@ describe('consumeChatStream', () => {
   it('treats a stream that ends without [DONE] as a dropped connection: error, no finish', async () => {
     const chunks = [{ type: 'start', messageId: 'm1' }, { type: 'text-start', id: '0' }];
     const { result, onFinish, onError } = consume(async () => sseResponse(sseText(chunks, { done: false })));
-    expect(await result).toBe('done');
+    expect(await result).toBe('dropped');
     expect(onFinish).not.toHaveBeenCalled();
     expect(onError).toHaveBeenCalledWith('The connection to the tutor dropped mid-turn.');
   });
@@ -101,6 +101,15 @@ describe('consumeChatStream', () => {
     const { result, onError } = consume(async () => refused);
     await result;
     expect(onError.mock.calls[0]![0]).toBe('The previous turn is still shutting down — try again in a moment.');
+  });
+
+  it('names the harness, not the browser, when the request never reaches the server', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { result, onError } = consume(async () => { throw new TypeError('Failed to fetch'); });
+    expect(await result).toBe('done');
+    const text = onError.mock.calls[0]![0] as string;
+    expect(text).toMatch(/can’t reach the harness/i);
+    expect(text).not.toMatch(/Failed to fetch/);
   });
 
   it('reports an HTTP failure without a method or path in the learner-facing text', async () => {

@@ -219,6 +219,26 @@ describe('listThreads', () => {
     expect(byId['t-short']).toBe('Why? Because the derivative is a limit of slopes, and I want…');
   });
 
+  it('does not end a title at an abbreviation or a lowercase continuation, and knows CJK stops', () => {
+    const vault = makeVault();
+    const say = (id: string, text: string) => saveThread(vault, id, [{ id: 'u', role: 'user', parts: [{ type: 'text', text }] }]);
+    say('t-eg', 'Explain limits, e.g. what x approaches. Then derivatives.');
+    say('t-lower', 'Walk me through v. 2 of the proof. Slowly please.');
+    say('t-cjk', '什么是导数和极限的关系呢？请详细解释一下这个概念的定义');
+    const byId = Object.fromEntries(listThreads(vault).map((t) => [t.id, t.title]));
+    expect(byId['t-eg']).toBe('Explain limits, e.g. what x approaches.');
+    expect(byId['t-lower']).toBe('Walk me through v. 2 of the proof.');
+    expect(byId['t-cjk']).toBe('什么是导数和极限的关系呢？');
+  });
+
+  it('cuts a long title on a code point, never inside a surrogate pair', () => {
+    const vault = makeVault();
+    saveThread(vault, 'astral', [{ role: 'user', parts: [{ type: 'text', text: `${'x'.repeat(59)}${'\u{1D4B3}'.repeat(10)}` }] }]);
+    const [t] = listThreads(vault);
+    expect(t.title).toBe(`${'x'.repeat(59)}\u{1D4B3}…`);
+    expect(t.title.isWellFormed()).toBe(true);
+  });
+
   it('trims long titles to ~60 chars', () => {
     const vault = makeVault();
     saveThread(vault, 'longone', [{ role: 'user', parts: [{ type: 'text', text: 'x'.repeat(120) }] }]);

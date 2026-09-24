@@ -11,7 +11,7 @@ test('sparse graph has readable status and opens the real page', async ({ page }
     await page.goto('/#/t/sparse-map/graph');
     const topics = page.getByRole('region', { name: 'Topics in this view' });
     await expect(topics).toBeVisible();
-    await expect(topics.getByText('unseen', { exact: true })).toBeVisible();
+    await expect(topics.getByText('not started', { exact: true })).toBeVisible();
     // Real Chromium has WebGL, so the sparse graph should actually render a canvas rather than
     // fall back to the "needs WebGL" message — verified once here since the rest of this test
     // spends its budget on the topic list and responsive layout.
