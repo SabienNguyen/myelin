@@ -29,6 +29,15 @@ let byTitleLower = new Map<string, string>();
 // caller's miss always fetches with no separate cold-start case to maintain.
 let lastFetchAt = 0;
 let inFlight: Promise<void> | null = null;
+// Keys (slugs from usePageTitle, titles from usePageSlugForTitle) asked for but still missing
+// when the 15s throttle declined to fetch. Without this, a miss landing inside the window
+// returned silently and nothing asked again: the caller's effect only reruns when its own key
+// changes, not on a timer, so a component that stayed mounted (e.g. a transcript chip for a page
+// written after the cache last loaded) would never resolve. `retryTimer` is the one shared
+// callback that closes that gap — scheduled for when the throttle next allows a fetch, not one
+// per caller, so a paint with several misses still costs a single retry.
+let wanted = new Set<string>();
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
 
 function notify(): void {
@@ -69,21 +78,51 @@ function load(): Promise<void> {
       // sees this fail. Logged so a persistently-unreachable /api/graph is still visible to someone.
       console.error('[titles] could not load page titles:', err);
     })
-    .finally(() => { inFlight = null; });
+    .finally(() => {
+      inFlight = null;
+      // Every key anyone was waiting on just got one fetch's worth of chance to resolve —
+      // whether it did (findable via `titles`/`byTitle` now) or didn't (no such page, or the
+      // fetch itself failed). Either way, dropping it here caps the automatic retry at exactly
+      // one: a still-missing key only gets asked for again when a new mount's effect calls
+      // ensureFresh and re-adds it.
+      wanted.clear();
+    });
   inFlight = attempt;
   return attempt;
+}
+
+/** Fires once, for whenever the throttle window next allows a fetch, and refetches only if
+ *  something is still unresolved by then. One timer shared by every caller — not one per
+ *  hook instance — so N callers missing inside the same window still produce one retry. */
+function scheduleRetry(): void {
+  if (retryTimer) return;
+  const delay = Math.max(0, REFETCH_MS - (Date.now() - lastFetchAt));
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (wanted.size > 0 && !inFlight) load();
+  }, delay);
 }
 
 /** Starts a fetch when the caller's key (a slug for usePageTitle, a title for
  *  usePageSlugForTitle) can't be answered from what's cached — the very first ask, or a page
  *  written since the last load. `known` is the caller's own cache check, so this one throttle
  *  serves both lookup directions off the one cache. Rate-limited across ALL callers, not per key,
- *  so a conversation touching several not-yet-cached pages in one paint costs one fetch, and a
- *  key that turns out not to exist doesn't retry on every render. */
-function ensureFresh(known: boolean): void {
-  if (known) return;
+ *  so a conversation touching several not-yet-cached pages in one paint costs one fetch.
+ *
+ *  A miss inside the throttle window doesn't just return — it joins `wanted` and schedules the
+ *  shared retry, so a key asked for once still resolves once the window ends even if the asking
+ *  component never rerenders on its own (see `wanted`'s comment for why that used to hang). */
+function ensureFresh(key: string, known: boolean): void {
+  if (known) {
+    wanted.delete(key);
+    return;
+  }
+  wanted.add(key);
   if (inFlight) return;
-  if (Date.now() - lastFetchAt < REFETCH_MS) return;
+  if (Date.now() - lastFetchAt < REFETCH_MS) {
+    scheduleRetry();
+    return;
+  }
   load();
 }
 
@@ -102,7 +141,7 @@ function findSlugForTitle(title: string): string | undefined {
 export function usePageTitle(slug: string | null | undefined): string | undefined {
   const title = useSyncExternalStore(subscribe, () => (slug ? titles.get(slug) : undefined));
   useEffect(() => {
-    if (slug) ensureFresh(titles.has(slug));
+    if (slug) ensureFresh(slug, titles.has(slug));
   }, [slug]);
   return title;
 }
@@ -118,7 +157,7 @@ export function usePageTitle(slug: string | null | undefined): string | undefine
 export function usePageSlugForTitle(title: string | null | undefined): string | undefined {
   const slug = useSyncExternalStore(subscribe, () => (title ? findSlugForTitle(title) : undefined));
   useEffect(() => {
-    if (title) ensureFresh(findSlugForTitle(title) !== undefined);
+    if (title) ensureFresh(title, findSlugForTitle(title) !== undefined);
   }, [title]);
   return slug;
 }

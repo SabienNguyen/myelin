@@ -62,11 +62,29 @@ describe('citationLinks', () => {
     expect(citationLinks(md)).toBe(md);
   });
 
-  it('escapes brackets in the link text and encodes parentheses in the href', () => {
+  it('entity-escapes brackets in the link text and encodes parentheses in the href', () => {
     // Unescaped, `[3]` in the title would end the markdown link's text early; an unescaped
-    // `(old)` in the href would end its destination early.
+    // `(old)` in the href would end its destination early. HTML entities (not backslash escapes)
+    // because react-markdown decodes them back to the literal character in link text, whereas a
+    // backslash escape survives into the rendered string and — worse — mathDelims (which runs
+    // later in chatPreprocess) mistakes a `\[...\]` pair for LaTeX display math.
     expect(citationLinks(cite('Vault: Section [3](old)')))
-      .toBe('[Section \\[3\\](old)](#/cite/Section%20%5B3%5D%28old%29)');
+      .toBe('[Section &#91;3&#93;(old)](#/cite/Section%20%5B3%5D%28old%29)');
+  });
+
+  it('entity-escapes a trailing backslash in the title instead of leaving a dangling escape', () => {
+    // A raw trailing backslash in link text would escape the closing `]`, breaking the link.
+    expect(citationLinks(cite('Vault: Weird Title\\')))
+      .toBe('[Weird Title&#92;](#/cite/Weird%20Title%5C)');
+  });
+
+  it('drops only a same-line space before the marker, never a paragraph break', () => {
+    // A dropped web ref at the start of a paragraph must not eat the blank line that separates
+    // it from the previous one — CITATION_SPAN's lead group may only consume [ \t], not \n.
+    const dirty = `para one\n\n${cite('turn0search0')} para two`;
+    const out = citationLinks(dirty);
+    expect(out.startsWith('para one\n\n')).toBe(true);
+    expect(out).not.toContain('turn0search0');
   });
 
   it('inserts a separating space when the marker is glued directly onto a word', () => {
@@ -202,5 +220,29 @@ describe('chatPreprocess composition', () => {
   it('drops an opaque citation through the full pipeline too', () => {
     const dirty = `found it here ${cite('turn0search0')}, apparently.`;
     expect(chatPreprocess(dirty)).toBe('found it here, apparently.');
+  });
+
+  it('keeps a bracketed title as one intact cite link, not display math', () => {
+    // Regression: citationLinks used to backslash-escape `[`/`]`, and mathDelims (which runs
+    // later in chatPreprocess) then read the resulting `\[2017\]` as a `\[...\]` LaTeX display
+    // block, splitting the link and typesetting "2017" as an equation.
+    const dirty = `see ${cite('Vault: Attention [2017] notes')} for details`;
+    const out = chatPreprocess(dirty);
+    expect(out).not.toContain('$$');
+    expect(out.match(/\]\(#\/cite\//g)).toHaveLength(1);
+    expect(out).toContain('#/cite/Attention%20%5B2017%5D%20notes');
+  });
+
+  it('keeps a valid link when the title ends with a backslash', () => {
+    // Regression: a raw trailing backslash in link text used to escape the closing `]`,
+    // breaking the markdown link.
+    const dirty = cite('Vault: Trailing Slash\\');
+    const out = chatPreprocess(dirty);
+    expect(out).toMatch(/^\[Trailing Slash&#92;\]\(#\/cite\/Trailing%20Slash%5C\)$/);
+  });
+
+  it('keeps the paragraph break when a web ref at a paragraph start is dropped', () => {
+    const dirty = `para one\n\n${cite('turn0search0')} para two`;
+    expect(chatPreprocess(dirty)).toContain('para one\n\n');
   });
 });

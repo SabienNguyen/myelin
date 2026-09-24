@@ -473,11 +473,13 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           labelDensity: 0.6,
           // Kept in step with the canvas size by onResize below; see stagePaddingFor.
           stagePadding: stagePaddingFor(container.offsetWidth, container.offsetHeight),
-          defaultDrawNodeHover: program.themedNodeHover(() => ({
-            fill: colorsRef.current!.background, stroke: colorsRef.current!.border,
-          })),
           // Colour and canvas width are read at draw time, so a scheme change or a resize applies
-          // without rebuilding the renderer.
+          // without rebuilding the renderer. Both drawers share the same canvas-width getter so the
+          // hover box and the fitted label always agree on which side has room.
+          defaultDrawNodeHover: program.themedNodeHover(
+            () => ({ fill: colorsRef.current!.background, stroke: colorsRef.current!.border }),
+            () => rendererRef.current?.getDimensions().width ?? container.clientWidth,
+          ),
           defaultDrawNodeLabel: makeLabelDrawer(
             () => colorsRef.current!.label,
             () => rendererRef.current?.getDimensions().width ?? container.clientWidth,

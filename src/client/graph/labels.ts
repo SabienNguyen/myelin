@@ -8,8 +8,9 @@
 import type { NodeLabelDrawingFunction } from 'sigma/rendering';
 
 // Matches sigma's own default offset (`data.x + data.size + 3`), so a label that fits keeps
-// exactly the position a learner already sees today.
-const LABEL_GAP = 3;
+// exactly the position a learner already sees today. Exported: themedNodeHover's own text draw
+// uses the same gap, so the hover copy lines up with the fitted label instead of drifting from it.
+export const LABEL_GAP = 3;
 // Kept clear at each canvas edge so a fitted label's own glyphs never touch the frame.
 const CANVAS_MARGIN = 4;
 const ELLIPSIS = '…';
@@ -18,6 +19,32 @@ export interface FitLabelResult {
   text: string;
   x: number;
   align: 'left' | 'right';
+}
+
+export interface HoverBoxPlacement {
+  align: 'left' | 'right';
+  /** Canvas x to anchor the box's node-side point. Equals `nodeX` except in the fallback case
+   *  below, where it is shifted just enough to keep the box inside the canvas. */
+  x: number;
+}
+
+/** Where a node-hover box (its node-side point at `nodeX`, reaching `extent` px further out on
+ *  whichever side it attaches to) should sit inside a `canvasWidth`-wide canvas. Tries the right
+ *  side first (matches a fitted label that also fits right), falls back to the left, and — for a
+ *  node close enough to an edge that neither full box fits — picks the side with more room and
+ *  slides the anchor in just far enough to keep the box's outer edge inside the canvas. The box
+ *  always carries the full label (see themedNodeHover): hover exists so a learner can read the
+ *  whole title, so unlike fitLabel this never truncates. */
+export function placeHoverBox(nodeX: number, extent: number, canvasWidth: number): HoverBoxPlacement {
+  if (nodeX + extent <= canvasWidth - CANVAS_MARGIN) return { align: 'right', x: nodeX };
+  if (nodeX - extent >= CANVAS_MARGIN) return { align: 'left', x: nodeX };
+
+  const rightRoom = canvasWidth - CANVAS_MARGIN - nodeX;
+  const leftRoom = nodeX - CANVAS_MARGIN;
+  const align: 'left' | 'right' = rightRoom >= leftRoom ? 'right' : 'left';
+  const rawX = align === 'right' ? canvasWidth - CANVAS_MARGIN - extent : CANVAS_MARGIN + extent;
+  const x = Math.min(Math.max(rawX, CANVAS_MARGIN), canvasWidth - CANVAS_MARGIN);
+  return { align, x };
 }
 
 /** Where sigma's default node-label drawer would place `label` next to a node at screen-space

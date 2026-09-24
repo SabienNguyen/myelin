@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, waitFor } from '@testing-library/react';
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 async function freshPageTitles() {
   vi.resetModules();
@@ -55,8 +55,7 @@ describe('pageTitles cache', () => {
   });
 
   it('a slug missing from the cache refetches, at most once per 15s across all callers', async () => {
-    let now = 1_000_000;
-    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    vi.useFakeTimers();
     let calls = 0;
     const fetchMock = vi.fn(async () => {
       calls += 1;
@@ -71,22 +70,54 @@ describe('pageTitles cache', () => {
     const { usePageTitle } = await freshPageTitles();
 
     render(<Probe slug="a" useTitle={usePageTitle} />);
-    await screen.findByText('A');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByText('A')).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    // 'c' is a miss right after the first fetch — still inside the 15s window, so no new call,
-    // and the probe stays on its honest "unresolved" fallback.
-    cleanup();
+    // 'c' mounts inside the 15s window, alongside 'a' — not in its place. This is the case the
+    // bug missed: a miss inside the throttle window used to return without fetching and without
+    // scheduling anything, so a slug written after the transcript's first chip loaded the cache
+    // never resolved for as long as the component stayed mounted. It must now resolve on its
+    // own once the window ends, with no remount standing in for a real retry.
     render(<Probe slug="c" useTitle={usePageTitle} />);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.getByText('…')).toBeTruthy();
 
-    // Past the throttle window, the same miss fires the retry and resolves.
-    now += 15_001;
-    cleanup();
-    render(<Probe slug="c" useTitle={usePageTitle} />);
-    await screen.findByText('C');
+    await vi.advanceTimersByTimeAsync(15_001);
+    expect(screen.getByText('C')).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  it('a slug that never exists triggers no more than one retry fetch', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ nodes: [{ slug: 'a', title: 'A' }] }),
+    }));
+    stubGraph(fetchMock);
+    const { usePageTitle } = await freshPageTitles();
+
+    render(<Probe slug="a" useTitle={usePageTitle} />);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 'ghost' has no page, ever. Its miss lands inside the throttle window right after the
+    // first fetch, so it joins the one shared retry timer instead of fetching immediately.
+    render(<Probe slug="ghost" useTitle={usePageTitle} />);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(15_001);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('…')).toBeTruthy();
+
+    // The retry fetch still doesn't have 'ghost', so it's dropped from the wanted set — no
+    // timer keeps firing forever for a page that will never exist.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
   });
 
   it('a failed fetch is logged with the [titles] prefix, not swallowed — callers keep falling back', async () => {

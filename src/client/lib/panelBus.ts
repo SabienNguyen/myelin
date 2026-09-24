@@ -108,10 +108,12 @@ function escapeLooseDollarsInText(text: string): string {
 
 // OpenAI's citation markup: U+E200, the word "cite", U+E202, a reference, U+E201. The
 // three code points have no glyph, so an unhandled marker renders as tofu boxes around
-// "cite" and the raw reference, mid-sentence. CITATION_SPAN's leading `(\s?)` group lets
+// "cite" and the raw reference, mid-sentence. CITATION_SPAN's leading `([ \t]?)` group lets
 // a single replacer decide, per match, whether to keep a pre-existing separating space,
-// drop it, or add one — see citationLinks below.
-const CITATION_SPAN = /(\s?)\uE200cite\uE202([^\uE201]*)\uE201/g;
+// drop it, or add one — see citationLinks below. It must only ever capture a SAME-LINE
+// space or tab: a marker opening a paragraph is preceded by "\n\n", and a bare `\s?` also
+// matched one of those newlines, so dropping a web ref there silently ate the paragraph break.
+const CITATION_SPAN = /([ \t]?)\uE200cite\uE202([^\uE201]*)\uE201/g;
 
 /** A ref prefixed "Vault: " names a page the model read with read_page and becomes a `#/cite/`
  * link — MarkdownLink (MarkdownText.tsx) turns that into a citation chip that resolves back to the
@@ -130,7 +132,15 @@ export function citationLinks(md: string): string {
         const trimmed = ref.trim();
         if (!trimmed.startsWith('Vault:')) return '';
         const title = trimmed.slice('Vault:'.length).trim();
-        const linkText = title.replace(/([[\]])/g, '\\$1');
+        // HTML entities, not backslash escapes: react-markdown decodes `&#91;`/`&#93;`/`&#92;`
+        // back to the literal character in the rendered link text (MarkdownText.tsx's cite
+        // branch actually gets its chip text from the href, not this text, but the text still
+        // has to parse as a well-formed link). A backslash escape survives as a literal `\` in
+        // the markdown source, and mathDelims — which runs later in chatPreprocess — reads a
+        // `\[...\]` pair coming from an escaped title as LaTeX display math, splitting the link
+        // and typesetting the title's own bracketed contents as an equation.
+        const linkText = title.replace(/[[\]\\]/g,
+          (c) => (c === '[' ? '&#91;' : c === ']' ? '&#93;' : '&#92;'));
         // encodeURIComponent leaves '(' and ')' unescaped (they're in its unreserved set), so a
         // title with parentheses would otherwise close the markdown link destination early.
         const href = encodeURIComponent(title).replace(/\(/g, '%28').replace(/\)/g, '%29');
