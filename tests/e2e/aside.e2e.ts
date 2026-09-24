@@ -46,7 +46,7 @@ test('an aside answers under its message, survives reload, and the tutor hears a
   });
 
   const aside = page.waitForResponse((r) => r.url().endsWith('/api/aside'));
-  await page.getByRole('button', { name: 'ask aside' }).click();
+  await page.getByRole('button', { name: 'ask aside', exact: true }).click();
   await page.getByRole('textbox', { name: 'aside question' }).fill('why multiply by the inner one?');
   await page.getByRole('button', { name: 'submit' }).click();
   expect((await aside).status()).toBe(200);
