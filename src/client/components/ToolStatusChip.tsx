@@ -1,4 +1,5 @@
 import { panelBus, scrubModelArtifacts } from '../lib/panelBus.js';
+import { usePageTitle } from '../lib/pageTitles.js';
 
 // Fallback UI for MCP (server-side) tool calls in the transcript. The learner should see a
 // quiet status line — "✓ evidence recorded" — never raw JSON args, retries, or tool plumbing.
@@ -64,12 +65,17 @@ function readTitle(result: any): unknown {
   }
 }
 
-/** The page's title when the call carries one (read_page's result, write_page's input), else the
- *  slug with its hyphens read as spaces — still recognisable, never invented. Titles are model or
- *  vault text, so they are scrubbed of leaked ChatML tokens like any other model output. */
-function pageLabel(args: any, result: any, slug: string): string {
+/** The title the call itself carries: read_page's result, or write_page's input. */
+function carriedTitle(args: any, result: any): string | undefined {
   const title = readTitle(result) ?? args?.title;
-  const clean = typeof title === 'string' ? scrubModelArtifacts(title).trim() : '';
+  return typeof title === 'string' && title.trim() ? title : undefined;
+}
+
+/** The carried title, else the graph's title for that slug (record_evidence carries none), else
+ *  the slug with its hyphens read as spaces — still recognisable, never invented. Titles are model
+ *  or vault text, so they are scrubbed of leaked ChatML tokens like any other model output. */
+function pageLabel(title: string | undefined, slug: string): string {
+  const clean = title ? scrubModelArtifacts(title).trim() : '';
   return clean || slug.replace(/-/g, ' ');
 }
 
@@ -81,6 +87,11 @@ export function ToolStatusChip({ toolName, args, result, isError }: any) {
   const [done, notDone] = LABELS[toolName] ?? [toolName, `${toolName} failed`];
   const slug = typeof args?.slug === 'string' && args.slug ? args.slug : null;
   const verb = PAGE_VERBS[toolName];
+  const carried = carriedTitle(args, result);
+  // Asked only when the call carries no title of its own, and called before the early returns
+  // below: React needs the same hooks in the same order on every render, and a pending call turns
+  // into a finished one on the next render.
+  const graphTitle = usePageTitle(verb && slug && !carried ? slug : null);
   if (result === undefined && !failed) {
     return <span className="tool-note" title={toolName}>{PENDING[toolName] ?? 'working…'}</span>;
   }
@@ -89,7 +100,7 @@ export function ToolStatusChip({ toolName, args, result, isError }: any) {
       <span className="tool-note" title={toolName}>
         {verb}{' '}
         <button type="button" className="tool-note-page" onClick={() => panelBus.openPage(slug)}>
-          {pageLabel(args, result, slug)}
+          {pageLabel(carried ?? graphTitle, slug)}
         </button>
       </span>
     );

@@ -87,6 +87,10 @@ export function App() {
   // tab flips, which replace) so Back returns to the prior conversation.
   function selectThread(id: string) {
     setThreadId(id);
+    // pushState below never fires hashchange/popstate, so a pick made from the notebooks screen's
+    // history menu must leave that route by hand — otherwise the URL moves to the conversation
+    // but the notebooks screen stays on screen underneath it.
+    setNotebookRoute(null);
     const current = parseHash(location.hash);
     // Stage is named outright: serializeHash leaves it implicit, and the remounted SidePanel's
     // map-as-home reads an implicit tab as "nothing chosen" and moved a learner on Stage to Graph.
@@ -113,7 +117,18 @@ export function App() {
 
   const appClass = ['app', focusMode && 'focus-mode', focusMode && peek && 'peek'].filter(Boolean).join(' ');
 
-  const brand = <h1><BookOpenText size={20} weight="duotone" aria-hidden="true" /> <span className="brand-word">Myelin</span></h1>;
+  // The wordmark returns to the Stage of the conversation App still holds under the notebooks
+  // screens. Stage is named outright for the same reason selectThread names it.
+  const brand = (
+    <h1>
+      <a
+        href={`${serializeHash({ threadId, tab: 'stage', pageSlug: null })}/stage`}
+        aria-label="Myelin — back to your conversation"
+      >
+        <BookOpenText size={20} weight="duotone" aria-hidden="true" /> <span className="brand-word">Myelin</span>
+      </a>
+    </h1>
+  );
 
   // The topbar sits OUTSIDE <Runtime key={threadId}>: inside it, every thread switch remounted
   // the header (focus dropped to <body> mid-HistoryMenu) and a failed thread load left only an
@@ -139,11 +154,11 @@ export function App() {
             {brand}
             {!notebookRoute && <NotebookCrumb threadId={threadId} />}
             <CommandPalette threadId={threadId} />
-            {!notebookRoute && <HistoryMenu activeId={threadId} onSelect={selectThread} />}
+            <HistoryMenu activeId={threadId} onSelect={selectThread} />
             <TopbarStatus />
             {/* THE add entry point — one control for every kind of material (file, git URL, local
                 folder). Not one button per artifact; AddMaterial routes by what it was given. */}
-            <AddMaterial />
+            <AddMaterial threadId={threadId} />
           </header>
           {notebookRoute ? (
             <main className="notebooks-main">

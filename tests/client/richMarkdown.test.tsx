@@ -4,7 +4,7 @@
 // plugin set copied across four files; these tests lock in the four behaviours the surfaces rely
 // on, so a change to the shared renderer can't silently regress any of them.
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, cleanup, fireEvent } from '@testing-library/react';
+import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import { panelBus } from '../../src/client/lib/panelBus.js';
 import { RichMarkdown } from '../../src/client/components/RichMarkdown.js';
 
@@ -15,7 +15,7 @@ vi.mock('../../src/client/components/Mermaid.js', () => ({
 }));
 
 describe('RichMarkdown — the one markdown-string renderer', () => {
-  afterEach(cleanup);
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
   it('typesets $…$ maths through KaTeX rather than printing the source', () => {
     // KaTeX's wrapper class is the observable — present means it typeset (it also embeds the source
@@ -86,6 +86,35 @@ describe('RichMarkdown — the one markdown-string renderer', () => {
     expect(imgs.map((i) => i.getAttribute('src'))).toEqual(['/api/uploads/fig.png']);
     const link = getByRole('link', { name: /image from evil\.test/ });
     expect(link.getAttribute('target')).toBe('_blank');
+  });
+
+  it('an unlabeled [[slug]] link resolves to the page title from the graph; a labeled one keeps its label', async () => {
+    // wikiPreprocess turns `[[qkv-attention]]` into `[qkv-attention](#/page/qkv-attention)` — the
+    // visible text IS the slug because the tutor wrote no label. `[[qkv-attention|the basics]]`
+    // becomes `[the basics](#/page/qkv-attention)`, a real label that must survive untouched.
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true, status: 200,
+      json: async () => ({ nodes: [{ slug: 'qkv-attention', title: 'QKV attention' }] }),
+    })));
+    // A fresh module graph: usePageTitle's cache (in pageTitles.ts, imported transitively via
+    // MarkdownText.js) is throttled to one /api/graph call per 15s across every caller in the
+    // process, including other test files Vitest happens to run alongside this one. Reimporting
+    // after vi.resetModules() gives this test its own cold cache instead of betting on suite-wide
+    // execution order. vi.mock('.../Mermaid.js') above still applies — mock registrations survive
+    // resetModules, only instantiated modules are dropped.
+    vi.resetModules();
+    const { RichMarkdown: FreshRichMarkdown } = await import('../../src/client/components/RichMarkdown.js');
+    render(
+      <FreshRichMarkdown
+        text="see [qkv-attention](#/page/qkv-attention) and [the basics](#/page/qkv-attention)"
+      />,
+    );
+    // Async: the title only exists once usePageTitle's graph fetch resolves.
+    const resolved = await screen.findByRole('link', { name: 'QKV attention' });
+    const labeled = screen.getByRole('link', { name: 'the basics' });
+    expect(resolved.getAttribute('href')).toBe('#/page/qkv-attention');
+    expect(labeled.getAttribute('href')).toBe('#/page/qkv-attention');
+    expect(screen.getAllByRole('link', { name: /QKV attention|the basics/ })).toHaveLength(2);
   });
 
   it('scrubs a leaked ChatML control token — text here is model output (a block prompt or a compiled page)', () => {

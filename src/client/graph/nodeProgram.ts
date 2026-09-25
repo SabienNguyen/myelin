@@ -7,10 +7,11 @@
 // of anti-aliasing. It adds two attributes — a_ringFraction (decay arc, -1 when there is none) and
 // a_slipped (0/1) — and draws them as a second ring just outside the disc.
 import type { Attributes } from 'graphology-types';
-import { drawDiscNodeLabel, NodeProgram, numberToGLSLFloat } from 'sigma/rendering';
+import { NodeProgram, numberToGLSLFloat } from 'sigma/rendering';
 import type { NodeHoverDrawingFunction, ProgramInfo } from 'sigma/rendering';
 import { colorToArray, floatColor } from 'sigma/utils';
 import type { NodeDisplayData, RenderParams } from 'sigma/types';
+import { LABEL_GAP, placeHoverBox } from './labels.js';
 
 const UNIFORMS = ['u_sizeRatio', 'u_correctionRatio', 'u_matrix', 'u_warnColor'] as const;
 
@@ -222,10 +223,21 @@ export class MasteryNodeProgram<
 }
 
 /** sigma's drawDiscNodeHover (the same label box: a pill hugging the disc) filled with the panel's
- *  colours. sigma's own fills the box '#FFF' and then draws the label in labelColor, which is
- *  --text: in dark mode a hovered name was near-white on white. No shadow, per the design's
- *  surfaces-separate-by-hairline rule. `box` is read at draw time so a scheme change applies. */
-export function themedNodeHover(box: () => { fill: string; stroke: string }): NodeHoverDrawingFunction {
+ *  colours, but placed and drawn ourselves rather than delegating to sigma's stock
+ *  drawDiscNodeLabel — that stock drawer always draws right (`data.x + data.size + 3`), so a node
+ *  near the right edge got a clipped box and title, and a node whose *fitted* label (makeLabelDrawer)
+ *  sits on the left showed the title twice: once fitted left, once hovered right. Sharing
+ *  placeHoverBox with fitLabel's own placement keeps the hover copy and the fitted label agreeing
+ *  on a side. The hover box always carries the FULL title — hovering exists so a learner can read
+ *  a title fitLabel had to ellipsize — so unlike the fitted label this never truncates, only
+ *  clamps its position inside the canvas as a last resort (see placeHoverBox).
+ *  sigma's own fills the box '#FFF' with a drop shadow; this fills the panel's own colours with no
+ *  shadow, per the design's surfaces-separate-by-hairline rule. `box`/`getCanvasWidth` are read at
+ *  draw time so a scheme change or a resize applies without rebuilding the renderer. */
+export function themedNodeHover(
+  box: () => { fill: string; stroke: string },
+  getCanvasWidth: () => number,
+): NodeHoverDrawingFunction {
   return (context, data, settings) => {
     const size = settings.labelSize;
     context.font = `${settings.labelWeight} ${size}px ${settings.labelFont}`;
@@ -234,24 +246,49 @@ export function themedNodeHover(box: () => { fill: string; stroke: string }): No
     context.strokeStyle = stroke;
     context.lineWidth = 1;
     const PADDING = 2;
-    context.beginPath();
-    if (typeof data.label === 'string') {
-      const boxWidth = Math.round(context.measureText(data.label).width + 5);
-      const boxHeight = Math.round(size + 2 * PADDING);
-      const radius = Math.max(data.size, size / 2) + PADDING;
-      const angle = Math.asin(boxHeight / 2 / radius);
-      const xDelta = Math.sqrt(Math.abs(radius ** 2 - (boxHeight / 2) ** 2));
-      context.moveTo(data.x + xDelta, data.y + boxHeight / 2);
-      context.lineTo(data.x + radius + boxWidth, data.y + boxHeight / 2);
-      context.lineTo(data.x + radius + boxWidth, data.y - boxHeight / 2);
-      context.lineTo(data.x + xDelta, data.y - boxHeight / 2);
-      context.arc(data.x, data.y, radius, angle, -angle);
-    } else {
+
+    if (typeof data.label !== 'string' || data.label.length === 0) {
+      context.beginPath();
       context.arc(data.x, data.y, data.size + PADDING, 0, Math.PI * 2);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      return;
     }
+
+    const boxWidth = Math.round(context.measureText(data.label).width + 5);
+    const boxHeight = Math.round(size + 2 * PADDING);
+    const radius = Math.max(data.size, size / 2) + PADDING;
+    const angle = Math.asin(boxHeight / 2 / radius);
+    const xDelta = Math.sqrt(Math.abs(radius ** 2 - (boxHeight / 2) ** 2));
+    const { align, x: anchorX } = placeHoverBox(data.x, radius + boxWidth, getCanvasWidth());
+    const sign = align === 'right' ? 1 : -1;
+
+    // Build the pill in the right-facing orientation (matches sigma's own math above) and let
+    // scale(sign, 1) mirror it for the left case — canvas arcs render correctly under a mirror
+    // transform, so this needs no separate left-side geometry to keep in sync with the right.
+    context.save();
+    context.translate(anchorX, data.y);
+    context.scale(sign, 1);
+    context.beginPath();
+    context.moveTo(xDelta, boxHeight / 2);
+    context.lineTo(radius + boxWidth, boxHeight / 2);
+    context.lineTo(radius + boxWidth, -boxHeight / 2);
+    context.lineTo(xDelta, -boxHeight / 2);
+    context.arc(0, 0, radius, angle, -angle);
     context.closePath();
     context.fill();
     context.stroke();
-    drawDiscNodeLabel(context, data, settings);
+    context.restore();
+
+    // Matches drawDiscNodeLabel's own colour resolution (settings.labelColor), since we are
+    // replacing that call rather than delegating to it.
+    const { labelColor } = settings;
+    context.fillStyle = (labelColor.attribute
+      ? ((data as Record<string, unknown>)[labelColor.attribute] as string | undefined) ?? labelColor.color
+      : labelColor.color) ?? '#000';
+    context.textAlign = align === 'right' ? 'left' : 'right';
+    context.fillText(data.label, anchorX + sign * (data.size + LABEL_GAP), data.y + size / 3);
+    context.textAlign = 'left';
   };
 }

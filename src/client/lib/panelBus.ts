@@ -106,6 +106,54 @@ function escapeLooseDollarsInText(text: string): string {
   return out.join('');
 }
 
+// OpenAI's citation markup: U+E200, the word "cite", U+E202, a reference, U+E201. The
+// three code points have no glyph, so an unhandled marker renders as tofu boxes around
+// "cite" and the raw reference, mid-sentence. CITATION_SPAN's leading `([ \t]?)` group lets
+// a single replacer decide, per match, whether to keep a pre-existing separating space,
+// drop it, or add one — see citationLinks below. It must only ever capture a SAME-LINE
+// space or tab: a marker opening a paragraph is preceded by "\n\n", and a bare `\s?` also
+// matched one of those newlines, so dropping a web ref there silently ate the paragraph break.
+const CITATION_SPAN = /([ \t]?)\uE200cite\uE202([^\uE201]*)\uE201/g;
+
+/** A ref prefixed "Vault: " names a page the model read with read_page and becomes a `#/cite/`
+ * link — MarkdownLink (MarkdownText.tsx) turns that into a citation chip that resolves back to the
+ * page. Every other ref is an opaque web-search id (`turn0search0`, `turn1view2`, …): the
+ * web_search tool chip already shows that source, so there is nothing useful to link and the
+ * whole span is dropped, including the leading space it would otherwise leave dangling before
+ * whatever punctuation follows ("results , that" -> "results, that"). Runs on the non-protected
+ * segments only (PROTECTED_SPANS), same discipline as wikiPreprocess, so a lesson that shows this
+ * exact markup AS CODE keeps it verbatim instead of linkifying or stripping it. */
+export function citationLinks(md: string): string {
+  return md
+    .split(PROTECTED_SPANS)
+    .map((seg, i) => (i % 2 ? seg : seg.replace(
+      CITATION_SPAN,
+      (_m: string, lead: string, ref: string, offset: number) => {
+        const trimmed = ref.trim();
+        if (!trimmed.startsWith('Vault:')) return '';
+        const title = trimmed.slice('Vault:'.length).trim();
+        // HTML entities, not backslash escapes: react-markdown decodes `&#91;`/`&#93;`/`&#92;`
+        // back to the literal character in the rendered link text (MarkdownText.tsx's cite
+        // branch actually gets its chip text from the href, not this text, but the text still
+        // has to parse as a well-formed link). A backslash escape survives as a literal `\` in
+        // the markdown source, and mathDelims — which runs later in chatPreprocess — reads a
+        // `\[...\]` pair coming from an escaped title as LaTeX display math, splitting the link
+        // and typesetting the title's own bracketed contents as an equation.
+        const linkText = title.replace(/[[\]\\]/g,
+          (c) => (c === '[' ? '&#91;' : c === ']' ? '&#93;' : '&#92;'));
+        // encodeURIComponent leaves '(' and ')' unescaped (they're in its unreserved set), so a
+        // title with parentheses would otherwise close the markdown link destination early.
+        const href = encodeURIComponent(title).replace(/\(/g, '%28').replace(/\)/g, '%29');
+        // `lead` already IS the separating whitespace when one preceded the marker; only a
+        // marker glued directly onto a preceding character (offset > 0, nothing captured) needs
+        // one inserted so the link text doesn't fuse onto the previous word.
+        const space = lead || (offset > 0 ? ' ' : '');
+        return `${space}[${linkText}](#/cite/${href})`;
+      },
+    )))
+    .join('');
+}
+
 /** Local models occasionally degenerate and echo their chat-template control tokens
  * (`<|im_start|>assistant`, `<|endoftext|>`, ...) as literal text instead of the harness ever
  * seeing them as structure — server-side stop tokens are the root fix, but already-saved threads
@@ -121,6 +169,13 @@ export function scrubModelArtifacts(md: string): string {
     .replace(/<\|(?:im_start|im_end)\|>(?:[ \t]*(?:assistant|user|system)\b[ \t]*\n?)?/g, ' ')
     // any other `<|marker|>` token: `<|endoftext|>`, or an unrecognized `<|foo_bar|>`.
     .replace(/<\|[a-z_]+\|>/gi, ' ')
+    // Backstop for OpenAI's citation markup (CITATION_SPAN, above): citationLinks runs first in
+    // chatPreprocess and already turns a Vault: ref into a link and drops every other ref, but a
+    // surface that renders raw model text without citationLinks must not show tofu either. The
+    // second line mops up a malformed marker CITATION_SPAN can't match, e.g. one missing its
+    // closing U+E201 — a stray private-use code point left on its own is still junk, not text.
+    .replace(CITATION_SPAN, ' ')
+    .replace(/[\uE200-\uE202]/g, ' ')
     // collapse the blank runs the removals leave behind.
     .replace(/[ \t]*\n[ \t]*/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
@@ -128,7 +183,9 @@ export function scrubModelArtifacts(md: string): string {
     .trim();
 }
 
+// citationLinks runs BEFORE scrubModelArtifacts: a Vault: ref must become a link while the
+// citation span is still intact, before the scrub strips whatever citation markup is left over.
 // escapeLooseDollars runs BEFORE mathDelims: it must only judge dollars the model (or a banked
 // problem) wrote as `$`, never the `$…$` pairs mathDelims itself mints from `\(…\)`.
 export const chatPreprocess = (md: string): string =>
-  mathDelims(escapeLooseDollars(wikiPreprocess(scrubModelArtifacts(md))));
+  mathDelims(escapeLooseDollars(wikiPreprocess(scrubModelArtifacts(citationLinks(md)))));

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, fireEvent } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent, within } from '@testing-library/react';
 import type { UIMessage } from '../../src/shared/uiMessages.js';
 import { StageSummary } from '../../src/client/components/StageSummary.js';
 
@@ -72,5 +72,59 @@ describe('Stage continuity', () => {
     expect(screen.getByText('not graded')).toBeTruthy();
     expect(screen.queryByText('graded')).toBeNull();
     expect(screen.getByText(/125/)).toBeTruthy();
+  });
+});
+
+const gradedQuiz: UIMessage[] = [{ id: 'q1', role: 'assistant', parts: [{
+  type: 'tool-quiz', toolCallId: 'quiz-1', state: 'output-available',
+  input: {
+    title: 'Attention basics',
+    items: [
+      { id: 'q1', type: 'short', prompt: 'What are the keys and values of past tokens called?', pageSlug: 'attn' },
+      { id: 'q2', type: 'choice', prompt: 'Which tokens does training see?', choices: ['All', 'Past only'], pageSlug: 'attn' },
+      { id: 'q3', type: 'short', prompt: 'Abbreviation for the token count?', expected: 'N', pageSlug: 'attn' },
+    ],
+  },
+  output: {
+    answers: [
+      { id: 'q1', answer: 'Keys and values of past tokens' },
+      { id: 'q2', answer: 'Past only' },
+      { id: 'q3', answer: 'n' },
+    ],
+    grading: {
+      verdict: 'partial', detail: '2/3 correct.',
+      perItem: [
+        { id: 'q1', correct: true },
+        { id: 'q2', correct: true },
+        { id: 'q3', correct: false },
+      ],
+    },
+  },
+}] }];
+
+describe('Stage quiz summary', () => {
+  it('renders a graded quiz as a per-item list instead of raw JSON', () => {
+    // Each row mixes literal text (the dash, a typed answer) with elements (the prompt, a choice
+    // answer, the mark) as siblings inside one <li> — getByText only matches a single node's own
+    // text, so row content is asserted per-row against that row's textContent instead.
+    const { container } = render(<StageSummary messages={gradedQuiz} />);
+    expect(container.textContent).not.toContain('{"id"');
+    const rows = screen.getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent).toContain('What are the keys and values of past tokens called?');
+    expect(rows[0].textContent).toContain('Keys and values of past tokens');
+    expect(within(rows[0]).getByRole('img', { name: 'correct' })).toBeTruthy();
+    expect(rows[1].textContent).toContain('Which tokens does training see?');
+    expect(rows[1].textContent).toContain('Past only');
+    expect(within(rows[1]).getByRole('img', { name: 'correct' })).toBeTruthy();
+    expect(rows[2].textContent).toContain('Abbreviation for the token count?');
+    expect(rows[2].textContent).toContain('n');
+    expect(within(rows[2]).getByRole('img', { name: 'incorrect' })).toBeTruthy();
+  });
+  it('shows "(blank)" for an unanswered quiz item', () => {
+    const messages = structuredClone(gradedQuiz);
+    (messages[0].parts[0] as any).output.answers[2].answer = '';
+    const { container } = render(<StageSummary messages={messages} />);
+    expect(container.textContent).toContain('(blank)');
   });
 });

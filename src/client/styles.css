@@ -115,6 +115,18 @@ input:focus-visible, textarea:focus-visible, select:focus-visible, button:focus-
   margin-right: auto;
 }
 .topbar h1 svg { color: var(--accent); }
+/* The wordmark is a link back to the held conversation (App.tsx); it must read exactly as the old
+   plain heading did — no accent color, no underline. */
+.topbar h1 a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: inherit;
+  text-decoration: none;
+}
+/* The global focus-ring rule above only lists input/textarea/select/button — a link falls outside
+   it, so it needs its own rule for the house ring instead of the browser's default one. */
+.topbar h1 a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ── History menu ────────────────────────────────────── */
 .history-menu { position: relative; }
@@ -1144,8 +1156,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .stage-empty h2 { font-family: var(--font-prose); font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
 .stage-empty p { color: var(--text-muted); font-size: .9rem; margin: 0 0 1.25rem; }
 .stage-empty-actions { display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
-.stage-empty-actions button { text-align: left; font-size: .85rem; min-height: 44px; border-color: transparent; background: transparent; padding: .4rem 0; }
-.stage-empty-actions button:hover { color: var(--accent); }
+.stage-empty-actions button { text-align: left; font-size: .85rem; min-height: 44px; }
 /* Portalled exercises and retained feedback displace the empty state without remounting them. */
 #stage-root:has(> :not(.stage-empty)) > .stage-empty { display: none; }
 
@@ -1386,6 +1397,29 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
 .wiki-link:hover { border-bottom-style: solid; }
 /* A remote image in model output, held back as a link (MarkdownImage). */
 .md-image-foreign { font-family: var(--font-mono); font-size: 0.8em; color: var(--text-muted); }
+
+/* A citation chip (MarkdownLink's `#/cite/<title>` branch, MarkdownText.tsx): an <a> when the title
+   resolves to a page, a plain <span> when it doesn't. Sized down and ellipsised — a model-cited
+   title runs long and sits mid-sentence, so it must read as a marginal source note, not prose. */
+.cite-chip {
+  display: inline-block;
+  max-width: 24ch;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.75em;
+  line-height: 1.5;
+  vertical-align: text-bottom;
+  padding: 0 0.45em;
+  margin-left: 0.15em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+a.cite-chip:hover { color: var(--accent); border-color: var(--accent); }
+/* The global input/textarea/select/button focus-visible rule (above) does not cover links. */
+a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* .page-panel previously had NO rules at all, so a concept page — the longest-form reading surface
    in the app — inherited system-ui at full panel width. design.md assigns --font-prose to page
@@ -1812,6 +1846,19 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
     padding: 0.75rem;
     border-right: 1px solid var(--border);
     height: 100%;
+  }
+  /* .peek reopens .thread (flex:1 -> flex-basis 0%, see its own rule) as a second flex child of
+     .thread-column. height:100% above becomes THIS item's flex-basis on that column axis, so left
+     alone under .peek it alone claims the entire .thread-column height (basis 100% + basis 0% ==
+     container height -> zero free space -> .thread's flex-grow has nothing to distribute) and
+     .thread renders at 0 height with the composer pushed off-screen, even though it's `display:
+     flex`. Drop the rail to its content height so the rest of the column is free for .thread to
+     grow into, and move its divider to the edge that now borders the reopened chat. */
+  .app.focus-mode.peek .focus-rail {
+    height: auto;
+    flex: none;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
   }
 }
 .focus-rail-toggle { align-self: flex-start; font-size: 0.82rem; }

@@ -419,7 +419,7 @@ export function ingestRepo(
             generate: compileGenerate(cfg), modelName: cfg.models.compile.model,
           })))(name, repoPath);
         const summary = mined.authored.length > 0
-          ? `${mined.authored.length} exercise${mined.authored.length === 1 ? '' : 's'} ready to practise in the Library`
+          ? `${mined.authored.length} exercise${mined.authored.length === 1 ? '' : 's'} ready to practice in the Library`
           : `no exercises authored (${mined.qualified}/${mined.candidates} candidate functions qualified)`;
         // mined.note names a skipped language (e.g. python3 missing) — without it, a Python
         // repo's "0 candidates" reads as a miner fault instead of a missing runtime.

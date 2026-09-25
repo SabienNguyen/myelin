@@ -24,6 +24,7 @@ import { useConversationNotebook } from './Notebooks.js';
 import {
   densityScale, resolveGraphColors, syncGraph, type MasteryGraph, type GraphColors,
 } from '../graph/buildGraph.js';
+import { makeLabelDrawer } from '../graph/labels.js';
 import { createLayout, type LayoutController } from '../graph/layout.js';
 import { createNodeDrag } from '../graph/nodeDrag.js';
 import { loadPositions, savePositions } from '../graph/positionStore.js';
@@ -472,9 +473,17 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
           labelDensity: 0.6,
           // Kept in step with the canvas size by onResize below; see stagePaddingFor.
           stagePadding: stagePaddingFor(container.offsetWidth, container.offsetHeight),
-          defaultDrawNodeHover: program.themedNodeHover(() => ({
-            fill: colorsRef.current!.background, stroke: colorsRef.current!.border,
-          })),
+          // Colour and canvas width are read at draw time, so a scheme change or a resize applies
+          // without rebuilding the renderer. Both drawers share the same canvas-width getter so the
+          // hover box and the fitted label always agree on which side has room.
+          defaultDrawNodeHover: program.themedNodeHover(
+            () => ({ fill: colorsRef.current!.background, stroke: colorsRef.current!.border }),
+            () => rendererRef.current?.getDimensions().width ?? container.clientWidth,
+          ),
+          defaultDrawNodeLabel: makeLabelDrawer(
+            () => colorsRef.current!.label,
+            () => rendererRef.current?.getDimensions().width ?? container.clientWidth,
+          ),
           allowInvalidContainer: true,
           nodeReducer: (node, data) => nodeReducerFnRef.current(node, data),
           edgeReducer: (edge, data) => edgeReducerFnRef.current(edge, data),

@@ -49,6 +49,16 @@ test('code_exercise: the built-in sandbox renders the full_body editor, the refe
     .toBeVisible({ timeout: 10000 });
   await page.screenshot({ path: '/tmp/i3-1.png', fullPage: true });
 
+  // Focus-rail peek round trip: "back to tutor" must reopen a WORKING conversation column, not
+  // just an empty one beside the exercise (regression: the rail's non-peek height:100% was still
+  // in force under .peek, so it claimed the whole column and .thread rendered at 0 height with
+  // the composer pushed off-screen — see styles.css's .app.focus-mode.peek .focus-rail comment).
+  await page.getByRole('button', { name: 'back to tutor' }).click();
+  await expect(page.getByRole('textbox', { name: 'Ask your tutor…' })).toBeInViewport();
+  await expect(page.getByRole('button', { name: 'back to exercise' })).toBeVisible();
+  await page.getByRole('button', { name: 'back to exercise' }).click();
+  await expect(page.getByRole('textbox', { name: 'Ask your tutor…' })).toBeHidden();
+
   // Predict-before-write gate (backlog item 4, added after this test was written): the editor
   // does not mount until the learner predicts the finished function's output — or skips. Answer
   // it FOR REAL: the gate's fixture input is `data: a` / `data: [DONE]` / `data: never`, and the

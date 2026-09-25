@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Hono } from 'hono';
@@ -96,6 +96,20 @@ describe('notebook routes', () => {
     const of = await (await app.request('/api/thread/t-1/notebook')).json();
     expect(of).toEqual({ id, title: 'Calculus I' });
     expect(await (await app.request('/api/thread/t-loose/notebook')).json()).toBeNull();
+  });
+
+  it('returns every unfiled conversation with messages, not just the newest eight, newest first', async () => {
+    const sessionsDir = join(vault, '.harness', 'sessions');
+    const ids = Array.from({ length: 9 }, (_, i) => `t-${i}`);
+    for (const [i, id] of ids.entries()) {
+      saveThread(vault, id, [{ id: `u-${id}`, role: 'user', parts: [{ type: 'text', text: `question ${i} about something specific` }] }]);
+      // Distinct, deterministic mtimes — oldest (t-0) to newest (t-8) — so "newest first" is unambiguous.
+      const at = new Date(Date.now() - (ids.length - i) * 60_000);
+      utimesSync(join(sessionsDir, `${id}.json`), at, at);
+    }
+
+    const list = await (await app.request('/api/notebooks')).json();
+    expect(list.unfiled.map((t: any) => t.id)).toEqual([...ids].reverse());
   });
 
   it('starts a notebook from a loose source in one request, and a bad source creates nothing', async () => {

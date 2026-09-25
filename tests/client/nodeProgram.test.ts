@@ -22,7 +22,34 @@ if (typeof (globalThis as { WebGL2RenderingContext?: unknown }).WebGL2RenderingC
 
 const { NodeProgram } = await import('sigma/rendering');
 const { floatColor } = await import('sigma/utils');
-const { MasteryNodeProgram } = await import('../../src/client/graph/nodeProgram.js');
+const { MasteryNodeProgram, themedNodeHover } = await import('../../src/client/graph/nodeProgram.js');
+
+// Records every 2D-context call themedNodeHover makes, without a real canvas — jsdom's own
+// CanvasRenderingContext2D throws "not implemented" for most drawing methods.
+function stubContext() {
+  const calls: Array<[string, ...unknown[]]> = [];
+  const ctx = {
+    font: '', fillStyle: '', strokeStyle: '', lineWidth: 0, textAlign: 'left' as CanvasTextAlign,
+    measureText: (text: string) => ({ width: text.length * 7 }) as TextMetrics,
+    save: () => calls.push(['save']),
+    restore: () => calls.push(['restore']),
+    translate: (x: number, y: number) => calls.push(['translate', x, y]),
+    scale: (x: number, y: number) => calls.push(['scale', x, y]),
+    beginPath: () => calls.push(['beginPath']),
+    closePath: () => calls.push(['closePath']),
+    moveTo: (x: number, y: number) => calls.push(['moveTo', x, y]),
+    lineTo: (x: number, y: number) => calls.push(['lineTo', x, y]),
+    arc: (...args: number[]) => calls.push(['arc', ...args]),
+    fill: () => calls.push(['fill']),
+    stroke: () => calls.push(['stroke']),
+    fillText: (text: string, x: number, y: number) => calls.push(['fillText', text, x, y]),
+  };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, calls };
+}
+
+const HOVER_SETTINGS = {
+  labelSize: 12, labelWeight: '400', labelFont: 'mono', labelColor: { color: '#eeeeee' },
+} as never;
 
 describe('MasteryNodeProgram', () => {
   it("is exported and extends sigma's NodeProgram", () => {
@@ -78,5 +105,37 @@ describe('MasteryNodeProgram', () => {
     program.processVisibleItem(0, 0, { x: 1, y: 2, size: 3, color: '#000000', ringFraction: null, slipped: false } as never);
     expect(array[5]).toBe(-1);
     expect(array[6]).toBe(0);
+  });
+});
+
+describe('themedNodeHover', () => {
+  it('draws the box and its own full-text copy on the right when the node has room there', () => {
+    const { ctx, calls } = stubContext();
+    const drawHover = themedNodeHover(() => ({ fill: '#111111', stroke: '#333333' }), () => 600);
+    const data = { x: 100, y: 50, size: 10, label: 'Attention Head' } as never;
+    drawHover(ctx, data, HOVER_SETTINGS);
+
+    expect(calls.find((c) => c[0] === 'scale')).toEqual(['scale', 1, 1]);
+    const fillTextCall = calls.find((c) => c[0] === 'fillText');
+    expect(fillTextCall).toEqual(['fillText', 'Attention Head', 100 + 10 + 3, 50 + 12 / 3]);
+    // The stock drawDiscNodeLabel copy (always right-anchored) must not also run — that was the
+    // double-label bug for a node whose fitted label sits on the left.
+    expect(calls.filter((c) => c[0] === 'fillText')).toHaveLength(1);
+  });
+
+  it('flips the box and its text to the left, and draws the full title, when a node sits at the right edge', () => {
+    const { ctx, calls } = stubContext();
+    const drawHover = themedNodeHover(() => ({ fill: '#111111', stroke: '#333333' }), () => 200);
+    // 30px of room on the right of a 200px canvas — not enough for this label's box; the left is
+    // wide open.
+    const data = { x: 190, y: 50, size: 10, label: 'A Much Longer Node Title' } as never;
+    drawHover(ctx, data, HOVER_SETTINGS);
+
+    expect(calls.find((c) => c[0] === 'scale')).toEqual(['scale', -1, 1]);
+    const fillTextCall = calls.find((c) => c[0] === 'fillText');
+    // Full title, never truncated, drawn at the placed (left) x — not sigma's stock always-right
+    // position of data.x + data.size + 3.
+    expect(fillTextCall![1]).toBe('A Much Longer Node Title');
+    expect(fillTextCall![2]).toBe(190 - 10 - 3);
   });
 });
