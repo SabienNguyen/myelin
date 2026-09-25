@@ -35,4 +35,9 @@ declare module '@phosphor-icons/react' {
   export const FilePdfIcon: ComponentType<PhosphorIconProps>;
   export const CpuIcon: ComponentType<PhosphorIconProps>;
   export const WarningIcon: ComponentType<PhosphorIconProps>;
+  export const GraphIcon: ComponentType<PhosphorIconProps>;
+  export const FileTextIcon: ComponentType<PhosphorIconProps>;
+  export const BooksIcon: ComponentType<PhosphorIconProps>;
+  export const PresentationIcon: ComponentType<PhosphorIconProps>;
+  export const SidebarSimpleIcon: ComponentType<PhosphorIconProps>;
 }

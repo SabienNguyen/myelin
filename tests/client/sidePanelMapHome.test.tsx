@@ -53,14 +53,14 @@ describe('SidePanel map-as-home', () => {
   it('opens on the graph tab when the hash named no tab and known pages exist', async () => {
     stubFetch(KNOWN_NODES);
     location.hash = '#/t/t-abc';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     await waitFor(() => expect(selectedTab()).toBe('graph'));
   });
 
   it('stays on stage when nothing is practicing or mastered', async () => {
     stubFetch(UNPROVEN_NODES);
     location.hash = '#/t/t-abc';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     // The negative needs the fetch to have actually resolved before it means anything.
     await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/graph'));
     await act(async () => {});
@@ -70,13 +70,13 @@ describe('SidePanel map-as-home', () => {
   it('never overrides a tab the hash named explicitly', async () => {
     stubFetch(KNOWN_NODES);
     location.hash = '#/t/t-abc/library';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     await act(async () => {});
     expect(selectedTab()).toBe('library');
     // And the deep-linked stage spelling holds too — explicit is explicit.
     cleanup();
     location.hash = '#/t/t-abc/stage';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     await act(async () => {});
     expect(selectedTab()).toBe('stage');
   });
@@ -85,7 +85,7 @@ describe('SidePanel map-as-home', () => {
     let open!: () => void;
     stubFetch(KNOWN_NODES, new Promise<void>((r) => { open = r; }));
     location.hash = '#/t/t-abc';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     // The learner re-affirms the stage tab while /api/graph is still in flight.
     fireEvent.click(screen.getByRole('tab', { name: 'stage' }));
     await act(async () => { open(); });
@@ -97,7 +97,7 @@ describe('SidePanel map-as-home', () => {
     let open!: () => void;
     stubFetch(KNOWN_NODES, new Promise<void>((r) => { open = r; }));
     location.hash = '#/t/t-abc';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     act(() => { panelBus.setTab('library'); });
     await act(async () => { open(); });
     await act(async () => {});

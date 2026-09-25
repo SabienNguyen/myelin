@@ -9,6 +9,12 @@ test('sparse graph has readable status and opens the real page', async ({ page }
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
     await page.goto('/#/t/sparse-map/graph');
+    // A tab-only hash keeps a freshly-collapsed panel collapsed. The second loop iteration
+    // reloads with the first iteration's now-stored "expanded" preference, so the rail's expand
+    // button may already be gone — wait for either toggle to mount before deciding.
+    await page.getByRole('button', { name: /^(Expand|Collapse) side panel$/ }).waitFor();
+    const expandToggle = page.getByRole('button', { name: 'Expand side panel' });
+    if (await expandToggle.count()) await expandToggle.click();
     const topics = page.getByRole('region', { name: 'Topics in this view' });
     await expect(topics).toBeVisible();
     await expect(topics.getByText('not started', { exact: true })).toBeVisible();

@@ -19,13 +19,20 @@ test('completed math remains readable in Stage after reload in both themes', asy
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
     await page.goto('/#/t/math-review/stage');
+    // A prior graded exercise doesn't itself expand a freshly-collapsed panel — only a deliberate
+    // navigation does (StagePortal's setTab fires for a LIVE stage, not replayed history). The
+    // second loop iteration reloads with the FIRST iteration's now-stored "expanded" preference,
+    // so the rail's expand button may already be gone.
+    await page.getByRole('button', { name: /^(Expand|Collapse) side panel$/ }).waitFor();
+    const expandToggle = page.getByRole('button', { name: 'Expand side panel' });
+    if (await expandToggle.count()) await expandToggle.click();
     const summary = page.getByRole('region', { name: 'Latest exercise' });
     await expect(summary.getByText('Your work', { exact: true })).toBeVisible();
     await expect(page.getByText(/could not be shown/i)).toHaveCount(0);
     await expect(page.getByLabel('Conversation transcript').locator('.math-scratchpad, .block.done')).toBeVisible();
     await expect(summary.locator('.katex')).toHaveCount(4);
     await expect(summary.getByRole('status')).toHaveText('Derivative is correct.');
-    await expect(page.getByRole('heading', { name: 'Your workspace' })).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'stage' })).toBeHidden();
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await summary.scrollIntoViewIfNeeded();
