@@ -17,7 +17,7 @@ describe('workspace design tokens', () => {
     expect(px('radius-sm')).toBeGreaterThanOrEqual(6); // 2px corners read as boxy — tried, rejected
   });
   it('keeps text and verdicts AA on every neutral surface in each palette', () => {
-    const roots = [...css.matchAll(/:root\s*\{([^}]+)\}/g)].filter(([, body]) => /--bg:/.test(body));
+    const roots = [...css.matchAll(/:root(?:\[data-theme="light"\])?\s*\{([^}]+)\}/g)].filter(([, body]) => /--bg:/.test(body));
     expect(roots.length).toBe(2);
     for (const [, root] of roots) {
       const tokens = Object.fromEntries([...root.matchAll(/--([\w-]+):\s*(#[a-f0-9]{6})/gi)].map(m => [m[1], m[2]]));

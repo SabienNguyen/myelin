@@ -6,7 +6,10 @@ import '@fontsource/jetbrains-mono/700.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
+import { initScheme } from './lib/theme.js';
 import './styles.css';
+
+initScheme();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
