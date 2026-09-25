@@ -41,7 +41,7 @@ describe('SidePanel URL deep-linking wiring', () => {
 
   it('panelBus.openPage switches to the page tab and writes /page/<slug> into the hash, preserving threadId', async () => {
     location.hash = '#/t/t-abc123';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
 
     act(() => { panelBus.openPage('derivatives'); });
 
@@ -52,7 +52,7 @@ describe('SidePanel URL deep-linking wiring', () => {
 
   it('initializes tab and pageSlug from the hash present at mount', async () => {
     location.hash = '#/t/default/page/chain-rule';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
 
     const pageTab = await screen.findByRole('tab', { name: 'page' });
     expect(pageTab.getAttribute('aria-selected')).toBe('true');
@@ -61,7 +61,7 @@ describe('SidePanel URL deep-linking wiring', () => {
 
   it('setting the hash and dispatching hashchange switches the active tab', async () => {
     location.hash = '#/t/default';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     expect(screen.getByRole('tab', { name: 'stage' }).getAttribute('aria-selected')).toBe('true');
 
     act(() => {
@@ -76,7 +76,7 @@ describe('SidePanel URL deep-linking wiring', () => {
 
   it('does not spam history on repeated tab flips (replaceState, not pushState)', async () => {
     location.hash = '#/t/t-xyz';
-    render(<SidePanel />);
+    render(<SidePanel collapsed={false} onCollapsedChange={() => {}} />);
     const lengthBefore = history.length;
 
     act(() => { panelBus.setTab('graph'); });

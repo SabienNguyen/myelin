@@ -1,4 +1,7 @@
-import { useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import {
+  BooksIcon, FileTextIcon, GraphIcon, PresentationIcon, SidebarSimpleIcon,
+} from '@phosphor-icons/react';
 import { ChatStoreContext } from '../chatCore/index.js';
 import { StageSummary } from './StageSummary.js';
 import { ConversationPages } from './ConversationPages.js';
@@ -9,7 +12,7 @@ import { GraphPanel } from './GraphPanel.js';
 import { LibraryPanel } from './LibraryPanel.js';
 import { PagePanel } from './PagePanel.js';
 import { SourceReader } from './SourceReader.js';
-import { useTablistKeys } from '../lib/tablist.js';
+import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 
 // How often the tab strip re-asks how much is due. Slow on purpose: due-ness changes on the scale
@@ -26,7 +29,22 @@ function TabBoundary({ label, children }: { label: string; children: React.React
   );
 }
 
-export function SidePanel() {
+const TAB_ORDER = ['stage', 'graph', 'page', 'library'] as const;
+// One icon per tab for the collapsed rail (icon-only at desktop widths — see styles.css). A stage
+// is a presentation surface; the other three are literal. Declared in phosphor.d.ts, which augments
+// @phosphor-icons/react with only the icons the app uses — see that file's own comment for why.
+const TAB_ICONS: Record<PanelTab, ReactNode> = {
+  stage: <PresentationIcon size={18} aria-hidden="true" />,
+  graph: <GraphIcon size={18} aria-hidden="true" />,
+  page: <FileTextIcon size={18} aria-hidden="true" />,
+  library: <BooksIcon size={18} aria-hidden="true" />,
+};
+
+const PANEL_ID = 'side-panel';
+
+export function SidePanel({
+  collapsed, onCollapsedChange,
+}: { collapsed: boolean; onCollapsedChange: (collapsed: boolean) => void }) {
   // Optional on purpose: SidePanel can mount outside the chat runtime (standalone panel tests),
   // and the stage summary is a nicety — no store means no summary, never a crash.
   const store = useContext(ChatStoreContext);
@@ -36,6 +54,10 @@ export function SidePanel() {
   );
   const messages = chat?.messages ?? [];
   const onTabKeys = useTablistKeys();
+  // The rail is a VERTICAL tablist (Up/Down primary) rather than the horizontal strip's Left/Right
+  // — useRovingKeys always honors Left/Right too (there is no vertical-only mode), which is a
+  // harmless superset here, not worth a new hook variant for one call site.
+  const onRailKeys = useRovingKeys({ selector: '[role="tab"]', orientation: 'both', activateOnFocus: true });
   const [tab, setTab] = useState<PanelTab>(() => parseHash(location.hash).tab);
   const [pageSlug, setPageSlug] = useState<string | null>(() => parseHash(location.hash).pageSlug);
   // The source reader is a MODE of the Page tab (deliberately not a fifth tab): reading the raw
@@ -60,10 +82,21 @@ export function SidePanel() {
   // Read by the map-as-home effect below, which must lose every race against a deliberate choice.
   const tabTouchedRef = useRef(false);
   useEffect(() => panelBus.subscribe((e) => {
-    if (e.type === 'openPage') { tabTouchedRef.current = true; setPageSlug(e.slug); setSource(null); setTab('page'); }
-    if (e.type === 'openSource') { tabTouchedRef.current = true; setSource({ path: e.path, title: e.title }); setTab('page'); }
-    if (e.type === 'setTab') { tabTouchedRef.current = true; setTab(e.tab); }
-  }), []);
+    // Every one of these is a DELIBERATE navigation (a wiki-link click, a graph node, a code
+    // exercise mounting via StagePortal's setTab('stage')) — a collapsed rail must open onto it,
+    // unlike the map-as-home effect below, which never touches collapsed at all.
+    if (e.type === 'openPage') { tabTouchedRef.current = true; setPageSlug(e.slug); setSource(null); setTab('page'); onCollapsedChange(false); }
+    if (e.type === 'openSource') { tabTouchedRef.current = true; setSource({ path: e.path, title: e.title }); setTab('page'); onCollapsedChange(false); }
+    if (e.type === 'setTab') { tabTouchedRef.current = true; setTab(e.tab); onCollapsedChange(false); }
+  }), [onCollapsedChange]);
+
+  // A deep link straight into a tab or page (a bookmark, a shared link) must open even if the last
+  // session left the panel collapsed — mount-only, since the hashchange listener below only ever
+  // sees CHANGES after this point.
+  useEffect(() => {
+    if (parseHash(location.hash).tabExplicit) onCollapsedChange(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Map-as-home: when the hash named NO tab (urlState's tabExplicit — the stage default, not a
   // deep link) and the vault already holds pages the learner can do, open on the graph — the map
@@ -113,6 +146,9 @@ export function SidePanel() {
       // hash said dilution-calculator while the panel still showed the raw source.
       if (parsed.pageSlug && parsed.pageSlug !== slugRef.current) setSource(null);
       setPageSlug(parsed.pageSlug);
+      // tabExplicit (not just "any hash change"): a hash that still names no tab is the SAME
+      // un-named default the map-as-home effect above is deliberately not allowed to expand for.
+      if (parsed.tabExplicit) onCollapsedChange(false);
     };
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('popstate', onHashChange);
@@ -120,38 +156,106 @@ export function SidePanel() {
       window.removeEventListener('hashchange', onHashChange);
       window.removeEventListener('popstate', onHashChange);
     };
-  }, []);
+  }, [onCollapsedChange]);
+
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  const collapseShortcut = isMac ? 'Meta+\\' : 'Control+\\';
+  const collapseShortcutLabel = isMac ? 'Cmd+\\' : 'Ctrl+\\';
 
   return (
-    <aside className="side-panel">
-      {/* The buttons carried role="tab" with no role="tablist" owning them — an orphaned tab is not
-          a valid ARIA structure, so assistive tech got neither the set-size announcement nor a
-          reason to route arrow keys here. */}
-      <nav className="tabs" role="tablist" aria-label="Workspace panels" onKeyDown={onTabKeys}>
-        {(['stage', 'graph', 'page', 'library'] as const).map((t) => (
+    <aside id={PANEL_ID} className="side-panel">
+      {collapsed ? (
+        <div className="panel-rail">
           <button
-            key={t}
-            className={tab === t ? 'on' : ''}
-            aria-selected={tab === t}
-            // Stage's panel keeps the id #stage-root — StagePortal resolves its portal target by
-            // that exact id, and an element gets one id, so aria-controls points at the real node
-            // rather than a panel-stage that would not exist.
-            aria-controls={t === 'stage' ? 'stage-root' : `panel-${t}`}
-            id={`tab-${t}`}
-            // Roving tabindex: the strip is ONE stop in the page's Tab order and arrows move
-            // within it, rather than Tab walking all four.
-            tabIndex={tab === t ? 0 : -1}
-            role="tab"
-            onClick={() => { tabTouchedRef.current = true; setTab(t); }}
+            type="button"
+            className="panel-rail-toggle"
+            aria-label="Expand side panel"
+            aria-expanded="false"
+            aria-controls={PANEL_ID}
+            aria-keyshortcuts={collapseShortcut}
+            title={`Expand side panel (${collapseShortcutLabel})`}
+            onClick={() => onCollapsedChange(false)}
           >
-            {t}
-            {t === 'library' && dueCount > 0 && (
-              <span className="tab-due-badge" aria-label={`${dueCount} ${dueCount === 1 ? 'page' : 'pages'} due for review`}>{dueCount}</span>
-            )}
+            <SidebarSimpleIcon size={16} aria-hidden="true" />
+            <span className="panel-rail-label">Expand</span>
           </button>
-        ))}
-      </nav>
-      <div hidden={tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
+          {/* Vertical at desktop widths, horizontal (matching the normal strip) on a phone — see
+              styles.css. Outside this nav is the expand button above: a tablist may contain only
+              tabs. */}
+          <nav
+            className="panel-rail-tabs"
+            role="tablist"
+            aria-label="Workspace panels"
+            aria-orientation="vertical"
+            onKeyDown={onRailKeys}
+          >
+            {TAB_ORDER.map((t) => (
+              <button
+                key={t}
+                className={tab === t ? 'on' : ''}
+                aria-selected={tab === t}
+                aria-controls={t === 'stage' ? 'stage-root' : `panel-${t}`}
+                id={`tab-${t}`}
+                tabIndex={tab === t ? 0 : -1}
+                role="tab"
+                onClick={() => { tabTouchedRef.current = true; setTab(t); onCollapsedChange(false); }}
+              >
+                {TAB_ICONS[t]}
+                <span className="panel-rail-label">
+                  {t}
+                  {t === 'library' && dueCount > 0 && (
+                    <span className="tab-due-badge" aria-label={`${dueCount} ${dueCount === 1 ? 'page' : 'pages'} due for review`}>{dueCount}</span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </nav>
+        </div>
+      ) : (
+        <div className="panel-tabstrip">
+          {/* The buttons carried role="tab" with no role="tablist" owning them — an orphaned tab is
+              not a valid ARIA structure, so assistive tech got neither the set-size announcement
+              nor a reason to route arrow keys here. */}
+          <nav className="tabs" role="tablist" aria-label="Workspace panels" onKeyDown={onTabKeys}>
+            {TAB_ORDER.map((t) => (
+              <button
+                key={t}
+                className={tab === t ? 'on' : ''}
+                aria-selected={tab === t}
+                // Stage's panel keeps the id #stage-root — StagePortal resolves its portal target by
+                // that exact id, and an element gets one id, so aria-controls points at the real node
+                // rather than a panel-stage that would not exist.
+                aria-controls={t === 'stage' ? 'stage-root' : `panel-${t}`}
+                id={`tab-${t}`}
+                // Roving tabindex: the strip is ONE stop in the page's Tab order and arrows move
+                // within it, rather than Tab walking all four.
+                tabIndex={tab === t ? 0 : -1}
+                role="tab"
+                onClick={() => { tabTouchedRef.current = true; setTab(t); }}
+              >
+                {t}
+                {t === 'library' && dueCount > 0 && (
+                  <span className="tab-due-badge" aria-label={`${dueCount} ${dueCount === 1 ? 'page' : 'pages'} due for review`}>{dueCount}</span>
+                )}
+              </button>
+            ))}
+          </nav>
+          {/* Outside the tablist above on purpose, same reason as the rail's expand button. */}
+          <button
+            type="button"
+            className="panel-collapse-toggle"
+            aria-label="Collapse side panel"
+            aria-expanded="true"
+            aria-controls={PANEL_ID}
+            aria-keyshortcuts={collapseShortcut}
+            title={`Collapse side panel (${collapseShortcutLabel})`}
+            onClick={() => onCollapsedChange(true)}
+          >
+            <SidebarSimpleIcon size={16} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+      <div hidden={collapsed || tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
         <section className="stage-empty">
           <h2>Your workspace</h2>
           <p>Exercises and feedback appear here as you learn.</p>
@@ -169,19 +273,19 @@ export function SidePanel() {
           <ConversationPages messages={messages} isRunning={chat?.isRunning ?? false} />
         </TabBoundary>
       </div>
-      <div hidden={tab !== 'graph'} id="panel-graph" className="tab-body" role="tabpanel" aria-labelledby="tab-graph">
-        <TabBoundary label="graph"><GraphPanel visible={tab === 'graph'} /></TabBoundary>
+      <div hidden={collapsed || tab !== 'graph'} id="panel-graph" className="tab-body" role="tabpanel" aria-labelledby="tab-graph">
+        <TabBoundary label="graph"><GraphPanel visible={!collapsed && tab === 'graph'} /></TabBoundary>
       </div>
-      <div hidden={tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page">
+      <div hidden={collapsed || tab !== 'page'} id="panel-page" className="tab-body" role="tabpanel" aria-labelledby="tab-page">
         {/* Keyed by what it shows, so opening another page recovers from one that crashed. */}
         <TabBoundary key={source ? `src:${source.path}` : `page:${pageSlug}`} label="page">
           {source
             ? <SourceReader path={source.path} title={source.title} onClose={() => setSource(null)} />
-            : <PagePanel slug={pageSlug} visible={tab === 'page'} />}
+            : <PagePanel slug={pageSlug} visible={!collapsed && tab === 'page'} />}
         </TabBoundary>
       </div>
-      <div hidden={tab !== 'library'} id="panel-library" className="tab-body" role="tabpanel" aria-labelledby="tab-library">
-        <TabBoundary label="library"><LibraryPanel visible={tab === 'library'} /></TabBoundary>
+      <div hidden={collapsed || tab !== 'library'} id="panel-library" className="tab-body" role="tabpanel" aria-labelledby="tab-library">
+        <TabBoundary label="library"><LibraryPanel visible={!collapsed && tab === 'library'} /></TabBoundary>
       </div>
     </aside>
   );

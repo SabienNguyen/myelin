@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { BookOpenTextIcon as BookOpenText } from '@phosphor-icons/react';
 import { getGraph } from './lib/api.js';
 import { Runtime } from './runtime.js';
@@ -12,8 +12,12 @@ import { AddMaterial } from './components/AddMaterial.js';
 import { NotebookCrumb, NotebookView, NotebooksHome } from './components/Notebooks.js';
 import { CommandPalette } from './components/CommandPalette.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
+import { WorkspaceSplitter } from './components/WorkspaceSplitter.js';
 import { panelBus } from './lib/panelBus.js';
 import { parseHash, parseNotebookRoute, serializeHash } from './lib/urlState.js';
+import {
+  DEFAULT_PANEL_FRACTION, MIN_CHAT_WIDTH, MIN_PANEL_WIDTH, useSidePanelLayout,
+} from './lib/sidePanelLayout.js';
 
 export function App() {
   // '' means "let the harness decide", which is chat (deriveMode.ts) — the mode selector is gone.
@@ -71,15 +75,97 @@ export function App() {
   // starts collapsed again.
   const [focusMode, setFocusMode] = useState(false);
   const [peek, setPeek] = useState(false);
+  // Mirrors `focusMode` for handleSidePanelCollapsedChange below, updated SYNCHRONOUSLY in the same
+  // panelBus dispatch that sets focusMode true — not in a useEffect keyed on focusMode, which would
+  // only run in the NEXT commit. StagePortal's own mount emits `setTab('stage')` in the SAME
+  // synchronous passive-effect flush as the exercise's `focusMode` emit (both are panelBus listeners
+  // reacting to effects that fire in one commit), and React does not re-render mid-flush — so a
+  // plain `focusMode ? NOOP : setCollapsed` closure captured by SidePanel's own panelBus
+  // subscription is still the PRE-flip one when that setTab arrives. A ref read at call time,
+  // rather than a value baked into the closure at subscribe time, is what actually wins the race.
+  const focusModeRef = useRef(false);
   // Idempotent on purpose (post-review hardening): a functional updater that bails to the SAME
   // state reference when the value hasn't changed, rather than trusting React's primitive-value
   // bailout alone — defense-in-depth against a StagePortal/CodeExercise subtree that legitimately
   // remounts (e.g. a fast reload or thread switch racing an unmount) re-emitting the value it
   // already holds.
   useEffect(() => panelBus.subscribe((e) => {
-    if (e.type === 'focusMode') setFocusMode((prev) => (prev === e.on ? prev : e.on));
+    if (e.type === 'focusMode') {
+      focusModeRef.current = e.on;
+      setFocusMode((prev) => (prev === e.on ? prev : e.on));
+    }
   }), []);
   useEffect(() => { if (!focusMode) setPeek(false); }, [focusMode]);
+
+  // Side panel resize + collapse. App owns the layout state (the hook persists it); the width math
+  // needs the workspace container's REAL px width, which only a measured element can give — a
+  // fluid 1.4fr/1fr default can't be expressed as a fixed px bound otherwise. containerWidth stays
+  // 0 in any environment without ResizeObserver (or where it's stubbed as a no-op, as client tests
+  // do), and every width below degrades to MIN_PANEL_WIDTH rather than producing an inverted or
+  // NaN range.
+  //
+  // The element is tracked in STATE, not a plain useRef, and observed from an effect keyed on that
+  // state: Runtime renders null for one frame while the thread loads (see runtime.tsx), so on
+  // App's first render `<main ref={...}>` below hasn't mounted yet. A `useEffect(..., [])` reading
+  // a plain ref would see it null, bail, and never run again — containerWidth stuck at 0 forever,
+  // every panel width clamped to MIN_PANEL_WIDTH. A callback ref fires again whenever the element
+  // actually attaches, including when `<main>` remounts on a thread switch (Runtime is keyed by
+  // threadId).
+  const { collapsed, width: savedWidth, setCollapsed, setWidth } = useSidePanelLayout();
+  const [workspaceEl, setWorkspaceEl] = useState<HTMLElement | null>(null);
+  const workspaceRef = useCallback((el: HTMLElement | null) => setWorkspaceEl(el), []);
+  const [containerWidth, setContainerWidth] = useState(0);
+  useEffect(() => {
+    if (!workspaceEl || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w != null) setContainerWidth(w);
+    });
+    ro.observe(workspaceEl);
+    return () => ro.disconnect();
+  }, [workspaceEl]);
+  const maxPanelWidth = Math.max(MIN_PANEL_WIDTH, containerWidth > 0 ? containerWidth - MIN_CHAT_WIDTH : MIN_PANEL_WIDTH);
+  const defaultPanelWidth = containerWidth > 0
+    ? Math.min(maxPanelWidth, Math.max(MIN_PANEL_WIDTH, containerWidth * DEFAULT_PANEL_FRACTION))
+    : MIN_PANEL_WIDTH;
+  const sidePanelWidth = savedWidth != null
+    ? Math.min(maxPanelWidth, Math.max(MIN_PANEL_WIDTH, savedWidth))
+    : defaultPanelWidth;
+  // The exercise needs the panel while focus mode is on — the splitter and the collapse control
+  // are not shown then (rendered conditionally below), and collapsed itself is forced open here so
+  // a collapse from an earlier session never hides the very thing focus mode exists to show. The
+  // saved flag is untouched, so it returns the moment focus mode ends.
+  const sidePanelCollapsed = focusMode ? false : collapsed;
+  // A no-op during focus mode, not just setCollapsed: SidePanel's own "a deliberate navigation
+  // reopens a collapsed panel" effects (panelBus setTab/openPage, an explicit hash) still fire
+  // during focus mode — StagePortal's mount emits setTab('stage') for every exercise — and without
+  // this guard that would permanently flip the SAVED flag to false right as focus mode begins,
+  // which is exactly the "returns afterwards" promise breaking. A STABLE callback reading
+  // focusModeRef, not `focusMode ? NOOP : setCollapsed` recomputed per render: SidePanel's panelBus
+  // subscription closes over whichever function identity was current when it last subscribed, and
+  // StagePortal's setTab fires inside the same synchronous effect flush as the exercise's own
+  // focusMode emit — before React has re-rendered App with the new `focusMode` value — so a fresh
+  // per-render function would still be the PRE-flip one at that instant.
+  const handleSidePanelCollapsedChange = useCallback((next: boolean) => {
+    if (!focusModeRef.current) setCollapsed(next);
+  }, [setCollapsed]);
+  const workspaceClass = [
+    'workspace',
+    savedWidth != null && 'side-panel-sized',
+    sidePanelCollapsed && 'side-panel-collapsed',
+  ].filter(Boolean).join(' ');
+  const workspaceStyle = { '--side-panel-width': `${sidePanelWidth}px` } as CSSProperties;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== '\\') return;
+      e.preventDefault();
+      if (focusMode) return;
+      setCollapsed(!collapsed);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [collapsed, focusMode, setCollapsed]);
 
   // Deep-linking (T27): the URL hash encodes `#/t/<threadId>[/<tab>|/page/<slug>]`. App owns
   // only the threadId slice — SidePanel owns tab/page and re-parses the hash to preserve this
@@ -173,12 +259,25 @@ export function App() {
             // — the server only overrides the one turn the command rides; persistence is this
             // state's job.
             <Runtime key={threadId} mode={mode} emptyVault={emptyVault} threadId={threadId} onSetMode={setMode}>
-              <main className="workspace">
+              <main className={workspaceClass} style={workspaceStyle} ref={workspaceRef}>
                 <div className="thread-column">
                   <FocusRail peek={peek} onTogglePeek={() => setPeek((p) => !p)} />
                   <Thread mode={mode} onModeChange={setMode} threadId={threadId} />
                 </div>
-                <SidePanel />
+                {/* Not shown during focus mode — the exercise needs the panel at its normal width,
+                    not a user-resizable one, and there is nothing left to collapse. */}
+                {!focusMode && (
+                  <WorkspaceSplitter
+                    panelId="side-panel"
+                    width={sidePanelWidth}
+                    min={MIN_PANEL_WIDTH}
+                    max={maxPanelWidth}
+                    onWidthChange={setWidth}
+                    onCollapse={() => setCollapsed(true)}
+                    onResetDefault={() => setWidth(null)}
+                  />
+                )}
+                <SidePanel collapsed={sidePanelCollapsed} onCollapsedChange={handleSidePanelCollapsedChange} />
               </main>
             </Runtime>
           )}
