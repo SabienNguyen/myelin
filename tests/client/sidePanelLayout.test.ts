@@ -10,10 +10,16 @@ describe('useSidePanelLayout', () => {
   beforeEach(() => { localStorage.clear(); });
   afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
 
-  it('defaults to expanded with no saved width — the 1.4fr/1fr split stays in charge', () => {
+  it('defaults to collapsed with no saved width — an empty panel is dead weight until something stages', () => {
+    const { result } = renderHook(() => useSidePanelLayout());
+    expect(result.current.collapsed).toBe(true);
+    expect(result.current.width).toBeNull();
+  });
+
+  it('a stored "false" wins over the collapsed default — the 1.4fr/1fr split stays in charge', () => {
+    localStorage.setItem(COLLAPSED_KEY, 'false');
     const { result } = renderHook(() => useSidePanelLayout());
     expect(result.current.collapsed).toBe(false);
-    expect(result.current.width).toBeNull();
   });
 
   it('persists a width change and restores it for a fresh mount', () => {
@@ -69,7 +75,7 @@ describe('useSidePanelLayout', () => {
 
     let hook!: ReturnType<typeof renderHook<ReturnType<typeof useSidePanelLayout>, unknown>>;
     expect(() => { hook = renderHook(() => useSidePanelLayout()); }).not.toThrow();
-    expect(hook.result.current.collapsed).toBe(false);
+    expect(hook.result.current.collapsed).toBe(true);
     expect(hook.result.current.width).toBeNull();
 
     // Writes must not throw either — a blocked store just means the session forgets on reload.

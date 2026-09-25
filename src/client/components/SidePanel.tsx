@@ -53,6 +53,10 @@ export function SidePanel({
     store?.getState ?? (() => null),
   );
   const messages = chat?.messages ?? [];
+  // The quiz shortcut only makes sense once the tutor has actually said something — an empty or
+  // brand-new thread has nothing yet to quiz on.
+  const hasAssistantText = messages.some((m) => m.role === 'assistant'
+    && m.parts.some((p) => p.type === 'text' && p.text.trim().length > 0));
   const onTabKeys = useTablistKeys();
   // The rail is a VERTICAL tablist (Up/Down primary) rather than the horizontal strip's Left/Right
   // — useRovingKeys always honors Left/Right too (there is no vertical-only mode), which is a
@@ -298,12 +302,18 @@ export function SidePanel({
       )}
       <div hidden={collapsed || tab !== 'stage'} id="stage-root" className="tab-body" role="tabpanel" aria-labelledby="tab-stage">
         <section className="stage-empty">
-          <h2>Your workspace</h2>
-          <p>Exercises and feedback appear here as you learn.</p>
-          <div className="stage-empty-actions">
-            <button type="button" onClick={() => panelBus.setTab('library')}>Browse library</button>
-            <button type="button" onClick={() => panelBus.setTab('graph')}>Explore knowledge graph</button>
-          </div>
+          <h2 className="stage-empty-label">stage</h2>
+          <p>Quizzes and exercises the tutor sets land here.</p>
+          {hasAssistantText && (
+            <button
+              type="button"
+              className="stage-empty-quiz"
+              disabled={chat?.isRunning ?? false}
+              onClick={() => panelBus.askTutor("Quiz me on what we've covered in this conversation.")}
+            >
+              Quiz me on this conversation
+            </button>
+          )}
         </section>
         {/* Siblings of the placeholder, not inside it: the :has rule that hides the placeholder once
             anything else is on the Stage hid the outline with it after the first answered block. */}

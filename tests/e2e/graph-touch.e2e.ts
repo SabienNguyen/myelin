@@ -11,6 +11,8 @@ test('tapping a graph node on a touch screen opens its page', async ({ page }) =
   ] } }));
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/#/t/graph-touch/graph');
+  // A tab-only hash keeps a freshly-collapsed panel collapsed — expand it onto the graph.
+  await page.getByRole('button', { name: 'Expand side panel' }).click();
   const canvas = page.locator('.graph-canvas');
   await expect(canvas.locator('canvas').first()).toBeVisible();
   await expect.poll(() => page.evaluate(() => {

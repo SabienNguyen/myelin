@@ -16,6 +16,7 @@ import { ChatStore, ChatStoreContext } from '../../src/client/chatCore/index.js'
 import { toolkit } from '../../src/client/toolkit.js';
 import { panelBus } from '../../src/client/lib/panelBus.js';
 import { SidePanel } from '../../src/client/components/SidePanel.js';
+import type { UIMessage } from '../../src/shared/uiMessages.js';
 
 const COLLAPSED_KEY = 'myelin.sidePanel.collapsed';
 
@@ -25,6 +26,9 @@ const COLLAPSED_KEY = 'myelin.sidePanel.collapsed';
 // gates whether TestRuntime sends it at all — most tests here want an idle thread.
 let scriptedContent: unknown[] = [{ type: 'text' as const, text: '' }];
 let autoKickMessage = false;
+// The Stage-empty quiz shortcut only renders once the conversation already has assistant text —
+// most tests here want a brand-new thread with none.
+let initialChatMessages: UIMessage[] = [];
 
 function TestRuntime({ children }: PropsWithChildren<Record<string, unknown>>) {
   const runtime = useLocalRuntime({ async run() { return { content: scriptedContent as any }; } });
@@ -39,7 +43,7 @@ function TestRuntime({ children }: PropsWithChildren<Record<string, unknown>>) {
     });
   }, [runtime]);
   const [store] = useState(() => new ChatStore({
-    threadId: 'test', initialMessages: [],
+    threadId: 'test', initialMessages: initialChatMessages,
     requestContext: () => ({ mode: 'learn', writeUp: false }),
   }));
   return (
@@ -122,6 +126,7 @@ beforeEach(() => {
   localStorage.clear();
   scriptedContent = [{ type: 'text' as const, text: '' }];
   autoKickMessage = false;
+  initialChatMessages = [];
   location.hash = '';
 });
 afterEach(() => {
@@ -343,16 +348,17 @@ describe('App — Ctrl+\\ and focus mode', () => {
     vi.stubGlobal('ResizeObserver', StubResizeObserver);
     if (!Element.prototype.scrollTo) Element.prototype.scrollTo = () => {};
 
+    // No stored preference: the panel starts collapsed.
     await act(async () => { render(<App />); });
-    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
 
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', ctrlKey: true, bubbles: true })); });
-    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
-    expect(localStorage.getItem(COLLAPSED_KEY)).toBe('true');
-
-    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true })); });
     await waitFor(() => expect(collapseBtn()).not.toBeNull());
     expect(localStorage.getItem(COLLAPSED_KEY)).toBe('false');
+
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '\\', metaKey: true, bubbles: true })); });
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+    expect(localStorage.getItem(COLLAPSED_KEY)).toBe('true');
   });
 
   it('focus mode ignores the collapsed state, which returns once focus mode ends', async () => {
@@ -390,5 +396,49 @@ describe('App — Ctrl+\\ and focus mode', () => {
 
     act(() => { panelBus.setFocusMode(false); });
     await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+  });
+});
+
+describe('SidePanel — empty Stage', () => {
+  it('a brand-new conversation shows the micro-label and the line, never the old card or buttons', async () => {
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><ControlledSidePanel /></TestRuntime>);
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+
+    expect(screen.getByRole('heading', { name: 'stage' })).toBeTruthy();
+    expect(screen.getByText('Quizzes and exercises the tutor sets land here.')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Your workspace' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Browse library' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Explore knowledge graph' })).toBeNull();
+  });
+
+  it('the quiz shortcut stays hidden with nothing yet for the tutor to quiz', async () => {
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><ControlledSidePanel /></TestRuntime>);
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+
+    expect(screen.queryByRole('button', { name: 'Quiz me on this conversation' })).toBeNull();
+  });
+
+  it('the quiz shortcut appears once the tutor has said something, and sends the fixed askTutor text', async () => {
+    initialChatMessages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Explain derivatives.' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'A derivative measures rate of change.' }] },
+    ];
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><ControlledSidePanel /></TestRuntime>);
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+
+    const quizBtn = screen.getByRole('button', { name: 'Quiz me on this conversation' });
+    expect(quizBtn).toBeTruthy();
+
+    const seen: string[] = [];
+    const unsub = panelBus.subscribe((e) => { if (e.type === 'askTutor') seen.push(e.text); });
+    fireEvent.click(quizBtn);
+    unsub();
+    expect(seen).toEqual(["Quiz me on what we've covered in this conversation."]);
   });
 });

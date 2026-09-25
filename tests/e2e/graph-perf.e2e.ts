@@ -189,6 +189,8 @@ test.describe('Graph performance — synthetic large vault', () => {
     await page.addInitScript((key) => { try { localStorage.removeItem(key); } catch { /* ignored: same fallback positionStore.ts itself takes for a blocked localStorage */ } }, POSITIONS_KEY);
 
     await page.goto('/#/t/e2e-graph-perf/graph');
+    // A tab-only hash keeps a freshly-collapsed panel collapsed — expand it onto the graph.
+    await page.getByRole('button', { name: 'Expand side panel' }).click();
 
     // sigma mounts SEVERAL layered canvases (edges/nodes/labels/hovers/mouse…) into .graph-canvas —
     // .first() picks one deterministically rather than a strict-mode violation on all of them.

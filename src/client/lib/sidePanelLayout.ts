@@ -24,11 +24,15 @@ function readStoredWidth(): number | null {
   }
 }
 
+/** No stored preference (first visit, or a blocked/private store) collapses by default — an empty
+ *  panel is dead weight on a fresh conversation until something stages onto it. An explicit
+ *  'false' from a browser that already opened it stays open; anything else (missing, 'true', or a
+ *  read that throws) collapses. */
 function readStoredCollapsed(): boolean {
   try {
-    return localStorage.getItem(COLLAPSED_KEY) === 'true';
+    return localStorage.getItem(COLLAPSED_KEY) !== 'false';
   } catch {
-    return false;
+    return true;
   }
 }
 

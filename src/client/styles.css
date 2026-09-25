@@ -1262,13 +1262,19 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .stage-math-work li::marker { color: var(--text-muted); font-size: .8rem; }
 .stage-math-work .stage-final { padding: .85rem; background: var(--bg-inset); border-radius: var(--radius); }
 .stage-math-work .stage-problem, .stage-math-work .stage-final, .stage-math-work li { overflow-x: auto; }
-.stage-empty { max-width: 24rem; margin: clamp(2rem, 12vh, 8rem) auto 2rem; padding: 1rem; }
-.stage-empty h2 { font-family: var(--font-prose); font-size: 1.05rem; font-weight: 600; margin: 0 0 .5rem; }
-.stage-empty p { color: var(--text-muted); font-size: .9rem; margin: 0 0 1.25rem; }
-.stage-empty-actions { display: flex; flex-direction: column; gap: .4rem; align-items: flex-start; }
-.stage-empty-actions button { text-align: left; font-size: .85rem; min-height: 44px; }
-/* Portalled exercises and retained feedback displace the empty state without remounting them. */
-#stage-root:has(> :not(.stage-empty)) > .stage-empty { display: none; }
+/* Top-anchored and left-aligned with the tab body's own padding — this used to be a centered
+   card with two navigation buttons; the buttons duplicated the tab strip one click away and the
+   card read as a marketing empty state rather than a workspace waiting for evidence. */
+.stage-empty { max-width: 28rem; margin: 0 0 1.5rem; }
+.stage-empty-label {
+  font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.4rem;
+}
+.stage-empty p { color: var(--text-muted); font-size: .9rem; margin: 0 0 1rem; }
+.stage-empty-quiz { font-size: .85rem; padding: 0.35rem 0.85rem; min-height: 44px; }
+/* Only a real staged block or the graded summary displaces the empty state — "In this
+   conversation" (ConversationPages) is a sibling list, not a reason to hide it. */
+#stage-root:has(> .block) > .stage-empty { display: none; }
 
 .mark-ok { color: var(--good); font-weight: 700; }
 .mark-bad { color: var(--bad); font-weight: 700; }
@@ -1965,6 +1971,9 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
   .app.focus-mode.peek .workspace { grid-template-columns: 1.4fr 1fr; }
   .app.focus-mode .thread-column > .thread { display: none; }
   .app.focus-mode.peek .thread-column > .thread { display: flex; }
+  /* The splitter isn't rendered in focus mode (App.tsx) — its hairline is the ONLY divider
+     between chat and the side panel everywhere else, so focus mode needs its own back here. */
+  .app.focus-mode .side-panel { border-left: 1px solid var(--border); }
   .app.focus-mode .focus-rail {
     display: flex;
     flex-direction: column;
@@ -3162,7 +3171,6 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
 /* Popovers float over the rounded canvas, so they take its corner rather than the control corner. */
 .history-panel, .models-panel, .student-menu, .add-material-panel { border-radius: var(--radius-shell); }
 .side-panel, .tabs, .panel-tabstrip, .panel-rail { background: transparent; }
-.side-panel { border-left: 1px solid var(--border); }
 .thread { border-right: 0; }
 
 /* Composer: one card, the focus ring on the CARD rather than a second box inside it. */
@@ -3187,7 +3195,6 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
 
 @media (max-width: 900px) {
   .workspace { margin: 0 0.4rem 0.4rem; }
-  .side-panel { border-left: 0; }
 }
 
 /* ── Fewer boxes ───────────────────────────────────────────────────────────────────────────────
@@ -3437,10 +3444,9 @@ button.nb-crumb-trigger:hover { background: transparent; }
 .nb-starter-kind--quiz { color: var(--accent); }
 
 /* ── Stage at rest: the conversation's pages (ConversationPages.tsx) ───────────────────────── */
-/* Its own child of #stage-root: at rest it follows the (hidden) placeholder, so it takes the
-   placeholder's column and drop; under a Latest exercise card it sits close beneath. */
-.stage-pages { max-width: 24rem; margin: 1.25rem auto 2rem; padding: 0 1rem; }
-.stage-empty + .stage-pages { margin-top: clamp(2rem, 12vh, 8rem); }
+/* Top-anchored and left-aligned like .stage-empty above it, sharing the same left edge whether it
+   follows the empty state or a graded block. */
+.stage-pages { max-width: 28rem; margin: 1.25rem 0 2rem; padding: 0; }
 .stage-pages h2 { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.5rem; }
 .stage-pages ul { list-style: none; margin: 0; padding: 0; }
 .stage-pages button {
