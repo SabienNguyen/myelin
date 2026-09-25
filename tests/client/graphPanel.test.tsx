@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, act } from '@testing-library/react';
 import type { GraphNodeMeta, LaidOutEdge } from '../../src/client/lib/graphLayout.js';
 import { panelBus } from '../../src/client/lib/panelBus.js';
+import { ChatStore, ChatStoreContext } from '../../src/client/chatCore/index.js';
+import type { UIMessage } from '../../src/shared/uiMessages.js';
 
 // GraphPanel calls useThreadRuntime() unconditionally — stub it rather than standing up a real
 // AssistantRuntimeProvider, matching tests/client/urlState.integration.test.tsx's approach.
@@ -14,6 +16,14 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
 const {
   GraphPanel, contextualSubgraph, neighborSlugs, stagePaddingFor, CONTEXT_HOPS, CONTEXT_CAP, POLL_MS, TOPIC_LIST_CAP,
 } = await import('../../src/client/components/GraphPanel.js');
+
+const NO_TOPIC = /no page in this conversation yet/;
+
+/** The panel has loaded with no topic to show: Whole vault is the selected scope. */
+async function wholeVaultShown(): Promise<void> {
+  const tab = await screen.findByRole('tab', { name: 'Whole vault' });
+  await vi.waitFor(() => expect(tab.getAttribute('aria-selected')).toBe('true'));
+}
 
 function node(slug: string, overrides: Partial<GraphNodeMeta> = {}): GraphNodeMeta {
   return {
@@ -143,15 +153,15 @@ describe('contextualSubgraph', () => {
     expect(g.seedInferred).toBe(true);
   });
 
-  it('no seed and no decay data anywhere falls back to the whole graph, seedSlug null', () => {
+  it('no seed and no decay data anywhere is an empty topic, not the whole graph', () => {
     const nodes = [node('a'), node('b'), node('c')];
     const edges = [edge('a', 'b')];
     const g = contextualSubgraph(nodes, edges, null);
     expect(g.seedSlug).toBeNull();
     expect(g.seedInferred).toBe(false);
     expect(g.hops).toBe(0);
-    expect(g.nodes).toBe(nodes); // unfiltered passthrough
-    expect(g.edges).toBe(edges);
+    expect(g.nodes).toEqual([]);
+    expect(g.edges).toEqual([]);
   });
 });
 
@@ -194,10 +204,29 @@ describe('GraphPanel — contextual mode (component)', () => {
   beforeEach(() => { stubFetch(); location.hash = ''; });
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); location.hash = ''; });
 
-  it('with no page open yet and no decay data, defaults to the whole-vault hint', async () => {
+  it('with no topic at all, opens on Whole vault, and This topic says there is none', async () => {
     render(<GraphPanel visible />);
-    await screen.findByText(/open a page to focus the graph/i);
+    await wholeVaultShown();
     expect(screen.getByText('Topic Isolated')).not.toBeNull();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'This topic' }));
+    await screen.findByText(NO_TOPIC);
+    expect(screen.queryByText('Topic Isolated')).toBeNull();
+    expect(screen.queryByText(/Nothing in the graph yet/)).toBeNull();
+  });
+
+  it('with no page open, This topic is the page the conversation is working on', async () => {
+    const store = new ChatStore({
+      threadId: 'test', requestContext: () => ({ mode: 'learn', writeUp: false }),
+      initialMessages: [{
+        id: 'm1', role: 'assistant',
+        parts: [{ type: 'tool-read_page', toolCallId: 'c1', state: 'output-available', input: { slug: 'b' }, output: {} }],
+      }] as UIMessage[],
+    });
+    render(<ChatStoreContext.Provider value={store}><GraphPanel visible /></ChatStoreContext.Provider>);
+    await screen.findByText(/around Topic B · 2 hops/i);
+    expect(screen.getByRole('tab', { name: 'This topic' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.queryByText('Topic Isolated')).toBeNull();
   });
 
   it('jsdom has no WebGL, so the canvas fails and the fallback message + topic list render', async () => {
@@ -210,7 +239,7 @@ describe('GraphPanel — contextual mode (component)', () => {
 
   it('re-seeds live off a panelBus openPage event while visible', async () => {
     render(<GraphPanel visible />);
-    await screen.findByText(/open a page to focus the graph/i);
+    await wholeVaultShown();
 
     act(() => { panelBus.openPage('b'); });
 
@@ -222,7 +251,7 @@ describe('GraphPanel — contextual mode (component)', () => {
 
   it('the This topic / Whole vault toggle switches scope without waiting for a new openPage', async () => {
     render(<GraphPanel visible />);
-    await screen.findByText(/open a page to focus the graph/i);
+    await wholeVaultShown();
     act(() => { panelBus.openPage('b'); });
     await screen.findByText(/around Topic B/i);
     expect(screen.queryByText('Topic Isolated')).toBeNull();
@@ -249,7 +278,7 @@ describe('GraphPanel — contextual mode (component)', () => {
     const opened: string[] = [];
     const unsub = panelBus.subscribe((e) => { if (e.type === 'openPage') opened.push(e.slug); });
     render(<GraphPanel visible />);
-    await screen.findByText(/open a page to focus the graph/i);
+    await wholeVaultShown();
 
     fireEvent.click(screen.getByText('Topic A'));
     expect(opened).toEqual(['a']);
@@ -270,7 +299,7 @@ describe('GraphPanel — loading state', () => {
 
     const { container } = render(<GraphPanel visible />);
     expect(screen.getByText(/laying out the graph/i)).not.toBeNull();
-    expect(screen.queryByText(/open a page to focus the graph/i)).toBeNull();
+    expect(screen.queryByText(NO_TOPIC)).toBeNull();
     expect(container.querySelector('.graph-canvas')).toBeNull();
 
     await act(async () => {
@@ -279,7 +308,7 @@ describe('GraphPanel — loading state', () => {
 
     expect(screen.queryByText(/laying out the graph/i)).toBeNull();
     expect(container.querySelector('.graph-canvas')).not.toBeNull();
-    await screen.findByText(/open a page to focus the graph/i);
+    await wholeVaultShown();
   });
 
   it('gives a sparse graph a readable topic list and a working page action', async () => {
@@ -303,13 +332,13 @@ describe('GraphPanel — loading state', () => {
     // Flush the first load's promise chain (fetch -> .json() -> setMeta/setLoading).
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(screen.queryByText(/laying out the graph/i)).toBeNull();
-    expect(screen.getByText(/open a page to focus the graph/i)).not.toBeNull();
+    expect(screen.getByRole('tab', { name: 'Whole vault' }).getAttribute('aria-selected')).toBe('true');
 
     // Fast-forward past a full poll interval — the interval's own `load()` call resolves via the
     // same fetch stub, but must not flip `loading` back to true.
     await act(async () => { await vi.advanceTimersByTimeAsync(POLL_MS); });
     expect(screen.queryByText(/laying out the graph/i)).toBeNull();
-    expect(screen.getByText(/open a page to focus the graph/i)).not.toBeNull();
+    expect(screen.getByRole('tab', { name: 'Whole vault' }).getAttribute('aria-selected')).toBe('true');
   });
 });
 
@@ -397,7 +426,7 @@ describe('GraphPanel — scopes and states', () => {
     location.hash = '#/t/t1';
     stub(vault, ['untouched-stub']);
     render(<GraphPanel visible />);
-    await screen.findByText(/around Limits \(last studied\)/);
+    await wholeVaultShown();
     expect(screen.queryByRole('tab', { name: 'This notebook' })).toBeNull();
     expect(screen.getByRole('tab', { name: 'Whole vault' })).not.toBeNull();
     expect(screen.queryByText(/Nothing in the graph yet/)).toBeNull();
@@ -414,7 +443,7 @@ describe('GraphPanel — scopes and states', () => {
   it('names the mastery levels in the legend the way every other surface does', async () => {
     stub(vault, null);
     const { container } = render(<GraphPanel visible />);
-    await screen.findByText(/around Limits/);
+    await wholeVaultShown();
     const legend = container.querySelector('.graph-legend')!.textContent!;
     expect(legend).toContain('not started');
     expect(legend).toContain('seen');
@@ -428,7 +457,7 @@ describe('GraphPanel — scopes and states', () => {
     }));
     stub(many, null);
     const { container } = render(<GraphPanel visible />);
-    await screen.findByText(/open a page to focus the graph/);
+    await wholeVaultShown();
     expect(container.querySelectorAll('.graph-topic-list li')).toHaveLength(TOPIC_LIST_CAP);
     expect(container.querySelector('.graph-topic-list li')!.textContent).toContain(`Page ${TOPIC_LIST_CAP + 40}`);
     expect(screen.getByText(new RegExp(`The ${TOPIC_LIST_CAP} most due of ${TOPIC_LIST_CAP + 50} pages`))).not.toBeNull();
