@@ -19,13 +19,14 @@ import { LEVEL_LABEL, type MasteryLevel } from '../lib/mastery.js';
 import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
 import { graphMeta, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
+import { onSchemeChange } from '../lib/theme.js';
 import { parseHash } from '../lib/urlState.js';
 import { useConversationNotebook } from './Notebooks.js';
 import {
   densityScale, resolveGraphColors, syncGraph, type MasteryGraph, type GraphColors,
 } from '../graph/buildGraph.js';
-import { makeLabelDrawer } from '../graph/labels.js';
-import { createLayout, type LayoutController } from '../graph/layout.js';
+import { LABEL_GAP, makeLabelDrawer } from '../graph/labels.js';
+import { createLayout, labelledBBox, type LabelFrame, type LayoutController } from '../graph/layout.js';
 import { createNodeDrag } from '../graph/nodeDrag.js';
 import { loadPositions, savePositions } from '../graph/positionStore.js';
 import { focusNeighbourhood, hoverLabelled, nodeReducer, edgeReducer } from '../graph/highlight.js';
@@ -65,12 +66,16 @@ function labelsFor(sub: Subgraph<GraphNodeMeta>, compact: boolean): boolean | Re
   return new Set([sub.seedSlug, ...neighborSlugs(sub.seedSlug, sub.edges)]);
 }
 
-/** sigma pads the fitted bbox (node centres only, no radius or label width) by this many screen px
- *  on every side. 64 is roughly a label's worth of room on a desktop canvas; on a phone's 160px-tall
- *  one it left a 32px band for the whole graph, so it shrinks with the canvas's shorter side. */
-export function stagePaddingFor(width: number, height: number): number {
+/** sigma pads the fitted bbox by this many screen px on every side. With no forced labels the box
+ *  is node centres only, and 64 is roughly a label's worth of room on a desktop canvas; on a
+ *  phone's 160px-tall one it left a 32px band for the whole graph, so it shrinks with the canvas's
+ *  shorter side. With forced labels the box already holds them (labelledBBox), and that same 64px
+ *  squeezed ten titles off a 360px-tall panel's fit, so only a node's breathing room is kept. */
+export function stagePaddingFor(width: number, height: number, labelsInBox = false): number {
+  if (labelsInBox) return LABELLED_STAGE_PADDING;
   return Math.min(64, Math.round(0.15 * Math.min(width, height)));
 }
+const LABELLED_STAGE_PADDING = 12;
 
 function prefersReducedMotion(): boolean {
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -394,15 +399,16 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
 
   // The canvas's colours are resolved from CSS tokens into strings once, so an OS switch to light
   // at sunrise left dark-scheme labels (near-white) on the light canvas until a reload. On a scheme
-  // or contrast change: resolve again, hand sigma the new label and ring colours, and recompute the
+  // change (theme.ts: the toggle, or the OS while the learner has not picked one) or a contrast
+  // change: resolve again, hand sigma the new label and ring colours, and recompute the
   // node metadata, whose new fills (and, through syncGraph, edge colours) the membership sync below
   // writes into the graph. The reducers pick the new muted colour up in the focus effect after this.
   useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return undefined;
-    const queries = ['(prefers-color-scheme: dark)', '(prefers-contrast: more)'].map((q) => window.matchMedia(q));
     const onChange = () => setScheme((v) => v + 1);
-    for (const q of queries) q.addEventListener('change', onChange);
-    return () => { for (const q of queries) q.removeEventListener('change', onChange); };
+    const offScheme = onSchemeChange(onChange);
+    const contrast = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-contrast: more)') : null;
+    contrast?.addEventListener('change', onChange);
+    return () => { offScheme(); contrast?.removeEventListener('change', onChange); };
   }, []);
   useEffect(() => {
     if (scheme === 0) return;
@@ -501,9 +507,30 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       // reduce motion mid-session left fits animating until a reload.
       const motionQuery = typeof window.matchMedia === 'function'
         ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+      const measureCtx = document.createElement('canvas').getContext('2d');
+      // What the packing and the fit budget for each label: only forced ones (sigma's label grid
+      // already drops a label that would collide, and budgeting every title would zoom a whole
+      // vault out to nothing), drawn to the right at sigma's label size.
+      const labelFrame = (): LabelFrame | undefined => {
+        const width = container.offsetWidth;
+        const height = container.offsetHeight;
+        if (width <= 0 || height <= 0 || !measureCtx) return undefined;
+        const labelSize = renderer.getSetting('labelSize');
+        measureCtx.font = `${renderer.getSetting('labelWeight')} ${labelSize}px ${labelFont}`;
+        return {
+          width, height,
+          padding: stagePaddingFor(width, height, graph.someNode((_node, attrs) => attrs.forceLabel)),
+          labelHeight: labelSize,
+          labelReach: (node) => {
+            const { label, size, forceLabel } = graph.getNodeAttributes(node);
+            const text = forceLabel && label ? measureCtx.measureText(label).width : 0;
+            return size + LABEL_GAP + text;
+          },
+        };
+      };
       const layout = createLayout(graph, {
         reducedMotion: motionQuery?.matches === true,
-        aspect: () => (container.offsetHeight > 0 ? container.offsetWidth / container.offsetHeight : 1),
+        frame: labelFrame,
       });
       layoutRef.current = layout;
       const onMotionChange = () => layout.setReducedMotion(prefersReducedMotion());
@@ -538,13 +565,22 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         if (userAdjustedRef.current && !force) return;
         // Freezes sigma's own auto-rescale to the frame computed HERE, so the layout settles
         // inside a fixed frame instead of the camera chasing every tick (see the plan's "why").
-        // getBBox is the extent the last process() computed, and setCustomBBox only schedules a
-        // render: the normalisation is rebuilt in process(), which only refresh() runs. So the
-        // custom box is cleared and the graph processed first, or a settled graph kept its stale
-        // frame and fit did nothing (Whole vault left a subject off the canvas until the next poll).
-        renderer.setCustomBBox(null);
+        // The box includes forced labels (labelledBBox), so a title at the right edge is not flipped
+        // left over its neighbour. setCustomBBox only schedules a render: the normalisation is
+        // rebuilt in process(), which only refresh() runs, so refresh() follows it — without that a
+        // settled graph kept its stale frame and fit did nothing (Whole vault left a subject off the
+        // canvas until the next poll). With no measurable canvas, sigma's own node extent stands in,
+        // which needs processing first to be current.
+        const frame = labelFrame();
+        if (frame) {
+          if (renderer.getSetting('stagePadding') !== frame.padding) renderer.setSetting('stagePadding', frame.padding);
+          renderer.setCustomBBox(labelledBBox(graph, frame));
+        } else {
+          renderer.setCustomBBox(null);
+          renderer.refresh();
+          renderer.setCustomBBox(renderer.getBBox());
+        }
         renderer.refresh();
-        renderer.setCustomBBox(renderer.getBBox());
         programmaticCameraMove = true;
         if (motionQuery?.matches) {
           camera.setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
@@ -607,7 +643,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
       const onResize = () => {
         const width = container.offsetWidth;
         const height = container.offsetHeight;
-        const padding = stagePaddingFor(width, height);
+        const padding = stagePaddingFor(width, height, graph.someNode((_node, attrs) => attrs.forceLabel));
         if (renderer.getSetting('stagePadding') !== padding) renderer.setSetting('stagePadding', padding);
         setCompact(Math.min(width, height) < COMPACT_CANVAS_PX);
       };

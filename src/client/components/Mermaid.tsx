@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { currentScheme } from '../lib/theme.js';
 
 /**
  * Renders a ```mermaid fence from the tutor's prose as a real diagram.
@@ -26,7 +27,7 @@ export function Mermaid({ chart }: { chart: string }) {
         // securityLevel 'strict' is mermaid's own sanitizer: no script, no foreign HTML.
         // Theme follows the app's: 'neutral' renders white boxes, which glared out of a dark chat
         // in the audit screenshot.
-        const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+        const dark = currentScheme() === 'dark';
         mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: dark ? 'dark' : 'neutral' });
         const { svg: rendered } = await mermaid.render(idRef.current, chart);
         // Clear any earlier failure: while the tutor is STREAMING, this component sees the fence

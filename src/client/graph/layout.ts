@@ -20,6 +20,7 @@ import forceAtlas2Import, { type ForceAtlas2Settings } from 'graphology-layout-f
 import workerFunction from 'graphology-layout-forceatlas2/webworker.js';
 import { createWorker, graphToByteArrays } from 'graphology-layout-forceatlas2/helpers.js';
 import type { MasteryGraph, Point } from './buildGraph.js';
+import { LABEL_GAP } from './labels.js';
 
 interface ForceAtlas2Module {
   assign(graph: MasteryGraph, params: { iterations: number; settings: ForceAtlas2Settings }): void;
@@ -125,9 +126,105 @@ const PACK_GAP_MIN = 40;
 
 interface Component { nodes: string[]; minX: number; minY: number; w: number; h: number }
 
-function components(graph: MasteryGraph): Component[] {
+/** The canvas a layout is fitted into, and how far each node's label reaches in screen px. Labels
+ *  are drawn at a fixed px size whatever the zoom, so packing by node centres alone put a row of
+ *  unlinked pages 20px apart with 200px titles, all forced on, drawn over each other. */
+export interface LabelFrame {
+  width: number;
+  height: number;
+  /** sigma's stagePadding. */
+  padding: number;
+  /** px from the node's centre to the far end of its label, drawn to the right. */
+  labelReach: (node: string) => number;
+  labelHeight: number;
+}
+
+/** Graph units per screen px when sigma fits a `w` x `h` extent into `frame` at camera ratio 1 —
+ *  sigma's own normalisation (max side to the unit square) and matrixFromCamera (smallest padded
+ *  viewport side, times getCorrectionRatio). */
+export function unitsPerPx(frame: LabelFrame, w: number, h: number): number {
+  const side = Math.max(w, h);
+  const usable = Math.min(frame.width, frame.height) - 2 * frame.padding;
+  if (side <= 0 || usable <= 0) return 0;
+  const viewportRatio = frame.height / frame.width;
+  const graphRatio = h > 0 && w > 0 ? h / w : 1;
+  const correction = (viewportRatio < 1 && graphRatio > 1) || (viewportRatio > 1 && graphRatio < 1)
+    ? 1
+    : Math.min(Math.max(graphRatio, 1 / graphRatio), Math.max(1 / viewportRatio, viewportRatio));
+  return side / (usable * correction);
+}
+
+// A title wider than the canvas can fit at no scale, so budgeting its full width made the fit
+// zoom out without end (u grew 1.6x a round for a 350px title on a 460px panel). Past this share
+// of the padded canvas width a label is budgeted as if cut there; fitLabel truncates whatever
+// actually runs into the edge.
+const LABEL_REACH_MAX = 0.6;
+
+/** Screen px from `node`'s centre to the end of its label, as the packing and the fit budget it. */
+export function budgetedReach(frame: LabelFrame, node: string): number {
+  return Math.min(frame.labelReach(node), LABEL_REACH_MAX * (frame.width - 2 * frame.padding));
+}
+
+interface Extent { minX: number; minY: number; maxX: number; maxY: number }
+
+/** Bbox of `nodes` placed at `at`, including their labels at `u` graph units per px. u = 0 is node
+ *  centres only. */
+function extentOf(
+  graph: MasteryGraph, nodes: Iterable<string>, u: number, frame: LabelFrame | undefined, at: (node: string) => Point,
+): Extent {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const halfLabel = frame ? (frame.labelHeight / 2) * u : 0;
+  for (const n of nodes) {
+    const { x, y } = at(n);
+    const radius = frame ? graph.getNodeAttribute(n, 'size') * u : 0;
+    const right = frame ? Math.max(budgetedReach(frame, n) * u, radius) : 0;
+    const half = Math.max(halfLabel, radius);
+    if (x - radius < minX) minX = x - radius;
+    if (x + right > maxX) maxX = x + right;
+    if (y - half < minY) minY = y - half;
+    if (y + half > maxY) maxY = y + half;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+const attrsAt = (graph: MasteryGraph) => (node: string): Point => graph.getNodeAttributes(node);
+
+// Label reach depends on the scale the fit lands on, which depends on the extent the labels add:
+// fixed-point iteration settles it, each round moving u by a shrinking fraction while the labels
+// take up less than the canvas (LABEL_REACH_MAX, and the shelf packing, arrange that). Five fixed
+// rounds stopped short of it and left the final fit zoomed further out than the spread assumed.
+const LABEL_FIT_ROUNDS = 30;
+const LABEL_FIT_TOLERANCE = 0.002;
+
+/** The graph-unit bbox that keeps every node AND its label on the canvas once sigma fits it, or
+ *  the node centres' bbox when the labels cannot all fit at any zoom (see packComponents). */
+export function labelledBBox(graph: MasteryGraph, frame: LabelFrame): { x: [number, number]; y: [number, number] } {
+  const at = attrsAt(graph);
+  const centres = extentOf(graph, graph.nodes(), 0, undefined, at);
+  let e = centres;
+  let u = 0;
+  for (let i = 0; i < LABEL_FIT_ROUNDS; i++) {
+    const next = unitsPerPx(frame, e.maxX - e.minX, e.maxY - e.minY);
+    if (Math.abs(next - u) <= LABEL_FIT_TOLERANCE * next) return { x: [e.minX, e.maxX], y: [e.minY, e.maxY] };
+    u = next;
+    e = extentOf(graph, graph.nodes(), u, frame, at);
+  }
+  return { x: [centres.minX, centres.maxX], y: [centres.minY, centres.maxY] };
+}
+
+// ForceAtlas2 knows nothing of labels, and fitting whole titles on the canvas zooms a small
+// component down until its nodes sit 10px apart under 14px titles (a five-page Rust chain printed
+// as one smear). So each component is swept top to bottom and a labelled node pushed down just far
+// enough to sit this many label heights below any title above it that reaches it, carrying every
+// node below it along. Minimal and vertical on purpose: titles are wide and short, and scaling the
+// whole component to part its closest pair grew it faster than the zoom-out it caused, without end.
+const LABEL_SPACING = 1.3;
+
+interface Group { nodes: string[]; labelled: Set<string>; y: Map<string, number> }
+
+function components(graph: MasteryGraph, frame: LabelFrame | undefined): Group[] {
   const seen = new Set<string>();
-  const out: Component[] = [];
+  const out: Group[] = [];
   graph.forEachNode((start) => {
     if (seen.has(start)) return;
     seen.add(start);
@@ -137,17 +234,51 @@ function components(graph: MasteryGraph): Component[] {
         if (!seen.has(nb)) { seen.add(nb); nodes.push(nb); }
       });
     }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const n of nodes) {
-      const { x, y } = graph.getNodeAttributes(n);
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-    out.push({ nodes, minX, minY, w: maxX - minX, h: maxY - minY });
+    const labelled = new Set(frame
+      ? nodes.filter((n) => frame.labelReach(n) > graph.getNodeAttribute(n, 'size') + LABEL_GAP)
+      : []);
+    out.push({ nodes, labelled, y: new Map() });
   });
   return out;
+}
+
+/** Where `g`'s nodes sit vertically at `u` graph units per px once no two of its titles overlap
+ *  (see LABEL_SPACING). Empty when fewer than two carry a label, which is every component of a
+ *  large view: only forced labels count, and those are capped at a contextual view's size. */
+function unstack(graph: MasteryGraph, g: Group, u: number, frame: LabelFrame): Map<string, number> {
+  const y = new Map<string, number>();
+  if (g.labelled.size < 2) return y;
+  const rowUnits = LABEL_SPACING * frame.labelHeight * u;
+  const order = [...g.nodes].sort((a, b) => graph.getNodeAttribute(a, 'y') - graph.getNodeAttribute(b, 'y') || (a < b ? -1 : 1));
+  const placed: string[] = [];
+  let shift = 0;
+  for (const n of order) {
+    const { x } = graph.getNodeAttributes(n);
+    let at = graph.getNodeAttribute(n, 'y') + shift;
+    if (g.labelled.has(n)) {
+      for (const m of placed) {
+        const mx = graph.getNodeAttribute(m, 'x');
+        const left = mx <= x ? m : n;
+        if (Math.abs(mx - x) < budgetedReach(frame, left) * u) at = Math.max(at, y.get(m)! + rowUnits);
+      }
+      placed.push(n);
+    }
+    shift = at - graph.getNodeAttribute(n, 'y');
+    y.set(n, at);
+  }
+  return y;
+}
+
+const spreadAt = (graph: MasteryGraph, g: Group) => (node: string): Point => {
+  const { x, y } = graph.getNodeAttributes(node);
+  return { x, y: g.y.get(node) ?? y };
+};
+
+function measure(graph: MasteryGraph, groups: Group[], u: number, frame: LabelFrame | undefined): Component[] {
+  return groups.map((g) => {
+    const e = extentOf(graph, g.nodes, u, frame, spreadAt(graph, g));
+    return { nodes: g.nodes, minX: e.minX, minY: e.minY, w: e.maxX - e.minX, h: e.maxY - e.minY };
+  });
 }
 
 /** Where each component's top-left corner goes when shelved in rows no wider than `rowWidth`, and
@@ -173,19 +304,15 @@ function shelve(comps: Component[], gap: number, rowWidth: number): { corners: P
 // trying every width when a whole vault has thousands of single-page components.
 const PACK_WIDTHS_TRIED = 24;
 
-/** Moves each connected component of `graph` as a whole into a shelf packing, largest first (then
- *  by first node, so repeated settles keep their places), in rows whose width is picked so the whole
- *  fits a canvas of `aspect` (width / height) at the largest scale. A single component, or any
- *  non-finite position, leaves the graph as it is. */
-export function packComponents(graph: MasteryGraph, aspect = 1): void {
-  const comps = components(graph);
-  if (comps.length < 2) return;
-  if (comps.some((c) => !Number.isFinite(c.w) || !Number.isFinite(c.h))) return;
-  comps.sort((a, b) => b.nodes.length - a.nodes.length || (a.nodes[0] < b.nodes[0] ? -1 : 1));
-  const gap = Math.max(PACK_GAP_MIN, PACK_GAP_FRACTION * Math.max(comps[0].w, comps[0].h));
+// Kept clear between one component's label and the next component, in screen px.
+const PACK_LABEL_GAP_PX = 16;
+
+/** The row width, out of PACK_WIDTHS_TRIED, whose shelf packing fits a canvas of `aspect`
+ *  (width / height) at the largest scale. */
+function bestShelf(comps: Component[], gap: number, aspect: number): ReturnType<typeof shelve> {
   const widest = Math.max(...comps.map((c) => c.w));
   const oneRow = comps.reduce((sum, c) => sum + c.w + gap, 0);
-  let best: ReturnType<typeof shelve> | null = null;
+  let best = shelve(comps, gap, widest);
   let bestScale = -Infinity;
   for (let i = 0; i < PACK_WIDTHS_TRIED; i++) {
     const rowWidth = widest + (oneRow - widest) * (i / (PACK_WIDTHS_TRIED - 1)) ** 2;
@@ -193,13 +320,56 @@ export function packComponents(graph: MasteryGraph, aspect = 1): void {
     const scale = Math.min(aspect / Math.max(packed.w, 1), 1 / Math.max(packed.h, 1));
     if (scale > bestScale) { best = packed; bestScale = scale; }
   }
+  return best;
+}
+
+/** Moves each connected component of `graph` as a whole into a shelf packing, largest first (then
+ *  by first node, so repeated settles keep their places), in rows whose width is picked so the whole
+ *  fits the canvas at the largest scale. With a `frame`, each component's footprint includes its
+ *  labels at the scale the fit will land on, so neighbouring components' titles do not overlap, and
+ *  a component whose own titles would overlap is unstacked first (LABEL_SPACING) — a single
+ *  component included. Without one, node centres only on a square canvas, and a single component
+ *  is left as it is. Any non-finite position leaves the graph as it is. */
+export function packComponents(graph: MasteryGraph, frame?: LabelFrame): void {
+  const groups = components(graph, frame);
+  if (groups.length < 2 && !frame) return;
+  groups.sort((a, b) => b.nodes.length - a.nodes.length || (a.nodes[0] < b.nodes[0] ? -1 : 1));
+  let comps = measure(graph, groups, 0, undefined);
+  if (comps.some((c) => !Number.isFinite(c.w) || !Number.isFinite(c.h))) return;
+  const baseGap = Math.max(PACK_GAP_MIN, PACK_GAP_FRACTION * Math.max(comps[0].w, comps[0].h));
+  const aspect = frame && frame.height > 0 ? frame.width / frame.height : 1;
+  const plainComps = comps;
+  let best = bestShelf(comps, baseGap, aspect);
+  const plain = best;
+  if (frame) {
+    let u = 0;
+    let converged = false;
+    for (let i = 0; i < LABEL_FIT_ROUNDS && !converged; i++) {
+      const next = unitsPerPx(frame, best.w, best.h);
+      converged = Math.abs(next - u) <= LABEL_FIT_TOLERANCE * next;
+      if (converged) break;
+      u = next;
+      for (const g of groups) g.y = unstack(graph, g, u, frame);
+      comps = measure(graph, groups, u, frame);
+      best = bestShelf(comps, Math.max(baseGap, PACK_LABEL_GAP_PX * u), aspect);
+    }
+    // More forced titles than the canvas holds at any zoom (nine 200px titles on a 460x360 panel):
+    // every round zooms out further and unstacks further, without end. Packing by node centres
+    // overlaps some titles but keeps the pages themselves in view.
+    if (!converged) {
+      for (const g of groups) g.y = new Map();
+      comps = plainComps;
+      best = plain;
+    }
+  }
   const target = new Map<string, Point>();
   comps.forEach((c, i) => {
-    const dx = best!.corners[i].x - c.minX;
-    const dy = best!.corners[i].y - c.minY;
+    const dx = best.corners[i].x - c.minX;
+    const dy = best.corners[i].y - c.minY;
+    const at = spreadAt(graph, groups[i]);
     for (const n of c.nodes) {
-      const a = graph.getNodeAttributes(n);
-      target.set(n, { x: a.x + dx, y: a.y + dy });
+      const p = at(n);
+      target.set(n, { x: p.x + dx, y: p.y + dy });
     }
   });
   graph.updateEachNodeAttributes((node, attrs) => {
@@ -247,9 +417,9 @@ function settingsFor(graph: MasteryGraph): ForceAtlas2Settings {
   };
 }
 
-/** `aspect` is the canvas's width / height at settle time, which the component packing aims for. */
+/** `frame` is the canvas and label metrics at settle time, which the component packing fits. */
 export function createLayout(
-  graph: MasteryGraph, opts: { reducedMotion?: boolean; aspect?: () => number } = {},
+  graph: MasteryGraph, opts: { reducedMotion?: boolean; frame?: () => LabelFrame | undefined } = {},
 ): LayoutController {
   const listeners = new Set<() => void>();
   // Once a worker construction has failed once, retrying it on every start() (e.g. every drag) would
@@ -427,7 +597,7 @@ export function createLayout(
 
   function fireSettle(): void {
     stop();
-    packComponents(graph, opts.aspect?.() ?? 1);
+    packComponents(graph, opts.frame?.());
     for (const cb of listeners) cb();
   }
 

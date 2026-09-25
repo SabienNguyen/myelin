@@ -1,4 +1,5 @@
-/* Neutral workspace. Dark by default; respect an explicit light OS preference. */
+/* Neutral workspace. Dark by default; light when <html data-theme="light"> — the OS preference
+   until the learner picks one with the topbar toggle (src/client/lib/theme.ts). */
 :root {
   color-scheme: dark;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -31,26 +32,24 @@
   --font-prose: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg: #eeeef7;
-    --bg-panel: #ffffff;
-    --bg-inset: #e4e5f0;
-    --text: #1f2128;
-    --text-muted: #565a68;
-    --border: #c9cbd8;
-    --accent: #2b55c4;
-    --accent-soft: #e3e9fb;
-    --accent-text: #ffffff;
-    --good: #27613f;
-    --bad: #9b3632;
-    --warn: #765319;
-    --mastery-unseen: #626873;
-    --mastery-exposed: #906619;
-    --mastery-practicing: #366caa;
-    --mastery-mastered: #27613f;
-  }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #eeeef7;
+  --bg-panel: #ffffff;
+  --bg-inset: #e4e5f0;
+  --text: #1f2128;
+  --text-muted: #565a68;
+  --border: #c9cbd8;
+  --accent: #2b55c4;
+  --accent-soft: #e3e9fb;
+  --accent-text: #ffffff;
+  --good: #27613f;
+  --bad: #9b3632;
+  --warn: #765319;
+  --mastery-unseen: #626873;
+  --mastery-exposed: #906619;
+  --mastery-practicing: #366caa;
+  --mastery-mastered: #27613f;
 }
 
 * { box-sizing: border-box; }
@@ -1384,8 +1383,8 @@ button.primary:disabled { opacity: 0.5; cursor: default; }
   :root { --text-muted: #d9dce1; --border: #858a94; }
   .page-chip { opacity: 1; }
 }
-@media (prefers-contrast: more) and (prefers-color-scheme: light) {
-  :root { --text-muted: #33373e; --border: #777d87; }
+@media (prefers-contrast: more) {
+  :root[data-theme="light"] { --text-muted: #33373e; --border: #777d87; }
 }
 
 .wiki-link {

@@ -12,6 +12,7 @@ import { MultiDirectedGraph as Graph } from 'graphology';
 import type { MasteryGraph, Point } from '../../src/client/graph/buildGraph.js';
 import {
   LAYOUT, meanDisplacement, bboxDiagonal, snapshot, createLayout, maxRunMsFor, packComponents,
+  labelledBBox, unitsPerPx, budgetedReach, type LabelFrame,
 } from '../../src/client/graph/layout.js';
 import {
   POSITIONS_KEY, MAX_REMEMBERED, loadPositions, savePositions,
@@ -554,6 +555,100 @@ describe('packComponents', () => {
     const before = snapshot(graph);
     packComponents(graph);
     expect(meanDisplacement(before, graph)).toBe(0);
+  });
+});
+
+describe('packComponents with forced labels', () => {
+  const CHAR_PX = 7;
+  // The graph panel at its desktop size, every label forced on and CHAR_PX wide per character.
+  function frameFor(graph: MasteryGraph): LabelFrame {
+    return {
+      width: 460, height: 360, padding: 54, labelHeight: 14,
+      labelReach: (n) => graph.getNodeAttribute(n, 'size') + 3 + graph.getNodeAttribute(n, 'label').length * CHAR_PX,
+    };
+  }
+
+  /** Pairs whose label boxes intersect on screen once sigma fits labelledBBox. */
+  function overlappingLabels(graph: MasteryGraph, frame: LabelFrame): string[] {
+    const box = labelledBBox(graph, frame);
+    const u = unitsPerPx(frame, box.x[1] - box.x[0], box.y[1] - box.y[0]);
+    const rects = graph.nodes().map((n) => {
+      const { x, y, size } = graph.getNodeAttributes(n);
+      return { n, left: x / u - size, right: x / u + budgetedReach(frame, n), top: y / u - 7, bottom: y / u + 7 };
+    });
+    const out: string[] = [];
+    for (let i = 0; i < rects.length; i++) {
+      for (let j = i + 1; j < rects.length; j++) {
+        const a = rects[i];
+        const b = rects[j];
+        if (a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom) out.push(`${a.n}/${b.n}`);
+      }
+    }
+    return out;
+  }
+
+  it('keeps unlinked pages\' titles apart instead of lining them up under each other', () => {
+    const graph = freshGraph();
+    // Six single-page subjects scattered where ForceAtlas2 left them, and a five-page chain.
+    for (let i = 0; i < 6; i++) addNode(graph, `single page ${i}`, i * 30, (i % 3) * 20);
+    for (let i = 0; i < 5; i++) {
+      addNode(graph, `chain ${i}`, 400 + i * 40, 400 + i * 40);
+      if (i > 0) graph.addEdge(`chain ${i - 1}`, `chain ${i}`, { kind: 'prereq', color: '#000', size: 1 });
+    }
+    const frame = frameFor(graph);
+    expect(overlappingLabels(graph, frame)).not.toEqual([]);
+    packComponents(graph, frame);
+    expect(overlappingLabels(graph, frame)).toEqual([]);
+  });
+
+  it('spreads a subject whose own pages sit closer than their titles', () => {
+    const graph = freshGraph();
+    // Side by side and nearly level: far enough apart as points, not as titles.
+    addNode(graph, 'Retrieval Practice for Durable Learning', 0, 0);
+    addNode(graph, 'Flow: immersive engagement and enabling conditions', 30, 4);
+    addNode(graph, 'Rust Ownership and Moves', 600, 600);
+    graph.addEdge('Retrieval Practice for Durable Learning', 'Flow: immersive engagement and enabling conditions',
+      { kind: 'deepens', color: '#000', size: 1 });
+    const frame = frameFor(graph);
+    packComponents(graph, frame);
+    expect(overlappingLabels(graph, frame)).toEqual([]);
+  });
+
+  it('unstacks a subject laid out nearly level, beside unlinked pages', () => {
+    const graph = freshGraph();
+    // The shape that zoomed out without end when the whole subject was scaled to part its closest
+    // pair: a five-page chain 2 units of height apart per step.
+    for (let i = 0; i < 5; i++) {
+      addNode(graph, `Rust chapter ${i}`, i * 30, i * 2);
+      if (i > 0) graph.addEdge(`Rust chapter ${i - 1}`, `Rust chapter ${i}`, { kind: 'prereq', color: '#000', size: 1 });
+    }
+    for (let i = 0; i < 5; i++) addNode(graph, `single page ${i}`, 500 + i * 30, 0);
+    const frame = frameFor(graph);
+    packComponents(graph, frame);
+    expect(overlappingLabels(graph, frame)).toEqual([]);
+  });
+
+  it('falls back to packing by node centres when the titles cannot all fit', () => {
+    const graph = freshGraph();
+    for (let i = 0; i < 12; i++) addNode(graph, `a page whose title runs well past half the panel ${i}`, i * 30, 0);
+    const plain = freshGraph();
+    graph.forEachNode((n, a) => plain.addNode(n, { ...a }));
+    packComponents(plain);
+    const frame = frameFor(graph);
+    packComponents(graph, frame);
+    // Still framed the size a centres-only packing is, not zoomed out after an unreachable fit.
+    expect(bboxDiagonal(graph)).toBeLessThan(2 * bboxDiagonal(plain));
+  });
+
+  it('still packs the same way on every settle', () => {
+    const graph = freshGraph();
+    for (let i = 0; i < 4; i++) addNode(graph, `page ${i}`, i * 5, i * 3);
+    graph.addEdge('page 0', 'page 1', { kind: 'prereq', color: '#000', size: 1 });
+    const frame = frameFor(graph);
+    packComponents(graph, frame);
+    const once = snapshot(graph);
+    packComponents(graph, frame);
+    expect(meanDisplacement(once, graph)).toBeLessThan(0.01 * bboxDiagonal(graph));
   });
 });
 
