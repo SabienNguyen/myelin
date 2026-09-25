@@ -216,7 +216,7 @@ describe('SidePanel collapse — the rail', () => {
     expect(screen.getByRole('tab', { name: 'page' }).getAttribute('aria-selected')).toBe('true');
   });
 
-  it('a hash change that names a tab expands a collapsed panel', async () => {
+  it('a hashchange that only names a tab keeps a collapsed panel collapsed, but still selects the tab', async () => {
     stubFetch();
     location.hash = '#/t/t-abc';
     render(<TestRuntime><ControlledSidePanel initialCollapsed /></TestRuntime>);
@@ -227,16 +227,58 @@ describe('SidePanel collapse — the rail', () => {
       window.dispatchEvent(new Event('hashchange'));
     });
 
-    await waitFor(() => expect(collapseBtn()).not.toBeNull());
-    expect(screen.getByRole('tab', { name: 'graph' }).getAttribute('aria-selected')).toBe('true');
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'graph' }).getAttribute('aria-selected')).toBe('true'));
+    // A tab name alone is not a deep link to content — it must not reopen a panel the learner
+    // deliberately collapsed. SidePanel's own write-back effect puts one of these in the hash on
+    // almost every tab switch, so treating it as an open request reopened on nearly every reload.
+    expect(railExpandBtn()).not.toBeNull();
+    expect(collapseBtn()).toBeNull();
   });
 
-  it('a hash that already names a tab on first mount expands the panel too', async () => {
+  it('a hash naming only a tab (not a page) on first mount does not expand the panel, but still selects the tab', async () => {
     stubFetch();
     location.hash = '#/t/t-abc/library';
     render(<TestRuntime><ControlledSidePanel initialCollapsed /></TestRuntime>);
-    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+    expect(collapseBtn()).toBeNull();
     expect(screen.getByRole('tab', { name: /^library/i }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('a hash naming a page expands a collapsed panel on first mount', async () => {
+    stubFetch();
+    location.hash = '#/t/t-abc/page/derivatives';
+    render(<TestRuntime><ControlledSidePanel initialCollapsed /></TestRuntime>);
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+    expect(screen.getByRole('tab', { name: 'page' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('a hashchange to a page deep link expands a collapsed panel', async () => {
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><ControlledSidePanel initialCollapsed /></TestRuntime>);
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+
+    act(() => {
+      location.hash = '#/t/t-abc/page/derivatives';
+      window.dispatchEvent(new Event('hashchange'));
+    });
+
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+    expect(screen.getByRole('tab', { name: 'page' }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('reloading with collapsed=true in storage and a tab-naming hash stays collapsed and leaves storage untouched', async () => {
+    localStorage.setItem(COLLAPSED_KEY, 'true');
+    stubFetch();
+    vi.stubGlobal('ResizeObserver', StubResizeObserver);
+    if (!Element.prototype.scrollTo) Element.prototype.scrollTo = () => {};
+    location.hash = '#/t/t-abc/graph';
+
+    await act(async () => { render(<App />); });
+
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+    expect(collapseBtn()).toBeNull();
+    expect(localStorage.getItem(COLLAPSED_KEY)).toBe('true');
   });
 
   it('the map-as-home default (an un-named hash, known pages) never expands a collapsed panel', async () => {
@@ -254,6 +296,44 @@ describe('SidePanel collapse — the rail', () => {
     // Still a rail — the un-named default must lose to "stay collapsed", unlike an explicit deep link.
     expect(railExpandBtn()).not.toBeNull();
     expect(collapseBtn()).toBeNull();
+  });
+
+  it('ArrowDown in the rail moves focus to the next tab without activating it', async () => {
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><ControlledSidePanel initialCollapsed /></TestRuntime>);
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+
+    const rail = screen.getByRole('tablist', { name: 'Workspace panels' });
+    screen.getByRole('tab', { name: /^stage/i }).focus();
+    fireEvent.keyDown(rail, { key: 'ArrowDown' });
+
+    expect(document.activeElement?.textContent).toContain('graph');
+    // Focus moved, but nothing was activated: the panel stays collapsed and the tab selection
+    // (still stage) is unchanged — the bug this pins had ArrowDown click the newly-focused tab,
+    // which expanded the panel, unmounted the rail out from under the roving-focus hook, and
+    // dropped focus to <body>.
+    expect(railExpandBtn()).not.toBeNull();
+    expect(collapseBtn()).toBeNull();
+    expect(screen.getByRole('tab', { name: /^stage/i }).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('Enter on a focused rail tab expands the panel onto that tab and moves focus into the strip', async () => {
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><ControlledSidePanel initialCollapsed /></TestRuntime>);
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+
+    const rail = screen.getByRole('tablist', { name: 'Workspace panels' });
+    screen.getByRole('tab', { name: /^graph/i }).focus();
+    fireEvent.keyDown(rail, { key: 'Enter' });
+
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+    const graphStripTab = screen.getByRole('tab', { name: 'graph' });
+    expect(graphStripTab.getAttribute('aria-selected')).toBe('true');
+    // The rail unmounted underneath the keypress that expanded it — without moving focus by hand,
+    // it falls to <body> and a keyboard user loses their place entirely.
+    expect(document.activeElement).toBe(graphStripTab);
   });
 });
 

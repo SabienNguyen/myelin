@@ -111,7 +111,9 @@ export function App() {
   // every panel width clamped to MIN_PANEL_WIDTH. A callback ref fires again whenever the element
   // actually attaches, including when `<main>` remounts on a thread switch (Runtime is keyed by
   // threadId).
-  const { collapsed, width: savedWidth, setCollapsed, setWidth } = useSidePanelLayout();
+  const {
+    collapsed, width: savedWidth, liveWidth, setCollapsed, setWidth, setLiveWidth,
+  } = useSidePanelLayout();
   const [workspaceEl, setWorkspaceEl] = useState<HTMLElement | null>(null);
   const workspaceRef = useCallback((el: HTMLElement | null) => setWorkspaceEl(el), []);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -128,9 +130,11 @@ export function App() {
   const defaultPanelWidth = containerWidth > 0
     ? Math.min(maxPanelWidth, Math.max(MIN_PANEL_WIDTH, containerWidth * DEFAULT_PANEL_FRACTION))
     : MIN_PANEL_WIDTH;
-  const sidePanelWidth = savedWidth != null
+  // liveWidth wins while a drag or keyboard step is in flight — see useSidePanelLayout for why
+  // that value is never the persisted one until the gesture actually finishes.
+  const sidePanelWidth = liveWidth ?? (savedWidth != null
     ? Math.min(maxPanelWidth, Math.max(MIN_PANEL_WIDTH, savedWidth))
-    : defaultPanelWidth;
+    : defaultPanelWidth);
   // The exercise needs the panel while focus mode is on — the splitter and the collapse control
   // are not shown then (rendered conditionally below), and collapsed itself is forced open here so
   // a collapse from an earlier session never hides the very thing focus mode exists to show. The
@@ -272,8 +276,9 @@ export function App() {
                     width={sidePanelWidth}
                     min={MIN_PANEL_WIDTH}
                     max={maxPanelWidth}
-                    onWidthChange={setWidth}
-                    onCollapse={() => setCollapsed(true)}
+                    onWidthChange={setLiveWidth}
+                    onWidthCommit={setWidth}
+                    onCollapse={() => { setLiveWidth(null); setCollapsed(true); }}
                     onResetDefault={() => setWidth(null)}
                   />
                 )}

@@ -57,7 +57,12 @@ export function SidePanel({
   // The rail is a VERTICAL tablist (Up/Down primary) rather than the horizontal strip's Left/Right
   // — useRovingKeys always honors Left/Right too (there is no vertical-only mode), which is a
   // harmless superset here, not worth a new hook variant for one call site.
-  const onRailKeys = useRovingKeys({ selector: '[role="tab"]', orientation: 'both', activateOnFocus: true });
+  //
+  // activateOnFocus is false here, unlike the horizontal strip: activating a rail tab expands the
+  // whole panel and unmounts the rail out from under the very hook steering focus, so the first
+  // ArrowDown used to expand the panel and drop focus to <body>. Enter/Space and click still
+  // activate — see onRailActivate below, which also moves focus into the expanded strip.
+  const onRailKeys = useRovingKeys({ selector: '[role="tab"]', orientation: 'both', activateOnFocus: false });
   const [tab, setTab] = useState<PanelTab>(() => parseHash(location.hash).tab);
   const [pageSlug, setPageSlug] = useState<string | null>(() => parseHash(location.hash).pageSlug);
   // The source reader is a MODE of the Page tab (deliberately not a fifth tab): reading the raw
@@ -90,11 +95,46 @@ export function SidePanel({
     if (e.type === 'setTab') { tabTouchedRef.current = true; setTab(e.tab); onCollapsedChange(false); }
   }), [onCollapsedChange]);
 
-  // A deep link straight into a tab or page (a bookmark, a shared link) must open even if the last
-  // session left the panel collapsed — mount-only, since the hashchange listener below only ever
-  // sees CHANGES after this point.
+  // Set just before a rail tab expands the panel (click, or Enter/Space below) so the effect right
+  // after can hand focus to that same tab once it re-mounts in the expanded strip. Without this,
+  // expanding via keyboard leaves focus on a now-detached rail button and it falls to <body>.
+  const pendingRailFocusRef = useRef<PanelTab | null>(null);
+  function activateRailTab(t: PanelTab) {
+    tabTouchedRef.current = true;
+    pendingRailFocusRef.current = t;
+    setTab(t);
+    onCollapsedChange(false);
+  }
+  // Roving focus only moves and never activates on the rail (onRailKeys above) — Enter/Space is the
+  // keyboard activation path, mirroring what a click on the rail button already does.
+  function onRailActivate(e: React.KeyboardEvent<HTMLElement>) {
+    onRailKeys(e);
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    // document.activeElement, not e.target: a real keydown's target IS the focused element, but a
+    // synthetic one dispatched on the container (as tests do, matching how the rest of this file's
+    // keyboard tests drive the roving-focus hooks) targets the container itself.
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.getAttribute('role') !== 'tab') return;
+    e.preventDefault();
+    active.click();
+  }
   useEffect(() => {
-    if (parseHash(location.hash).tabExplicit) onCollapsedChange(false);
+    if (collapsed) return;
+    const target = pendingRailFocusRef.current;
+    if (!target) return;
+    pendingRailFocusRef.current = null;
+    document.getElementById(`tab-${target}`)?.focus();
+  }, [collapsed]);
+
+  // A deep link straight into a PAGE (a bookmark, a wiki-link's slug) must open even if the last
+  // session left the panel collapsed — mount-only, since the hashchange listener below only ever
+  // sees CHANGES after this point. A hash that names only a TAB is not a deep link to content: it
+  // still selects that tab (below), but the panel stays collapsed — SidePanel's own write-back
+  // effect puts a tab-naming hash in the URL on nearly every navigation, and <Runtime key={threadId}>
+  // remounts this component on every thread switch, so treating tabExplicit as "open" reopened a
+  // deliberately collapsed panel on almost every reload and thread switch.
+  useEffect(() => {
+    if (parseHash(location.hash).pageSlug) onCollapsedChange(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -146,9 +186,10 @@ export function SidePanel({
       // hash said dilution-calculator while the panel still showed the raw source.
       if (parsed.pageSlug && parsed.pageSlug !== slugRef.current) setSource(null);
       setPageSlug(parsed.pageSlug);
-      // tabExplicit (not just "any hash change"): a hash that still names no tab is the SAME
-      // un-named default the map-as-home effect above is deliberately not allowed to expand for.
-      if (parsed.tabExplicit) onCollapsedChange(false);
+      // pageSlug (not tabExplicit): a hash naming only a tab — Back/Forward through ordinary tab
+      // switches, or the un-named stage default — must not reopen a panel the learner collapsed.
+      // Only a hash naming an actual page is a deep link to content worth expanding for.
+      if (parsed.pageSlug) onCollapsedChange(false);
     };
     window.addEventListener('hashchange', onHashChange);
     window.addEventListener('popstate', onHashChange);
@@ -187,7 +228,7 @@ export function SidePanel({
             role="tablist"
             aria-label="Workspace panels"
             aria-orientation="vertical"
-            onKeyDown={onRailKeys}
+            onKeyDown={onRailActivate}
           >
             {TAB_ORDER.map((t) => (
               <button
@@ -198,7 +239,7 @@ export function SidePanel({
                 id={`tab-${t}`}
                 tabIndex={tab === t ? 0 : -1}
                 role="tab"
-                onClick={() => { tabTouchedRef.current = true; setTab(t); onCollapsedChange(false); }}
+                onClick={() => activateRailTab(t)}
               >
                 {TAB_ICONS[t]}
                 <span className="panel-rail-label">

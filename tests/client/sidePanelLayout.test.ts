@@ -46,6 +46,23 @@ describe('useSidePanelLayout', () => {
     expect(reopened.current.collapsed).toBe(true);
   });
 
+  it('setLiveWidth updates the live value without writing to storage', () => {
+    const { result } = renderHook(() => useSidePanelLayout());
+    act(() => { result.current.setLiveWidth(555); });
+    expect(result.current.liveWidth).toBe(555);
+    expect(result.current.width).toBeNull();
+    expect(localStorage.getItem(WIDTH_KEY)).toBeNull();
+  });
+
+  it('setWidth persists and clears any pending live override', () => {
+    const { result } = renderHook(() => useSidePanelLayout());
+    act(() => { result.current.setLiveWidth(250); });
+    act(() => { result.current.setWidth(600); });
+    expect(result.current.width).toBe(600);
+    expect(result.current.liveWidth).toBeNull();
+    expect(localStorage.getItem(WIDTH_KEY)).toBe('600');
+  });
+
   it('a throwing localStorage falls back to defaults without an error escaping', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
