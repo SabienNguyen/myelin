@@ -13,13 +13,14 @@ import type { MouseCoords, SigmaNodeEventPayload, TouchCoords } from 'sigma/type
 import { WarningIcon as Warning } from '@phosphor-icons/react';
 import { MultiDirectedGraph as Graph } from 'graphology';
 import { ChatStoreContext } from '../chatCore/index.js';
-import { pagesTouched } from '../../shared/topics.js';
+import { pagesTouched, threadTopic } from '../../shared/topics.js';
 import { getGraph } from '../lib/api.js';
 import { LEVEL_LABEL, type MasteryLevel } from '../lib/mastery.js';
 import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
 import { graphMeta, type GraphNodeMeta, type LaidOutEdge } from '../lib/graphLayout.js';
 import { panelBus } from '../lib/panelBus.js';
 import { onSchemeChange } from '../lib/theme.js';
+import { learnerText, matchPages } from '../lib/conversationTopic.js';
 import { parseHash } from '../lib/urlState.js';
 import { useConversationNotebook } from './Notebooks.js';
 import {
@@ -116,6 +117,9 @@ export interface Subgraph<N extends ContextualNode = GraphNodeMeta> {
   seedSlug: string | null;
   /** True when seedSlug wasn't the caller's requested seed but was inferred from decay data. */
   seedInferred: boolean;
+  /** How many pages the BFS started from when they were matched from the conversation's own words
+   * (no page open or worked on); seedSlug is the best of them. Absent otherwise. */
+  matched?: number;
   hops: number;
   /** True when the 2-hop neighborhood exceeded `cap` and some hop-2 nodes were dropped to fit —
    * hop-1 neighbors are never dropped, see the trim step below. */
@@ -135,14 +139,21 @@ export interface Subgraph<N extends ContextualNode = GraphNodeMeta> {
  * `requestedSeed` missing (null, or a slug no longer present in `nodes`) falls back to inferring a
  * seed from decay data — the node with the most `daysLeft` (least elapsed time since
  * `last_reinforced`, i.e. the freshest "recently touched" node the already-fetched graph exposes)
- * — and, if nothing has decay data either, all the way to the whole graph with `seedSlug: null`.
+ * — and, if nothing has decay data either, to an empty subgraph with `seedSlug: null`: with no
+ * topic, "This topic" has nothing to show, and showing the whole vault under that name read as a
+ * scope that covered more than the topic.
  */
 export function contextualSubgraph<N extends ContextualNode>(
   nodes: N[], edges: LaidOutEdge[], requestedSeed: string | null, cap: number = CONTEXT_CAP,
+  related: string[] = [],
 ): Subgraph<N> {
   const bySlug = new Map(nodes.map((n) => [n.slug, n]));
   let seedSlug = requestedSeed != null && bySlug.has(requestedSeed) ? requestedSeed : null;
   let seedInferred = false;
+  // No page asked for: the pages the conversation's words matched (conversationTopic.ts), all
+  // searched from at once, before any guess from decay data.
+  const matchedSeeds = seedSlug == null ? related.filter((s) => bySlug.has(s)) : [];
+  if (matchedSeeds.length > 0) seedSlug = matchedSeeds[0];
   if (seedSlug == null) {
     const withDecay = nodes.filter((n) => n.daysLeft != null);
     if (withDecay.length > 0) {
@@ -151,7 +162,7 @@ export function contextualSubgraph<N extends ContextualNode>(
     }
   }
   if (seedSlug == null) {
-    return { nodes, edges, seedSlug: null, seedInferred: false, hops: 0, truncated: false };
+    return { nodes: [], edges: [], seedSlug: null, seedInferred: false, hops: 0, truncated: false };
   }
 
   const adjacency = new Map<string, Set<string>>();
@@ -161,8 +172,9 @@ export function contextualSubgraph<N extends ContextualNode>(
   };
   for (const e of edges) { link(e.src, e.dst); link(e.dst, e.src); }
 
-  const distance = new Map<string, number>([[seedSlug, 0]]);
-  let frontier = [seedSlug];
+  const seeds = matchedSeeds.length > 0 ? matchedSeeds : [seedSlug];
+  const distance = new Map<string, number>(seeds.map((s) => [s, 0]));
+  let frontier = [...seeds];
   for (let hop = 1; hop <= CONTEXT_HOPS && frontier.length > 0; hop++) {
     const next: string[] = [];
     for (const cur of frontier) {
@@ -176,7 +188,7 @@ export function contextualSubgraph<N extends ContextualNode>(
   const hop1 = [...distance].filter(([, d]) => d === 1).map(([s]) => s);
   const hop2 = [...distance].filter(([, d]) => d === 2).map(([s]) => s);
 
-  const included = new Set<string>([seedSlug, ...hop1]);
+  const included = new Set<string>([...seeds, ...hop1]);
   const room = cap - included.size;
   let truncated: boolean;
   if (room > 0) {
@@ -192,6 +204,7 @@ export function contextualSubgraph<N extends ContextualNode>(
     nodes: nodes.filter((n) => included.has(n.slug)),
     edges: edges.filter((e) => included.has(e.src) && included.has(e.dst)),
     seedSlug, seedInferred, hops: CONTEXT_HOPS, truncated,
+    ...(matchedSeeds.length > 0 ? { matched: matchedSeeds.length } : {}),
   };
 }
 
@@ -320,6 +333,18 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   const touchedKey = useSyncExternalStore(chatStore?.subscribe ?? noSubscribe, () => {
     const state = chatStore?.getState();
     return state ? pagesTouched(state.messages).join('\n') : '';
+  });
+  // The page this conversation is working on (its latest page tool call): what "This topic" means
+  // while no page is open. Without it the scope fell through to the whole vault, still labelled
+  // This topic.
+  const threadTopicSlug = useSyncExternalStore(chatStore?.subscribe ?? noSubscribe, () => {
+    const state = chatStore?.getState();
+    return state ? threadTopic(state.messages) : null;
+  });
+  // What the learner typed, for matching pages when the conversation has worked on none.
+  const askedText = useSyncExternalStore(chatStore?.subscribe ?? noSubscribe, () => {
+    const state = chatStore?.getState();
+    return state ? learnerText(state.messages) : '';
   });
   const notebookSlugs = useMemo(() => {
     if (!notebook || !Array.isArray(notebook.topics)) return null;
@@ -817,9 +842,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // recomputes only on a genuine reseed or fresh poll data — NOT on a mode toggle — so flipping
   // back to "This topic" after visiting "Whole vault" doesn't redo the BFS. `fullSub` is a
   // passthrough of every node/edge (memoized separately for the same reason).
+  const topicSeed = contextSeed ?? threadTopicSlug;
+  const matchedPages = useMemo(
+    () => (topicSeed == null ? matchPages(askedText, meta.nodes) : []),
+    [topicSeed, askedText, meta],
+  );
   const contextualSub = useMemo(
-    () => contextualSubgraph(meta.nodes, meta.edges, contextSeed),
-    [meta, contextSeed],
+    () => contextualSubgraph(meta.nodes, meta.edges, topicSeed, CONTEXT_CAP, matchedPages),
+    [meta, topicSeed, matchedPages],
   );
   const fullSub: Subgraph<GraphNodeMeta> = useMemo(
     () => ({ nodes: meta.nodes, edges: meta.edges, seedSlug: null, seedInferred: false, hops: 0, truncated: false }),
@@ -833,13 +863,15 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
   // /api/graph hides), or a page newer than the graph cache, is an empty scope, and an empty scope
   // read as an empty vault and hid the other scope tabs.
   const notebookOffered = notebookSub != null && notebookSub.nodes.length > 0;
-  // Until the learner picks a scope, a notebook conversation with no page open shows its notebook:
-  // the contextual seed would otherwise be a guess from decay data (the vault's most recently
-  // studied page), often in another subject entirely.
+  // Until the learner picks a scope, it opens on This topic only when there is one: an open page or
+  // the page the conversation is on. Otherwise the seed would be a guess from decay data (the
+  // vault's most recently studied page, often in another subject entirely) or nothing, so a
+  // notebook conversation shows its notebook and any other shows the whole vault, under its own
+  // name rather than This topic's.
   const guessedSeed = contextualSub.seedSlug == null || contextualSub.seedInferred;
   const mode: Scope = chosenMode === 'notebook' && !notebookOffered
     ? 'contextual'
-    : chosenMode ?? (notebookOffered && guessedSeed ? 'notebook' : 'contextual');
+    : chosenMode ?? (!guessedSeed ? 'contextual' : notebookOffered ? 'notebook' : 'full');
   const sub = mode === 'contextual' ? contextualSub : mode === 'notebook' ? notebookSub! : fullSub;
 
   // A scope switch refits: the scopes have wildly different extents. While the layout runs the fit
@@ -966,12 +998,14 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         {!loading && mode === 'contextual' && (
           seedTitle != null ? (
             <p className="graph-subtitle">
-              around {seedTitle}{sub.seedInferred && ' (last studied)'} · {sub.hops} hops
+              {sub.matched != null && sub.matched > 1
+                ? `pages this conversation is about · ${sub.hops} hops`
+                : <>around {seedTitle}{sub.seedInferred && ' (last studied)'} · {sub.hops} hops</>}
               {sub.nodes.length === 1 && ' · no linked pages yet'}
               {sub.truncated && ' · showing closest matches'}
             </p>
           ) : (
-            <p className="graph-subtitle hint">open a page to focus the graph</p>
+            <p className="graph-subtitle hint">no page in this conversation yet — open one to focus the graph</p>
           )
         )}
       </div>
@@ -981,6 +1015,10 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         <p className="graph-subtitle hint graph-error" role="status">
           {loadError} The graph will reappear on its own once it loads.
         </p>
+      ) : meta.nodes.length > 0 && sub.nodes.length === 0 ? (
+        // An empty scope in a vault with pages (This topic with no topic): the subtitle says why,
+        // and the cold-start copy below would claim the vault is empty.
+        null
       ) : sub.nodes.length === 0 ? (
         // Cold start: an empty vault rendered an empty canvas under a full mastery legend — a key
         // to nothing, and no indication that the way to fill it is to go and ask. This is the

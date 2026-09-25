@@ -190,9 +190,11 @@ function extentOf(
 const attrsAt = (graph: MasteryGraph) => (node: string): Point => graph.getNodeAttributes(node);
 
 // Label reach depends on the scale the fit lands on, which depends on the extent the labels add:
-// fixed-point iteration settles it, each round moving u by a shrinking fraction while the labels
-// take up less than the canvas (LABEL_REACH_MAX, and the shelf packing, arrange that). Five fixed
-// rounds stopped short of it and left the final fit zoomed further out than the spread assumed.
+// fixed-point iteration settles it while the labels take up less than the canvas (LABEL_REACH_MAX,
+// and the shelf packing, arrange that). u only ever grows: the shelf packing's row width is a
+// discrete choice that can flip between rounds, and a u that followed it back down bounced between
+// two values forever, missed the tolerance, and dropped a vault that fits to the centres-only
+// fallback. Stopping on a u at or above the one the fit lands on only budgets labels more room.
 const LABEL_FIT_ROUNDS = 30;
 const LABEL_FIT_TOLERANCE = 0.002;
 
@@ -205,7 +207,7 @@ export function labelledBBox(graph: MasteryGraph, frame: LabelFrame): { x: [numb
   let u = 0;
   for (let i = 0; i < LABEL_FIT_ROUNDS; i++) {
     const next = unitsPerPx(frame, e.maxX - e.minX, e.maxY - e.minY);
-    if (Math.abs(next - u) <= LABEL_FIT_TOLERANCE * next) return { x: [e.minX, e.maxX], y: [e.minY, e.maxY] };
+    if (next <= u * (1 + LABEL_FIT_TOLERANCE)) return { x: [e.minX, e.maxX], y: [e.minY, e.maxY] };
     u = next;
     e = extentOf(graph, graph.nodes(), u, frame, at);
   }
@@ -346,7 +348,7 @@ export function packComponents(graph: MasteryGraph, frame?: LabelFrame): void {
     let converged = false;
     for (let i = 0; i < LABEL_FIT_ROUNDS && !converged; i++) {
       const next = unitsPerPx(frame, best.w, best.h);
-      converged = Math.abs(next - u) <= LABEL_FIT_TOLERANCE * next;
+      converged = next <= u * (1 + LABEL_FIT_TOLERANCE);
       if (converged) break;
       u = next;
       for (const g of groups) g.y = unstack(graph, g, u, frame);
