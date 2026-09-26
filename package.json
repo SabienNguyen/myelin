@@ -130,5 +130,8 @@
     "afterPack": "electron/afterPack.mjs",
     "afterSign": "electron/notarize.mjs"
   },
-  "desktopName": "myelin.desktop"
+  "desktopName": "myelin.desktop",
+  "overrides": {
+    "katex": "$katex"
+  }
 }
