@@ -76,6 +76,10 @@ The suite runs **all 20 tests green** (verified 2026-09-23, cloud container, wit
 resolved. They are kept here so that if one reappears you recognise it as a REAL regression, not
 the old baseline:
 
+- `graph-perf.e2e.ts` (the `perf` project) **fails in the cloud container** on its 12 s run cap:
+  software WebGL lands about 20 layout iterations in that time. Verified 2026-09-26 against the
+  graph code from before and after `ea98717` alike. Judge it on real GPU hardware, or run
+  `--project=e2e` to leave it out.
 - `gap-exercise.e2e.ts` and `gap-help.e2e.ts` **run and pass** — they exercise the BUILT-IN sandbox,
   which serves `/api/gap/*` from the backend process itself, so there is no external the-gap sidecar
   on `:4930` to gate on. (The old external-sidecar version `test.skip()`ped when `:4930` went
