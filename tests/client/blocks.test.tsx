@@ -186,6 +186,6 @@ describe('errored block copy tells the right story', () => {
     const { container: c2 } = render(render2);
     // A cancellation is the learner's choice: neutral styling, never the failure class.
     expect(c2.querySelector('.tool-note.failed')).toBeNull();
-    expect(c2.querySelector('.tool-note.skipped')?.textContent).toBe('quick check skipped · the conversation moved on');
+    expect(c2.querySelector('.tool-note.skipped')?.textContent).toBe('Skipped the quick check.');
   });
 });

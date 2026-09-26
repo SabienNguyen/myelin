@@ -27,8 +27,9 @@
   --radius-shell: 14px;
   --shadow: none;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  /* Compatibility alias for existing headings, not a second type system. */
-  --font-serif: var(--font-mono);
+  /* The heading face, under an old name. Titles are subjects and pages, not code, so they read in
+     the prose face; mono stays for code, micro-labels and the wordmark. */
+  --font-serif: var(--font-prose);
   --font-prose: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -904,7 +905,8 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .tool-note::before { content: "\2713\00a0"; color: var(--good); }
 .tool-note.failed { color: var(--bad); }
 .tool-note.failed::before { content: ""; }
-.tool-note.skipped { font-weight: 500; letter-spacing: 0.04em; }
+/* A skip is the quietest line in a transcript: sentence case, regular weight, no caps tracking. */
+.tool-note.skipped { font-size: 0.8rem; font-weight: 400; letter-spacing: 0; text-transform: none; font-style: italic; }
 /* The page a tool acted on, as a link into the Page tab: the name keeps its own case (a title,
    not chrome) and takes the accent, so the source list reads as clickable. */
 .tool-note-page {
@@ -912,7 +914,7 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
   background: none; border: 0; padding: 0; border-radius: 2px; cursor: pointer;
 }
 .tool-note-page:hover { background: none; text-decoration: underline; text-underline-offset: 2px; }
-.tool-note.skipped::before { content: "\2013\00a0"; color: var(--text-muted); }
+.tool-note.skipped::before { content: ""; }
 
 /* ── model thinking: collapsed by default, quiet like the tool chips ── */
 .reasoning-part { margin: 0.15rem 0; font-size: 0.8rem; color: var(--text-muted); }
@@ -1243,9 +1245,8 @@ mark[class^="ann-"] { border-radius: 3px; padding: 0 2px; color: inherit; }
 .panel-rail-toggle:hover,
 .panel-rail-tabs button:hover { color: var(--text); background: var(--bg-inset); }
 .panel-rail-tabs { display: flex; flex-direction: column; gap: 0.2rem; }
-/* Same selection cue as the expanded strip's button.on, in the shape an icon square can carry —
-   a bottom border reads as a stray pixel on a 32px square, a fill doesn't. */
-.panel-rail-tabs button.on { color: var(--accent); background: var(--accent-soft); }
+/* No selection cue on the rail: with the panel closed nothing is open, and a lit Graph icon read as
+   a stuck state. The tab keeps aria-selected (it is the one the expand button reopens). */
 .panel-rail-label {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
@@ -3278,13 +3279,14 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
   display: flex; flex-direction: column; gap: 0.9rem;
 }
 .nb-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-.nb-heading { font-family: var(--font-mono); font-size: 1.35rem; font-weight: 600; margin: 0; text-wrap: balance; }
+.nb-heading { font-family: var(--font-serif); font-size: 1.45rem; font-weight: 650; letter-spacing: -0.015em; margin: 0; text-wrap: balance; }
 /* Focused by the route change so a screen reader starts here; not a control, so no ring. */
 .nb-heading:focus { outline: none; }
 .nb-lede { margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
+/* Section names in sentence case: five tracked-caps labels on one screen all shouted at once. */
 .nb-subheading {
-  font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--text-muted); margin: 0;
+  font-family: var(--font-prose); font-size: 0.88rem; font-weight: 600; letter-spacing: 0;
+  color: var(--text-muted); margin: 0;
 }
 .nb-create { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
 .nb-create label { font-size: 0.85rem; color: var(--text-muted); }
@@ -3474,7 +3476,7 @@ button.nb-crumb-trigger:hover { background: transparent; }
 /* Top-anchored and left-aligned like .stage-empty above it, sharing the same left edge whether it
    follows the empty state or a graded block. */
 .stage-pages { max-width: 28rem; margin: 1.25rem 0 2rem; padding: 0; }
-.stage-pages h2 { font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 0.5rem; }
+.stage-pages h2 { font-family: var(--font-prose); font-size: 0.88rem; font-weight: 600; color: var(--text-muted); margin: 0 0 0.5rem; }
 .stage-pages ul { list-style: none; margin: 0; padding: 0; }
 .stage-pages button {
   width: 100%; display: flex; align-items: center; gap: 0.55rem; text-align: left;
@@ -3607,12 +3609,9 @@ p.quiz-expected { margin: 0.3rem 0 0; }
   .app:not(.focus-mode) .panel-collapse-label { display: inline; }
   .app:not(.focus-mode) .tabs { padding-inline: 0.25rem; gap: 0; }
   .app:not(.focus-mode) .tabs button { padding-inline: 0.35rem; }
-  /* The bottom bar: chat is what is on screen, so no panel tab reads as selected, and the
-     expand toggle has nothing to add over four labelled destinations. */
+  /* The bottom bar: the expand toggle has nothing to add over four labelled destinations. */
   .panel-rail-toggle { display: none; }
   .panel-rail-tabs button { flex-direction: column; gap: 0.15rem; padding: 0.3rem 0.2rem; }
-  .panel-rail-tabs button.on { color: var(--text-muted); background: none; }
-  .panel-rail-tabs button.on:hover { color: var(--text); background: var(--bg-inset); }
   .panel-rail-label {
     position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto;
     font-size: 0.68rem; text-transform: capitalize; letter-spacing: 0.01em;

@@ -61,13 +61,14 @@ been audited. Borders are intentionally subdued; high-contrast mode strengthens 
 
 ## Typography and density
 
-System sans-serif is used for workspace headings, tabs, status controls and long lessons;
-JetBrains Mono is bundled locally for code, technical headings and the wordmark. No font CDN.
+System sans-serif is used for headings (notebook, page and block titles), tabs, status controls
+and long lessons; JetBrains Mono is bundled locally for code, micro-labels and the wordmark. No
+font CDN.
 The composer is a unified, centered card capped at 760px, with secondary controls in its bottom
 row. Symbol keys use neutral surfaces and open above the composer rather than resizing it.
 An empty Stage is a mono micro-label, one muted line, and — once the tutor has said anything —
 a shortcut to quiz the conversation; it disappears when an exercise or summary arrives.
-`--font-serif` is a compatibility alias to `--font-mono`,
+`--font-serif` is the heading face under an old name, an alias to `--font-prose`,
 not a second design language. Base 15px, prose line-height 1.75; preserve the compact controls and
 responsive layout. Micro-labels may be uppercase; sentences remain normal case.
 

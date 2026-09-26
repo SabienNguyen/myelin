@@ -30,7 +30,7 @@ const errorNote = (name: string, result: any) => {
   // done tick — it reads like a folded card, the way a skipped exercise does in any study app.
   return malformed
     ? <span className="tool-note failed" title={name}>✗ {name.replace('_', ' ')} could not be shown — the tutor sent it malformed</span>
-    : <span className="tool-note skipped" title={name}>{name.replace('_', ' ')} skipped · the conversation moved on</span>;
+    : <span className="tool-note skipped" title={`${name} — the conversation moved on`}>Skipped the {name.replace('_', ' ')}.</span>;
 };
 
 const malformedNote = (name: string) => (
