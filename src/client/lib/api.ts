@@ -212,7 +212,9 @@ export interface NotebookTopic {
 }
 export interface NotebookDetail {
   notebook: NotebookSummary;
-  threads: ThreadRow[];
+  /** `pages`: titles of the pages each conversation reached, a few at most. Optional: older
+   *  servers omit it. */
+  threads: (ThreadRow & { pages?: string[] })[];
   sources: NotebookSource[];
   library: NotebookSource[];
   topics: NotebookTopic[];

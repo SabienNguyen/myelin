@@ -81,6 +81,8 @@ describe('notebook routes', () => {
       { slug: 'limits', title: 'Limits', level: 'mastered', due: false, daysLeft: 30, slipped: false, was: null, misconception: 'thinks every limit is f(a)' },
     ]);
     expect(detail.threads.map((t: any) => t.id)).toEqual(['t-1']);
+    // What the conversation reached, by title; a page it tried to write that never landed is not one.
+    expect(detail.threads[0].pages).toEqual(['Derivative']);
     expect(detail.sources).toEqual([{ book: 'spivak', title: 'Spivak, Calculus', authors: ['Michael Spivak'] }]);
     expect(detail.library.map((s: any) => s.book)).toEqual(['spivak']);
 

@@ -17,7 +17,7 @@ const detail = {
   notebook: summary,
   threads: [
     { id: 't-new', title: 'why is the derivative a limit?', updatedAt: now, messages: 4 },
-    { id: 't-old', title: 'limits from scratch', updatedAt: now, messages: 6 },
+    { id: 't-old', title: 'limits from scratch', updatedAt: now, messages: 6, pages: ['Limits', 'Continuity'] },
   ],
   sources: [{ book: 'spivak', title: 'Spivak, Calculus', authors: ['Michael Spivak'] }],
   library: [
@@ -193,6 +193,10 @@ describe('NotebookView', () => {
     render(<NotebookView id="nb-calc" />);
     expect(await screen.findByRole('heading', { name: 'Calculus I' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'limits from scratch' }).getAttribute('href')).toBe('#/t/t-old');
+    // What a conversation covered sits under its title; one without pages shows nothing there.
+    const conversations = screen.getByRole('region', { name: 'Conversations' });
+    expect(within(conversations).getByText('Limits · Continuity')).toBeTruthy();
+    expect(conversations.querySelectorAll('.nb-row-pages')).toHaveLength(1);
     expect(screen.getByText('Spivak, Calculus')).toBeTruthy();
     const topics = screen.getByRole('region', { name: 'Topics' });
     const links = within(topics).getAllByRole('link');

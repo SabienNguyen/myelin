@@ -605,11 +605,12 @@ export function NotebookView({ id }: { id: string }) {
                     {confirmThread === t.id
                       ? <ConfirmDeleteThread thread={t} onDeleted={() => { setConfirmThread(null); load(); }} onCancel={() => setConfirmThread(null)} />
                       : (
-                        <button type="button" className="ghost-btn nb-small" aria-label={`Delete “${t.title}”`}
+                        <button type="button" className="ghost-btn nb-small nb-quiet" aria-label={`Delete “${t.title}”`}
                           onClick={() => setConfirmThread(t.id)}>
                           delete
                         </button>
                       )}
+                    {t.pages && t.pages.length > 0 && <span className="nb-row-pages">{t.pages.join(' · ')}</span>}
                   </li>
                 ))}
               </ul>

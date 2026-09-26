@@ -23,6 +23,9 @@ export interface NotebookTopic {
   misconception: string | null;
 }
 
+/** Page titles listed under a conversation in the notebook view; the rest are its topics'. */
+const THREAD_PAGES_SHOWN = 4;
+
 export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
   const app = new Hono();
 
@@ -50,7 +53,7 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const topicsOf = (nb: Notebook) => notebookTopics(nb, touched, sources, (s) => existing.has(s));
     const summarize = (nb: Notebook) =>
       summarizeNotebook(nb, { topics: topicsOf(nb), threads, sources, state });
-    return { state, sources, threads, topicsOf, summarize };
+    return { state, sources, threads, existing, touched, topicsOf, summarize };
   }
 
   // Page titles for the topic list. Degrades to slugs rather than failing the notebook view — a
@@ -126,7 +129,13 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const bySource = (s: SourceRecord) => ({ book: s.book, title: s.title, authors: s.authors });
     return c.json({
       notebook: f.summarize(nb),
-      threads: withMessages(f.threads).filter((t) => nb.threads.includes(t.id)),
+      // Each with the pages it reached, so three conversations opened by the same Studio button
+      // are told apart by what they covered, not only by when.
+      threads: withMessages(f.threads).filter((t) => nb.threads.includes(t.id)).map((t) => ({
+        ...t,
+        pages: f.touched(t.id).filter((slug) => f.existing.has(slug)).slice(0, THREAD_PAGES_SHOWN)
+          .map((slug) => names.get(slug) ?? slug),
+      })),
       sources: f.sources.filter((s) => nb.sources.includes(s.book)).map(bySource),
       // Every source in the Library, for the "choose sources" list.
       library: f.sources.map(bySource),

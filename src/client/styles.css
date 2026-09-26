@@ -3357,9 +3357,13 @@ a.nb-row-title:hover { color: var(--accent); }
    and the controls come up on hover or keyboard focus. A touch screen has no hover to wait on. */
 .nb-file { display: inline-flex; align-items: center; gap: 0.35rem; }
 @media (hover: hover) {
-  .nb-row .nb-file { opacity: 0; transition: opacity 0.12s; }
-  .nb-row:hover .nb-file, .nb-row:focus-within .nb-file, .nb-row .nb-file.armed { opacity: 1; }
+  .nb-row .nb-file, .nb-row .nb-quiet { opacity: 0; transition: opacity 0.12s; }
+  .nb-row:hover .nb-file, .nb-row:focus-within .nb-file, .nb-row .nb-file.armed,
+  .nb-row:hover .nb-quiet, .nb-row:focus-within .nb-quiet { opacity: 1; }
 }
+/* What a conversation covered, under its title: the one thing that tells apart three opened by the
+   same Studio button. */
+.nb-row-pages { flex-basis: 100%; margin-top: -0.2rem; color: var(--text-muted); font-size: 0.78rem; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .nb-row .nb-file { flex-basis: 100%; justify-content: flex-end; }
 }
