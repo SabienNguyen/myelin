@@ -1,6 +1,6 @@
 import { useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
-  BooksIcon, FileTextIcon, GraphIcon, PresentationIcon, SidebarSimpleIcon,
+  BooksIcon, ChatCircleIcon, FileTextIcon, GraphIcon, PresentationIcon, SidebarSimpleIcon,
 } from '@phosphor-icons/react';
 import { ChatStoreContext } from '../chatCore/index.js';
 import { StageSummary } from './StageSummary.js';
@@ -58,6 +58,14 @@ export function SidePanel({
   const hasAssistantText = messages.some((m) => m.role === 'assistant'
     && m.parts.some((p) => p.type === 'text' && p.text.trim().length > 0));
   const onTabKeys = useTablistKeys();
+  // On a phone the open panel covers the chat (styles.css), so the tutor can answer out of sight —
+  // a grading turn after a stage Submit does exactly that. The "Chat" button marks it: replies
+  // counted when the panel opened, against replies now.
+  const replies = messages.filter((m) => m.role === 'assistant').length;
+  const [repliesAtOpen, setRepliesAtOpen] = useState(replies);
+  // Keyed on collapsed alone: the count is taken at the moment the panel opens, not kept current.
+  useEffect(() => { if (!collapsed) setRepliesAtOpen(replies); }, [collapsed]);
+  const unseenReply = !collapsed && replies > repliesAtOpen;
   // The rail is a VERTICAL tablist (Up/Down primary) rather than the horizontal strip's Left/Right
   // — useRovingKeys always honors Left/Right too (there is no vertical-only mode), which is a
   // harmless superset here, not worth a new hook variant for one call site.
@@ -289,14 +297,18 @@ export function SidePanel({
           <button
             type="button"
             className="panel-collapse-toggle"
-            aria-label="Collapse side panel"
+            aria-label={unseenReply ? 'Collapse side panel (new reply in chat)' : 'Collapse side panel'}
             aria-expanded="true"
             aria-controls={PANEL_ID}
             aria-keyshortcuts={collapseShortcut}
             title={`Collapse side panel (${collapseShortcutLabel})`}
             onClick={() => onCollapsedChange(true)}
           >
-            <SidebarSimpleIcon size={16} aria-hidden="true" />
+            <SidebarSimpleIcon size={16} aria-hidden="true" className="panel-collapse-desk" />
+            {/* A phone shows one view at a time, so there the same button reads as the way back. */}
+            <ChatCircleIcon size={16} aria-hidden="true" className="panel-collapse-phone" />
+            <span className="panel-collapse-label" aria-hidden="true">Chat</span>
+            {unseenReply && <span className="panel-collapse-dot" />}
           </button>
         </div>
       )}

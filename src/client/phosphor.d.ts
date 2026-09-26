@@ -13,6 +13,7 @@ declare module '@phosphor-icons/react' {
     mirrored?: boolean;
   }
   export const BookOpenTextIcon: ComponentType<PhosphorIconProps>;
+  export const ChatCircleIcon: ComponentType<PhosphorIconProps>;
   export const KeyIcon: ComponentType<PhosphorIconProps>;
   export const SparkleIcon: ComponentType<PhosphorIconProps>;
   export const MapPinIcon: ComponentType<PhosphorIconProps>;

@@ -3267,6 +3267,8 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
 }
 .nb-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .nb-heading { font-family: var(--font-mono); font-size: 1.35rem; font-weight: 600; margin: 0; text-wrap: balance; }
+/* Focused by the route change so a screen reader starts here; not a control, so no ring. */
+.nb-heading:focus { outline: none; }
 .nb-lede { margin: 0.25rem 0 0; color: var(--text-muted); font-size: 0.9rem; }
 .nb-subheading {
   font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600; letter-spacing: 0.08em;
@@ -3351,6 +3353,16 @@ a.nb-row-title:hover { color: var(--accent); }
 .nb-row .nb-action { min-width: 4.5rem; justify-content: center; }
 .nb-row .nb-action + .nb-row-time { flex: 0 0 9.5rem; }
 .nb-row .panel-error, .nb-row .thread-confirm { flex-basis: 100%; }
+/* Filing is the occasional act on a row, not its content: at rest the row is a title and a time,
+   and the controls come up on hover or keyboard focus. A touch screen has no hover to wait on. */
+.nb-file { display: inline-flex; align-items: center; gap: 0.35rem; }
+@media (hover: hover) {
+  .nb-row .nb-file { opacity: 0; transition: opacity 0.12s; }
+  .nb-row:hover .nb-file, .nb-row:focus-within .nb-file, .nb-row .nb-file.armed { opacity: 1; }
+}
+@media (max-width: 640px) {
+  .nb-row .nb-file { flex-basis: 100%; justify-content: flex-end; }
+}
 .nb-topic-misconception {
   flex-basis: 100%; display: flex; align-items: baseline; gap: 0.35rem; margin: 0;
   color: var(--bad); font-size: 0.8rem; overflow-wrap: anywhere;
@@ -3543,5 +3555,50 @@ p.quiz-expected { margin: 0.3rem 0 0; }
   .tabs button {
     padding-inline: 0.35rem; white-space: nowrap;
     display: inline-flex; align-items: center; justify-content: center; gap: 0.3rem;
+  }
+}
+
+/* ── Phone: one view at a time ─────────────────────────────────────────────────────────────────
+   Stacked at phone width, an open panel left the chat a strip above a tall composer and itself
+   a strip below — two views, neither usable. Under 640px the workspace shows ONE: the chat, with
+   the rail as a labelled bottom bar, or the panel filling the canvas, its collapse button turned
+   into "Chat". The thread stays mounted either way (display, not unmount), so a draft survives.
+   Focus mode keeps the stack: its exercise and FocusRail were laid out for it. */
+.panel-collapse-phone, .panel-collapse-label { display: none; }
+.panel-collapse-toggle { position: relative; }
+.panel-collapse-dot {
+  position: absolute; top: 4px; right: 4px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent);
+}
+@media (min-width: 641px) { .panel-collapse-dot { display: none; } }
+@media (max-width: 640px) {
+  .app:not(.focus-mode) .workspace:not(.side-panel-collapsed) { grid-template-rows: minmax(0, 1fr); }
+  .app:not(.focus-mode) .workspace:not(.side-panel-collapsed) > .thread-column { display: none; }
+  .app:not(.focus-mode) .panel-tabstrip { padding-left: 0.25rem; }
+  .app:not(.focus-mode) .panel-collapse-toggle {
+    order: -1;
+    width: auto;
+    gap: 0.3rem;
+    grid-auto-flow: column;
+    margin: 0 0.1rem;
+    padding: 0 0.55rem;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .app:not(.focus-mode) .panel-collapse-desk { display: none; }
+  .app:not(.focus-mode) .panel-collapse-phone,
+  .app:not(.focus-mode) .panel-collapse-label { display: inline; }
+  .app:not(.focus-mode) .tabs { padding-inline: 0.25rem; gap: 0; }
+  .app:not(.focus-mode) .tabs button { padding-inline: 0.35rem; }
+  /* The bottom bar: chat is what is on screen, so no panel tab reads as selected, and the
+     expand toggle has nothing to add over four labelled destinations. */
+  .panel-rail-toggle { display: none; }
+  .panel-rail-tabs button { flex-direction: column; gap: 0.15rem; padding: 0.3rem 0.2rem; }
+  .panel-rail-tabs button.on { color: var(--text-muted); background: none; }
+  .panel-rail-tabs button.on:hover { color: var(--text); background: var(--bg-inset); }
+  .panel-rail-label {
+    position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto;
+    font-size: 0.68rem; text-transform: capitalize; letter-spacing: 0.01em;
   }
 }

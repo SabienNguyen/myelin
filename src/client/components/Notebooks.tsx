@@ -309,7 +309,7 @@ function UnfiledRow({ thread, notebooks, onFiled }: {
       <a href={threadHref(thread.id)} className="nb-row-title">{thread.title}</a>
       <span className="nb-row-time">{relativeTime(thread.updatedAt)}</span>
       {notebooks.length > 0 && (
-        <>
+        <span className={`nb-file${target ? ' armed' : ''}`}>
           <label htmlFor={selectId} className="visually-hidden">File “{thread.title}” under a notebook</label>
           <select id={selectId} value={target} onChange={(e) => setTarget(e.target.value)}>
             <option value="">file under…</option>
@@ -319,7 +319,7 @@ function UnfiledRow({ thread, notebooks, onFiled }: {
             aria-label={`File “${thread.title}”`} onClick={file}>
             file
           </button>
-        </>
+        </span>
       )}
       {error && <p className="panel-error" role="alert">{error}</p>}
     </li>

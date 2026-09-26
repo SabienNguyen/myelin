@@ -10,7 +10,7 @@
 // resolves through a real provider instead of needing a second, conflicting mock.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, cleanup, act, fireEvent, waitFor } from '@testing-library/react';
-import { useEffect, useRef, useState, type PropsWithChildren } from 'react';
+import { useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import { AssistantRuntimeProvider, Tools, useAui, useLocalRuntime } from '@assistant-ui/react';
 import { ChatStore, ChatStoreContext } from '../../src/client/chatCore/index.js';
 import { toolkit } from '../../src/client/toolkit.js';
@@ -440,5 +440,30 @@ describe('SidePanel — empty Stage', () => {
     fireEvent.click(quizBtn);
     unsub();
     expect(seen).toEqual(["Quiz me on what we've covered in this conversation."]);
+  });
+});
+
+describe('SidePanel — a reply while the panel is open', () => {
+  // On a phone the open panel covers the chat, so the tutor can answer out of sight — a grading
+  // turn after a stage Submit does. The collapse button (the phone's "Chat") says so in its name.
+  it('names a reply that arrived after the panel opened, and forgets it once the panel closes', async () => {
+    let store: ChatStore | null = null;
+    function Grab() { store = useContext(ChatStoreContext); return null; }
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><Grab /><ControlledSidePanel /></TestRuntime>);
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+
+    act(() => store!.setMessages([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: '6' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Right.' }] },
+    ]));
+    const named = screen.getByRole('button', { name: 'Collapse side panel (new reply in chat)' });
+
+    fireEvent.click(named);
+    await waitFor(() => expect(railExpandBtn()).not.toBeNull());
+    fireEvent.click(railExpandBtn()!);
+    // Reopened after reading it: nothing new since.
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
   });
 });
