@@ -3,6 +3,7 @@ import { BrainIcon as Brain, UserCircleIcon as UserCircle } from '@phosphor-icon
 import { LocalModelGetter } from './LocalModelGetter.js';
 import { CodexConnectionPanel } from './CodexConnectionPanel.js';
 import { useDismissableDialog } from '../lib/useDismissableDialog.js';
+import { ThemeChoice } from './ThemeToggle.js';
 
 type Status = { anki?: 'up' | 'down' | 'backlog'; student?: string; tutor?: string };
 
@@ -58,13 +59,6 @@ export function TopbarStatus() {
   }, []);
   return (
     <div className="topbar-status">
-      {status.student && <StudentSwitcher current={status.student} onSwitched={(name) => setStatus((s) => ({ ...s, student: name }))} />}
-      {status.tutor && (
-        <ModelsMenu
-          tutor={status.tutor}
-          onSaved={(tutor) => setStatus((s) => ({ ...s, tutor }))}
-        />
-      )}
       {/* 'down' is omitted, not shown greyed: on a first run nobody has Anki installed, and an
           amber badge for a feature the learner never asked for reads as "something is broken".
           A backlog IS worth flagging — that one is about work they have already done. */}
@@ -79,17 +73,61 @@ export function TopbarStatus() {
           <span className="statusdot" aria-hidden="true" /> anki
         </span>
       )}
+      <SettingsMenu status={status} setStatus={setStatus} />
     </div>
   );
 }
 
-
 /**
- * The student badge, grown into a switcher: one vault, several learners, separate evidence —
- * engram has always keyed the student model by id, and this is the surface that lets a
- * household actually use that. Menu lists known students (anyone with a state file) plus a
- * field for a new name; switching takes effect on the next request and persists.
+ * Who is studying, which model teaches, and light or dark, behind one avatar. They were three
+ * topbar pills ("e2e", "Scripted", a sun) that read as developer status and crowded a phone's row.
+ * The student switcher and the models form keep their own triggers and dialogs, opening in place
+ * inside this panel (styles.css); Escape closes the innermost first (useDismissableDialog).
  */
+function SettingsMenu({ status, setStatus }: {
+  status: Status; setStatus: (update: (s: Status) => Status) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  useDismissableDialog({ open, rootRef, triggerRef, onClose: () => setOpen(false) });
+  const student = status.student ?? '';
+  const initial = Array.from(student.trim())[0]?.toUpperCase() ?? '';
+  return (
+    <span className="settings-menu" ref={rootRef}>
+      <button
+        ref={triggerRef} type="button" className="settings-trigger"
+        aria-haspopup="dialog" aria-expanded={open}
+        aria-label={student ? `settings — studying as ${student}` : 'settings'}
+        title="Settings"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {initial ? <span className="settings-avatar" aria-hidden="true">{initial}</span> : <UserCircle size={18} weight="duotone" />}
+      </button>
+      {open && (
+        <span className="settings-panel" role="dialog" aria-label="settings">
+          {status.student && (
+            <span className="settings-row">
+              <span className="settings-row-label">Student</span>
+              <StudentSwitcher current={status.student} onSwitched={(name) => setStatus((s) => ({ ...s, student: name }))} />
+            </span>
+          )}
+          {status.tutor && (
+            <span className="settings-row">
+              <span className="settings-row-label">Tutor</span>
+              <ModelsMenu tutor={status.tutor} onSaved={(tutor) => setStatus((s) => ({ ...s, tutor }))} />
+            </span>
+          )}
+          <span className="settings-row">
+            <span className="settings-row-label">Theme</span>
+            <ThemeChoice />
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched: (name: string) => void }) {
   const [open, setOpen] = useState(false);
   const [students, setStudents] = useState<string[]>([]);

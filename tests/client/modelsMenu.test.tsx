@@ -63,6 +63,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 async function openPopover() {
   render(<TopbarStatus />);
+  fireEvent.click(await screen.findByRole('button', { name: /^settings/ }));
   fireEvent.click(await screen.findByRole('button', { name: /configure models/i }));
   return screen.findByRole('dialog', { name: 'models' });
 }

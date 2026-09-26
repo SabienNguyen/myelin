@@ -5,7 +5,7 @@
 // of thing a later "simplification" drops — these pin it, plus the accessible name each state
 // carries (the dot's colour is aria-hidden, so the label is the only non-visual carrier of state).
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
 import { TopbarStatus, modelLabel } from '../../src/client/components/TopbarStatus.js';
 
 function stubStatus(status: Record<string, unknown>, extra: Record<string, unknown> = {}) {
@@ -42,8 +42,8 @@ describe('TopbarStatus — the Anki badge is shown only when it says something u
   it('a closed Anki shows NO badge — down is silent, not greyed', async () => {
     stubStatus({ student: 'e2e', tutor: 'claude-sonnet-5', anki: 'down' });
     render(<TopbarStatus />);
-    // The tutor badge proves the status fetch resolved and the bar rendered…
-    await screen.findByText('Sonnet 5');
+    // The settings avatar naming the student proves the status fetch resolved and the bar rendered…
+    await screen.findByRole('button', { name: 'settings — studying as e2e' });
     // …and yet nothing anki is on screen.
     expect(screen.queryByLabelText(/anki/i)).toBeNull();
     expect(document.querySelector('[class*="anki-"]')).toBeNull();
@@ -52,7 +52,7 @@ describe('TopbarStatus — the Anki badge is shown only when it says something u
   it('an absent anki field shows no badge either', async () => {
     stubStatus({ student: 'e2e', tutor: 'claude-sonnet-5' });
     render(<TopbarStatus />);
-    await screen.findByText('Sonnet 5');
+    await screen.findByRole('button', { name: 'settings — studying as e2e' });
     await waitFor(() => expect(document.querySelector('[class*="anki-"]')).toBeNull());
   });
 });
@@ -68,6 +68,7 @@ describe('StudentSwitcher — a popup with inputs is a dialog, not a menu', () =
       { students: { current: 'e2e', students: ['e2e', 'alex'] }, voice: { voice: '' } },
     );
     render(<TopbarStatus />);
+    fireEvent.click(await screen.findByRole('button', { name: /^settings/ }));
     const trigger = await screen.findByRole('button', { name: /switch student/i });
     expect(trigger.getAttribute('aria-haspopup')).toBe('dialog');
 
@@ -88,5 +89,27 @@ describe('modelLabel', () => {
   it('falls back to the id when a routed prefix carries no model', () => {
     expect(modelLabel('oai:')).toEqual({ name: 'oai:', how: 'OpenAI API' });
     expect(modelLabel('groq:llama-4')).toEqual({ name: 'llama-4', how: 'Groq' });
+  });
+});
+
+describe('settings menu', () => {
+  it('one avatar holds student, tutor and theme; Escape closes the models form first, then the menu', async () => {
+    stubStatus({ student: 'e2e', tutor: 'claude-sonnet-5' });
+    render(<TopbarStatus />);
+    const avatar = await screen.findByRole('button', { name: 'settings — studying as e2e' });
+    expect(avatar.textContent).toBe('E');
+    expect(screen.queryByRole('button', { name: /configure models/i })).toBeNull();
+    fireEvent.click(avatar);
+    const panel = await screen.findByRole('dialog', { name: 'settings' });
+    expect(within(panel).getByRole('button', { name: /switch student/i })).toBeTruthy();
+    expect(within(panel).getByRole('group', { name: 'Theme' })).toBeTruthy();
+    fireEvent.click(within(panel).getByRole('button', { name: /configure models/i }));
+    await screen.findByRole('dialog', { name: 'models' });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'models' })).toBeNull());
+    expect(screen.getByRole('dialog', { name: 'settings' })).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'settings' })).toBeNull());
+    expect(document.activeElement).toBe(avatar);
   });
 });

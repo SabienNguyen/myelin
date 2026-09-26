@@ -19,13 +19,20 @@ export function useDismissableDialog({ open, rootRef, triggerRef, onClose }: {
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      // Nested popovers (a settings panel holding the models form) close one at a time, innermost
+      // first: a dialog still open INSIDE this one's root takes this Escape, not this one.
+      const root = rootRef.current;
+      if (root && [...root.querySelectorAll('[data-dialog-open]')].some((el) => el !== root)) return;
       e.preventDefault();
       close.current();
       triggerRef.current?.focus();
     };
+    rootRef.current?.setAttribute('data-dialog-open', '');
+    const marked = rootRef.current;
     document.addEventListener('mousedown', onDown);
     window.addEventListener('keydown', onKey);
     return () => {
+      marked?.removeAttribute('data-dialog-open');
       document.removeEventListener('mousedown', onDown);
       window.removeEventListener('keydown', onKey);
     };

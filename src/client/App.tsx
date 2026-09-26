@@ -6,7 +6,6 @@ import { Thread } from './components/Thread.js';
 import { SidePanel } from './components/SidePanel.js';
 import { TopbarStatus } from './components/TopbarStatus.js';
 import { HistoryMenu } from './components/HistoryMenu.js';
-import { ThemeToggle } from './components/ThemeToggle.js';
 import { FocusRail } from './components/FocusRail.js';
 import { FirstRun } from './components/FirstRun.js';
 import { AddMaterial } from './components/AddMaterial.js';
@@ -246,7 +245,6 @@ export function App() {
             {!notebookRoute && <NotebookCrumb threadId={threadId} />}
             <CommandPalette threadId={threadId} />
             <HistoryMenu activeId={threadId} onSelect={selectThread} />
-            <ThemeToggle />
             <TopbarStatus />
             {/* THE add entry point — one control for every kind of material (file, git URL, local
                 folder). Not one button per artifact; AddMaterial routes by what it was given. */}

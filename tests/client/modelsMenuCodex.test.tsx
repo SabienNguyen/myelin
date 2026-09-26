@@ -29,7 +29,8 @@ describe('ModelsMenu — ChatGPT connection section', () => {
   it('opens with the models dialog and starts sign-in only on explicit click', async () => {
     const fetched = stubFetch();
     render(<TopbarStatus />);
-    fireEvent.click(await screen.findByRole('button', { name: /configure models/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^settings/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /configure models/i }));
     await screen.findByText('Not connected');
     expect(fetched.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
     fireEvent.click(screen.getByRole('button', { name: 'Sign in with ChatGPT' }));
@@ -42,7 +43,8 @@ describe('ModelsMenu — ChatGPT connection section', () => {
   it('shows a connected plan with an explicit disconnect control', async () => {
     stubFetch(true);
     render(<TopbarStatus />);
-    fireEvent.click(await screen.findByRole('button', { name: /configure models/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^settings/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /configure models/i }));
     await screen.findByText(/Connected · plus/);
     expect(screen.getByRole('button', { name: 'Disconnect ChatGPT' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign in with ChatGPT' })).toBeNull();

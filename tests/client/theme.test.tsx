@@ -2,7 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { initScheme, chooseScheme, currentScheme } from '../../src/client/lib/theme.js';
-import { ThemeToggle } from '../../src/client/components/ThemeToggle.js';
+import { ThemeChoice } from '../../src/client/components/ThemeToggle.js';
 
 // An OS whose scheme the test can flip, firing the change listeners the way a browser does.
 function fakeOs(initial: 'light' | 'dark') {
@@ -42,13 +42,15 @@ describe('colour scheme', () => {
     expect(currentScheme()).toBe('light');
   });
 
-  it('the topbar toggle flips the page and names the scheme it switches to', () => {
+  it('the settings choice sets the page\'s scheme and shows which one is on', () => {
     fakeOs('dark');
     initScheme();
-    render(<ThemeToggle />);
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to light theme' }));
+    render(<ThemeChoice />);
+    expect(screen.getByRole('button', { name: 'Dark' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Light' }));
     expect(document.documentElement.dataset.theme).toBe('light');
-    fireEvent.click(screen.getByRole('button', { name: 'Switch to dark theme' }));
+    expect(screen.getByRole('button', { name: 'Light' }).getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByRole('button', { name: 'Dark' }));
     expect(document.documentElement.dataset.theme).toBe('dark');
   });
 });
