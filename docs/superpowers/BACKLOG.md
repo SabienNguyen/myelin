@@ -241,8 +241,10 @@ spawns the vendored Engram over stdio exactly as in development.
 
 Still open:
 
-1. **No application icon** — the default Electron icon ships. Cosmetic, and the first thing anyone
-   will notice.
+1. ~~**No application icon**~~ **Closed**: `build/icon.svg` (an open book in the accent blue, a
+   short path of nodes on its right page) rendered to `build/icon.png`, which electron-builder
+   picks up from its default buildResources directory for every target. Regenerate the PNG from
+   the SVG when the mark changes. The favicon now uses the same colours.
 2. **No code signing or notarization.** On macOS that means Gatekeeper blocks it; on Windows,
    SmartScreen warns. Both need certificates, which is a purchasing decision, not a coding one.
 3. **Only the Linux AppImage has been built and launched.** The mac and win targets are configured
