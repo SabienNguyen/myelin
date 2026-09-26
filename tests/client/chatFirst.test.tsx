@@ -156,7 +156,9 @@ describe('what the tutor is doing', () => {
     expect(currentStep(msg())).toBe('thinking');
     expect(currentStep(msg({ type: 'tool-read_page', toolCallId: 'r', state: 'input-available', input: { slug: 'chain-rule' } }))).toBe('reading chain rule');
     expect(currentStep(msg({ type: 'tool-web_search', toolCallId: 'w', state: 'input-streaming', input: {} }))).toBe('searching the web');
-    expect(currentStep(msg({ type: 'tool-quiz', toolCallId: 'q', state: 'input-available', input: {} }))).toBe('setting an exercise');
+    expect(currentStep(msg({ type: 'tool-quiz', toolCallId: 'q', state: 'input-streaming', input: {} }))).toBe('setting an exercise');
+    // A complete block waits on the learner, so it is not the tutor's step.
+    expect(currentStep(msg({ type: 'tool-quiz', toolCallId: 'q', state: 'input-available', input: {} }))).toBe('thinking');
     // A finished tool is past; the text after it is what is streaming now.
     expect(currentStep(msg(
       { type: 'tool-read_page', toolCallId: 'r', state: 'output-available', input: { slug: 'x' }, output: {} },
@@ -173,6 +175,15 @@ describe('after a miss', () => {
     expect(missedOn(qc('incorrect'))).toEqual(['What is 2+2?']);
     expect(missedOn(qc('correct'))).toBeNull();
     expect(missedOn(answered[1])).toBeNull();
+  });
+
+  it('steps aside while another exercise on the same message waits for an answer', async () => {
+    const open = [quizMiss[0], { ...quizMiss[1], parts: [...quizMiss[1].parts,
+      { type: 'tool-quick_check', toolCallId: 'c2', state: 'input-available', input: { question: 'Next?' } } as any] }];
+    stubServer(open, []);
+    await renderThread();
+    await screen.findByText(LONG_ANSWER.slice(0, 30), { exact: false });
+    expect(screen.queryByRole('button', { name: 'practise the one I missed' })).toBeNull();
   });
 
   it('offers practising the missed item instead of the generic chips, and asks for a fresh question on it', async () => {

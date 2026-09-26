@@ -587,8 +587,11 @@ const STEP: Record<string, string> = {
 export function currentStep(message: UIMessage | undefined): string {
   if (message?.role !== 'assistant') return 'thinking';
   const lastPart = message.parts.at(-1);
+  // A block whose input is complete is waiting on the LEARNER, not the tutor: while an answer to
+  // one exercise is graded, a second unanswered one must not read as "setting an exercise".
   const running = [...message.parts].reverse().find((p) => isToolUIPart(p)
-    && p.state !== 'output-available' && p.state !== 'output-error');
+    && p.state !== 'output-available' && p.state !== 'output-error'
+    && !(p.state === 'input-available' && (BLOCK_TOOL_NAMES as readonly string[]).includes(getToolName(p))));
   if (running && isToolUIPart(running)) {
     const name = getToolName(running);
     const input = (running as { input?: { slug?: unknown; title?: unknown } }).input;
@@ -648,7 +651,9 @@ function MissedFollowUp({ drafting }: { drafting: boolean }) {
   const store = useChatStore();
   const { messages, isRunning, error } = useSyncExternalStore(store.subscribe, store.getState);
   const last = messages[messages.length - 1];
-  if (drafting || isRunning || error !== undefined || last?.role !== 'assistant' || turnFailed(last)) return null;
+  if (drafting || isRunning || error !== undefined || last?.role !== 'assistant' || turnFailed(last)
+    // An exercise still open on the message is the next step; a fresh question would strand it.
+    || awaitsAnswer(last)) return null;
   const missed = missedOn(last);
   if (missed === null) return null;
   const named = missed.slice(0, 4).map((m) => oneLine(m, 120)).join('; ');
