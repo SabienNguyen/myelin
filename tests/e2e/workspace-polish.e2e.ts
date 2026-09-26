@@ -17,6 +17,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.getByRole('tab', { name: 'stage', exact: true }).click();
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
+      // A phone shows one view at a time: the open panel covers the chat until "Chat" is tapped.
+      if (width < 641) {
+        await expect(page.locator('.composer')).toBeHidden();
+        await page.getByRole('button', { name: 'Collapse side panel' }).click();
+      }
       const toggle = page.locator('.composer').getByRole('button', { name: 'Math symbols' });
       await toggle.click();
       const card = await page.locator('.composer-row').boundingBox();

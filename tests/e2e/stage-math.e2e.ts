@@ -18,6 +18,8 @@ test('completed math remains readable in Stage after reload in both themes', asy
   page.on('pageerror', (e) => errors.push(e.message));
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
+    // The previous pass ended at phone width, where an open panel covers the transcript.
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/#/t/math-review/stage');
     // A prior graded exercise doesn't itself expand a freshly-collapsed panel — only a deliberate
     // navigation does (StagePortal's setTab fires for a LIVE stage, not replayed history). The
