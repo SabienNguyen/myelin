@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { StrictMode, useState } from 'react';
 import { setPendingAsk } from '../../src/client/lib/pendingAsk.js';
-import { Thread } from '../../src/client/components/Thread.js';
+import { Thread, missedOn } from '../../src/client/components/Thread.js';
 import { Runtime } from '../../src/client/runtime.js';
 import type { UIMessage } from '../../src/shared/uiMessages.js';
 import { sseResponse, sseText } from './chatCore/sse.js';
@@ -136,6 +136,37 @@ describe('the plan one item at a time', () => {
     expect(chats[0].command).toBe('study');
     expect(lastUserText(chats[0])).toContain('1. [new] "continuity"');
     expect(lastUserText(chats[0])).not.toContain('limits');
+  });
+});
+
+const quizMiss: UIMessage[] = [
+  { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'quiz me on derivatives' }] },
+  { id: 'a1', role: 'assistant', parts: [
+    { type: 'tool-quiz', toolCallId: 'q1', state: 'output-available',
+      input: { title: 'Derivatives', items: [{ id: 'a', prompt: 'Differentiate x^3.' }, { id: 'b', prompt: 'What is a limit?' }] },
+      output: { answers: [], grading: { verdict: 'partial', detail: '1 of 2', perItem: [{ id: 'a', correct: false }, { id: 'b', correct: true }] } } } as any,
+    { type: 'text', text: LONG_ANSWER },
+  ] },
+];
+
+describe('after a miss', () => {
+  it('names what was missed from a quiz, a single check, or nothing to name', () => {
+    expect(missedOn(quizMiss[1])).toEqual(['Differentiate x^3.']);
+    const qc = (verdict: string) => ({ id: 'a', role: 'assistant', parts: [{ type: 'tool-quick_check', toolCallId: 'c', state: 'output-available',
+      input: { question: 'What is 2+2?' }, output: { grading: { verdict, detail: '' } } }] }) as any as UIMessage;
+    expect(missedOn(qc('incorrect'))).toEqual(['What is 2+2?']);
+    expect(missedOn(qc('correct'))).toBeNull();
+    expect(missedOn(answered[1])).toBeNull();
+  });
+
+  it('offers practising the missed item instead of the generic chips, and asks for a fresh question on it', async () => {
+    const chats = stubServer(quizMiss, [LONG_ANSWER]);
+    await renderThread();
+    const practise = await screen.findByRole('button', { name: 'practise the one I missed' });
+    expect(screen.queryByRole('button', { name: 'check my understanding' })).toBeNull();
+    fireEvent.click(practise);
+    await waitFor(() => expect(chats).toHaveLength(1));
+    expect(lastUserText(chats[0])).toMatch(/^I missed “Differentiate x\^3\.”\. Give me a fresh question on it/);
   });
 });
 

@@ -10,7 +10,7 @@ import { AsidePart } from './AsidePart.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 import { CommandEditor, type CommandEditorHandle } from './CommandEditor.js';
 import { MarkdownText } from './MarkdownText.js';
-import { NotebookIntro, NotebookPicker, useConversationNotebook } from './Notebooks.js';
+import { NotebookIntro, NotebookPicker, oneLine, useConversationNotebook } from './Notebooks.js';
 import { ToolStatusChip } from './ToolStatusChip.js';
 import { panelBus } from '../lib/panelBus.js';
 import { takePendingAsk } from '../lib/pendingAsk.js';
@@ -572,12 +572,63 @@ function answerAwaitingGrade(message: UIMessage): boolean {
  * waiting, while a turn runs, after a turn that failed (its note is no answer to check), and once
  * the learner starts typing their own next message.
  */
+/**
+ * What the newest graded block on `message` got wrong, as the prompts the learner missed; null
+ * when that block's grade was not a miss (or there is no graded block). An empty list means a miss
+ * with no per-item prompt to name (a scratchpad, a draft). Pure.
+ */
+export function missedOn(message: UIMessage): string[] | null {
+  const graded = message.parts.filter((p) => isToolUIPart(p)
+    && (BLOCK_TOOL_NAMES as readonly string[]).includes(getToolName(p))
+    && p.state === 'output-available'
+    && (p.output as { grading?: unknown } | undefined)?.grading);
+  const part = graded.at(-1) as { input?: any; output?: any } | undefined;
+  if (!part) return null;
+  const verdict = part.output?.grading?.verdict;
+  if (verdict !== 'incorrect' && verdict !== 'partial') return null;
+  const input = part.input ?? {};
+  const perItem: { id: string; correct: boolean }[] = Array.isArray(part.output.grading.perItem) ? part.output.grading.perItem : [];
+  if (Array.isArray(input.items) && perItem.length > 0) {
+    const wrong = new Set(perItem.filter((i) => !i.correct).map((i) => i.id));
+    return input.items.filter((i: any) => wrong.has(i?.id) && typeof i?.prompt === 'string').map((i: any) => i.prompt);
+  }
+  const single = input.question ?? input.prompt;
+  return typeof single === 'string' ? [single] : [];
+}
+
+/**
+ * The one next step after a miss: a fresh question on exactly what was missed, rather than a
+ * "2 of 3 correct" with nowhere to go. In every mode, since a study session's miss is the same
+ * moment. Steps aside while a turn runs or the learner types, like FollowUps, which it replaces.
+ */
+function MissedFollowUp({ drafting }: { drafting: boolean }) {
+  const store = useChatStore();
+  const { messages, isRunning, error } = useSyncExternalStore(store.subscribe, store.getState);
+  const last = messages[messages.length - 1];
+  if (drafting || isRunning || error !== undefined || last?.role !== 'assistant' || turnFailed(last)) return null;
+  const missed = missedOn(last);
+  if (missed === null) return null;
+  const named = missed.slice(0, 4).map((m) => oneLine(m, 120)).join('; ');
+  const ask = missed.length > 0
+    ? `I missed ${named}. Give me a fresh question on ${missed.length === 1 ? 'it' : 'them'}, not the same one, and check me before explaining.`
+    : 'Give me a fresh question on what I just missed, not the same one, and check me before explaining.';
+  return (
+    <div className="follow-ups">
+      <button type="button" onClick={() => store.sendMessage(ask)}>
+        {missed.length > 1 ? 'practise the ones I missed' : 'practise the one I missed'}
+      </button>
+    </div>
+  );
+}
+
 function FollowUps({ drafting }: { drafting: boolean }) {
   const store = useChatStore();
   const { messages, isRunning, error } = useSyncExternalStore(store.subscribe, store.getState);
   const last = messages[messages.length - 1];
   if (drafting || isRunning || error !== undefined
     || last?.role !== 'assistant' || turnFailed(last) || awaitsAnswer(last)) return null;
+  // After a miss the one useful next step is MissedFollowUp's; these would compete with it.
+  if (missedOn(last) !== null) return null;
   const said = last.parts.map((p) => (p.type === 'text' ? p.text : '')).join('').trim();
   if (said.length < MIN_FOLLOW_UP_CHARS) return null;
   return (
@@ -864,6 +915,7 @@ export function Thread({ mode = '', onModeChange, threadId }: {
           <EmptyHero threadId={threadId} />
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages components={{ UserMessage, AssistantMessage }} />
+        <MissedFollowUp drafting={drafting} />
         {mode === '' && <FollowUps drafting={drafting} />}
         <RetryFailed drafting={drafting} />
         <ThreadPrimitive.If running>
