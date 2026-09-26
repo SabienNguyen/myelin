@@ -572,6 +572,49 @@ function answerAwaitingGrade(message: UIMessage): boolean {
  * waiting, while a turn runs, after a turn that failed (its note is no answer to check), and once
  * the learner starts typing their own next message.
  */
+// What a running tool call is doing, in the learner's words. Page tools name their page.
+const STEP: Record<string, string> = {
+  search: 'searching your pages', web_search: 'searching the web', WebSearch: 'searching the web',
+  read_url: 'reading a web page', WebFetch: 'reading a web page', record_evidence: 'saving what you showed',
+  get_student_state: 'checking your progress', next_lessons: 'picking what comes next',
+  find_analogies: 'looking for an analogy', link_pages: 'linking pages', compile_source: 'reading your source',
+  find_recent_papers: 'looking for papers', find_canonical_sources: 'looking for sources',
+  ingest_paper: 'reading a paper', generate_exercise: 'writing an exercise', course_problems: 'picking a problem',
+};
+
+/** The step a running turn is on, from its newest part: a tool still in flight names what it is
+ *  doing, streaming text is "writing", anything before either is "thinking". Pure. */
+export function currentStep(message: UIMessage | undefined): string {
+  if (message?.role !== 'assistant') return 'thinking';
+  const lastPart = message.parts.at(-1);
+  const running = [...message.parts].reverse().find((p) => isToolUIPart(p)
+    && p.state !== 'output-available' && p.state !== 'output-error');
+  if (running && isToolUIPart(running)) {
+    const name = getToolName(running);
+    const input = (running as { input?: { slug?: unknown; title?: unknown } }).input;
+    const page = typeof input?.title === 'string' ? input.title
+      : typeof input?.slug === 'string' ? input.slug.replace(/-/g, ' ') : null;
+    if (name === 'read_page') return page ? `reading ${page}` : 'reading a page';
+    if (name === 'write_page') return page ? `writing ${page}` : 'writing a page';
+    if ((BLOCK_TOOL_NAMES as readonly string[]).includes(name)) return 'setting an exercise';
+    return STEP[name] ?? 'working';
+  }
+  return lastPart?.type === 'text' && lastPart.text.trim() ? 'writing' : 'thinking';
+}
+
+/** The running turn's status line: what the tutor is doing now, not only that it is busy. */
+function WorkingLine() {
+  const store = useChatStore();
+  const { messages, isRunning } = useSyncExternalStore(store.subscribe, store.getState);
+  if (!isRunning) return null;
+  return (
+    <div className="working" role="status">
+      <span className="dot" /><span className="dot" /><span className="dot" />
+      <em>tutor is {currentStep(messages.at(-1))}…</em>
+    </div>
+  );
+}
+
 /**
  * What the newest graded block on `message` got wrong, as the prompts the learner missed; null
  * when that block's grade was not a miss (or there is no graded block). An empty list means a miss
@@ -918,12 +961,7 @@ export function Thread({ mode = '', onModeChange, threadId }: {
         <MissedFollowUp drafting={drafting} />
         {mode === '' && <FollowUps drafting={drafting} />}
         <RetryFailed drafting={drafting} />
-        <ThreadPrimitive.If running>
-          <div className="working" role="status">
-            <span className="dot" /><span className="dot" /><span className="dot" />
-            <em>tutor is working…</em>
-          </div>
-        </ThreadPrimitive.If>
+        <WorkingLine />
       </ThreadPrimitive.Viewport>
       <Composer mode={mode} onEndMode={() => onModeChange?.('')} onDraftingChange={setDrafting} />
     </ThreadPrimitive.Root>

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { StrictMode, useState } from 'react';
 import { setPendingAsk } from '../../src/client/lib/pendingAsk.js';
-import { Thread, missedOn } from '../../src/client/components/Thread.js';
+import { Thread, currentStep, missedOn } from '../../src/client/components/Thread.js';
 import { Runtime } from '../../src/client/runtime.js';
 import type { UIMessage } from '../../src/shared/uiMessages.js';
 import { sseResponse, sseText } from './chatCore/sse.js';
@@ -148,6 +148,22 @@ const quizMiss: UIMessage[] = [
     { type: 'text', text: LONG_ANSWER },
   ] },
 ];
+
+describe('what the tutor is doing', () => {
+  const msg = (...parts: any[]) => ({ id: 'a', role: 'assistant', parts }) as UIMessage;
+  it('names the running tool, the page it works on, or the plain stages around them', () => {
+    expect(currentStep(undefined)).toBe('thinking');
+    expect(currentStep(msg())).toBe('thinking');
+    expect(currentStep(msg({ type: 'tool-read_page', toolCallId: 'r', state: 'input-available', input: { slug: 'chain-rule' } }))).toBe('reading chain rule');
+    expect(currentStep(msg({ type: 'tool-web_search', toolCallId: 'w', state: 'input-streaming', input: {} }))).toBe('searching the web');
+    expect(currentStep(msg({ type: 'tool-quiz', toolCallId: 'q', state: 'input-available', input: {} }))).toBe('setting an exercise');
+    // A finished tool is past; the text after it is what is streaming now.
+    expect(currentStep(msg(
+      { type: 'tool-read_page', toolCallId: 'r', state: 'output-available', input: { slug: 'x' }, output: {} },
+      { type: 'text', text: 'So the chain rule' },
+    ))).toBe('writing');
+  });
+});
 
 describe('after a miss', () => {
   it('names what was missed from a quiz, a single check, or nothing to name', () => {
