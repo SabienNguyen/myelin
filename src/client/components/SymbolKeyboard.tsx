@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import { SigmaIcon } from '@phosphor-icons/react';
 
 /** Unicode, not LaTeX: these characters can be read and edited in ordinary text answers. */
 export const SYMBOLS = [
@@ -23,8 +24,10 @@ export function SymbolKeyboard({ onInsert, disabled = false }: {
   return (
     <div className="symbol-keyboard">
       <button type="button" className="symbol-toggle" aria-expanded={open} aria-controls={id}
-        disabled={disabled} onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
-        Math symbols
+        disabled={disabled} title="Math symbols" onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(!open)}>
+        {/* The composer shows the icon alone (styles.css); an answer field keeps the words. */}
+        <SigmaIcon size={16} aria-hidden="true" className="symbol-toggle-icon" />
+        <span className="symbol-toggle-label">Math symbols</span>
       </button>
       {open && <div id={id} className="symbol-panel">
         <p>click to insert at your cursor</p>

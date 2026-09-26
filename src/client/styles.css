@@ -3663,3 +3663,33 @@ p.quiz-expected { margin: 0.3rem 0 0; }
   .topbar .badge-label { display: none; }
   .topbar .student-badge, .topbar .model-badge { padding-inline: 0.45rem; }
 }
+
+/* ── Composer: one row ─────────────────────────────────────────────────────────────────────────
+   Attach and Σ on the left, the editor between, send on the right, bottom-aligned so they stay on
+   the last line as a long message grows. Two rows (an empty editor over a strip of controls) made
+   an empty composer twice the height of what it held. */
+.symbol-toggle { display: inline-flex; align-items: center; gap: 0.35rem; }
+.symbol-toggle-icon { display: none; }
+.composer-row { grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: end; }
+.composer-row > .composer-attach { grid-column: 1; grid-row: 1; }
+.composer-row > .composer-editor > .symbol-keyboard { grid-column: 2; grid-row: 1; }
+.composer-row > .composer-editor > div:not(.symbol-keyboard):not(.slash-menu) { grid-column: 3; grid-row: 1; }
+.composer-row > button[type="submit"], .composer-row > button.composer-stop { grid-column: 4; grid-row: 1; }
+.composer-row .composer-editor .tiptap { min-height: 0; padding: 0.4rem 0.3rem; }
+.composer-row .symbol-toggle {
+  width: 2rem; height: 2rem; justify-content: center; padding: 0;
+  border-color: transparent; background: transparent; color: var(--text-muted);
+}
+.composer-row .symbol-toggle:hover, .composer-row .symbol-toggle[aria-expanded="true"] { color: var(--text); background: var(--bg-inset); }
+.composer-row .symbol-toggle-icon { display: block; width: 18px; height: 18px; flex: none; }
+.composer-row .symbol-toggle-label {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* One line whatever the width: on a phone the command hint wrapped under the card's edge. Out of
+   the flow (the empty paragraph keeps its own line height) so it can clip with an ellipsis. */
+.composer-editor .tiptap p.is-editor-empty:first-child { position: relative; }
+.composer-editor .tiptap p.is-editor-empty:first-child::before {
+  position: absolute; inset: 0 0 auto 0; float: none; height: auto;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}

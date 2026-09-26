@@ -137,7 +137,8 @@ export function CommandEditor({ handleRef, onEnter, onEmptyChange, onEscape, ini
 
   const extensions = useMemo(() => [
     Document, Paragraph, Text, UndoRedo,
-    Placeholder.configure({ placeholder: 'Ask your tutor…' }),
+    // The slash menu is the composer's whole command surface, and nothing else said it exists.
+    Placeholder.configure({ placeholder: 'Ask your tutor…  (/ for commands)' }),
     CommandChip,
     Extension.create({
       name: 'composerKeymap',
