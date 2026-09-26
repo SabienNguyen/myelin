@@ -474,6 +474,61 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
     }
     setNote({ text: `${ollamaTag} ready — press save to use it`, err: false });
   };
+  // One role's rows: its provider and model id, and (under "other roles") its context window. The
+  // tutor's model sits at the top of the dialog and its window in the collapsed section, so the
+  // two halves render separately.
+  const roleRows = (r: RoleName, withContext: boolean, withModel = true) => (
+    <>
+      {withModel && (
+        <>
+          <span className="models-row">
+            <label htmlFor={`models-provider-${r}`}>{r} provider</label>
+            <select
+              id={`models-provider-${r}`} value={splitModel(roles[r]).provider}
+              onFocus={() => { lastRole.current = r; }}
+              onChange={(e) => setRoles((s) => ({ ...s,
+                [r]: routedModel(e.target.value as Provider, splitModel(s[r]).model),
+              }))}
+            >
+              {PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </span>
+          <span className="models-row">
+            <label htmlFor={`models-role-${r}`}>{r}</label>
+            <input
+              id={`models-role-${r}`} ref={r === 'tutor' ? firstRef : undefined}
+              list={`model-id-list-${splitModel(roles[r]).provider}`} autoComplete="off" spellCheck={false}
+              value={splitModel(roles[r]).model}
+              onFocus={() => { lastRole.current = r; }}
+              onChange={(e) => {
+                const value = e.target.value;
+                setRoles((s) => ({ ...s, [r]: /^(oai|openrouter|groq|ollama|openai):/.test(value.trim())
+                  ? value.trim() : routedModel(splitModel(s[r]).provider, value) }));
+              }}
+            />
+            {/* settings.json can hold this role as a hand-tuned object (sampler, effort — see
+                settings.ts's RoleObject) instead of a bare id. A save here still only ever
+                touches the id (setupRoutes.ts keeps the rest), so this is a note, not a field. */}
+            {loaded?.roles[r]?.savedHasOverrides && (
+              <span className="models-shadow-note">custom settings saved — editing the id keeps them</span>
+            )}
+          </span>
+        </>
+      )}
+      {withContext && (
+        <span className="models-row">
+          <label htmlFor={`models-context-${r}`}>{r} context</label>
+          <input
+            id={`models-context-${r}`} type="number" min={1} step={1} inputMode="numeric"
+            autoComplete="off" placeholder="model default"
+            value={windows[r]}
+            onFocus={() => { lastRole.current = r; }}
+            onChange={(e) => setWindows((s) => ({ ...s, [r]: e.target.value }))}
+          />
+        </span>
+      )}
+    </>
+  );
   return (
     <span className="models-menu" ref={rootRef}>
       <button
@@ -489,61 +544,36 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
       {/* A dialog for the same reason StudentSwitcher is one: text inputs cannot live in a menu. */}
       {open && (
         <form className="models-panel" role="dialog" aria-label="models" onSubmit={save}>
-          {/* oai: and openai: read the same brand name but are different routes (models.ts):
-              oai:<model> is OpenAI's own Responses API — built-in web search, reasoning alongside
-              tools; openai: stays the generic OpenAI-compatible endpoint (LM Studio, LiteLLM, a
-              proxy), which needs its own base URL below. */}
-          <span className="models-hint">
-            oai is OpenAI's own API (built-in web search, e.g. oai:gpt-5.1); OpenAI-compatible is
-            any other server that speaks the same wire (LM Studio, LiteLLM, a proxy) and needs a
-            base URL.
-          </span>
-          {ROLE_ORDER.map((r, i) => (
-            <Fragment key={r}>
-              <span className="models-row">
-                <label htmlFor={`models-provider-${r}`}>{r} provider</label>
-                <select
-                  id={`models-provider-${r}`} value={splitModel(roles[r]).provider}
-                  onFocus={() => { lastRole.current = r; }}
-                  onChange={(e) => setRoles((s) => ({ ...s,
-                    [r]: routedModel(e.target.value as Provider, splitModel(s[r]).model),
-                  }))}
-                >
-                  {PROVIDERS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-                </select>
-              </span>
-              <span className="models-row">
-                <label htmlFor={`models-role-${r}`}>{r}</label>
-                <input
-                  id={`models-role-${r}`} ref={i === 0 ? firstRef : undefined}
-                  list={`model-id-list-${splitModel(roles[r]).provider}`} autoComplete="off" spellCheck={false}
-                  value={splitModel(roles[r]).model}
-                  onFocus={() => { lastRole.current = r; }}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setRoles((s) => ({ ...s, [r]: /^(oai|openrouter|groq|ollama|openai):/.test(value.trim())
-                      ? value.trim() : routedModel(splitModel(s[r]).provider, value) }));
-                  }}
-                />
-                {/* settings.json can hold this role as a hand-tuned object (sampler, effort — see
-                    settings.ts's RoleObject) instead of a bare id. A save here still only ever
-                    touches the id (setupRoutes.ts keeps the rest), so this is a note, not a field. */}
-                {loaded?.roles[r]?.savedHasOverrides && (
-                  <span className="models-shadow-note">custom settings saved — editing the id keeps them</span>
-                )}
-              </span>
-              <span className="models-row">
-                <label htmlFor={`models-context-${r}`}>{r} context</label>
-                <input
-                  id={`models-context-${r}`} type="number" min={1} step={1} inputMode="numeric"
-                  autoComplete="off" placeholder="model default"
-                  value={windows[r]}
-                  onFocus={() => { lastRole.current = r; }}
-                  onChange={(e) => setWindows((s) => ({ ...s, [r]: e.target.value }))}
-                />
-              </span>
-            </Fragment>
-          ))}
+          {roleRows('tutor', false)}
+          {/* Every other role, and every context window, is tuning most learners never need —
+              collapsed so the one choice that matters (who teaches) is what the dialog opens on. */}
+          <details className="models-advanced">
+            <summary>other roles and context windows</summary>
+            {/* oai: and openai: read the same brand name but are different routes (models.ts):
+                oai:<model> is OpenAI's own Responses API — built-in web search, reasoning alongside
+                tools; openai: stays the generic OpenAI-compatible endpoint (LM Studio, LiteLLM, a
+                proxy), which needs its own base URL below. */}
+            <span className="models-hint">
+              oai is OpenAI's own API (built-in web search, e.g. oai:gpt-5.1); OpenAI-compatible is
+              any other server that speaks the same wire (LM Studio, LiteLLM, a proxy) and needs a
+              base URL.
+            </span>
+            {roleRows('tutor', true, false)}
+            {ROLE_ORDER.filter((r) => r !== 'tutor').map((r) => <Fragment key={r}>{roleRows(r, true)}</Fragment>)}
+            {/* The window is the only lever over compaction and the truncation warning, and it
+                used to be reachable from harness.config.json alone — a learner on a small-window
+                model had no supported way to protect themselves from overflow. */}
+            <span className="models-hint">
+              context is the model's window in tokens: it sets how much history a turn may carry
+              before compaction, and how large a chunk compile sends. blank falls back to the
+              built-in defaults — unless harness.config.json declares one, which the file reapplies
+              at the next restart.
+            </span>
+            <span className="models-hint">
+              tutor and compile want the strongest model; grader and card_gen run fine on a
+              cheap or local one
+            </span>
+          </details>
           {PROVIDERS.map((p) => (
             <datalist key={p.id} id={`model-id-list-${p.id}`}>
               {[...STATIC_MODEL_IDS, ...discoveredModelIds(available)]
@@ -551,15 +581,6 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
                 .map((m) => <option key={m.model} value={m.model} />)}
             </datalist>
           ))}
-          {/* The window is the only lever over compaction and the truncation warning, and it used
-              to be reachable from harness.config.json alone — a learner on a small-window model
-              had no supported way to protect themselves from overflow. */}
-          <span className="models-hint">
-            context is the model's window in tokens: it sets how much history a turn may carry
-            before compaction, and how large a chunk compile sends. blank falls back to the
-            built-in defaults — unless harness.config.json declares one, which the file reapplies
-            at the next restart.
-          </span>
           {/* The no-cost on-ramp: every id here is verified zero-priced AND tool-capable by the
               server, so a tutor that needs block tools never lands on a model that can't run them. */}
           <span className="models-group">free models (OpenRouter)</span>
@@ -631,10 +652,6 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
               </span>
             </>
           )}
-          <span className="models-hint">
-            tutor and compile want the strongest model; grader and card_gen run fine on a
-            cheap or local one
-          </span>
           <CodexConnectionPanel />
           <span className="models-group">provider endpoints</span>
           {/* The Anthropic key, changeable after first run (the first-run card only sets it once).

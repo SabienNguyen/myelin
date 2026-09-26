@@ -3062,6 +3062,18 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
 .local-getter-blocked-foot { font-size: 0.72rem; color: var(--text-muted); margin: 0.5rem 0 0; }
 .firstrun-getter-lede { font-size: 0.85rem; margin: 0.4rem 0 0; }
 .models-foot { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3rem; }
+/* The panel scrolls; save stays in reach at its foot rather than below every endpoint field. */
+.models-foot {
+  position: sticky; bottom: -0.6rem; margin-bottom: -0.6rem; padding-block: 0.5rem 0.6rem;
+  background: var(--bg-panel); border-top: 1px solid var(--border);
+}
+.models-advanced { display: flex; flex-direction: column; gap: 0.4rem; }
+.models-advanced > summary {
+  cursor: pointer; padding: 0.25rem 0; color: var(--text-muted); font-size: 0.8rem;
+}
+.models-advanced > summary:hover { color: var(--text); }
+.models-advanced[open] > summary { margin-bottom: 0.2rem; }
+.models-advanced > :not(summary) { margin-bottom: 0.4rem; }
 .models-note { font-size: 0.78rem; color: var(--text-muted); }
 .models-note.err { color: var(--warn); }
 
