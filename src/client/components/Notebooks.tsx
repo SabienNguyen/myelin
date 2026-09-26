@@ -184,11 +184,30 @@ function MasteryLegend() {
   );
 }
 
+const VERB_LABEL: Record<TopicVerb, string> = { review: 'Review', fix: 'Fix', learn: 'Learn', practice: 'Practise' };
+
+/** A notebook on the home screen: the card opens it, and its one button does the next thing in it
+ *  (the list route's `next`), so the home screen is a list of things to do, not only of places.
+ *  The title's link stretches over the card (styles.css) because a button cannot sit in a link. */
 function NotebookCard({ nb }: { nb: NotebookSummary }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const next = nb.next;
+  async function goNext() {
+    if (!next || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await startConversation(nb.id, topicAsk(next));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  }
   return (
-    <a className="nb-card" href={notebookHash(nb.id)}>
+    <div className="nb-card">
       <span className="nb-card-head">
-        <span className="nb-card-title">{nb.title}</span>
+        <a className="nb-card-title" href={notebookHash(nb.id)}>{nb.title}</a>
         {nb.due > 0
           ? <span className="nb-pill nb-pill--due">{plural(nb.due, 'review')} due</span>
           // "Caught up" on a notebook where nothing has been learned yet reads as done.
@@ -200,8 +219,16 @@ function NotebookCard({ nb }: { nb: NotebookSummary }) {
         {plural(nb.sources, 'source')} · {plural(nb.chats, 'conversation')} · {plural(nb.topics, 'topic')}
       </span>
       <MasteryBar mastery={nb.mastery} topics={nb.topics} />
-      {relativeTime(nb.lastActive) && <span className="nb-card-time">active {relativeTime(nb.lastActive)}</span>}
-    </a>
+      <span className="nb-card-foot">
+        {relativeTime(nb.lastActive) && <span className="nb-card-time">active {relativeTime(nb.lastActive)}</span>}
+        {next && (
+          <button type="button" className="nb-card-next" disabled={busy} onClick={goNext}>
+            {VERB_LABEL[topicVerb(next)]} {next.title} <span aria-hidden="true">→</span>
+          </button>
+        )}
+      </span>
+      {error && <p className="panel-error" role="alert">{error}</p>}
+    </div>
   );
 }
 

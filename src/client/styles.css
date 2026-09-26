@@ -3311,8 +3311,21 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
   background: var(--bg-panel); color: inherit; text-decoration: none;
   transition: background 0.12s, border-color 0.12s;
 }
+/* The title's link covers the whole card (a stretched link); the next-step button sits above it. */
+.nb-card { position: relative; }
 .nb-card:hover { border-color: var(--accent); }
-.nb-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.nb-card:has(.nb-card-title:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.nb-card-title { color: inherit; text-decoration: none; }
+.nb-card-title:focus-visible { outline: none; }
+.nb-card-title::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.nb-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; margin-top: auto; }
+.nb-card-next {
+  position: relative; z-index: 1; margin-left: auto;
+  padding: 0.3rem 0.7rem; font-size: 0.82rem; font-weight: 600;
+  background: var(--accent-soft); color: var(--accent); border-color: transparent;
+}
+.nb-card-next:hover { background: var(--accent); color: var(--accent-text); }
+.nb-card .panel-error { position: relative; z-index: 1; margin: 0; }
 .nb-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; }
 .nb-card-title { font-weight: 600; font-size: 1rem; overflow-wrap: anywhere; }
 .nb-card-meta { margin: 0; color: var(--text-muted); font-size: 0.85rem; }

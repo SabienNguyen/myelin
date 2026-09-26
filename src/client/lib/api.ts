@@ -195,6 +195,9 @@ export interface NotebookSummary {
   sources: number; chats: number; topics: number;
   mastery: Record<NotebookLevel, number>;
   due: number; lastActive: string;
+  /** The home list's pick of what to do next in this notebook. Optional: only the list sends it,
+   *  and an older server not at all. */
+  next?: NotebookTopic | null;
 }
 export interface ThreadRow { id: string; title: string; updatedAt: string; messages: number }
 export interface NotebooksPayload {

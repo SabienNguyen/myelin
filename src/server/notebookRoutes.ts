@@ -68,6 +68,29 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     }
   }
 
+  /** A notebook's topics as the view lists them: due first (the thing to do next), then a
+   *  recorded misconception (the thing to fix), then by level, then by name. */
+  function topicRows(f: Awaited<ReturnType<typeof facts>>, nb: Notebook, names: Map<string, string>): NotebookTopic[] {
+    const order: Record<Level, number> = { practicing: 0, exposed: 1, mastered: 2, unseen: 3 };
+    return f.topicsOf(nb)
+      .map((slug) => {
+        const m = f.state[slug];
+        const level = levelOf(m);
+        const was = levelOf({ effective: m?.level });
+        const last = Array.isArray(m?.misconceptions) ? m!.misconceptions!.at(-1) : undefined;
+        return {
+          slug, title: names.get(slug) ?? slug, level, due: isDue(m),
+          daysLeft: typeof m?.days_left === 'number' ? m.days_left : null,
+          slipped: m?.slipped === true,
+          was: m?.slipped === true && was !== 'unseen' && was !== level ? was : null,
+          misconception: last === undefined || last === null ? null : String(last),
+        };
+      })
+      .sort((a, b) => Number(b.due) - Number(a.due)
+        || Number(b.misconception !== null) - Number(a.misconception !== null)
+        || order[a.level] - order[b.level] || a.title.localeCompare(b.title));
+  }
+
   const fail = (c: Context, e: unknown) => {
     if (e instanceof NotebookNotFound) return c.json({ error: e.message }, 404);
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
@@ -76,12 +99,17 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
   const withMessages = (threads: ThreadSummary[]) => threads.filter((t) => t.messages > 0);
 
   app.get('/api/notebooks', async (c) => {
-    const f = await facts();
+    const [f, names] = await Promise.all([facts(), titles()]);
     const notebooks = readNotebooks(cfg.vault);
     const filed = new Set(notebooks.flatMap((n) => n.threads));
     const inNotebook = new Set(notebooks.flatMap((n) => n.sources));
     return c.json({
-      notebooks: notebooks.map(f.summarize).sort((a, b) => b.lastActive.localeCompare(a.lastActive)),
+      // Each with the one topic to act on next, so a card on the home screen can offer it: the
+      // first in the view's own order that is due, carries a misconception, or is not yet mastered.
+      notebooks: notebooks.map((nb) => ({
+        ...f.summarize(nb),
+        next: topicRows(f, nb, names).find((t) => t.due || t.misconception !== null || t.level !== 'mastered') ?? null,
+      })).sort((a, b) => b.lastActive.localeCompare(a.lastActive)),
       // Conversations outside every notebook still have a way back from the home screen. All of
       // them: the home shows the newest few and a "show all", and an older one must stay fileable.
       unfiled: withMessages(f.threads).filter((t) => !filed.has(t.id)),
@@ -106,26 +134,7 @@ export function buildNotebookRoutes(lw: Engram, cfg: HarnessConfig) {
     const nb = getNotebook(cfg.vault, c.req.param('id'));
     if (!nb) return c.json({ error: `no notebook "${c.req.param('id')}"` }, 404);
     const [f, names] = await Promise.all([facts(), titles()]);
-    const order: Record<Level, number> = { practicing: 0, exposed: 1, mastered: 2, unseen: 3 };
-    const topics: NotebookTopic[] = f.topicsOf(nb)
-      .map((slug) => {
-        const m = f.state[slug];
-        const level = levelOf(m);
-        const was = levelOf({ effective: m?.level });
-        const last = Array.isArray(m?.misconceptions) ? m!.misconceptions!.at(-1) : undefined;
-        return {
-          slug, title: names.get(slug) ?? slug, level, due: isDue(m),
-          daysLeft: typeof m?.days_left === 'number' ? m.days_left : null,
-          slipped: m?.slipped === true,
-          was: m?.slipped === true && was !== 'unseen' && was !== level ? was : null,
-          misconception: last === undefined || last === null ? null : String(last),
-        };
-      })
-      // Due first (the thing to do next), then a recorded misconception (the thing to fix), then by
-      // level, then by name.
-      .sort((a, b) => Number(b.due) - Number(a.due)
-        || Number(b.misconception !== null) - Number(a.misconception !== null)
-        || order[a.level] - order[b.level] || a.title.localeCompare(b.title));
+    const topics = topicRows(f, nb, names);
     const bySource = (s: SourceRecord) => ({ book: s.book, title: s.title, authors: s.authors });
     return c.json({
       notebook: f.summarize(nb),

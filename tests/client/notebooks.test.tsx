@@ -53,12 +53,36 @@ describe('NotebooksHome', () => {
   it('shows each notebook with what is due, its counts and its mastery, and lists loose conversations', async () => {
     routes['GET /api/notebooks'] = () => ({ body: { notebooks: [summary], unfiled: [{ id: 't-loose', title: 'something unrelated', updatedAt: now, messages: 2 }] } });
     render(<NotebooksHome />);
-    const card = await screen.findByRole('link', { name: /Calculus I/ });
-    expect(card.getAttribute('href')).toBe('#/notebooks/nb-calc');
+    const link = await screen.findByRole('link', { name: 'Calculus I' });
+    expect(link.getAttribute('href')).toBe('#/notebooks/nb-calc');
+    const card = link.closest('.nb-card') as HTMLElement;
     expect(within(card).getByText('2 reviews due')).toBeTruthy();
     expect(within(card).getByText('1 source · 2 conversations · 3 topics')).toBeTruthy();
     expect(within(card).getByRole('img').getAttribute('aria-label')).toBe('Topics: 1 mastered, 1 practicing, 1 not started');
     expect(screen.getByRole('link', { name: 'something unrelated' }).getAttribute('href')).toBe('#/t/t-loose');
+  });
+
+  it('a card offers its next topic, which opens a filed conversation asking for it', async () => {
+    const next = { slug: 'derivative', title: 'Derivative', level: 'practicing', due: true, daysLeft: null };
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [{ ...summary, next }], unfiled: [] } });
+    render(<NotebooksHome />);
+    const go = await screen.findByRole('button', { name: /Review Derivative/ });
+    (fetch as any).mockImplementationOnce(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: undefined });
+      return { ok: true, status: 200, json: async () => ({ id: 'nb-calc', title: 'Calculus I' }) } as Response;
+    });
+    fireEvent.click(go);
+    await waitFor(() => expect(location.hash).toMatch(/^#\/t\/t-[a-z0-9]+$/));
+    const threadId = location.hash.slice('#/t/'.length);
+    expect(calls.at(-1)).toMatchObject({ method: 'PUT', url: `/api/notebooks/nb-calc/threads/${threadId}` });
+    expect(takePendingAsk(threadId)).toMatchObject({ command: 'review' });
+  });
+
+  it('a card with nothing left to do offers no next step', async () => {
+    routes['GET /api/notebooks'] = () => ({ body: { notebooks: [{ ...summary, next: null }], unfiled: [] } });
+    render(<NotebooksHome />);
+    await screen.findByRole('link', { name: 'Calculus I' });
+    expect(screen.queryByRole('button', { name: /^(Review|Learn|Practise|Fix) / })).toBeNull();
   });
 
   it('files a loose conversation only on the file button, then refreshes', async () => {
@@ -97,10 +121,10 @@ describe('NotebooksHome', () => {
     const done = { ...summary, id: 'nb-done', title: 'Done', due: 0, lastActive: '' };
     routes['GET /api/notebooks'] = () => ({ body: { notebooks: [fresh, done], unfiled: [] } });
     render(<NotebooksHome />);
-    const freshCard = await screen.findByRole('link', { name: /Fresh/ });
+    const freshCard = (await screen.findByRole('link', { name: 'Fresh' })).closest('.nb-card') as HTMLElement;
     expect(within(freshCard).getByText('3 topics to learn')).toBeTruthy();
     expect(within(freshCard).queryByText('caught up')).toBeNull();
-    const doneCard = screen.getByRole('link', { name: /Done/ });
+    const doneCard = screen.getByRole('link', { name: 'Done' }).closest('.nb-card') as HTMLElement;
     expect(within(doneCard).getByText('caught up')).toBeTruthy();
     // An unreadable activity date shows no time rather than "active NaNd ago".
     expect(doneCard.textContent).not.toMatch(/active/);

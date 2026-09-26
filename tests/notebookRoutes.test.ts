@@ -72,6 +72,8 @@ describe('notebook routes', () => {
       title: 'Calculus I', chats: 1, sources: 1, topics: 2, due: 1,
       mastery: { mastered: 1, practicing: 1, exposed: 0, unseen: 0 },
     });
+    // The card's next step: the due topic, before the mastered one.
+    expect(list.notebooks[0].next).toMatchObject({ slug: 'derivative', due: true });
     // The loose conversation stays reachable from the home screen; the filed one does not repeat.
     expect(list.unfiled.map((t: any) => t.id)).toEqual(['t-loose']);
 
