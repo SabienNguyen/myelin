@@ -351,18 +351,26 @@ export interface PlanItem {
  * default: the heading asks what to explore, and this is one answer. The whole plan travels in the
  * message so the tutor works through it in order.
  */
-function SessionPlanCta({ plan, label = 'Start today’s session' }: { plan: PlanItem[]; label?: string }) {
+function SessionPlanCta({ plan, label = 'Start today’s session', rows = true }: {
+  plan: PlanItem[]; label?: string;
+  /** Each item as its own way in. Off where something else already lists them (a notebook's
+   *  starters name the same topics). */
+  rows?: boolean;
+}) {
   const store = useChatStore();
   if (plan.length === 0) return null;
 
   const KIND_LABEL: Record<string, string> = {
     review: 'review', new: 'new', misconception: 'fix', course: 'course', quiz: 'quiz',
   };
-  const start = () => {
+  const VERB: Record<string, string> = {
+    review: 'Review', new: 'Learn', misconception: 'Fix a slip in', course: 'Practise', quiz: 'Quiz me on',
+  };
+  const start = (items: PlanItem[]) => {
     // The transfer directive rides on the item's own line (review/fix items carry it), so the
     // constraint is in front of the tutor exactly where it works that row — not left to a rule
     // several screens up in the system prompt.
-    const lines = plan.map((p, i) => {
+    const lines = items.map((p, i) => {
       // A quiz item covers SEVERAL pages in one block, so the row has to name all of them —
       // otherwise the tutor quizzes the first slug and the batching is lost.
       // The instruction rides the ROW. As a trailing note after six numbered items it lost to the
@@ -384,17 +392,23 @@ function SessionPlanCta({ plan, label = 'Start today’s session' }: { plan: Pla
   };
   return (
     <div className="session-plan">
-      <button type="button" className="session-plan-start" onClick={start}>
+      <button type="button" className="session-plan-start" onClick={() => start(plan)}>
         {label} ({plan.length} {plan.length === 1 ? 'item' : 'items'})
       </button>
-      <ol className="session-plan-preview">
-        {plan.map((p) => (
-          <li key={p.slug}>
-            <span className={`session-plan-kind session-plan-kind--${p.kind}`}>{KIND_LABEL[p.kind] ?? p.kind}</span>
-            {p.title}
-          </li>
-        ))}
-      </ol>
+      {/* The same rows a notebook opens on, so the two empty chats read as one design; any one
+          of them is a session of one. */}
+      {rows && (
+        <ul className="nb-starters session-plan-rows" aria-label="Or one at a time">
+          {plan.map((p) => (
+            <li key={p.slug}>
+              <button type="button" onClick={() => start([p])}>
+                <span className={`session-plan-kind session-plan-kind--${p.kind}`}>{KIND_LABEL[p.kind] ?? p.kind}</span>
+                {VERB[p.kind] ?? 'Study'} {p.title}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -471,6 +485,7 @@ function EmptyHero({ threadId }: { threadId?: string }) {
         <SessionPlanCta
           plan={planWithin(plan, notebook.topics)}
           label={`Study ${notebook.notebook.title}`}
+          rows={false}
         />
         {planFailed && <p className="session-plan-failed">could not load today’s session</p>}
       </div>
@@ -481,11 +496,9 @@ function EmptyHero({ threadId }: { threadId?: string }) {
   return (
     <div className="thread-empty">
       <h2>What do you want to explore?</h2>
-      <p>
-        Ask anything, research a topic, read a paper or book you added. What you research becomes
-        linked pages in your vault. Study tools are here when you want them: /study starts a
-        tutor session.
-      </p>
+      {/* One line: what the box below does and the one command worth knowing. The longer pitch
+          (research becomes pages, papers and books) is what the example asks show a newcomer. */}
+      <p>Ask anything, or type /study for a tutor session.</p>
       <SessionPlanCta plan={plan} />
       {planFailed && <p className="session-plan-failed">could not load today’s session</p>}
       {threadId && <NotebookPicker threadId={threadId} />}

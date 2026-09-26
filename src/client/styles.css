@@ -3225,7 +3225,15 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
 .block .symbol-toggle { border-color: transparent; background: transparent; padding-inline: 0; }
 .block .symbol-toggle:hover { background: transparent; color: var(--text); }
 .badge { border-color: transparent; border-radius: 999px; }
-.session-plan { border-color: transparent; background: color-mix(in srgb, var(--bg-inset) 50%, var(--bg-panel)); }
+.session-plan { border-color: transparent; background: none; padding: 0; }
+/* The plan's one primary action; the rows under it are the quieter per-item doors. */
+.session-plan-start {
+  background: var(--accent); color: var(--accent-text); border-color: var(--accent);
+  font-weight: 600; padding: 0.55rem 1rem; margin-bottom: 0.6rem;
+}
+.session-plan-start:hover { filter: brightness(1.06); background: var(--accent); }
+.session-plan-rows { margin-bottom: 0; }
+.session-plan-rows .session-plan-kind { flex: none; min-width: 3.2rem; margin-right: 0; text-align: center; font-family: var(--font-mono); font-size: 0.68rem; }
 
 /* ── One set of edges ──────────────────────────────────────────────────────────────────────────
    The transcript sits on the composer card's 45rem measure, so prose, blocks, the user's bubbles

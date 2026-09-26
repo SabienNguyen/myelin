@@ -124,6 +124,21 @@ describe('the empty thread', () => {
   });
 });
 
+describe('the plan one item at a time', () => {
+  it('each row of the plan starts a session of just that item', async () => {
+    const chats = stubServer([], [LONG_ANSWER], [
+      { kind: 'review', slug: 'limits', title: 'Limits', why: 'due' },
+      { kind: 'new', slug: 'continuity', title: 'Continuity', why: 'next' },
+    ]);
+    await renderThread();
+    fireEvent.click(await screen.findByRole('button', { name: /Learn Continuity/ }));
+    await waitFor(() => expect(chats).toHaveLength(1));
+    expect(chats[0].command).toBe('study');
+    expect(lastUserText(chats[0])).toContain('1. [new] "continuity"');
+    expect(lastUserText(chats[0])).not.toContain('limits');
+  });
+});
+
 describe('follow-up chips in chat', () => {
   it('"check my understanding" sends a plain chat message: no command, no mode', async () => {
     const chats = stubServer(answered, [LONG_ANSWER]);
