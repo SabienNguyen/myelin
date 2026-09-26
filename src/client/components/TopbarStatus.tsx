@@ -137,7 +137,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
         aria-label={`student: ${current} — switch student`}
         onClick={() => setOpen((o) => !o)}
       >
-        <UserCircle size={14} weight="duotone" /> {current}
+        <UserCircle size={14} weight="duotone" /> <span className="badge-label">{current}</span>
       </button>
       {/* A dialog, not a menu — same call AddMaterial makes, and for the same reason: this popup
           holds two text INPUTS (teaching style, new student) alongside the student buttons, and
@@ -539,7 +539,7 @@ function ModelsMenu({ tutor, onSaved }: { tutor: string; onSaved: (tutor: string
         aria-label={`tutor model: ${name}, via ${how} — configure models`}
         onClick={() => setOpen((o) => !o)}
       >
-        <Brain size={14} weight="duotone" /> {name}
+        <Brain size={14} weight="duotone" /> <span className="badge-label">{name}</span>
       </button>
       {/* A dialog for the same reason StudentSwitcher is one: text inputs cannot live in a menu. */}
       {open && (

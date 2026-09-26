@@ -3656,3 +3656,11 @@ p.quiz-expected { margin: 0.3rem 0 0; }
   animation: loading-sweep 1.1s ease-in-out infinite;
 }
 @keyframes loading-sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* A phone's topbar row cannot hold the student's and the model's names beside a notebook crumb:
+   the model badge slid under Add material. The icons stay, and each button's aria-label and the
+   dialog it opens still name them. */
+@media (max-width: 640px) {
+  .topbar .badge-label { display: none; }
+  .topbar .student-badge, .topbar .model-badge { padding-inline: 0.45rem; }
+}
