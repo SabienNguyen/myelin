@@ -9,6 +9,7 @@ import { LEVEL_LABEL, asMasteryLevel } from '../lib/mastery.js';
 import { useDismissableDialog } from '../lib/useDismissableDialog.js';
 import { notebookHash, parseHash, serializeHash } from '../lib/urlState.js';
 import { panelBus } from '../lib/panelBus.js';
+import { Loading } from './Loading.js';
 
 export type PaletteKind = 'action' | 'notebook' | 'conversation' | 'page';
 export interface PaletteItem { kind: PaletteKind; key: string; label: string; detail: string; href: string }
@@ -197,7 +198,7 @@ export function CommandPalette({ threadId }: { threadId?: string }) {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onInputKey}
           />
-          {items === null && <p className="palette-empty" role="status">loading…</p>}
+          {items === null && <Loading what="loading" className="palette-empty" />}
           {items !== null && results.length === 0 && (
             <p className="palette-empty" role="status">Nothing matches “{query}”.</p>
           )}

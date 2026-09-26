@@ -30,6 +30,7 @@ import { createLayout, labelledBBox, type LabelFrame, type LayoutController } fr
 import { createNodeDrag } from '../graph/nodeDrag.js';
 import { loadPositions, savePositions } from '../graph/positionStore.js';
 import { focusNeighbourhood, hoverLabelled, nodeReducer, edgeReducer } from '../graph/highlight.js';
+import { Loading } from './Loading.js';
 
 export const POLL_MS = 30_000;
 
@@ -976,7 +977,7 @@ export function GraphPanel({ visible = true }: { visible?: boolean }) {
         )}
       </div>
       {loading ? (
-        <p className="graph-subtitle hint graph-loading">laying out the graph…</p>
+        <Loading what="laying out the graph" className="graph-subtitle hint graph-loading" />
       ) : loadError ? (
         <p className="graph-subtitle hint graph-error" role="status">
           {loadError} The graph will reappear on its own once it loads.

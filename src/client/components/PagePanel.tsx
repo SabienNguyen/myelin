@@ -7,6 +7,7 @@ import { panelBus, wikiPreprocess } from '../lib/panelBus.js';
 import { PageNotebooks } from './Notebooks.js';
 import { WarningIcon as Warning } from '@phosphor-icons/react';
 import { LEVEL_LABEL, asMasteryLevel } from '../lib/mastery.js';
+import { Loading } from './Loading.js';
 
 // The panel used to render `meta.title` + `body` and throw the rest of the payload away. For a
 // system whose whole thesis is a JUSTIFIED TYPED GRAPH — every edge carries a rationale someone had
@@ -150,7 +151,7 @@ function VaultIndex() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   if (error) return <p className="panel-error" role="status">{error}</p>;
-  if (!nodes) return <p className="empty">Loading…</p>;
+  if (!nodes) return <Loading what="loading pages" />;
   if (nodes.length === 0) {
     return <p className="empty">Nothing in the vault yet — add a book, or ask the tutor about a topic and let it research.</p>;
   }
@@ -201,7 +202,7 @@ export function PagePanel({ slug, visible = true }: { slug: string | null; visib
   if (!slug) return <VaultIndex />;
   // getPage names the slug in the message itself, so no prefix here — see PathsSection.
   if (error) return <p className="panel-error" role="status">{error}</p>;
-  if (!page) return <p className="empty">Loading…</p>;
+  if (!page) return <Loading what="loading the page" />;
   // A slug that routes to some other endpoint (a crafted hash, a model-supplied slug) answers 200
   // with a payload that is not a page; reading page.page.meta off it blanked the whole app.
   if (!page.page) return <p className="panel-error" role="status">no page named “{slug}”</p>;

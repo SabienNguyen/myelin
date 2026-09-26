@@ -22,6 +22,7 @@ import { useMenu } from '../lib/useMenu.js';
 import { ConfirmDeleteThread, relativeTime } from './HistoryMenu.js';
 import { Collapsible } from './Collapsible.js';
 import { setPendingAsk, type PendingAsk } from '../lib/pendingAsk.js';
+import { Loading } from './Loading.js';
 
 const threadHref = (threadId: string, pageSlug: string | null = null) =>
   serializeHash({ threadId, tab: pageSlug ? 'page' : 'stage', pageSlug });
@@ -351,7 +352,7 @@ export function NotebooksHome() {
         <CreateNotebook />
       </div>
       {error && <p className="panel-error" role="alert">{error}</p>}
-      {!data && !error && <p className="empty" role="status">loading notebooks…</p>}
+      {!data && !error && <Loading what="loading notebooks" />}
       {data && (
         <>
           {data.notebooks.length === 0
@@ -531,7 +532,7 @@ export function NotebookView({ id }: { id: string }) {
 
   const back = <a className="nb-back" href={notebookHash()}>← Notebooks</a>;
   if (error) return <div className="nb-page">{back}<p className="panel-error" role="alert">{error}</p></div>;
-  if (!detail) return <div className="nb-page">{back}<p className="empty" role="status">loading notebook…</p></div>;
+  if (!detail) return <div className="nb-page">{back}<Loading what="loading the notebook" /></div>;
 
   const nb = detail.notebook;
   // Topics open in the notebook's most recent conversation, where the Page tab can show them; a

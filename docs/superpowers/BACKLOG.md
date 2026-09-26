@@ -191,8 +191,9 @@ Ranked, and honestly labelled: none of these move the goal.
 1. **Deterministic graph label placement.** Currently 0 overlaps measured across 4 viewports × 2
    scopes — but that rests on a collision-radius heuristic plus randomised seeding, so it is not
    guaranteed. A post-layout placement pass is the real fix.
-2. **Per-panel loading states.** Error and empty states are consistent across Graph/Page/Library
-   now; loading is still ad hoc ("Loading…", "laying out the graph…").
+2. ~~**Per-panel loading states.**~~ **Closed**: `Loading.tsx` is the one loading line (a status
+   role, a thin indeterminate bar, words that name what is coming) on the Page tab, the graph, the
+   notebooks screens and the palette.
 3. **`quiz` per-item source in the UI.** The evidence note says `(model-graded)` and the graded card
    does not. A learner cannot see which items were checked and which were judged.
 3a. ~~`structured_check` answer inputs are plain text.~~ **Closed**: answers preview as they type
