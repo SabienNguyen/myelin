@@ -13,6 +13,7 @@ import { LibraryPanel } from './LibraryPanel.js';
 import { PagePanel } from './PagePanel.js';
 import { SourceReader } from './SourceReader.js';
 import { useRovingKeys, useTablistKeys } from '../lib/tablist.js';
+import { useMediaQuery } from '../lib/useMediaQuery.js';
 import { ErrorBoundary } from './ErrorBoundary.js';
 
 // How often the tab strip re-asks how much is due. Slow on purpose: due-ness changes on the scale
@@ -58,14 +59,17 @@ export function SidePanel({
   const hasAssistantText = messages.some((m) => m.role === 'assistant'
     && m.parts.some((p) => p.type === 'text' && p.text.trim().length > 0));
   const onTabKeys = useTablistKeys();
-  // On a phone the open panel covers the chat (styles.css), so the tutor can answer out of sight —
-  // a grading turn after a stage Submit does exactly that. The "Chat" button marks it: replies
-  // counted when the panel opened, against replies now.
+  // On a phone the open panel covers the chat (styles.css, the same 640px), so the tutor can answer
+  // out of sight — a grading turn after a stage Submit does exactly that. The collapse button,
+  // which a phone labels "Chat", marks it: replies counted when the panel opened, against replies
+  // now. The count is taken in the render that opens the panel, not an effect after it, or a
+  // reopen would show the mark for a frame. At desktop width the chat is in view beside the panel,
+  // so there is nothing to mark.
+  const phone = useMediaQuery('(max-width: 640px)');
   const replies = messages.filter((m) => m.role === 'assistant').length;
-  const [repliesAtOpen, setRepliesAtOpen] = useState(replies);
-  // Keyed on collapsed alone: the count is taken at the moment the panel opens, not kept current.
-  useEffect(() => { if (!collapsed) setRepliesAtOpen(replies); }, [collapsed]);
-  const unseenReply = !collapsed && replies > repliesAtOpen;
+  const [openedWith, setOpenedWith] = useState({ collapsed, replies });
+  if (openedWith.collapsed !== collapsed) setOpenedWith({ collapsed, replies });
+  const unseenReply = phone && !collapsed && openedWith.collapsed === collapsed && replies > openedWith.replies;
   // The rail is a VERTICAL tablist (Up/Down primary) rather than the horizontal strip's Left/Right
   // — useRovingKeys always honors Left/Right too (there is no vertical-only mode), which is a
   // harmless superset here, not worth a new hook variant for one call site.

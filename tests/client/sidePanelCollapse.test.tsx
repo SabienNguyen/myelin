@@ -446,7 +446,29 @@ describe('SidePanel — empty Stage', () => {
 describe('SidePanel — a reply while the panel is open', () => {
   // On a phone the open panel covers the chat, so the tutor can answer out of sight — a grading
   // turn after a stage Submit does. The collapse button (the phone's "Chat") says so in its name.
-  it('names a reply that arrived after the panel opened, and forgets it once the panel closes', async () => {
+  const atWidth = (phone: boolean) => vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: phone && query === '(max-width: 640px)', media: query,
+    addEventListener() {}, removeEventListener() {},
+  }));
+  const reply = (store: ChatStore) => act(() => store.setMessages([
+    { id: 'u1', role: 'user', parts: [{ type: 'text', text: '6' }] },
+    { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Right.' }] },
+  ]));
+
+  it('at desktop width the chat is in view, so a reply changes nothing', async () => {
+    atWidth(false);
+    let store: ChatStore | null = null;
+    function Grab() { store = useContext(ChatStoreContext); return null; }
+    stubFetch();
+    location.hash = '#/t/t-abc';
+    render(<TestRuntime><Grab /><ControlledSidePanel /></TestRuntime>);
+    await waitFor(() => expect(collapseBtn()).not.toBeNull());
+    reply(store!);
+    expect(collapseBtn()).not.toBeNull();
+  });
+
+  it('on a phone, names a reply that arrived after the panel opened, and forgets it once the panel closes', async () => {
+    atWidth(true);
     let store: ChatStore | null = null;
     function Grab() { store = useContext(ChatStoreContext); return null; }
     stubFetch();
@@ -454,10 +476,7 @@ describe('SidePanel — a reply while the panel is open', () => {
     render(<TestRuntime><Grab /><ControlledSidePanel /></TestRuntime>);
     await waitFor(() => expect(collapseBtn()).not.toBeNull());
 
-    act(() => store!.setMessages([
-      { id: 'u1', role: 'user', parts: [{ type: 'text', text: '6' }] },
-      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Right.' }] },
-    ]));
+    reply(store!);
     const named = screen.getByRole('button', { name: 'Collapse side panel (new reply in chat)' });
 
     fireEvent.click(named);
