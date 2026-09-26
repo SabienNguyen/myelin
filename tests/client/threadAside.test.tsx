@@ -94,6 +94,17 @@ async function renderApp(initial: UIMessage[], asideHandler: (body: any) => any)
   await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
 }
 
+describe('conversation title', () => {
+  it('names the conversation above its transcript, as the history list does', async () => {
+    await renderApp([
+      { id: 'u0', role: 'user', parts: [{ type: 'text', text: 'hi' }] },
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'How do I take a derivative? Show me slowly.' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: ASSISTANT_TEXT }] },
+    ], () => ({ ok: true, json: async () => ({}) }));
+    expect(screen.getByRole('heading', { level: 2, name: 'How do I take a derivative?' })).toBeTruthy();
+  });
+});
+
 describe('inline asides — selection flow (real Thread wiring)', () => {
   const initial: UIMessage[] = [
     { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'How do I take a derivative?' }] },

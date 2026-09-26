@@ -3606,3 +3606,23 @@ p.quiz-expected { margin: 0.3rem 0 0; }
     font-size: 0.68rem; text-transform: capitalize; letter-spacing: 0.01em;
   }
 }
+
+/* ── Conversation title ───────────────────────────────────────────────────────────────────────
+   One quiet line on the transcript's measure: which conversation this is, not a toolbar. A phone's
+   topbar row already carries everything that fits. */
+.thread-title {
+  flex: none;
+  padding: 0.7rem max(calc(clamp(1rem, 3vw, 3rem) + 10px), calc((100% - 45rem) / 2)) 0.55rem;
+  border-bottom: 1px solid var(--border);
+}
+.thread-title h2 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-prose);
+  font-size: 0.9rem;
+  font-weight: 550;
+  color: var(--text-muted);
+}
+@media (max-width: 640px) { .thread-title { display: none; } }

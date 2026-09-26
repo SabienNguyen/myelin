@@ -17,6 +17,7 @@ import { takePendingAsk } from '../lib/pendingAsk.js';
 import { loadDraft, saveDraft } from '../lib/composerDraft.js';
 import type { JSONContent } from '@tiptap/core';
 import type { Command } from '../../shared/commands.js';
+import { titleFor } from '../../shared/threadTitle.js';
 
 // P1 FIX (docs/superpowers/plans/2026-07-20-gap-integration.md — post-review): these two must be
 // stable module-scope function references, NOT inline arrow functions inside Thread()'s render
@@ -796,6 +797,23 @@ export function Composer({ mode = '', onEndMode, onDraftingChange, testEditorHan
   );
 }
 
+/**
+ * The conversation's name above its transcript, as the history list names it (shared/threadTitle).
+ * Without it a conversation opened from a link or the palette said nowhere which one it was. Nothing
+ * until the learner has said something: an empty chat's own heading does that job.
+ */
+function ConversationTitle() {
+  const store = useChatStore();
+  const { messages } = useSyncExternalStore(store.subscribe, store.getState);
+  const title = titleFor(messages, '');
+  if (!title) return null;
+  return (
+    <header className="thread-title">
+      <h2 title={title}>{title}</h2>
+    </header>
+  );
+}
+
 export function Thread({ mode = '', onModeChange, threadId }: {
   /** The sticky mode App holds: '' is chat (the harness derives each turn), anything else a study
    *  session a /study-family command started. */
@@ -811,6 +829,7 @@ export function Thread({ mode = '', onModeChange, threadId }: {
   const [drafting, setDrafting] = useState(false);
   return (
     <ThreadPrimitive.Root className="thread">
+      <ConversationTitle />
       <AskTutorBridge />
       <PendingAsk threadId={threadId} />
       {/* tabIndex + a name so the transcript can be SCROLLED by keyboard. It is its own scroll
