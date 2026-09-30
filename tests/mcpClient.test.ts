@@ -65,7 +65,9 @@ describe('spawnMcpServer request timeout', () => {
     const conn = await spawnMcpServer({
       command: process.execPath,
       args: [writeServerScript(STALL_SERVER)],
-      requestTimeoutMs: 50,
+      // The same timeout covers `initialize`, which waits on a cold node spawn: 50ms timed out the
+      // handshake on a loaded CI runner before tools/list was ever sent.
+      requestTimeoutMs: 1_000,
     });
     await expect(conn.listTools()).rejects.toThrow(/^mcp transport timeout: tools\/list$/);
     await conn.close();
