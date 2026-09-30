@@ -2557,16 +2557,28 @@ a.cite-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1p
    matters, but only to someone who thought to ask. */
 .firstrun-note { margin: 0; font-size: 0.81rem; color: var(--text-muted); line-height: 1.55; }
 .firstrun-getkey { margin: 0; font-size: 0.88rem; }
-/* The divider between the two ways in (key vs local model): a small centered word, not a heading —
-   both options carry equal weight and neither is an afterthought. */
-.firstrun-or {
-  margin: 0.2rem 0 -0.5rem;
-  text-align: center;
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+/* The free path as numbered steps: the first-run visitor most likely to stall is the one who has
+   never made an API key, and "paste your key" assumed they had one. */
+.firstrun-steps {
+  margin: 0;
+  padding-left: 1.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
+.firstrun-steps a { color: var(--accent); font-weight: 600; }
+.firstrun-steps + label { margin-top: 0.35rem; }
+/* The Claude and local-model paths, folded away. Open, each keeps its own hairline-topped block. */
+.firstrun-more { border-top: 1px solid var(--border); padding-top: 0.8rem; }
+.firstrun-more > summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.firstrun-more[open] > summary { margin-bottom: 0.9rem; }
+.firstrun-more > .firstrun-option + .firstrun-option { margin-top: 0.9rem; }
 /* Full-width, own line, muted: the "where things live" footer. */
 .firstrun-paths { padding-top: 0.9rem; border-top: 1px solid var(--border); }
 .firstrun-note code, .firstrun-lede code {

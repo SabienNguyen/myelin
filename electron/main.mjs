@@ -70,7 +70,7 @@ function createWindow(url) {
     width: 1280,
     height: 860,
     minWidth: 760,
-    title: 'Engram',
+    title: 'Myelin',
     backgroundColor: windowBackground(),
     show: false,
     webPreferences: {
@@ -97,8 +97,8 @@ function createWindow(url) {
 }
 
 function showBootFailure(message) {
-  const win = new BrowserWindow({ width: 720, height: 420, title: 'Engram', backgroundColor: windowBackground() });
-  const body = `<h1>Engram could not start</h1><pre>${
+  const win = new BrowserWindow({ width: 720, height: 420, title: 'Myelin', backgroundColor: windowBackground() });
+  const body = `<h1>Myelin could not start</h1><pre>${
     String(message).replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])
   }</pre>`;
   win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(
@@ -131,7 +131,7 @@ app.whenReady().then(async () => {
 
     const url = `http://127.0.0.1:${port}`;
     if (!await waitForServer(port)) {
-      throw new Error('The server started but never became ready. Check the log for a Engram '
+      throw new Error('The server started but never became ready. Check the log for an Engram '
         + 'connection failure.');
     }
     createWindow(url);

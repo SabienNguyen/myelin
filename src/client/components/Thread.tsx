@@ -481,9 +481,9 @@ function EmptyHero({ threadId }: { threadId?: string }) {
     <div className="thread-empty">
       <h2>What do you want to explore?</h2>
       <p>
-        Ask anything, research a topic, read a paper or book you added. What you research becomes
-        linked pages in your vault. Study tools are here when you want them: /study starts a
-        tutor session.
+        Ask about anything, or add a paper or book with Add material and read it together. What
+        you learn is saved as linked notes you can come back to. When you want to be quizzed,
+        type <code>/study</code>.
       </p>
       <SessionPlanCta plan={plan} />
       {planFailed && <p className="session-plan-failed">could not load today’s session</p>}
