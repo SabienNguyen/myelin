@@ -478,6 +478,27 @@ export function buildSetupRoutes(
       }, 400);
     }
 
+    // Probe a newly pasted OpenRouter key before saving, as /api/setup/api-key does for Anthropic.
+    // A truncated paste otherwise saves, lifts the setup gate, and fails the first lesson with a
+    // 401 — the setup card is where "your key is wrong" belongs. The catalog below stays anonymous;
+    // this request is the only one that carries the key, and only to OpenRouter's own key check.
+    const newRouterKey = String(env.OPENROUTER_API_KEY ?? '').trim();
+    if (newRouterKey) {
+      const probe = await (deps.probeFetch ?? fetch)('https://openrouter.ai/api/v1/key', {
+        headers: { authorization: `Bearer ${newRouterKey}` },
+        signal: AbortSignal.timeout(15_000),
+      }).catch((e: any) => ({ ok: false, status: 0, statusText: String(e?.message ?? e) } as Response));
+      if (!probe.ok) {
+        return probe.status === 401 || probe.status === 403
+          ? c.json({ error: 'OpenRouter rejected that key. Copy it again from openrouter.ai/settings/keys — the whole key, starting with sk-or-.' }, 400)
+          : c.json({
+            error: probe.status === 0
+              ? `Could not reach OpenRouter to check the key (${probe.statusText}). Check your internet connection and try again.`
+              : `OpenRouter answered ${probe.status} when checking the key. Try again in a minute.`,
+          }, 502);
+      }
+    }
+
     const routerIds = ids.filter(([, id]) => modelRouteFor(id.trim()) === 'openrouter');
     if (routerIds.length) {
       let catalog: any[];
