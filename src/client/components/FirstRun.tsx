@@ -148,12 +148,12 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
       <main className="firstrun-card">
         <p className="firstrun-mark"><BookOpenText size={18} weight="duotone" /> Myelin</p>
         <h1>Ready when you are</h1>
-        {/* One sentence, no paths. The vault location matters eventually and not now — it moved to
-            the muted footer, because on the first screenshot of this card four lines of absolute
-            path were the first thing the eye landed on and the least useful thing on it. */}
+        {/* Written for someone who has never made an API key. The free OpenRouter path is the only
+            one on the face of the card; the Claude and local-model paths sit behind "other ways",
+            because a first-time visitor shown three equal options with "OpenAI-compatible" and
+            "prefix the id" in them stopped reading at the second. */}
         <p className="firstrun-lede">
-          Just one thing: a way to reach a model — a free OpenRouter key, Claude with an
-          Anthropic key, or a local / OpenAI-compatible model.
+          Myelin needs an AI model to teach you. The free way takes about two minutes:
         </p>
 
         <form className="firstrun-option" onSubmit={(e) => {
@@ -162,117 +162,127 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             env: routerKey.trim() ? { OPENROUTER_API_KEY: routerKey.trim() } : {},
           });
         }}>
+          <ol className="firstrun-steps">
+            <li>
+              <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">
+                Open openrouter.ai
+              </a>
+              {' '}and sign in. It is free; no card needed.
+            </li>
+            <li>Create a key (any name will do) and copy it.</li>
+            <li>Paste it below.</li>
+          </ol>
           <label htmlFor="router-key">OpenRouter API key</label>
           <div className="firstrun-row">
             <input id="router-key" type="password" autoFocus autoComplete="off" spellCheck={false}
-              placeholder="Paste your OpenRouter key" value={routerKey}
+              placeholder="sk-or-…" value={routerKey}
               onChange={(e) => setRouterKey(e.target.value)} />
             <button type="submit" className="firstrun-primary" disabled={busy || !routerKey.trim()}>
-              {busy ? 'Saving…' : 'Use free models'}
+              {busy ? 'Checking…' : 'Use free models'}
             </button>
           </div>
           <p className="firstrun-note">
-            Uses OpenRouter’s free router for every learning role — the same tutor loop as any
-            other model, on whichever free model the router picks.
-            No paid fallback. Free models have rate limits and variable availability.
-            Your lesson content is sent to OpenRouter and its selected provider; the key stays on this device.
-          </p>
-          <a href="https://openrouter.ai/settings/keys" target="_blank" rel="noreferrer">Create an OpenRouter key</a>
-        </form>
-        <p className="firstrun-or" role="separator">or</p>
-        <form
-          className="firstrun-option"
-          onSubmit={(e) => { e.preventDefault(); void saveKey(); }}
-        >
-          <label htmlFor="api-key">
-            <Key size={16} weight="duotone" /> Anthropic API key
-          </label>
-          <div className="firstrun-row">
-            <input
-              id="api-key" type="password" autoComplete="off"
-              spellCheck={false} placeholder="sk-ant-…"
-              value={key} onChange={(e) => setKey(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="firstrun-primary"
-              disabled={busy || !key.trim()}
-            >
-              {busy ? 'Checking…' : 'Save'}
-            </button>
-          </div>
-          {/* Its own line, not buried at the end of the reassurance paragraph. Someone who has
-              not got a key yet is the most common first-run visitor, and in the first version this
-              was the last four words of a dense grey block. */}
-          <p className="firstrun-getkey">
-            Don’t have one?{' '}
-            <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
-              Create a key at console.anthropic.com
-            </a>
-          </p>
-          <p className="firstrun-note">
-            Checked with Anthropic before it is saved, so a wrong key fails here rather than mid-lesson.
+            The key is checked with OpenRouter before it is saved, and stays on this computer. Your
+            lessons go to OpenRouter’s free models, which can be slow when they are busy.
           </p>
         </form>
 
+        <details className="firstrun-more">
+          <summary>Other ways to connect: Claude, or a model on this computer</summary>
+          <form
+            className="firstrun-option"
+            onSubmit={(e) => { e.preventDefault(); void saveKey(); }}
+          >
+            <label htmlFor="api-key">
+              <Key size={16} weight="duotone" /> Anthropic API key
+            </label>
+            <div className="firstrun-row">
+              <input
+                id="api-key" type="password" autoComplete="off"
+                spellCheck={false} placeholder="sk-ant-…"
+                value={key} onChange={(e) => setKey(e.target.value)}
+              />
+              <button
+                type="submit"
+                className="firstrun-primary"
+                disabled={busy || !key.trim()}
+              >
+                {busy ? 'Checking…' : 'Save'}
+              </button>
+            </div>
+            {/* Its own line, not buried at the end of the reassurance paragraph. Someone who has
+                not got a key yet is the most common first-run visitor, and in the first version this
+                was the last four words of a dense grey block. */}
+            <p className="firstrun-getkey">
+              Don’t have one?{' '}
+              <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
+                Create a key at console.anthropic.com
+              </a>
+            </p>
+            <p className="firstrun-note">
+              Checked with Anthropic before it is saved, so a wrong key fails here rather than mid-lesson.
+            </p>
+          </form>
 
-        <form
-          className="firstrun-option"
-          onSubmit={(e) => { e.preventDefault(); void saveLocal(); }}
-        >
-          <label htmlFor="local-model">
-            <Cpu size={16} weight="duotone" /> A local or OpenAI-compatible model
-          </label>
-          <div className="firstrun-row">
-            <input
-              id="local-model" type="text" autoComplete="off" spellCheck={false}
-              placeholder="openai:gpt-4o-mini  ·  ollama:qwen3:8b"
-              list="firstrun-model-ids"
-              value={localId} onChange={(e) => setLocalId(e.target.value)}
+
+          <form
+            className="firstrun-option"
+            onSubmit={(e) => { e.preventDefault(); void saveLocal(); }}
+          >
+            <label htmlFor="local-model">
+              <Cpu size={16} weight="duotone" /> A local or OpenAI-compatible model
+            </label>
+            <div className="firstrun-row">
+              <input
+                id="local-model" type="text" autoComplete="off" spellCheck={false}
+                placeholder="openai:gpt-4o-mini  ·  ollama:qwen3:8b"
+                list="firstrun-model-ids"
+                value={localId} onChange={(e) => setLocalId(e.target.value)}
+              />
+              <button type="submit" className="firstrun-primary" disabled={busy || !localId.trim()}>
+                {busy ? 'Saving…' : 'Use it'}
+              </button>
+            </div>
+            <datalist id="firstrun-model-ids">
+              <option value="openai:gpt-4o-mini" />
+              <option value="openai:deepseek/deepseek-chat" />
+              <option value="ollama:qwen3:8b" />
+              <option value="ollama:llama3.1:8b" />
+            </datalist>
+            {wantsCompat && (
+              <>
+                <p className="firstrun-note">where that model lives, and the key it needs:</p>
+                <div className="firstrun-row">
+                  <input
+                    type="text" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible base URL"
+                    placeholder="base URL, e.g. https://openrouter.ai/api/v1"
+                    value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
+                  />
+                  <input
+                    type="password" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible API key"
+                    placeholder="API key (if the endpoint needs one)"
+                    value={compatKey} onChange={(e) => setCompatKey(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
+            <p className="firstrun-note">
+              Points every role at it — <code>ollama:</code> needs Ollama running. Reaching OpenRouter,
+              LM Studio, LiteLLM, or any other OpenAI-compatible host? Prefix the id with{' '}
+              <code>openai:</code> and the base URL and key fields appear. Split the roles later from
+              the model badge in the top bar.
+            </p>
+            {/* The zero-typing on-ramp: pick a recommended local model and we pull + configure it.
+                A pulled model points every role at it, then re-reads /api/setup — with nothing on the
+                Anthropic route the gate lifts itself. */}
+            <p className="firstrun-getter-lede">Don’t have a model yet? Pick one and we’ll install it:</p>
+            <LocalModelGetter
+              installed={installedLocal}
+              busy={busy}
+              onConfigured={(id) => saveAllRolesTo(`ollama:${id}`)}
             />
-            <button type="submit" className="firstrun-primary" disabled={busy || !localId.trim()}>
-              {busy ? 'Saving…' : 'Use it'}
-            </button>
-          </div>
-          <datalist id="firstrun-model-ids">
-            <option value="openai:gpt-4o-mini" />
-            <option value="openai:deepseek/deepseek-chat" />
-            <option value="ollama:qwen3:8b" />
-            <option value="ollama:llama3.1:8b" />
-          </datalist>
-          {wantsCompat && (
-            <>
-              <p className="firstrun-note">where that model lives, and the key it needs:</p>
-              <div className="firstrun-row">
-                <input
-                  type="text" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible base URL"
-                  placeholder="base URL, e.g. https://openrouter.ai/api/v1"
-                  value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
-                />
-                <input
-                  type="password" autoComplete="off" spellCheck={false} aria-label="OpenAI-compatible API key"
-                  placeholder="API key (if the endpoint needs one)"
-                  value={compatKey} onChange={(e) => setCompatKey(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-          <p className="firstrun-note">
-            Points every role at it — <code>ollama:</code> needs Ollama running. Reaching OpenRouter,
-            LM Studio, LiteLLM, or any other OpenAI-compatible host? Prefix the id with{' '}
-            <code>openai:</code> and the base URL and key fields appear. Split the roles later from
-            the model badge in the top bar.
-          </p>
-          {/* The zero-typing on-ramp: pick a recommended local model and we pull + configure it.
-              A pulled model points every role at it, then re-reads /api/setup — with nothing on the
-              Anthropic route the gate lifts itself. */}
-          <p className="firstrun-getter-lede">Don’t have a model yet? Pick one and we’ll install it:</p>
-          <LocalModelGetter
-            installed={installedLocal}
-            busy={busy}
-            onConfigured={(id) => saveAllRolesTo(`ollama:${id}`)}
-          />
-        </form>
+          </form>
+        </details>
 
         {error && <p className="firstrun-error" role="alert">{error}</p>}
 

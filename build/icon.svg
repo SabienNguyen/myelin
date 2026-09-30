@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- macOS icon grid: the tile sits inside a 100px margin so it matches the size of other dock icons -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#101116"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="184.5" fill="none" stroke="#2b2f3a" stroke-width="3"/>
+  <path d="M512 346c-62-41-139-51-232-41v412c93-10 170 0 232 41 62-41 139-51 232-41V305c-93-10-170 0-232 41z"
+        fill="none" stroke="#93b4f7" stroke-width="44" stroke-linejoin="round"/>
+  <path d="M512 346v412" stroke="#93b4f7" stroke-width="44" stroke-linecap="round"/>
+  <path d="M350 420c40-3 78 3 108 18M350 510c40-3 78 3 108 18M350 600c40-3 78 3 108 18" fill="none" stroke="#93b4f7" stroke-opacity=".5" stroke-width="22" stroke-linecap="round"/>
+</svg>

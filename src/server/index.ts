@@ -150,7 +150,10 @@ export async function runAnkiTick(lw: Engram, anki: AnkiClient, cfg: HarnessConf
   // tick, same mutex — is safe ordering, not a race.
   await ankiOutboundTick(lw, anki, cfg).catch(console.error);
   const up = await anki.isUp();
-  if (up || backlogDays(cfg.vault) <= cfg.schedule.ankiBacklogNudgeDays) return;
+  const days = backlogDays(cfg.vault);
+  // Never synced is Infinity, and a learner who has never used Anki has no backlog to nudge about —
+  // the same rule /api/status applies to its badge.
+  if (up || !Number.isFinite(days) || days <= cfg.schedule.ankiBacklogNudgeDays) return;
   const key = `anki|backlog|${isoWeekKey(new Date())}`;
   const ledger = loadNotifyLedger();
   if (ledger[key]) return;

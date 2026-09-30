@@ -77,7 +77,19 @@ describe('FirstRun — two ways through the gate', () => {
     const note = (await screen.findByLabelText('OpenRouter API key'))
       .closest('form')!.textContent ?? '';
     expect(note).not.toMatch(/guided exercise|rails/i);
-    expect(note).toMatch(/free router for every learning role/);
+    expect(note).toMatch(/checked with OpenRouter before it is saved/);
+  });
+
+  // One path on the face of the card: a first-time visitor shown three equal options, two of them
+  // in API jargon, did not get as far as the free one.
+  it('shows only the free path up front; Claude and local models are folded away', async () => {
+    stubFetch();
+    render(<FirstRun><p>the app</p></FirstRun>);
+    const more = (await screen.findByText(/Other ways to connect/)).closest('details')!;
+    expect(more.open).toBe(false);
+    expect(more.contains(screen.getByLabelText(/Anthropic API key/))).toBe(true);
+    expect(more.contains(screen.getByLabelText(/local or OpenAI-compatible model/))).toBe(true);
+    expect(more.contains(screen.getByLabelText('OpenRouter API key'))).toBe(false);
   });
 
   // Every role defaults to OpenRouter now, so a saved Anthropic key alone satisfies nothing: the

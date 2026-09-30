@@ -56,6 +56,19 @@ describe('ToolStatusChip', () => {
     expect(container.textContent).toBe('created a path');
   });
 
+  it('labels every engram tool — a fresh-install run leaked raw "LIST_PAGES"', () => {
+    for (const [tool, label] of [
+      ['list_pages', 'listed your pages'],
+      ['unlink_pages', 'unlinked pages'],
+      ['working_set', 'checked what you are working on'],
+      ['author_affinity', 'checked related authors'],
+    ]) {
+      const { container } = render(<ToolStatusChip toolName={tool} result={{ ok: true }} />);
+      expect(container.textContent).toBe(label);
+      cleanup();
+    }
+  });
+
   it('labels the Agent SDK web tools under their unstripped names', () => {
     const { container } = render(<ToolStatusChip toolName="WebSearch" result={{ ok: true }} />);
     expect(container.textContent).toBe('searched the web');

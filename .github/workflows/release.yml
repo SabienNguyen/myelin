@@ -86,11 +86,27 @@ jobs:
           name: ${{ github.event.inputs.tag || github.ref_name }}
           fail_on_unmatched_files: false
           body: |
-            Myelin ${{ github.event.inputs.tag || github.ref_name }} — a learn-anything desktop tutor.
+            Myelin ${{ github.event.inputs.tag || github.ref_name }}: a learn-anything desktop tutor.
 
-            Download the installer for your platform below and run it; nothing else to install and
-            no config to write. Builds are **unsigned**, so macOS and Windows will warn on first
-            launch (right-click → Open on macOS; "More info → Run anyway" on Windows).
+            **Which file do I download?**
+
+            | Your computer | File |
+            |---|---|
+            | Windows 10 or 11 | `Myelin.Setup.*.exe` |
+            | Mac with Apple silicon (M1 or newer) | `Myelin-*-arm64.dmg` |
+            | Linux | `Myelin-*.AppImage` |
+
+            The installers are not code-signed yet, so the first launch shows a warning:
+
+            - **Windows:** if "Windows protected your PC" appears, click **More info**, then **Run anyway**.
+            - **Mac:** drag Myelin into Applications and open it. When macOS says it cannot verify the
+              app, click **Done**, then **System Settings → Privacy & Security → Open Anyway**. If it
+              says the app "is damaged", run `xattr -cr /Applications/Myelin.app` in Terminal and open
+              it again.
+            - **Linux:** mark the AppImage as executable (`chmod +x Myelin-*.AppImage`), then run it.
+
+            On first launch Myelin asks for a free OpenRouter key and walks you through getting one.
+            Full instructions: https://github.com/SabienNguyen/myelin#download
           files: |
             release/*.AppImage
             release/*.dmg

@@ -17,6 +17,39 @@ evidence a machine check earns. Long-term memory lives in
 **[Engram](https://github.com/SabienNguyen/engram)** — an MCP teaching-memory server that is the
 *only* writer of your notes and student files, reached exclusively over stdio MCP.
 
+## Download
+
+No programming needed. Get the file for your computer from the
+**[latest release](https://github.com/SabienNguyen/myelin/releases/latest)**:
+
+| Your computer | Download |
+|---|---|
+| Windows 10 or 11 | `Myelin.Setup.<version>.exe` |
+| Mac with Apple silicon (M1 or newer) | `Myelin-<version>-arm64.dmg` |
+| Linux | `Myelin-<version>.AppImage` |
+
+Intel Macs are not supported yet.
+
+**Installing.** The app is not code-signed yet, so the first launch shows a warning. That is
+expected, and you only get it once.
+
+- **Windows:** run the `.exe`. If a blue "Windows protected your PC" box appears, click
+  **More info**, then **Run anyway**.
+- **Mac:** open the `.dmg` and drag Myelin into Applications, then open it. When macOS says it
+  cannot verify the app, click **Done**, open **System Settings → Privacy & Security**, scroll down,
+  and click **Open Anyway** next to Myelin. If macOS instead says the app "is damaged", open
+  Terminal, paste `xattr -cr /Applications/Myelin.app`, press Return, and open Myelin again.
+- **Linux:** right-click the `.AppImage` → Properties → allow running it as a program (or run
+  `chmod +x Myelin-*.AppImage`), then double-click it.
+
+**First run.** Myelin needs an AI model to teach you, and the free option takes about two
+minutes. Make a free account at [openrouter.ai](https://openrouter.ai/settings/keys), create a key,
+and paste it into the box Myelin shows you. No card needed. You can switch to Claude or to a
+model running on your own computer later.
+
+Your notes are saved as plain Markdown files in `Documents/Myelin`, so you can open them in any
+editor, and they stay yours if you stop using the app.
+
 ## A guided tour
 
 **Ask for anything.** No syllabus to choose, no deck to build — say what you want to learn, and the
@@ -359,9 +392,10 @@ talks to the local server over HTTP like any browser would.
 `tests/packaging.test.ts` pins all three as static checks, so a config edit that would
 reintroduce one fails in seconds instead of at the end of a 230MB build.
 
-**Not yet done:** no application icon, no code signing or notarization, no auto-update channel.
-Only the Linux AppImage has been built and launched here; mac and win targets are configured but
-unverified.
+**Not yet done:** no code signing or notarization, no auto-update channel. The icon lives in
+`build/` (`icon.svg` is the source; re-render `icon.png` with
+`rsvg-convert -w 1024 -h 1024 build/icon.svg -o build/icon.png`). Only the Linux AppImage has been
+built and launched here; the mac and win installers are built by CI and have not been launched.
 </details>
 
 ## Running from source

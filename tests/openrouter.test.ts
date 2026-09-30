@@ -63,9 +63,12 @@ describe('OpenRouter', () => {
     expect(res.status).toBe(200);
     expect(config.models.tutor.model).toBe('openrouter:vendor/inkling:free');
     expect(config.models.grader.model).toBe('openrouter:vendor/paid');
-    expect(probeFetch).toHaveBeenCalledTimes(1);
-    expect(probeFetch.mock.calls[0][0]).toBe('https://openrouter.ai/api/v1/models');
-    expect(probeFetch.mock.calls[0][1]?.headers).toBeUndefined();
+    // The catalog is fetched once and anonymously; the key goes only to OpenRouter's own key check.
+    const catalogCalls = probeFetch.mock.calls.filter(([url]) => url === 'https://openrouter.ai/api/v1/models');
+    expect(catalogCalls).toHaveLength(1);
+    expect(catalogCalls[0][1]?.headers).toBeUndefined();
+    const keyed = probeFetch.mock.calls.filter(([, init]) => JSON.stringify(init?.headers ?? {}).includes('test-router-key'));
+    expect(keyed.map(([url]) => url)).toEqual(['https://openrouter.ai/api/v1/key']);
     expect(await res.text()).not.toContain('test-router-key');
   });
   it('sends the exact selected model and dedicated key to the pinned endpoint', async () => {
@@ -85,7 +88,7 @@ describe('OpenRouter', () => {
     expect(state.blocked).toBe(true);
   });
   it('saves a dedicated key without reflecting the secret in any response', async () => {
-    const app = buildSetupRoutes(cfg());
+    const app = buildSetupRoutes(cfg(), { probeFetch: vi.fn(async () => Response.json({ data: {} })) });
     const res = await app.request('/api/setup/models', {method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({env:{OPENROUTER_API_KEY:'test-router-key'}})});
     expect(res.status).toBe(200);
     const text = await res.text();
@@ -103,5 +106,34 @@ describe('OpenRouter', () => {
     const res = await buildSetupRoutes(cfg(), {probeFetch}).request('/api/setup/openrouter/models');
     expect(res.status).toBe(200);
     expect((await res.json()).models.map((m:any)=>m.id)).toEqual(['test/free:free']);
+  });
+  // A pasted key with a missing character used to save, lift the setup gate, and then fail the
+  // learner's first lesson with a 401 — the one place it should never surface.
+  it('refuses a key OpenRouter rejects, and saves nothing', async () => {
+    const config = cfg();
+    const probeFetch = vi.fn(async (url: string | URL | Request) => (String(url).endsWith('/key')
+      ? new Response('{"error":{"code":401}}', { status: 401 })
+      : Response.json({ data: [{ id: 'openrouter/free' }] })));
+    const res = await buildSetupRoutes(config, { probeFetch }).request('/api/setup/models', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ models: { tutor: 'openrouter:openrouter/free' }, env: { OPENROUTER_API_KEY: 'sk-or-typo' } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/OpenRouter rejected that key/);
+    expect(readSettings()).toEqual({});
+    expect(process.env.OPENROUTER_API_KEY).toBe('');
+  });
+  it('does not save a key it could not check', async () => {
+    const probeFetch = vi.fn(async (url: string | URL | Request) => {
+      if (String(url).endsWith('/key')) throw new Error('offline');
+      return Response.json({ data: [{ id: 'openrouter/free' }] });
+    });
+    const res = await buildSetupRoutes(cfg(), { probeFetch }).request('/api/setup/models', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ env: { OPENROUTER_API_KEY: 'sk-or-fine' } }),
+    });
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toMatch(/Could not reach OpenRouter.*offline/);
+    expect(readSettings()).toEqual({});
   });
 });

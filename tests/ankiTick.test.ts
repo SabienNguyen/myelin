@@ -111,4 +111,30 @@ describe('runAnkiTick', () => {
 
     expect(calls).toEqual(['inbound', 'outbound']);
   });
+
+  it('never nudges about a backlog when Anki has never synced', async () => {
+    // backlogDays() is Infinity with no sync cursor. Infinity > nudgeDays sent "Anki reviews are
+    // piling up" to every fresh install, including learners who have never used Anki.
+    const { runAnkiTick } = await import('../src/server/index.js');
+    const inbound = await import('../src/server/anki/inbound.js');
+    const notify = await import('../src/server/notify.js');
+    vi.mocked(inbound.backlogDays).mockReturnValue(Infinity);
+    const fakeCfg = { vault: scratchVault, schedule: { ankiBacklogNudgeDays: 3 } } as never;
+
+    await runAnkiTick({} as never, { isUp: async () => false } as never, fakeCfg);
+
+    expect(notify.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it('still nudges when a real sync cursor has gone stale', async () => {
+    const { runAnkiTick } = await import('../src/server/index.js');
+    const inbound = await import('../src/server/anki/inbound.js');
+    const notify = await import('../src/server/notify.js');
+    vi.mocked(inbound.backlogDays).mockReturnValue(10);
+    const fakeCfg = { vault: scratchVault, schedule: { ankiBacklogNudgeDays: 3 } } as never;
+
+    await runAnkiTick({} as never, { isUp: async () => false } as never, fakeCfg);
+
+    expect(notify.sendNotification).toHaveBeenCalledWith('Myelin', expect.stringMatching(/piling up/));
+  });
 });
