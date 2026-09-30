@@ -152,7 +152,9 @@ describe('NotebookView', () => {
   it('moves focus to the notebook’s heading once it loads', async () => {
     render(<NotebookView id="nb-calc" />);
     const heading = await screen.findByRole('heading', { name: 'Calculus I' });
-    expect(document.activeElement).toBe(heading);
+    // findByRole resolves on the DOM commit; the focus lands in the passive effect after it, and a
+    // slow CI runner polled in between (failed on graph-topic-scope and on the 0.4.0 PR).
+    await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 
   it('says why a due topic is due, and shows a recorded misconception on its row', async () => {
