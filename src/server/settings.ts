@@ -25,6 +25,15 @@ export interface Settings {
   // maps a role straight to an id string and must keep loading unchanged.
   contextTokens?: Partial<Record<ModelRole, number>>;
   env?: Partial<Record<ProviderEnvKey, string>>;
+  // The student menu's learner and teaching style. They used to be written into
+  // ./harness.config.json, relative to the process cwd, which a Finder-launched app has as `/`.
+  student?: string;
+  voice?: string;
+}
+
+/** A student id doubles as the filename of that learner's evidence, so it is held to a filename. */
+export function isStudentName(name: string): boolean {
+  return /^[a-z0-9][a-z0-9-_]{0,39}$/.test(name);
 }
 
 export const PROVIDER_ENV_KEYS = [
@@ -140,5 +149,10 @@ export function applySettings(cfg: HarnessConfig, path = settingsPath()): void {
     }
     cfg.models[role as ModelRole].contextTokens = tokens as number;
   }
+  if (saved.student !== undefined) {
+    if (isStudentName(saved.student)) cfg.student = saved.student;
+    else console.error(`${path}: student "${saved.student}" is not a usable student id — keeping "${cfg.student}"`);
+  }
+  if (saved.voice) cfg.voice = saved.voice;
   applyEnvValues(saved.env ?? {});
 }

@@ -884,13 +884,16 @@ describe('student profiles — one vault, several learners', () => {
     writeFileSync(cfgFile, JSON.stringify({ student: 'alice', keep: 'me' }));
     prevEnv = process.env.HARNESS_CONFIG;
     process.env.HARNESS_CONFIG = cfgFile;
+    vi.stubEnv('MYELIN_CONFIG_DIR', join(vault, 'config-dir'));
   });
   afterEach(() => {
     if (prevEnv === undefined) delete process.env.HARNESS_CONFIG;
     else process.env.HARNESS_CONFIG = prevEnv;
+    vi.unstubAllEnvs();
     rmSync(vault, { recursive: true, force: true });
   });
   const mkCfg = () => ({ student: 'alice', vault } as unknown as HarnessConfig);
+  const savedSettings = () => JSON.parse(readFileSync(join(vault, 'config-dir', 'settings.json'), 'utf8'));
 
   it('lists known students including the current one', async () => {
     const res = await buildRestRoutes(lw, mkCfg()).request('/api/students');
@@ -899,17 +902,24 @@ describe('student profiles — one vault, several learners', () => {
     expect(body.students).toContain('alice');
   });
 
-  it('switching mutates cfg in place and persists without clobbering other fields', async () => {
+  // The switch used to persist into ./harness.config.json, relative to the process cwd. A desktop
+  // app launched from Finder has cwd `/`, so every switch came back "not saved" and reverted on the
+  // next launch. It now lands in settings.json, the per-user file the models popover writes.
+  it('switching mutates cfg in place and persists to settings.json beside the other saved settings', async () => {
     const cfg = mkCfg();
+    mkdirSync(join(vault, 'config-dir'), { recursive: true });
+    writeFileSync(join(vault, 'config-dir', 'settings.json'), JSON.stringify({ models: { tutor: 'keep-me' } }));
     const res = await buildRestRoutes(lw, cfg).request('/api/student', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'Bobby' }),
     });
-    expect((await res.json()).current).toBe('bobby'); // case-folded
+    const body = await res.json();
+    expect(body.current).toBe('bobby');               // case-folded
+    expect(body.warning).toBeUndefined();
     expect((cfg as any).student).toBe('bobby');       // in place — next request is bobby's
-    const onDisk = JSON.parse(readFileSync(cfgFile, 'utf8'));
-    expect(onDisk.student).toBe('bobby');
-    expect(onDisk.keep).toBe('me');                   // read-modify-write preserved the rest
+    expect(savedSettings().student).toBe('bobby');
+    expect(savedSettings().models.tutor).toBe('keep-me'); // read-modify-write preserved the rest
+    expect(JSON.parse(readFileSync(cfgFile, 'utf8')).student).toBe('alice'); // config file untouched
   });
 
   it('a switch drops the cached graph, which carries the previous learner’s mastery', async () => {
@@ -930,23 +940,6 @@ describe('student profiles — one vault, several learners', () => {
     });
     expect(res.status).toBe(400);
   });
-
-  it('expands HARNESS_CONFIG the same way config.ts does, including ${VAR}', async () => {
-    // config.ts resolves HARNESS_CONFIG through expand() (handles ~ and ${VAR}); this route read
-    // it raw, so a config path set via an env var (the e2e fixtures' pattern) silently missed the
-    // on-disk file this route persists to.
-    process.env.SOME_VAR = vault;
-    process.env.HARNESS_CONFIG = '${SOME_VAR}/harness.config.json';
-    const cfg = mkCfg();
-    const res = await buildRestRoutes(lw, cfg).request('/api/student', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'zoe' }),
-    });
-    expect((await res.json()).current).toBe('zoe');
-    const onDisk = JSON.parse(readFileSync(cfgFile, 'utf8'));
-    expect(onDisk.student).toBe('zoe'); // written to the ${SOME_VAR}-expanded path, not literally
-    delete process.env.SOME_VAR;
-  });
 });
 
 describe('PUT /api/voice — the teaching-style preference', () => {
@@ -961,22 +954,26 @@ describe('PUT /api/voice — the teaching-style preference', () => {
     writeFileSync(cfgFile, JSON.stringify({ student: 'kid' }));
     prevEnv = process.env.HARNESS_CONFIG;
     process.env.HARNESS_CONFIG = cfgFile;
+    vi.stubEnv('MYELIN_CONFIG_DIR', join(dir, 'config-dir'));
   });
   afterEach(() => {
     if (prevEnv === undefined) delete process.env.HARNESS_CONFIG;
     else process.env.HARNESS_CONFIG = prevEnv;
+    vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('sets in place, persists, and an empty string clears', async () => {
+  it('sets in place, persists to settings.json, and an empty string clears', async () => {
     const cfg = { student: 'kid', vault: dir } as unknown as HarnessConfig;
     const app = buildRestRoutes(lw, cfg);
+    const saved = () => JSON.parse(readFileSync(join(dir, 'config-dir', 'settings.json'), 'utf8'));
     await app.request('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice: 'high school, no jargon' }) });
     expect((cfg as any).voice).toBe('high school, no jargon');
-    expect(JSON.parse(readFileSync(cfgFile, 'utf8')).voice).toBe('high school, no jargon');
+    expect(saved().voice).toBe('high school, no jargon');
     await app.request('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice: '' }) });
     expect((cfg as any).voice).toBeUndefined();
-    expect('voice' in JSON.parse(readFileSync(cfgFile, 'utf8'))).toBe(false);
+    expect('voice' in saved()).toBe(false);
+    expect('voice' in JSON.parse(readFileSync(cfgFile, 'utf8'))).toBe(false); // config file untouched
   });
 });
 

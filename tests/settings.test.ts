@@ -75,6 +75,24 @@ describe('merge precedence: defaults < harness.config.json < settings.json', () 
     expect(cfg.models.compile.model).toBe(DEFAULT_MODEL);         // default untouched
   });
 
+  it('a saved learner and teaching style beat the config file; an unusable saved name is ignored out loud', () => {
+    const cfgPath = bareConfig({ student: 'from-file', voice: 'file voice' });
+    writeSettings({ student: 'maya', voice: 'no jargon' });
+    const cfg = loadConfig(cfgPath);
+    applySettings(cfg);
+    expect(cfg.student).toBe('maya');
+    expect(cfg.voice).toBe('no jargon');
+
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      writeSettings({ student: '../evil' });
+      const cfg2 = loadConfig(cfgPath);
+      applySettings(cfg2);
+      expect(cfg2.student).toBe('from-file');
+      expect(err.mock.calls.flat().join(' ')).toMatch(/student/);
+    } finally { err.mockRestore(); }
+  });
+
   it('a saved context window beats the file; a hand-edited nonsense one is ignored OUT LOUD', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
