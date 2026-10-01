@@ -6,6 +6,7 @@ export default defineConfig({
     // include would run that repo's suite here too — under the wrong config and a second copy
     // of @vitest/expect, which fails on a jest-matchers global collision.
     include: ['tests/**/*.test.{ts,tsx}'],
+    setupFiles: ['tests/setup/isolateConfig.ts'],
     environmentMatchGlobs: [['tests/client/**', 'jsdom'], ['**', 'node']],
     // Node 26 makes `localStorage` an own property of globalThis (a getter that reads as
     // undefined unless --localstorage-file is passed) even when nobody ever passes

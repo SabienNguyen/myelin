@@ -993,10 +993,13 @@ describe('GET /api/status — names the live student, not the boot snapshot', ()
     writeFileSync(cfgFile, JSON.stringify({ student: 'kid' }));
     prevEnv = process.env.HARNESS_CONFIG;
     process.env.HARNESS_CONFIG = cfgFile;
+    // The switch below persists to settings.json; without this it wrote the real one.
+    vi.stubEnv('MYELIN_CONFIG_DIR', join(dir, 'config-dir'));
   });
   afterEach(() => {
     if (prevEnv === undefined) delete process.env.HARNESS_CONFIG;
     else process.env.HARNESS_CONFIG = prevEnv;
+    vi.unstubAllEnvs();
     rmSync(dir, { recursive: true, force: true });
   });
 
