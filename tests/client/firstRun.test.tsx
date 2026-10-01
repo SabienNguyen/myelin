@@ -39,7 +39,7 @@ function stubFetch(modelsPut: { ok: boolean; body?: object } = { ok: true }, mod
     }
     if (u.endsWith('/api/setup')) {
       const blocked = keySaved ? false
-        : lastPutModels ? !lastPutModels.every((id) => id.startsWith('ollama:') || id.startsWith('openai:'))
+        : lastPutModels ? !lastPutModels.every((id) => /^(ollama|openai|oai):/.test(id))
           : true;
       return { ok: true, json: async () => ({ ...blockedState, blocked }) };
     }
@@ -88,8 +88,30 @@ describe('FirstRun — two ways through the gate', () => {
     const more = (await screen.findByText(/Other ways to connect/)).closest('details')!;
     expect(more.open).toBe(false);
     expect(more.contains(screen.getByLabelText(/Anthropic API key/))).toBe(true);
+    expect(more.contains(screen.getByLabelText(/OpenAI API key/))).toBe(true);
     expect(more.contains(screen.getByLabelText(/local or OpenAI-compatible model/))).toBe(true);
     expect(more.contains(screen.getByLabelText('OpenRouter API key'))).toBe(false);
+  });
+
+  it('an OpenAI key points every role at the oai: route, with the key riding the save', async () => {
+    const mock = stubFetch();
+    render(<FirstRun><p>the app</p></FirstRun>);
+    fireEvent.change(await screen.findByLabelText(/OpenAI API key/), { target: { value: 'sk-test-openai' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use OpenAI' }));
+    await screen.findByText('the app');
+    const put = mock.mock.calls.find(([u, i]) => String(u).endsWith('/api/setup/models') && i?.method === 'PUT');
+    const body = JSON.parse(String(put?.[1]?.body));
+    expect(Object.values(body.models)).toEqual(Array(5).fill('oai:gpt-6-luna'));
+    expect(body.env).toEqual({ OPENAI_API_KEY: 'sk-test-openai' });
+  });
+
+  it('a rejected OpenAI key keeps the gate up and says why', async () => {
+    stubFetch({ ok: false, body: { error: 'OpenAI rejected that key. Copy it again from platform.openai.com/api-keys' } });
+    render(<FirstRun><p>the app</p></FirstRun>);
+    fireEvent.change(await screen.findByLabelText(/OpenAI API key/), { target: { value: 'sk-typo' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use OpenAI' }));
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/OpenAI rejected that key/));
+    expect(screen.queryByText('the app')).toBeNull();
   });
 
   // Every role defaults to OpenRouter now, so a saved Anthropic key alone satisfies nothing: the

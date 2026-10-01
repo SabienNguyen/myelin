@@ -29,6 +29,10 @@ const CLAUDE_ROLES = {
   card_gen: 'claude-haiku-4-5', compile: 'claude-sonnet-5',
 };
 
+/** What the OpenAI card points every role at: the oai: route (OpenAI's own Responses API, with
+ *  its built-in web search), on the model the maintainer runs day to day. */
+const OPENAI_MODEL = 'oai:gpt-6-luna';
+
 export function FirstRun({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<SetupState | null>(null);
   const [key, setKey] = useState('');
@@ -36,6 +40,7 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
   const [baseUrl, setBaseUrl] = useState('');
   const [compatKey, setCompatKey] = useState('');
   const [routerKey, setRouterKey] = useState('');
+  const [openaiKey, setOpenaiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -188,7 +193,7 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
         </form>
 
         <details className="firstrun-more">
-          <summary>Other ways to connect: Claude, or a model on this computer</summary>
+          <summary>Other ways to connect: Claude, OpenAI, or a model on this computer</summary>
           <form
             className="firstrun-option"
             onSubmit={(e) => { e.preventDefault(); void saveKey(); }}
@@ -224,6 +229,40 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             </p>
           </form>
 
+
+          {/* Its own card rather than the openai: field below: that one needs a typed id and a
+              base URL, which nobody arriving with "I have an OpenAI key" should have to know. */}
+          <form
+            className="firstrun-option"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void saveAllRolesTo(OPENAI_MODEL, { env: { OPENAI_API_KEY: openaiKey.trim() } });
+            }}
+          >
+            <label htmlFor="openai-key">
+              <Key size={16} weight="duotone" /> OpenAI API key
+            </label>
+            <div className="firstrun-row">
+              <input
+                id="openai-key" type="password" autoComplete="off"
+                spellCheck={false} placeholder="sk-…"
+                value={openaiKey} onChange={(e) => setOpenaiKey(e.target.value)}
+              />
+              <button type="submit" className="firstrun-primary" disabled={busy || !openaiKey.trim()}>
+                {busy ? 'Checking…' : 'Use OpenAI'}
+              </button>
+            </div>
+            <p className="firstrun-getkey">
+              Don’t have one?{' '}
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
+                Create a key at platform.openai.com
+              </a>
+            </p>
+            <p className="firstrun-note">
+              Paid: OpenAI bills your account for each lesson. The key is checked with OpenAI before
+              it is saved.
+            </p>
+          </form>
 
           <form
             className="firstrun-option"
@@ -290,7 +329,9 @@ export function FirstRun({ children }: { children: React.ReactNode }) {
             worth doing and worth doing quietly. */}
         <p className="firstrun-note firstrun-paths">
           Notes: <code>{state.vault.path}</code>
-          {' '}· Key: <code>{state.apiKey.savedAt}</code>, outside your notes
+          {/* The folder, not credentials.json: only the Anthropic key lands there; OpenRouter and
+              OpenAI keys go to settings.json beside it. */}
+          {' '}· Keys: <code>{state.apiKey.savedAt.replace(/[^/\\]+$/, '')}</code>, outside your notes
         </p>
       </main>
     </div>

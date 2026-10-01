@@ -478,25 +478,30 @@ export function buildSetupRoutes(
       }, 400);
     }
 
-    // Probe a newly pasted OpenRouter key before saving, as /api/setup/api-key does for Anthropic.
-    // A truncated paste otherwise saves, lifts the setup gate, and fails the first lesson with a
-    // 401 — the setup card is where "your key is wrong" belongs. The catalog below stays anonymous;
-    // this request is the only one that carries the key, and only to OpenRouter's own key check.
-    const newRouterKey = String(env.OPENROUTER_API_KEY ?? '').trim();
-    if (newRouterKey) {
-      const probe = await (deps.probeFetch ?? fetch)('https://openrouter.ai/api/v1/key', {
-        headers: { authorization: `Bearer ${newRouterKey}` },
+    // Probe a newly pasted OpenRouter or OpenAI key before saving, as /api/setup/api-key does for
+    // Anthropic. A truncated paste otherwise saves, lifts the setup gate, and fails the first lesson
+    // with a 401 — the setup card is where "your key is wrong" belongs. Each key goes only to its
+    // own provider; the OpenRouter catalog below stays anonymous.
+    const keyChecks = [
+      { key: String(env.OPENROUTER_API_KEY ?? '').trim(), provider: 'OpenRouter',
+        url: 'https://openrouter.ai/api/v1/key', where: 'openrouter.ai/settings/keys', prefix: 'sk-or-' },
+      { key: String(env.OPENAI_API_KEY ?? '').trim(), provider: 'OpenAI',
+        url: 'https://api.openai.com/v1/models', where: 'platform.openai.com/api-keys', prefix: 'sk-' },
+    ];
+    for (const { key, provider, url, where, prefix } of keyChecks) {
+      if (!key) continue;
+      const probe = await (deps.probeFetch ?? fetch)(url, {
+        headers: { authorization: `Bearer ${key}` },
         signal: AbortSignal.timeout(15_000),
       }).catch((e: any) => ({ ok: false, status: 0, statusText: String(e?.message ?? e) } as Response));
-      if (!probe.ok) {
-        return probe.status === 401 || probe.status === 403
-          ? c.json({ error: 'OpenRouter rejected that key. Copy it again from openrouter.ai/settings/keys — the whole key, starting with sk-or-.' }, 400)
-          : c.json({
-            error: probe.status === 0
-              ? `Could not reach OpenRouter to check the key (${probe.statusText}). Check your internet connection and try again.`
-              : `OpenRouter answered ${probe.status} when checking the key. Try again in a minute.`,
-          }, 502);
-      }
+      if (probe.ok) continue;
+      return probe.status === 401 || probe.status === 403
+        ? c.json({ error: `${provider} rejected that key. Copy it again from ${where} — the whole key, starting with ${prefix}.` }, 400)
+        : c.json({
+          error: probe.status === 0
+            ? `Could not reach ${provider} to check the key (${probe.statusText}). Check your internet connection and try again.`
+            : `${provider} answered ${probe.status} when checking the key. Try again in a minute.`,
+        }, 502);
     }
 
     const routerIds = ids.filter(([, id]) => modelRouteFor(id.trim()) === 'openrouter');
