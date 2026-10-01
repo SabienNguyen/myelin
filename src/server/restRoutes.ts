@@ -7,7 +7,7 @@ import { backlogDays } from './anki/inbound.js';
 import { isGapUp } from './gapProxy.js';
 import type { Engram } from './mcp.js';
 import type { HarnessConfig } from './config.js';
-import { expand } from './config.js';
+import { isStudentName, readSettings, writeSettings } from './settings.js';
 import { getGraphCached, invalidateGraphCache, type GraphPayload } from './graphCache.js';
 import { readGoal, writeGoal, pathProgress } from './goalStore.js';
 import { isDue } from './notebookStore.js';
@@ -446,19 +446,16 @@ export function buildRestRoutes(
   app.put('/api/student', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const name = String(body?.name ?? '').trim().toLowerCase();
-    if (!/^[a-z0-9][a-z0-9-_]{0,39}$/.test(name)) {
+    if (!isStudentName(name)) {
       return c.json({ error: 'student names are 1-40 chars: letters, digits, - and _' }, 400);
     }
     cfg.student = name;
     // The cached graph carries the previous learner's mastery and is not keyed by student.
     invalidateGraphCache();
-    // Persist so a restart keeps the switch. Read-modify-write of the JSON on disk preserves
-    // every other field (and any fields this build does not know about).
+    // settings.json, not harness.config.json: the config file was resolved against the process
+    // cwd, which is `/` for a Finder-launched app, so every switch reverted on the next launch.
     try {
-      const path = expand(process.env.HARNESS_CONFIG ?? './harness.config.json');
-      const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
-      onDisk.student = name;
-      atomicWrite(path, `${JSON.stringify(onDisk, null, 2)}\n`);
+      writeSettings({ ...readSettings(), student: name });
     } catch (e: any) {
       // The in-memory switch already took effect; a failed persist is named, not hidden.
       return c.json({ current: name, warning: `switched for this run, but not saved: ${e?.message ?? e}` });
@@ -466,17 +463,15 @@ export function buildRestRoutes(
     return c.json({ current: name });
   });
 
-  /** The teaching-style preference, settable from the student menu. Same in-place +
-   *  read-modify-write persistence as /api/student; empty string clears it. */
+  /** The teaching-style preference, settable from the student menu. Same in-place switch and
+   *  settings.json persistence as /api/student; empty string clears it. */
   app.put('/api/voice', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const voice = String(body?.voice ?? '').trim().slice(0, 200);
     (cfg as any).voice = voice || undefined;
     try {
-      const path = expand(process.env.HARNESS_CONFIG ?? './harness.config.json');
-      const onDisk = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
-      if (voice) onDisk.voice = voice; else delete onDisk.voice;
-      atomicWrite(path, JSON.stringify(onDisk, null, 2) + '\n');
+      const { voice: _prior, ...rest } = readSettings();
+      writeSettings(voice ? { ...rest, voice } : rest);
     } catch (e: any) {
       return c.json({ voice, warning: 'set for this run, but not saved: ' + (e?.message ?? e) });
     }

@@ -95,6 +95,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
   const [students, setStudents] = useState<string[]>([]);
   const [fresh, setFresh] = useState('');
   const [voice, setVoice] = useState('');
+  const [savedVoice, setSavedVoice] = useState('');
   const [note, setNote] = useState('');
   const rootRef = useRef<HTMLSpanElement>(null);
   const badgeRef = useRef<HTMLButtonElement>(null);
@@ -103,7 +104,8 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
     if (!open) return;
     fetch('/api/students').then((r) => r.json())
       .then((d) => setStudents(d.students ?? [])).catch(() => {});
-    fetch('/api/voice').then((r) => r.json()).then((d) => setVoice(d.voice ?? '')).catch(() => {});
+    fetch('/api/voice').then((r) => r.json())
+      .then((d) => { setVoice(d.voice ?? ''); setSavedVoice(d.voice ?? ''); }).catch(() => {});
   }, [open]);
   useDismissableDialog({ open, rootRef, triggerRef: badgeRef, onClose: () => setOpen(false) });
 
@@ -126,6 +128,25 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
     setNote(`${d.warning} — reload to see ${d.current}’s progress`);
     onSwitched(d.current);
     setFresh('');
+  };
+
+  // Saved on blur. This was fire-and-forget, so a save that failed (or only held for this run)
+  // looked exactly like one that worked.
+  const saveVoice = async () => {
+    if (voice.trim() === savedVoice.trim()) return;
+    let res: Response;
+    try {
+      res = await fetch('/api/voice', {
+        method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice }),
+      });
+    } catch {
+      setNote('can’t reach the harness — teaching style not saved');
+      return;
+    }
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { setNote(d.error ?? 'teaching style not saved'); return; }
+    if (!d.warning) setSavedVoice(voice);
+    setNote(d.warning ?? (voice.trim() ? 'teaching style saved' : 'teaching style cleared'));
   };
 
   return (
@@ -160,7 +181,7 @@ function StudentSwitcher({ current, onSwitched }: { current: string; onSwitched:
             placeholder="teaching style — e.g. no jargon"
             value={voice}
             onChange={(e) => setVoice(e.target.value)}
-            onBlur={() => { void fetch('/api/voice', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ voice }) }); }}
+            onBlur={() => { void saveVoice(); }}
             onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           />
           <input

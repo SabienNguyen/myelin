@@ -84,6 +84,48 @@ describe('StudentSwitcher — a popup with inputs is a dialog, not a menu', () =
   });
 });
 
+describe('StudentSwitcher — the teaching style says whether it was saved', () => {
+  // The blur save was fire-and-forget: a save the server could only hold "for this run" (or could
+  // not reach at all) looked exactly like one that stuck.
+  function stubVoice(putReply: { ok: boolean; body: object }) {
+    const mock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.endsWith('/api/voice') && init?.method === 'PUT') return { ok: putReply.ok, json: async () => putReply.body };
+      const body = u.endsWith('/api/status') ? { student: 'e2e', tutor: 'claude-sonnet-5' }
+        : u.endsWith('/api/students') ? { current: 'e2e', students: ['e2e'] }
+          : u.endsWith('/api/voice') ? { voice: 'calm' } : {};
+      return { ok: true, json: async () => body };
+    });
+    vi.stubGlobal('fetch', mock as any);
+    return mock;
+  }
+  async function openStyle() {
+    render(<TopbarStatus />);
+    fireEvent.click(await screen.findByRole('button', { name: /switch student/i }));
+    const field = await screen.findByLabelText('teaching style');
+    await waitFor(() => expect((field as HTMLInputElement).value).toBe('calm'));
+    return field;
+  }
+
+  it('names a save that only held for this run', async () => {
+    stubVoice({ ok: true, body: { voice: 'no jargon', warning: 'set for this run, but not saved: EACCES' } });
+    const field = await openStyle();
+    fireEvent.change(field, { target: { value: 'no jargon' } });
+    fireEvent.blur(field);
+    expect((await screen.findByRole('status')).textContent).toMatch(/not saved: EACCES/);
+  });
+
+  it('confirms a save that stuck, and tabbing past an unchanged field sends nothing', async () => {
+    const mock = stubVoice({ ok: true, body: { voice: 'no jargon' } });
+    const field = await openStyle();
+    fireEvent.blur(field);
+    expect(mock.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(false);
+    fireEvent.change(field, { target: { value: 'no jargon' } });
+    fireEvent.blur(field);
+    expect((await screen.findByRole('status')).textContent).toBe('teaching style saved');
+  });
+});
+
 describe('modelLabel', () => {
   it('falls back to the id when a routed prefix carries no model', () => {
     expect(modelLabel('oai:')).toEqual({ name: 'oai:', how: 'OpenAI API' });

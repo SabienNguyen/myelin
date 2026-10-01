@@ -4,6 +4,9 @@ import { describe, it, expect } from 'vitest';
 import { MultiDirectedGraph as Graph } from 'graphology';
 import type { GraphNodeMeta } from '../../src/client/lib/graphLayout.js';
 import type { Subgraph } from '../../src/client/components/GraphPanel.js';
+// Top-level, not awaited inside the test: GraphPanel pulls in React, sigma and the rest of the
+// graph UI, and a cold load of that under a full parallel run outlasted the 5s per-test timeout.
+import { notebookSubgraph } from '../../src/client/components/GraphPanel.js';
 import {
   type MasteryGraph, type GraphColors, type Point,
   withAlpha, seedPosition, syncGraph, densityScale, SEED_JITTER, resolveGraphColors,
@@ -380,8 +383,7 @@ describe('edgeReducer', () => {
 });
 
 describe('notebookSubgraph', () => {
-  it('keeps only the notebook’s pages and the links between them', async () => {
-    const { notebookSubgraph } = await import('../../src/client/components/GraphPanel.js');
+  it('keeps only the notebook’s pages and the links between them', () => {
     const nodes = ['a', 'b', 'c', 'd'].map((slug) => ({ slug, daysLeft: null }));
     const edges = [
       { src: 'a', dst: 'b', type: 'prereq' as const },
