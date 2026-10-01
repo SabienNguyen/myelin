@@ -238,7 +238,8 @@ describe('GET/PUT /api/setup/models', () => {
 
   it('saves an oai: role together with its key; the key never comes back in a response', async () => {
     const cfg = cfgWith(plainModels());
-    const app = buildSetupRoutes(cfg);
+    const probeFetch = vi.fn(async (..._args: Parameters<typeof fetch>) => ({ ok: true, status: 200 }) as Response);
+    const app = buildSetupRoutes(cfg, { probeFetch });
     const res = await put(app, {
       models: { tutor: 'oai:gpt-5.1' }, env: { OPENAI_API_KEY: 'sk-oai-secret' },
     });
@@ -249,6 +250,34 @@ describe('GET/PUT /api/setup/models', () => {
     expect(cfg.models.tutor.model).toBe('oai:gpt-5.1');
     expect(readSettings().env?.OPENAI_API_KEY).toBe('sk-oai-secret');
     expect(process.env.OPENAI_API_KEY).toBe('sk-oai-secret');
+    // Checked against OpenAI before saving, and only there.
+    expect(probeFetch.mock.calls.map(([u]) => String(u))).toEqual(['https://api.openai.com/v1/models']);
+    expect(probeFetch.mock.calls[0][1]?.headers).toMatchObject({ authorization: 'Bearer sk-oai-secret' });
+  });
+
+  // The first-run card's OpenAI option rides this save; a mistyped key used to save, lift the
+  // gate, and fail the first lesson with a 401.
+  it('an OpenAI key OpenAI rejects is never saved', async () => {
+    const cfg = cfgWith(plainModels());
+    const probeFetch = async () => ({ ok: false, status: 401 }) as Response;
+    const res = await put(buildSetupRoutes(cfg, { probeFetch }), {
+      models: { tutor: 'oai:gpt-5.1' }, env: { OPENAI_API_KEY: 'sk-typo' },
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/OpenAI rejected that key/);
+    expect(readSettings().env?.OPENAI_API_KEY).toBeUndefined();
+    expect(process.env.OPENAI_API_KEY).toBeUndefined();
+    expect(cfg.models.tutor.model).toBe('claude-sonnet-5');
+  });
+
+  it('an OpenAI key that could not be checked is not saved', async () => {
+    const probeFetch = (async () => { throw new Error('getaddrinfo ENOTFOUND'); }) as unknown as typeof fetch;
+    const res = await put(buildSetupRoutes(cfgWith(plainModels()), { probeFetch }), {
+      models: { tutor: 'oai:gpt-5.1' }, env: { OPENAI_API_KEY: 'sk-fine' },
+    });
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toMatch(/Could not reach OpenAI.*ENOTFOUND/);
+    expect(readSettings().env?.OPENAI_API_KEY).toBeUndefined();
   });
 
   it('a real environment variable shadows the saved value: reported, and never overwritten', async () => {
